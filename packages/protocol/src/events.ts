@@ -114,6 +114,10 @@ export const EventBody = z.discriminatedUnion('type', [
     }),
   ),
   event(
+    'system.notice',
+    z.object({ level: z.enum(['info', 'warning', 'error']), code: z.string(), message: z.string() }),
+  ),
+  event(
     'usage',
     z.object({
       run_id: z.string(),

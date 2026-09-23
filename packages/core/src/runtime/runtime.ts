@@ -427,8 +427,25 @@ export class Runtime {
     await this.scheduler.whenIdle();
   }
 
-  /** On startup: reschedules agents left queued (or with undelivered messages) by a previous daemon. Returns their ids. */
+  /**
+   * On startup: repairs runs cut off by a crash (unfinished tool calls become `interrupted`), then reschedules
+   * agents left queued or with undelivered messages. Returns the rescheduled agent ids.
+   */
   recover(): string[] {
+    const repairedByProject = new Map<string, number>();
+    for (const agent of listLiveAgents(this.o.store.db, ['running'])) {
+      this.repairCrashedRun(agent);
+      repairedByProject.set(agent.project_id, (repairedByProject.get(agent.project_id) ?? 0) + 1);
+    }
+    for (const [projectId, count] of repairedByProject) {
+      this.o.store.append({
+        project_id: projectId,
+        agent_id: null,
+        type: 'system.notice',
+        payload: { level: 'warning', code: 'daemon_restart', message: `Recovered ${count} run(s) interrupted by an unclean daemon shutdown.` },
+      });
+    }
+
     const resumed: string[] = [];
     for (const agent of listLiveAgents(this.o.store.db)) {
       const pendingInbox = hasPendingInbox(this.o.store, agent.id);
@@ -439,6 +456,40 @@ export class Runtime {
       }
     }
     return resumed;
+  }
+
+  /** Closes a run that has `run.started` but no `run.finished`: never re-executes calls whose outcome is unknown. */
+  private repairCrashedRun(agent: AgentRow): void {
+    const { store } = this.o;
+    const started = lastEvent(store.db, agent.id, 'run.started');
+    if (started?.type !== 'run.started') return;
+    const runId = started.payload.run_id;
+    const since = store.list({ agentId: agent.id, after: started.id, types: ['tool.call', 'tool.result', 'approval.requested'] });
+    const settled = new Set(since.flatMap((e) => (e.type === 'tool.result' || e.type === 'approval.requested' ? [e.payload.tool_call_id] : [])));
+    const base = { project_id: agent.project_id, agent_id: agent.id };
+    const interrupted = since.flatMap((e) =>
+      e.type === 'tool.call' && !settled.has(e.payload.tool_call_id)
+        ? [
+            {
+              ...base,
+              type: 'tool.result' as const,
+              payload: {
+                run_id: runId,
+                tool_call_id: e.payload.tool_call_id,
+                name: e.payload.name,
+                status: 'interrupted' as const,
+                content: 'The daemon restarted during execution; the state of any side effects is unknown — verify before retrying.',
+              },
+            },
+          ]
+        : [],
+    );
+    const waiting = pendingApprovalsFor(store.db, agent.id).length > 0;
+    store.append([
+      ...interrupted,
+      { ...base, type: 'run.finished', payload: { run_id: runId, reason: 'error', detail: 'daemon_restart' } },
+      { ...base, type: 'agent.status_changed', payload: { status: waiting ? 'waiting' : 'queued', reason: 'Recovered after daemon restart' } },
+    ]);
   }
 
   // ── internals ────────────────────────────────────────────────────────
