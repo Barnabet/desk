@@ -7,7 +7,7 @@ import { createWorkspace, removeWorkspace, threadBranchName } from '../workspace
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
-import { threadSystemPrompt } from '../agent/prompts';
+import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
 import { runAgent } from '../agent/run';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
@@ -23,22 +23,18 @@ import {
   getSource,
   lastEvent,
   listActiveThreads,
+  listSources,
   pendingApprovalsFor,
   type AgentRow,
   type ProjectRow,
 } from '../state/queries';
-import { bashTool } from '../tools/bash';
-import { fileTools } from '../tools/fs';
-import { JobManager, jobTools } from '../tools/jobs';
+import { JobManager } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
-import { threadCoordinationTools } from '../tools/thread';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
-import { webTools } from '../tools/web';
 import { Scheduler } from './scheduler';
-
-export const defaultThreadTools: Tool[] = [...fileTools, bashTool, ...jobTools, ...webTools, ...threadCoordinationTools];
+import { toolsForRole } from './toolsets';
 
 export type RuntimeOptions = {
   store: EventStore;
@@ -418,7 +414,19 @@ export class Runtime {
   }
 
   private toolsFor(agent: AgentRow): Tool[] {
-    return this.o.toolsFor?.(agent) ?? defaultThreadTools;
+    return this.o.toolsFor?.(agent) ?? toolsForRole(agent);
+  }
+
+  /** Own workspace + every project source + the project library. */
+  private readRoots(agent: AgentRow): string[] {
+    const roots = listSources(this.o.store.db, agent.project_id).map((s) => s.path);
+    return [...(agent.workspace_path ? [agent.workspace_path] : []), ...roots, this.libraryDir(agent.project_id)];
+  }
+
+  private systemPrompt(agent: AgentRow, project: ProjectRow): string {
+    if (this.o.systemPrompt) return this.o.systemPrompt(agent, project);
+    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id) };
+    return agent.role === 'desk' ? deskSystemPrompt(ctx) : threadSystemPrompt(ctx);
   }
 
   private sandboxAvailable(): Promise<boolean> {
@@ -426,7 +434,12 @@ export class Runtime {
   }
 
   private async toolContext(agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) {
-    return buildToolContext(agent, runId, toolCallId, signal, { sandboxEnabled: await this.sandboxAvailable(), jobs: this.jobs, services: this.services });
+    return buildToolContext(agent, runId, toolCallId, signal, {
+      sandboxEnabled: await this.sandboxAvailable(),
+      jobs: this.jobs,
+      services: this.services,
+      readRoots: (a) => this.readRoots(a),
+    });
   }
 
   /** Schedules the agent unless it is already active or blocked on an approval. */
@@ -450,12 +463,17 @@ export class Runtime {
         store: this.o.store,
         adapter: this.o.adapter,
         tools: this.toolsFor(agent),
-        systemPrompt: this.o.systemPrompt ?? threadSystemPrompt,
+        systemPrompt: (a, p) => this.systemPrompt(a, p),
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         gate: (tool, input, project, a) =>
           evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
-        toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, { sandboxEnabled: sandboxAvailable, jobs: this.jobs, services: this.services }),
+        toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, {
+            sandboxEnabled: sandboxAvailable,
+            jobs: this.jobs,
+            services: this.services,
+            readRoots: (x) => this.readRoots(x),
+          }),
       },
       agentId,
       signal,

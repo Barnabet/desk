@@ -23,7 +23,7 @@ const deps = (extra: Partial<RunDeps> = {}): RunDeps => ({
   store: h.store,
   adapter: h.adapter,
   tools: [...fileTools, completeTool],
-  systemPrompt: threadSystemPrompt,
+  systemPrompt: (agent, project) => threadSystemPrompt({ db: h.store.db, agent, project, libraryDir: h.dir }),
   maxSteps: 20,
   retry: noSleep,
   gate: () => ({ action: 'auto', delegateToDesk: false, reason: 'test' }),

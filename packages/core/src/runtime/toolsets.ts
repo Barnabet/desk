@@ -1,0 +1,46 @@
+import type { AgentRow } from '../state/queries';
+import { bashReadonlyTool, bashTool } from '../tools/bash';
+import { deskCoordinationTools } from '../tools/desk';
+import { editFileTool, fileTools, globTool, grepTool, listDirTool, readFileTool, writeFileTool } from '../tools/fs';
+import { gitTools } from '../tools/git';
+import { jobTools } from '../tools/jobs';
+import { libraryTools } from '../tools/library';
+import { memoryTools } from '../tools/memory';
+import { threadCoordinationTools } from '../tools/thread';
+import type { Tool } from '../tools/types';
+import { webTools } from '../tools/web';
+
+/** Desk: read anything in the project, draft in its own scratch dir, read-only shell, coordination. */
+export function deskToolsFor(_agent: AgentRow): Tool[] {
+  return [
+    readFileTool,
+    listDirTool,
+    globTool,
+    grepTool,
+    writeFileTool,
+    editFileTool,
+    bashReadonlyTool,
+    ...webTools,
+    ...memoryTools,
+    ...libraryTools,
+    ...deskCoordinationTools,
+  ];
+}
+
+/** Threads: full workspace tools; git tools only in worktrees. */
+export function threadToolsFor(agent: AgentRow): Tool[] {
+  return [
+    ...fileTools,
+    bashTool,
+    ...jobTools,
+    ...webTools,
+    ...memoryTools,
+    ...libraryTools,
+    ...(agent.git_branch ? gitTools : []),
+    ...threadCoordinationTools,
+  ];
+}
+
+export function toolsForRole(agent: AgentRow): Tool[] {
+  return agent.role === 'desk' ? deskToolsFor(agent) : threadToolsFor(agent);
+}

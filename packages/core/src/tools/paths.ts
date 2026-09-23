@@ -23,7 +23,8 @@ async function realpathLenient(abs: string): Promise<string> {
 export async function resolveInside(p: string, roots: string[], cwd: string): Promise<string> {
   const abs = isAbsolute(p) ? resolve(p) : resolve(cwd, p);
   const real = await realpathLenient(abs);
-  const realRoots = await Promise.all(roots.map((r) => realpath(r)));
+  // Roots that no longer exist (e.g. a deleted source folder) are ignored rather than failing every call.
+  const realRoots = (await Promise.allSettled(roots.map((r) => realpath(r)))).flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
   if (!realRoots.some((root) => real === root || real.startsWith(root + sep))) {
     throw new ToolDenied(`Path is outside the allowed directories: ${p}`);
   }

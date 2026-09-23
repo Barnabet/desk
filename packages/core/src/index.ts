@@ -6,13 +6,20 @@ export {
   getApproval,
   getProject,
   getUsageTotals,
+  getDeskAgent,
+  getSource,
+  lastEvent,
+  listActiveThreads,
   listAgents,
   listApprovals,
+  listSources,
+  listThreads,
   pendingApprovalsFor,
   type AgentRow,
   type ApprovalRow,
   type ApprovalStatus,
   type ProjectRow,
+  type SourceRow,
   type UsageRow,
 } from './state/queries';
 export { loadModelConfig, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
@@ -45,7 +52,19 @@ export { evaluatePolicy, globToRegExp, type PolicyDecision } from './policy/eval
 export { buildToolContext, type ToolEnvironment } from './agent/context';
 export { buildConversation } from './agent/transcript';
 export { drainInbox, hasPendingInbox } from './agent/inbox';
-export { threadSystemPrompt } from './agent/prompts';
+export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agent/prompts';
 export { runAgent, type RunDeps, type RunOutcome } from './agent/run';
 export { Scheduler, type Job, type SchedulerOptions } from './runtime/scheduler';
-export { defaultThreadTools, Runtime, type RuntimeOptions } from './runtime/runtime';
+export { Runtime, type RuntimeOptions } from './runtime/runtime';
+export { deskToolsFor, threadToolsFor, toolsForRole } from './runtime/toolsets';
+export { gitCommitTool, gitDiffTool, gitPushTool, gitStatusTool, gitTools, openPrTool } from './tools/git';
+export { bashReadonlyTool } from './tools/bash';
+export { memorySearchTool, memoryTools, memoryWriteTool } from './tools/memory';
+export { libraryListTool, libraryPublishTool, libraryReadTool, libraryTools } from './tools/library';
+export { messageDeskTool, threadCoordinationTools, waitForReplyTool } from './tools/thread';
+export { deskCoordinationTools } from './tools/desk';
+export { activeMemory, getMemory, memoryDigest, searchMemory, type MemoryRow } from './memory/memory';
+export { listArtifacts, type ArtifactRow } from './library/library';
+export { formatPlan, getPlan, type PlanRow } from './coordination/plan';
+export { formatThreadLine, formatThreadSummary, renderTranscript } from './coordination/render';
+export { createWorkspace, removeWorkspace, threadBranchName } from './workspaces/workspaces';
