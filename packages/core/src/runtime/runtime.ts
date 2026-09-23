@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { AgentMessageKind, ProjectSettingsPatch } from '@desk/protocol';
+import type { AgentMessageKind, MemoryKind, ProjectSettingsPatch } from '@desk/protocol';
+import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
 import { threadSystemPrompt } from '../agent/prompts';
@@ -20,7 +21,7 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
 import { completeTool } from '../tools/thread';
-import type { Tool, ToolResult } from '../tools/types';
+import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
 import { webTools } from '../tools/web';
 import { Scheduler } from './scheduler';
 
@@ -47,8 +48,13 @@ const TERMINAL = new Set(['done', 'failed', 'cancelled']);
 export class Runtime {
   readonly scheduler: Scheduler;
   readonly jobs = new JobManager();
+  readonly services: RuntimeServices;
 
   constructor(private readonly o: RuntimeOptions) {
+    this.services = {
+      store: o.store,
+      writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
+    };
     this.scheduler = new Scheduler({
       modelConcurrency: (model) => o.models.get(model).concurrency,
       projectConcurrency: (projectId) =>
@@ -118,6 +124,29 @@ export class Runtime {
     const source = getSource(this.o.store.db, sourceId);
     if (!source || source.project_id !== projectId) throw new Error(`Unknown source: ${sourceId}`);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'source.removed', payload: { source_id: sourceId } });
+  }
+
+  // ── memory ───────────────────────────────────────────────────────────
+
+  writeMemory(projectId: string, input: { kind: MemoryKind; content: string; supersedes?: string }, source = 'user'): string {
+    if (input.supersedes) {
+      const old = getMemory(this.o.store.db, input.supersedes);
+      if (!old || old.project_id !== projectId || old.superseded_by) throw new Error(`Memory ${input.supersedes} is not active in this project`);
+    }
+    const id = newId();
+    this.o.store.append({
+      project_id: projectId,
+      agent_id: null,
+      type: 'memory.written',
+      payload: { memory_id: id, kind: input.kind, content: input.content, source, ...(input.supersedes ? { supersedes: input.supersedes } : {}) },
+    });
+    return id;
+  }
+
+  deleteMemory(projectId: string, memoryId: string): void {
+    const m = getMemory(this.o.store.db, memoryId);
+    if (!m || m.project_id !== projectId) throw new Error(`Unknown memory: ${memoryId}`);
+    this.o.store.append({ project_id: projectId, agent_id: null, type: 'memory.deleted', payload: { memory_id: memoryId } });
   }
 
   /** Delivers an agent-to-agent message (or a system notice attributed to `fromAgentId`) and wakes the recipient. */
@@ -244,7 +273,7 @@ export class Runtime {
   }
 
   private async toolContext(agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) {
-    return buildToolContext(agent, runId, toolCallId, signal, { sandboxEnabled: await this.sandboxAvailable(), jobs: this.jobs });
+    return buildToolContext(agent, runId, toolCallId, signal, { sandboxEnabled: await this.sandboxAvailable(), jobs: this.jobs, services: this.services });
   }
 
   /** Schedules the agent unless it is already active or blocked on an approval. */
@@ -272,7 +301,7 @@ export class Runtime {
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         gate: (tool, input, project) => evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable }),
-        toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, { sandboxEnabled: sandboxAvailable, jobs: this.jobs }),
+        toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, { sandboxEnabled: sandboxAvailable, jobs: this.jobs, services: this.services }),
       },
       agentId,
       signal,

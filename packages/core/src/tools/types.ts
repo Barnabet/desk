@@ -1,5 +1,6 @@
 import type { z } from 'zod';
-import type { AgentStatus, ToolResultStatus } from '@desk/protocol';
+import type { AgentStatus, MemoryKind, ToolResultStatus } from '@desk/protocol';
+import type { EventStore } from '../events/store';
 import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
 
@@ -13,7 +14,14 @@ export type ToolContext = {
   signal: AbortSignal;
   sandbox: SandboxSpec;
   jobs: JobManager;
+  services: RuntimeServices;
 };
+
+/** Runtime capabilities available to tools (implemented by Runtime). */
+export interface RuntimeServices {
+  readonly store: EventStore;
+  writeMemory(projectId: string, input: { kind: MemoryKind; content: string; supersedes?: string }, source: string): string;
+}
 
 export type ToolYield = { status: AgentStatus; reason?: string };
 export type ToolOutput = string | { content: string; yield?: ToolYield };

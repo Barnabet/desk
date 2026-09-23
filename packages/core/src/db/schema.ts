@@ -97,3 +97,18 @@ export const sources = sqliteTable(
   },
   (t) => [index('sources_project_idx').on(t.project_id)],
 );
+
+export const memory = sqliteTable(
+  'memory',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    kind: text('kind', { enum: ['fact', 'decision', 'preference', 'contact', 'note'] }).notNull(),
+    content: text('content').notNull(),
+    source: text('source').notNull(),
+    supersedes: text('supersedes'),
+    superseded_by: text('superseded_by'),
+    created_at: text('created_at').notNull(),
+  },
+  (t) => [index('memory_project_idx').on(t.project_id, t.superseded_by)],
+);

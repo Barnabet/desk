@@ -51,6 +51,18 @@ CREATE TABLE `events` (
 --> statement-breakpoint
 CREATE INDEX `events_project_idx` ON `events` (`project_id`,`id`);--> statement-breakpoint
 CREATE INDEX `events_agent_idx` ON `events` (`agent_id`,`id`);--> statement-breakpoint
+CREATE TABLE `memory` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`kind` text NOT NULL,
+	`content` text NOT NULL,
+	`source` text NOT NULL,
+	`supersedes` text,
+	`superseded_by` text,
+	`created_at` text NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `memory_project_idx` ON `memory` (`project_id`,`superseded_by`);--> statement-breakpoint
 CREATE TABLE `projects` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,

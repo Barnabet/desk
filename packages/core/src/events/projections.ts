@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, approvals, projects, sources, usageTotals } from '../db/schema';
+import { agents, approvals, memory, projects, sources, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -63,6 +63,22 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       return;
     case 'source.removed':
       tx.delete(sources).where(eq(sources.id, ev.payload.source_id)).run();
+      return;
+    case 'memory.written': {
+      const p = ev.payload;
+      tx.insert(memory)
+        .values({ id: p.memory_id, project_id: ev.project_id, kind: p.kind, content: p.content, source: p.source, supersedes: p.supersedes ?? null, created_at: ev.ts })
+        .run();
+      tx.run(sql`INSERT INTO memory_fts (content, memory_id, project_id) VALUES (${p.content}, ${p.memory_id}, ${ev.project_id})`);
+      if (p.supersedes) {
+        tx.update(memory).set({ superseded_by: p.memory_id }).where(eq(memory.id, p.supersedes)).run();
+        tx.run(sql`DELETE FROM memory_fts WHERE memory_id = ${p.supersedes}`);
+      }
+      return;
+    }
+    case 'memory.deleted':
+      tx.delete(memory).where(eq(memory.id, ev.payload.memory_id)).run();
+      tx.run(sql`DELETE FROM memory_fts WHERE memory_id = ${ev.payload.memory_id}`);
       return;
     case 'agent.status_changed':
       tx.update(agents).set({ status: ev.payload.status, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();

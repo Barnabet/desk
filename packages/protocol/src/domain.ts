@@ -45,3 +45,6 @@ export const AgentMessageKind = z.enum([
   'stalled',
 ]);
 export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
+
+export const MemoryKind = z.enum(['fact', 'decision', 'preference', 'contact', 'note']);
+export type MemoryKind = z.infer<typeof MemoryKind>;

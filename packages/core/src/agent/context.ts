@@ -1,9 +1,14 @@
 import type { AgentRow } from '../state/queries';
 import type { JobManager } from '../tools/jobs';
 import type { SandboxSpec } from '../tools/sandbox';
-import type { ToolContext } from '../tools/types';
+import type { RuntimeServices, ToolContext } from '../tools/types';
 
-export type ToolEnvironment = { sandboxEnabled: boolean; jobs: JobManager; readRoots?: (agent: AgentRow) => string[] };
+export type ToolEnvironment = {
+  sandboxEnabled: boolean;
+  jobs: JobManager;
+  services: RuntimeServices;
+  readRoots?: (agent: AgentRow) => string[];
+};
 
 /** Builds the execution context for one tool call of an agent. */
 export function buildToolContext(agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal, env: ToolEnvironment): ToolContext {
@@ -20,5 +25,6 @@ export function buildToolContext(agent: AgentRow, runId: string, toolCallId: str
     signal,
     sandbox,
     jobs: env.jobs,
+    services: env.services,
   };
 }
