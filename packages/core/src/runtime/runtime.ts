@@ -7,7 +7,8 @@ import { newId } from '../ids';
 import { DEFAULT_MODEL_ID, type ModelRegistry } from '../model/registry';
 import type { RetryOptions } from '../model/retry';
 import type { ModelAdapter } from '../model/types';
-import { getAgent, type AgentRow, type ProjectRow } from '../state/queries';
+import type { ProjectSettingsPatch } from '@desk/protocol';
+import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
 import { bashTool } from '../tools/bash';
 import { fileTools } from '../tools/fs';
 import { completeTool } from '../tools/thread';
@@ -39,15 +40,24 @@ export class Runtime {
     });
   }
 
-  createProject(input: { name: string; goal: string; instructions?: string }): string {
+  createProject(input: { name: string; goal: string; instructions?: string; settings?: ProjectSettingsPatch }): string {
     const id = newId();
     this.o.store.append({
       project_id: id,
       agent_id: null,
       type: 'project.created',
-      payload: { name: input.name, goal: input.goal, instructions: input.instructions ?? '' },
+      payload: { name: input.name, goal: input.goal, instructions: input.instructions ?? '', ...(input.settings ? { settings: input.settings } : {}) },
     });
     return id;
+  }
+
+  updateProject(
+    projectId: string,
+    patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch },
+  ): void {
+    const project = getProject(this.o.store.db, projectId);
+    if (!project) throw new Error(`Unknown project: ${projectId}`);
+    this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.updated', payload: patch });
   }
 
   createThread(projectId: string, input: { title: string; brief: string; workspacePath: string; model?: string }): string {

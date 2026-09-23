@@ -30,7 +30,9 @@ CREATE TABLE `projects` (
 	`name` text NOT NULL,
 	`goal` text NOT NULL,
 	`instructions` text NOT NULL,
-	`created_at` text NOT NULL
+	`settings` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `usage_totals` (

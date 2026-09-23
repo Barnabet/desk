@@ -1,11 +1,24 @@
 import { z } from 'zod';
 import { AgentRole, AgentStatus, RunFinishReason, ToolCall, ToolResultStatus } from './domain';
+import { ProjectSettingsPatch } from './settings';
 
 const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
   z.object({ type: z.literal(type), payload });
 
 export const EventBody = z.discriminatedUnion('type', [
-  event('project.created', z.object({ name: z.string().min(1), goal: z.string(), instructions: z.string() })),
+  event(
+    'project.created',
+    z.object({ name: z.string().min(1), goal: z.string(), instructions: z.string(), settings: ProjectSettingsPatch.optional() }),
+  ),
+  event(
+    'project.updated',
+    z.object({
+      name: z.string().min(1).optional(),
+      goal: z.string().optional(),
+      instructions: z.string().optional(),
+      settings: ProjectSettingsPatch.optional(),
+    }),
+  ),
   event(
     'agent.created',
     z.object({
