@@ -6,6 +6,7 @@ import { withRetry, type RetryOptions } from '../model/retry';
 import type { ChatMessage, ModelAdapter } from '../model/types';
 import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
 import { executeToolCall, toToolSpecs } from '../tools/registry';
+import { NO_SANDBOX } from '../tools/sandbox';
 import type { Tool } from '../tools/types';
 import { drainInbox } from './inbox';
 import { buildConversation } from './transcript';
@@ -105,6 +106,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
             workspace,
             readRoots: [workspace],
             signal,
+            sandbox: NO_SANDBOX,
           }),
         ),
       );

@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bashTool, scrubbedEnv } from './bash';
+import { NO_SANDBOX } from './sandbox';
 import type { ToolContext } from './types';
 
 let ws: string;
 let ctx: ToolContext;
 beforeEach(async () => {
   ws = await realpath(await mkdtemp(join(tmpdir(), 'desk-bash-')));
-  ctx = { projectId: 'p', agentId: 'a', runId: 'r', toolCallId: 't', workspace: ws, readRoots: [ws], signal: new AbortController().signal };
+  ctx = { projectId: 'p', agentId: 'a', runId: 'r', toolCallId: 't', workspace: ws, readRoots: [ws], signal: new AbortController().signal, sandbox: NO_SANDBOX };
 });
 afterEach(async () => rm(ws, { recursive: true, force: true }));
 
@@ -46,10 +47,8 @@ describe('bash', () => {
 
 describe('scrubbedEnv', () => {
   it('keeps only safe keys plus DESK_WORKSPACE', () => {
-    expect(scrubbedEnv('/w', { PATH: '/bin', HOME: '/h', OPENAI_API_KEY: 'x', CLIPROXY_API_KEY: 'y' })).toEqual({
-      PATH: '/bin',
-      HOME: '/h',
-      DESK_WORKSPACE: '/w',
-    });
+    const env = scrubbedEnv('/w', { PATH: '/bin', HOME: '/h', OPENAI_API_KEY: 'x', CLIPROXY_API_KEY: 'y' });
+    expect(env).toMatchObject({ PATH: '/bin', HOME: '/h', DESK_WORKSPACE: '/w' });
+    expect(Object.keys(env).filter((k) => /KEY/.test(k))).toEqual([]);
   });
 });

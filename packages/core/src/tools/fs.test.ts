@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { editFileTool, globTool, grepFallback, grepTool, listDirTool, readFileTool, writeFileTool } from './fs';
+import { NO_SANDBOX } from './sandbox';
 import { ToolDenied, type ToolContext } from './types';
 
 let base: string;
@@ -18,7 +19,7 @@ beforeEach(async () => {
   await mkdir(join(src, 'lib'), { recursive: true });
   await writeFile(join(src, 'readme.md'), 'line one\nline two\nline three');
   await writeFile(join(src, 'lib', 'util.ts'), 'export const answer = 42;\n');
-  ctx = { projectId: 'p', agentId: 'a', runId: 'r', toolCallId: 't', workspace: ws, readRoots: [ws, src], signal: new AbortController().signal };
+  ctx = { projectId: 'p', agentId: 'a', runId: 'r', toolCallId: 't', workspace: ws, readRoots: [ws, src], signal: new AbortController().signal, sandbox: NO_SANDBOX };
 });
 afterEach(async () => rm(base, { recursive: true, force: true }));
 

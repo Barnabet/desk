@@ -1,5 +1,8 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { runProcess } from './process';
+import { shellInvocation } from './sandbox';
 import { defineTool } from './types';
 
 export const SAFE_ENV_KEYS = ['PATH', 'HOME', 'LANG', 'TERM', 'TMPDIR', 'USER', 'SHELL'] as const;
@@ -11,6 +14,13 @@ export function scrubbedEnv(workspace: string, source: NodeJS.ProcessEnv = proce
     if (value !== undefined) env[key] = value;
   }
   env.DESK_WORKSPACE = workspace;
+  // Keep package-manager caches inside the sandbox's writable temp area.
+  const cache = join(source.TMPDIR ?? tmpdir(), 'desk-cache');
+  env.XDG_CACHE_HOME = cache;
+  env.npm_config_cache = join(cache, 'npm');
+  env.npm_config_store_dir = join(cache, 'pnpm-store');
+  env.PIP_CACHE_DIR = join(cache, 'pip');
+  env.YARN_CACHE_FOLDER = join(cache, 'yarn');
   return env;
 }
 
@@ -24,8 +34,7 @@ export const bashTool = defineTool({
   }),
   async execute({ command, timeout_s }, ctx) {
     const r = await runProcess({
-      command: '/bin/zsh',
-      args: ['-f', '-c', command],
+      ...shellInvocation(command, ctx.sandbox),
       cwd: ctx.workspace,
       env: scrubbedEnv(ctx.workspace),
       timeoutMs: timeout_s * 1000,
