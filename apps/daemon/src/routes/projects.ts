@@ -5,6 +5,7 @@ import {
   getDeskAgent,
   getPlan,
   getProject,
+  lastProjectSeq,
   listApprovals,
   listProjects,
   listSources,
@@ -44,6 +45,7 @@ export function projectOverview(db: Db, id: string) {
     plan: getPlan(db, id) ?? null,
     threads: listThreads(db, id).filter((t) => !t.archived_at),
     approvals: listApprovals(db, id, 'pending'),
+    last_seq: lastProjectSeq(db, id),
   };
 }
 

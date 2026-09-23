@@ -10,6 +10,7 @@ export {
   getDeskAgent,
   getSource,
   lastEvent,
+  lastProjectSeq,
   listActiveThreads,
   listAgents,
   listApprovals,

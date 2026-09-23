@@ -1,0 +1,4 @@
+#!/bin/sh
+# desk — CLI for the local Desk daemon. Symlink this file onto your PATH.
+ROOT="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.." && pwd)"
+exec node --import "$ROOT/node_modules/tsx/dist/loader.mjs" "$ROOT/apps/cli/src/main.ts" "$@"

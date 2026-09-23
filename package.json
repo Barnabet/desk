@@ -3,11 +3,15 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.12.1",
-  "engines": { "node": ">=22.12" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "test": "vitest run",
     "test:live": "DESK_LIVE=1 vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "desk": "node --import tsx apps/cli/src/main.ts",
+    "deskd": "node --import tsx apps/daemon/src/main.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -16,6 +20,8 @@
     "vitest": "^5.0.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

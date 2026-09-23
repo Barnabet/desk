@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, max } from 'drizzle-orm';
 import type { EventType, StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
@@ -84,3 +84,7 @@ export const listLiveAgents = (db: Db, statuses?: AgentRow['status'][]): AgentRo
     .orderBy(asc(agents.created_at), asc(agents.id))
     .all()
     .map((r) => r.agent);
+
+/** Highest event id of a project (0 if none): a stream cursor meaning "from now on". */
+export const lastProjectSeq = (db: Db, projectId: string): number =>
+  db.select({ seq: max(events.id) }).from(events).where(eq(events.project_id, projectId)).get()?.seq ?? 0;
