@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, approvals, projects, usageTotals } from '../db/schema';
+import { agents, approvals, projects, sources, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -47,10 +47,22 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
           workspace_path: ev.payload.workspace_path,
           parent_id: ev.payload.parent_id,
           inbox_cursor: 0,
+          git_source_id: ev.payload.git?.source_id ?? null,
+          git_branch: ev.payload.git?.branch ?? null,
+          git_base: ev.payload.git?.base ?? null,
+          git_common_dir: ev.payload.git?.common_dir ?? null,
           created_at: ev.ts,
           updated_at: ev.ts,
         })
         .run();
+      return;
+    case 'source.added':
+      tx.insert(sources)
+        .values({ id: ev.payload.source_id, project_id: ev.project_id, path: ev.payload.path, kind: ev.payload.kind, label: ev.payload.label, created_at: ev.ts })
+        .run();
+      return;
+    case 'source.removed':
+      tx.delete(sources).where(eq(sources.id, ev.payload.source_id)).run();
       return;
     case 'agent.status_changed':
       tx.update(agents).set({ status: ev.payload.status, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();

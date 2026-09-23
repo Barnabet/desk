@@ -9,7 +9,7 @@ afterEach(async () => h?.cleanup());
 describe('project settings', () => {
   it('stores resolved settings and applies updates', async () => {
     h = await createHarness();
-    const rt = new Runtime({ store: h.store, adapter: h.adapter, models: h.models, retry: noSleep });
+    const rt = new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep });
     const id = rt.createProject({ name: 'P', goal: 'G', settings: { check_in: 'minimal' } });
     expect(getProject(h.store.db, id)?.settings).toMatchObject({ check_in: 'minimal', max_concurrent_threads: 4 });
     rt.updateProject(id, { goal: 'G2', settings: { max_concurrent_threads: 2 } });

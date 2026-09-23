@@ -9,6 +9,13 @@ CREATE TABLE `agents` (
 	`workspace_path` text,
 	`parent_id` text,
 	`inbox_cursor` integer DEFAULT 0 NOT NULL,
+	`review_round` integer DEFAULT 0 NOT NULL,
+	`result_summary` text,
+	`result_artifacts` text,
+	`git_source_id` text,
+	`git_branch` text,
+	`git_base` text,
+	`git_common_dir` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );
@@ -54,6 +61,16 @@ CREATE TABLE `projects` (
 	`updated_at` text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `sources` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`path` text NOT NULL,
+	`kind` text NOT NULL,
+	`label` text NOT NULL,
+	`created_at` text NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `sources_project_idx` ON `sources` (`project_id`);--> statement-breakpoint
 CREATE TABLE `usage_totals` (
 	`project_id` text NOT NULL,
 	`agent_id` text NOT NULL,

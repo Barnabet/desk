@@ -12,7 +12,7 @@ describe.each(MODELS)('live: %s', (model) => {
     const { db, close } = openDb(':memory:');
     const store = new EventStore(db);
     const models = new ModelRegistry();
-    const runtime = new Runtime({ store, adapter: createModelAdapter(loadModelConfig(), models), models, retry: { maxAttempts: 3 } });
+    const runtime = new Runtime({ store, adapter: createModelAdapter(loadModelConfig(), models), models, dataDir: dir, retry: { maxAttempts: 3 } });
     try {
       const projectId = runtime.createProject({ name: 'Live smoke', goal: 'Verify the Desk runtime end to end' });
       const workspace = join(dir, 'ws');

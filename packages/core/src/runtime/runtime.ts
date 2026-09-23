@@ -1,5 +1,7 @@
-import { mkdirSync } from 'node:fs';
-import type { ProjectSettingsPatch } from '@desk/protocol';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import type { AgentMessageKind, ProjectSettingsPatch } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
 import { threadSystemPrompt } from '../agent/prompts';
@@ -10,11 +12,12 @@ import { DEFAULT_MODEL_ID, type ModelRegistry } from '../model/registry';
 import type { RetryOptions } from '../model/retry';
 import type { ModelAdapter } from '../model/types';
 import { evaluatePolicy } from '../policy/evaluate';
-import { getAgent, getApproval, getProject, pendingApprovalsFor, type AgentRow, type ProjectRow } from '../state/queries';
+import { getAgent, getApproval, getDeskAgent, getProject, getSource, pendingApprovalsFor, type AgentRow, type ProjectRow } from '../state/queries';
 import { bashTool } from '../tools/bash';
 import { fileTools } from '../tools/fs';
 import { JobManager, jobTools } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
+import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
 import { completeTool } from '../tools/thread';
 import type { Tool, ToolResult } from '../tools/types';
@@ -27,6 +30,8 @@ export type RuntimeOptions = {
   store: EventStore;
   adapter: ModelAdapter;
   models: ModelRegistry;
+  /** Root for project libraries, Desk scratch dirs and thread workspaces. */
+  dataDir: string;
   toolsFor?: (agent: AgentRow) => Tool[];
   systemPrompt?: (agent: AgentRow, project: ProjectRow) => string;
   maxSteps?: { desk: number; thread: number };
@@ -55,15 +60,78 @@ export class Runtime {
 
   // ── projects & agents ────────────────────────────────────────────────
 
+  /** Creates a project, its directories and its Desk agent. */
   createProject(input: { name: string; goal: string; instructions?: string; settings?: ProjectSettingsPatch }): string {
     const id = newId();
+    const deskDir = join(this.projectDir(id), 'desk');
+    mkdirSync(deskDir, { recursive: true });
+    mkdirSync(this.libraryDir(id), { recursive: true });
     this.o.store.append({
       project_id: id,
       agent_id: null,
       type: 'project.created',
       payload: { name: input.name, goal: input.goal, instructions: input.instructions ?? '', ...(input.settings ? { settings: input.settings } : {}) },
     });
+    const deskModel = getProject(this.o.store.db, id)!.settings.desk_model;
+    this.o.models.get(deskModel);
+    this.o.store.append({
+      project_id: id,
+      agent_id: newId(),
+      type: 'agent.created',
+      payload: { role: 'desk', model: deskModel, title: 'Desk', brief: null, workspace_path: deskDir, parent_id: null },
+    });
     return id;
+  }
+
+  projectDir(projectId: string): string {
+    return join(this.o.dataDir, 'projects', projectId);
+  }
+
+  libraryDir(projectId: string): string {
+    return join(this.projectDir(projectId), 'library');
+  }
+
+  /** Sends a user message to the project's Desk. */
+  sendToDesk(projectId: string, text: string): void {
+    const desk = getDeskAgent(this.o.store.db, projectId);
+    if (!desk) throw new Error(`Unknown project: ${projectId}`);
+    this.sendMessage(desk.id, text);
+  }
+
+  async addSource(projectId: string, path: string, label?: string): Promise<string> {
+    if (!getProject(this.o.store.db, projectId)) throw new Error(`Unknown project: ${projectId}`);
+    if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Source path does not exist or is not a directory: ${path}`);
+    const real = await realpath(path);
+    const top = await runProcess({ command: 'git', args: ['rev-parse', '--show-toplevel'], cwd: real, timeoutMs: 10_000 }).catch(() => null);
+    const isRepoRoot = top?.exitCode === 0 && (await realpath(top.output.trim()).catch(() => '')) === real;
+    const id = newId();
+    this.o.store.append({
+      project_id: projectId,
+      agent_id: null,
+      type: 'source.added',
+      payload: { source_id: id, path: real, kind: isRepoRoot ? 'git' : 'folder', label: label ?? basename(real) },
+    });
+    return id;
+  }
+
+  removeSource(projectId: string, sourceId: string): void {
+    const source = getSource(this.o.store.db, sourceId);
+    if (!source || source.project_id !== projectId) throw new Error(`Unknown source: ${sourceId}`);
+    this.o.store.append({ project_id: projectId, agent_id: null, type: 'source.removed', payload: { source_id: sourceId } });
+  }
+
+  /** Delivers an agent-to-agent message (or a system notice attributed to `fromAgentId`) and wakes the recipient. */
+  sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void {
+    const from = this.requireAgent(fromAgentId);
+    const to = this.requireAgent(toAgentId);
+    const label = from.role === 'desk' ? 'Desk' : `thread "${from.title ?? 'untitled'}" (${from.id})`;
+    this.o.store.append({
+      project_id: to.project_id,
+      agent_id: to.id,
+      type: 'message.agent',
+      payload: { from_agent_id: from.id, from_label: label, kind, text },
+    });
+    this.wake(this.requireAgent(toAgentId));
   }
 
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
@@ -80,7 +148,14 @@ export class Runtime {
       project_id: projectId,
       agent_id: id,
       type: 'agent.created',
-      payload: { role: 'thread', model, title: input.title, brief: input.brief, workspace_path: input.workspacePath, parent_id: null },
+      payload: {
+        role: 'thread',
+        model,
+        title: input.title,
+        brief: input.brief,
+        workspace_path: input.workspacePath,
+        parent_id: getDeskAgent(this.o.store.db, projectId)?.id ?? null,
+      },
     });
     return id;
   }

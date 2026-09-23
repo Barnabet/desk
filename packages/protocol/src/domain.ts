@@ -24,3 +24,24 @@ export const ModelInfo = z.object({
   concurrency: z.number().int().min(1),
 });
 export type ModelInfo = z.infer<typeof ModelInfo>;
+
+export const SourceKind = z.enum(['folder', 'git']);
+export type SourceKind = z.infer<typeof SourceKind>;
+
+/** Git worktree details for a thread working on a repository source. */
+export const GitInfo = z.object({ source_id: z.string(), branch: z.string(), base: z.string(), common_dir: z.string() });
+export type GitInfo = z.infer<typeof GitInfo>;
+
+export const AgentMessageKind = z.enum([
+  'note',
+  'revision',
+  'update',
+  'question',
+  'blocker',
+  'completed',
+  'failed',
+  'cancelled',
+  'approval',
+  'stalled',
+]);
+export type AgentMessageKind = z.infer<typeof AgentMessageKind>;

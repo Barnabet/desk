@@ -38,6 +38,13 @@ export const agents = sqliteTable(
     workspace_path: text('workspace_path'),
     parent_id: text('parent_id'),
     inbox_cursor: integer('inbox_cursor').notNull().default(0),
+    review_round: integer('review_round').notNull().default(0),
+    result_summary: text('result_summary'),
+    result_artifacts: text('result_artifacts', { mode: 'json' }).$type<string[]>(),
+    git_source_id: text('git_source_id'),
+    git_branch: text('git_branch'),
+    git_base: text('git_base'),
+    git_common_dir: text('git_common_dir'),
     created_at: text('created_at').notNull(),
     updated_at: text('updated_at').notNull(),
   },
@@ -76,4 +83,17 @@ export const approvals = sqliteTable(
     resolved_at: text('resolved_at'),
   },
   (t) => [index('approvals_project_idx').on(t.project_id, t.status), index('approvals_agent_idx').on(t.agent_id, t.status)],
+);
+
+export const sources = sqliteTable(
+  'sources',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    path: text('path').notNull(),
+    kind: text('kind', { enum: ['folder', 'git'] }).notNull(),
+    label: text('label').notNull(),
+    created_at: text('created_at').notNull(),
+  },
+  (t) => [index('sources_project_idx').on(t.project_id)],
 );

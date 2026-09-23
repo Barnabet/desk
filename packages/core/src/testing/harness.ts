@@ -7,9 +7,10 @@ import { openDb } from '../db/open';
 import { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { createModelAdapter } from '../model/adapter';
-import { ModelRegistry } from '../model/registry';
+import { ModelRegistry, SEED_MODELS } from '../model/registry';
 import type { RetryOptions } from '../model/retry';
 import type { ModelAdapter } from '../model/types';
+import { Runtime, type RuntimeOptions } from '../runtime/runtime';
 
 export const FAKE_MODEL: ModelInfo = {
   id: 'fake-model',
@@ -36,7 +37,7 @@ export async function createHarness(opts: { script?: Script | FakeReply[]; concu
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'desk-test-')));
   const { db, close } = openDb(':memory:');
   const store = new EventStore(db);
-  const models = new ModelRegistry([{ ...FAKE_MODEL, concurrency: opts.concurrency ?? FAKE_MODEL.concurrency }]);
+  const models = new ModelRegistry([...SEED_MODELS, { ...FAKE_MODEL, concurrency: opts.concurrency ?? FAKE_MODEL.concurrency }]);
   const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 'test' }, models);
   return {
     fake,
@@ -71,4 +72,9 @@ export async function seedThread(
     payload: { role: 'thread', model: opts.model ?? FAKE_MODEL.id, title: 'Test thread', brief: opts.brief ?? 'Do the test task', workspace_path: workspace, parent_id: null },
   });
   return { projectId, agentId, workspace };
+}
+
+/** A Runtime wired to the harness (fake model, temp data dir, no backoff sleeps, sandbox off). */
+export function newRuntime(h: Harness, extra: Partial<RuntimeOptions> = {}): Runtime {
+  return new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep, sandboxAvailable: false, ...extra });
 }

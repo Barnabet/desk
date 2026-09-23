@@ -9,7 +9,7 @@ let h: Harness;
 afterEach(async () => h?.cleanup());
 
 const makeRuntime = (extra: { maxConcurrentThreads?: number } = {}) =>
-  new Runtime({ store: h.store, adapter: h.adapter, models: h.models, retry: noSleep, ...extra });
+  new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep, ...extra });
 
 const statuses = (agentId: string) =>
   h.store.list({ agentId, types: ['agent.status_changed'] }).map((e) => (e.type === 'agent.status_changed' ? e.payload.status : ''));

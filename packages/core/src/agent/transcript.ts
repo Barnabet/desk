@@ -1,19 +1,25 @@
 import type { EventOf, StoredEvent } from '@desk/protocol';
 import type { ChatMessage } from '../model/types';
 
+function renderInboxItem(ev: EventOf<'message.user'> | EventOf<'message.agent'>): string {
+  if (ev.type === 'message.user') return ev.payload.text;
+  return `[from ${ev.payload.from_label} — ${ev.payload.kind}] ${ev.payload.text}`;
+}
+
 /** Rebuilds the model conversation for one agent from its events (in id order). */
 export function buildConversation(events: StoredEvent[]): ChatMessage[] {
   const out: ChatMessage[] = [];
-  const pending: EventOf<'message.user'>[] = [];
+  const pending: Array<EventOf<'message.user'> | EventOf<'message.agent'>> = [];
 
   for (const ev of events) {
     switch (ev.type) {
       case 'message.user':
+      case 'message.agent':
         pending.push(ev);
         break;
       case 'inbox.drained': {
         const batch: string[] = [];
-        while (pending.length && pending[0]!.id <= ev.payload.up_to) batch.push(pending.shift()!.payload.text);
+        while (pending.length && pending[0]!.id <= ev.payload.up_to) batch.push(renderInboxItem(pending.shift()!));
         if (batch.length) out.push({ role: 'user', content: batch.join('\n\n') });
         break;
       }

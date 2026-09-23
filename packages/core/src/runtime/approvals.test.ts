@@ -40,7 +40,7 @@ const testTools: Tool[] = [...fileTools, bashTool, completeTool, openPr, gitPush
 
 async function setup(script: NonNullable<Parameters<typeof createHarness>[0]>['script'], sandboxAvailable = true) {
   h = await createHarness({ script });
-  const rt = new Runtime({ store: h.store, adapter: h.adapter, models: h.models, retry: noSleep, toolsFor: () => testTools, sandboxAvailable });
+  const rt = new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep, toolsFor: () => testTools, sandboxAvailable });
   const projectId = rt.createProject({ name: 'P', goal: 'G' });
   const workspace = join(h.dir, 'ws');
   const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: workspace, model: FAKE_MODEL.id });

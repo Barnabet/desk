@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentRole, AgentStatus, RunFinishReason, ToolCall, ToolResultStatus } from './domain';
+import { AgentMessageKind, AgentRole, AgentStatus, GitInfo, RunFinishReason, SourceKind, ToolCall, ToolResultStatus } from './domain';
 import { ProjectSettingsPatch } from './settings';
 
 const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
@@ -28,10 +28,17 @@ export const EventBody = z.discriminatedUnion('type', [
       brief: z.string().nullable(),
       workspace_path: z.string().nullable(),
       parent_id: z.string().nullable(),
+      git: GitInfo.nullable().optional(),
     }),
   ),
+  event('source.added', z.object({ source_id: z.string(), path: z.string(), kind: SourceKind, label: z.string() })),
+  event('source.removed', z.object({ source_id: z.string() })),
   event('agent.status_changed', z.object({ status: AgentStatus, reason: z.string().optional() })),
   event('message.user', z.object({ text: z.string().min(1) })),
+  event(
+    'message.agent',
+    z.object({ from_agent_id: z.string(), from_label: z.string(), kind: AgentMessageKind, text: z.string().min(1) }),
+  ),
   event('inbox.drained', z.object({ run_id: z.string(), up_to: z.number().int() })),
   event('run.started', z.object({ run_id: z.string(), model: z.string() })),
   event('run.finished', z.object({ run_id: z.string(), reason: RunFinishReason, detail: z.string().optional() })),
@@ -104,4 +111,4 @@ export const EphemeralEvent = z.discriminatedUnion('type', [
 export type EphemeralEvent = z.infer<typeof EphemeralEvent>;
 
 /** Event types that land in an agent's inbox and trigger/steer runs. */
-export const INBOX_EVENT_TYPES = ['message.user'] as const satisfies readonly EventType[];
+export const INBOX_EVENT_TYPES = ['message.user', 'message.agent'] as const satisfies readonly EventType[];
