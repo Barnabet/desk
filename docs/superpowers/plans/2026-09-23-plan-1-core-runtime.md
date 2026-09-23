@@ -120,7 +120,7 @@ packages/core/
     "vitest": "^5.0.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }
 ```
@@ -285,7 +285,7 @@ describe('protocol', () => {
 - [ ] **Step 4: Install and run**
 
 Run: `pnpm install`
-Expected: completes; `better-sqlite3` native build succeeds (prebuilt binary download or compile).
+Expected: completes. `better-sqlite3` v13 ships N-API prebuilds inside the package, so it is deliberately **not** in `onlyBuiltDependencies` (a source build needs Xcode and is unnecessary).
 
 Run: `pnpm test`
 Expected: PASS — 1 test (`exposes the protocol version`). This verifies workspace-name resolution through `exports` → `.ts` source works under Vitest.
