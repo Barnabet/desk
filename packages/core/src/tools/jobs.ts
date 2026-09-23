@@ -91,6 +91,10 @@ export class JobManager {
   killAll(agentId: string): void {
     for (const [id, job] of this.jobs) if (job.agentId === agentId) this.kill(agentId, id);
   }
+
+  killEverything(): void {
+    for (const [id, job] of this.jobs) this.kill(job.agentId, id);
+  }
 }
 
 export const bashBackgroundTool = defineTool({

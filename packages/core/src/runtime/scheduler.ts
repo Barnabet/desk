@@ -55,6 +55,15 @@ export class Scheduler {
     return 'none';
   }
 
+  /** Drops every queued job and aborts every running one with `reason`. Returns the dropped queued jobs. */
+  stopAll(reason: unknown): Job[] {
+    const dropped = this.queue;
+    this.queue = [];
+    for (const r of this.running.values()) r.controller.abort(reason);
+    this.pump();
+    return dropped;
+  }
+
   whenIdle(): Promise<void> {
     if (this.queue.length === 0 && this.running.size === 0) return Promise.resolve();
     return new Promise((resolve) => this.idleWaiters.push(resolve));

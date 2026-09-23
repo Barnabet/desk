@@ -73,3 +73,14 @@ export const listProjects = (db: Db, opts: { includeArchived?: boolean } = {}): 
     .where(opts.includeArchived ? undefined : isNull(projects.archived_at))
     .orderBy(asc(projects.created_at), asc(projects.id))
     .all();
+
+/** Agents of non-archived projects, optionally filtered by status. */
+export const listLiveAgents = (db: Db, statuses?: AgentRow['status'][]): AgentRow[] =>
+  db
+    .select({ agent: agents })
+    .from(agents)
+    .innerJoin(projects, eq(projects.id, agents.project_id))
+    .where(and(isNull(projects.archived_at), statuses ? inArray(agents.status, statuses) : undefined))
+    .orderBy(asc(agents.created_at), asc(agents.id))
+    .all()
+    .map((r) => r.agent);

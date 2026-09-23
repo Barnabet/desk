@@ -9,7 +9,7 @@ import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
 import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
-import { runAgent } from '../agent/run';
+import { runAgent, SHUTDOWN_REASON } from '../agent/run';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { DEFAULT_MODEL_ID, type ModelRegistry } from '../model/registry';
@@ -25,6 +25,7 @@ import {
   lastEvent,
   listActiveThreads,
   listAgents,
+  listLiveAgents,
   listSources,
   pendingApprovalsFor,
   type AgentRow,
@@ -66,6 +67,7 @@ export class Runtime {
   private readonly silentStops = new Set<string>();
   /** Last event id already reported as stalled, per thread. */
   private readonly stallNotified = new Map<string, number>();
+  private shuttingDown = false;
 
   constructor(private readonly o: RuntimeOptions) {
     this.services = {
@@ -417,6 +419,28 @@ export class Runtime {
     return this.scheduler.whenIdle();
   }
 
+  /** Stops scheduling, interrupts running agents resumably and kills background jobs. */
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    this.scheduler.stopAll(SHUTDOWN_REASON);
+    this.jobs.killEverything();
+    await this.scheduler.whenIdle();
+  }
+
+  /** On startup: reschedules agents left queued (or with undelivered messages) by a previous daemon. Returns their ids. */
+  recover(): string[] {
+    const resumed: string[] = [];
+    for (const agent of listLiveAgents(this.o.store.db)) {
+      const pendingInbox = hasPendingInbox(this.o.store, agent.id);
+      if (agent.status === 'queued' || (pendingInbox && agent.status !== 'cancelled')) {
+        if (pendingApprovalsFor(this.o.store.db, agent.id).length) continue;
+        this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role });
+        resumed.push(agent.id);
+      }
+    }
+    return resumed;
+  }
+
   // ── internals ────────────────────────────────────────────────────────
 
   private requireAgent(agentId: string): AgentRow {
@@ -463,14 +487,15 @@ export class Runtime {
 
   /** Schedules the agent unless it is already active or blocked on an approval. */
   private wake(agent: AgentRow): void {
-    if (this.scheduler.isActive(agent.id)) return;
+    if (this.shuttingDown || this.scheduler.isActive(agent.id)) return;
     if (pendingApprovalsFor(this.o.store.db, agent.id).length) return;
     this.schedule(agent);
   }
 
   private schedule(agent: AgentRow): void {
     this.o.store.append({ project_id: agent.project_id, agent_id: agent.id, type: 'agent.status_changed', payload: { status: 'queued' } });
-    this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role });
+    // While shutting down, `queued` is recorded so the next daemon's recover() runs it.
+    if (!this.shuttingDown) this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role });
   }
 
   private async execute(agentId: string, signal: AbortSignal): Promise<void> {

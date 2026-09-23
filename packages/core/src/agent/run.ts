@@ -25,6 +25,9 @@ export type RunDeps = {
 
 export type RunOutcome = { reason: RunFinishReason; status: AgentStatus };
 
+/** Abort reason used when the daemon stops: the run ends resumable (agent left `queued`) instead of cancelled. */
+export const SHUTDOWN_REASON = 'daemon_shutdown';
+
 /** Runs one activation of an agent until it yields, replies without tools, hits the step limit, is aborted, or fails. Never throws. */
 export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSignal): Promise<RunOutcome> {
   const { store } = deps;
@@ -48,13 +51,16 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
     return { reason, status };
   };
 
+  const interrupted = (): RunOutcome =>
+    signal.reason === SHUTDOWN_REASON ? finish('error', 'queued', SHUTDOWN_REASON) : finish('stopped', 'cancelled');
+
   const workspace = agent.workspace_path;
   if (!workspace) return finish('error', 'failed', 'Agent has no workspace');
   const specs = toToolSpecs(deps.tools);
 
   try {
     for (let step = 0; step < deps.maxSteps; step++) {
-      if (signal.aborted) return finish('stopped', 'cancelled');
+      if (signal.aborted) return interrupted();
       drainInbox(store, agentId, runId);
 
       const current = getAgent(store.db, agentId)!;
@@ -150,7 +156,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
     return finish('max_steps', 'idle', `Reached the limit of ${deps.maxSteps} steps`);
   } catch (e) {
     const err = classifyModelError(e);
-    if (err.kind === 'aborted') return finish('stopped', 'cancelled');
+    if (err.kind === 'aborted' || signal.aborted) return interrupted();
     return finish('error', 'failed', err.message);
   }
 }

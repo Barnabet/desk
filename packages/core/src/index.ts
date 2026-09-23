@@ -13,6 +13,7 @@ export {
   listActiveThreads,
   listAgents,
   listApprovals,
+  listLiveAgents,
   listProjects,
   listSources,
   listThreads,
@@ -55,7 +56,7 @@ export { buildToolContext, type ToolEnvironment } from './agent/context';
 export { buildConversation } from './agent/transcript';
 export { drainInbox, hasPendingInbox } from './agent/inbox';
 export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agent/prompts';
-export { runAgent, type RunDeps, type RunOutcome } from './agent/run';
+export { runAgent, SHUTDOWN_REASON, type RunDeps, type RunOutcome } from './agent/run';
 export { Scheduler, type Job, type SchedulerOptions } from './runtime/scheduler';
 export { Runtime, type RuntimeOptions } from './runtime/runtime';
 export { deskToolsFor, threadToolsFor, toolsForRole } from './runtime/toolsets';
