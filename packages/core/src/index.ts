@@ -73,3 +73,5 @@ export { listArtifacts, type ArtifactRow } from './library/library';
 export { formatPlan, getPlan, type PlanRow } from './coordination/plan';
 export { formatThreadLine, formatThreadSummary, renderTranscript } from './coordination/render';
 export { createWorkspace, removeWorkspace, threadBranchName } from './workspaces/workspaces';
+export { SkillStore, parseSkillMd, serializeSkillMd, type SkillDetail, type SkillSummary, type SkillSaveInput } from './skills/store';
+export { skillUseTools, skillAuthoringTools, renderSkill } from './tools/skills';

@@ -355,6 +355,47 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     });
     say(`Uploaded ${a.path}`);
   });
+  const skillsBase = async (c: DeskClient, ref?: string) => (ref ? `/projects/${(await resolveProject(c, ref)).id}/skills` : '/skills');
+  const skillLine = (s: any) => `${s.name} (${s.scope}, v${s.version}) — ${s.error ? `BROKEN: ${s.error}` : s.description}`;
+  program
+    .command('skills [project]')
+    .description('List global skills, or every skill visible in a project')
+    .action(async (ref?: string) => {
+      const c = client();
+      const rows = await c.get<any[]>(await skillsBase(c, ref));
+      say(rows.length ? rows.map(skillLine).join('\n') : 'No skills');
+    });
+  const skill = program.command('skill').description('Manage skills (global unless --project is given)');
+  skill.command('show <name>').option('-p, --project <project>').action(async (name: string, opts: { project?: string }) => {
+    const c = client();
+    const s = await c.get(`${await skillsBase(c, opts.project)}/${name}`);
+    say([skillLine(s), `Directory: ${s.dir}`, `Files: ${s.files.map((f: any) => f.path).join(', ')}`, '', s.instructions].join('\n'));
+  });
+  skill
+    .command('import <path>')
+    .description('Import a skill directory containing a SKILL.md (e.g. from ~/.claude/skills)')
+    .option('-p, --project <project>')
+    .option('--name <name>')
+    .action(async (path: string, opts: { project?: string; name?: string }) => {
+      const c = client();
+      const r = await c.post(`${await skillsBase(c, opts.project)}/import`, { path: resolve(path), ...(opts.name ? { name: opts.name } : {}) });
+      say(`Imported skill v${r.version} to ${r.dir}`);
+    });
+  skill.command('rm <name>').option('-p, --project <project>').action(async (name: string, opts: { project?: string }) => {
+    const c = client();
+    await c.del(`${await skillsBase(c, opts.project)}/${name}`);
+    say(`Deleted skill ${name} (restorable with desk skill restore)`);
+  });
+  skill.command('history <name>').option('-p, --project <project>').action(async (name: string, opts: { project?: string }) => {
+    const c = client();
+    const rows = await c.get<any[]>(`${await skillsBase(c, opts.project)}/${name}/history`);
+    say(rows.map((h) => `v${h.version}${h.current ? ' (current)' : ''} — ${h.description}`).join('\n'));
+  });
+  skill.command('restore <name> <version>').option('-p, --project <project>').action(async (name: string, version: string, opts: { project?: string }) => {
+    const c = client();
+    const r = await c.post(`${await skillsBase(c, opts.project)}/${name}/restore`, { version: Number(version) });
+    say(`Restored ${name} v${version} as v${r.version}`);
+  });
   program.command('usage <project>').action(async (ref: string) => {
     const c = client();
     const p = await resolveProject(c, ref);
