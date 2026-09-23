@@ -36,6 +36,7 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
+import { ProxyGate } from './proxy-gate';
 import { Scheduler } from './scheduler';
 import { toolsForRole } from './toolsets';
 
@@ -53,6 +54,8 @@ export type RuntimeOptions = {
   retry?: RetryOptions;
   /** Force sandbox availability; detected via `sandbox-exec` when omitted. */
   sandboxAvailable?: boolean;
+  /** Health-probe interval while the model proxy is down (default 10 s). */
+  proxyProbeIntervalMs?: number;
   /** Called with internal errors that are not tied to a request (defaults to console.error). */
   onError?: (err: unknown, context: string) => void;
 };
@@ -63,6 +66,7 @@ export class Runtime {
   readonly scheduler: Scheduler;
   readonly jobs = new JobManager();
   readonly services: RuntimeServices;
+  private readonly proxy: ProxyGate | undefined;
   /** Threads stopped by their Desk: their cancellation is not reported back to it. */
   private readonly silentStops = new Set<string>();
   /** Last event id already reported as stalled, per thread. */
@@ -70,6 +74,19 @@ export class Runtime {
   private shuttingDown = false;
 
   constructor(private readonly o: RuntimeOptions) {
+    const health = o.adapter.health?.bind(o.adapter);
+    this.proxy = health
+      ? new ProxyGate(health, o.proxyProbeIntervalMs ?? 10_000, (projectId, up) =>
+          o.store.append({
+            project_id: projectId,
+            agent_id: null,
+            type: 'system.notice',
+            payload: up
+              ? { level: 'info', code: 'proxy_up', message: 'The model proxy is reachable again; paused agents resumed.' }
+              : { level: 'error', code: 'proxy_down', message: 'The model proxy is unreachable; agents are paused until it comes back.' },
+          }),
+        )
+      : undefined;
     this.services = {
       store: o.store,
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
@@ -425,6 +442,7 @@ export class Runtime {
     this.scheduler.stopAll(SHUTDOWN_REASON);
     this.jobs.killEverything();
     await this.scheduler.whenIdle();
+    this.proxy?.close();
   }
 
   /**
@@ -561,6 +579,7 @@ export class Runtime {
         systemPrompt: (a, p) => this.systemPrompt(a, p),
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
+        ...(this.proxy ? { proxy: this.proxy } : {}),
         gate: (tool, input, project, a) =>
           evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
         toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, {

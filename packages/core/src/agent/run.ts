@@ -21,6 +21,8 @@ export type RunDeps = {
   /** Policy decision for a validated call. */
   gate: (tool: Tool, input: unknown, project: ProjectRow, agent: AgentRow) => PolicyDecision;
   toolContext: (agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) => ToolContext;
+  /** When set, `proxy_down` errors pause here until the proxy is back instead of failing the run. */
+  proxy?: { markDown(projectId: string): void; waitUntilUp(signal: AbortSignal): Promise<void> };
 };
 
 export type RunOutcome = { reason: RunFinishReason; status: AgentStatus };
@@ -61,6 +63,30 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   // artifact appearing as pre-existing context). Changes made by others arrive as messages instead.
   const system = deps.systemPrompt(agent, project);
 
+  const callModel = async (model: string, messages: ChatMessage[]) => {
+    for (;;) {
+      try {
+        return await withRetry(
+          () =>
+            deps.adapter.complete(
+              { model, messages, tools: specs },
+              {
+                signal,
+                onText: (text) =>
+                  store.publishEphemeral({ type: 'assistant.delta', project_id: agent.project_id, agent_id: agentId, payload: { run_id: runId, text } }),
+              },
+            ),
+          { ...deps.retry, signal },
+        );
+      } catch (e) {
+        const err = classifyModelError(e);
+        if (err.kind !== 'proxy_down' || !deps.proxy) throw err;
+        deps.proxy.markDown(agent.project_id);
+        await deps.proxy.waitUntilUp(signal);
+      }
+    }
+  };
+
   try {
     for (let step = 0; step < deps.maxSteps; step++) {
       if (signal.aborted) return interrupted();
@@ -72,18 +98,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         ...buildConversation(store.list({ agentId })),
       ];
 
-      const result = await withRetry(
-        () =>
-          deps.adapter.complete(
-            { model: current.model, messages, tools: specs },
-            {
-              signal,
-              onText: (text) =>
-                store.publishEphemeral({ type: 'assistant.delta', project_id: agent.project_id, agent_id: agentId, payload: { run_id: runId, text } }),
-            },
-          ),
-        { ...deps.retry, signal },
-      );
+      const result = await callModel(current.model, messages);
 
       store.append([
         { ...base, type: 'assistant.message', payload: { run_id: runId, content: result.content, tool_calls: result.toolCalls } },

@@ -73,7 +73,7 @@ function split(s: string, size: number): string[] {
   return out;
 }
 
-export async function startFakeModel(initial: Script | FakeReply[] = []): Promise<FakeModelServer> {
+export async function startFakeModel(initial: Script | FakeReply[] = [], opts: { port?: number } = {}): Promise<FakeModelServer> {
   let script = toScript(initial);
   const requests: ChatRequest[] = [];
   let inFlight = 0;
@@ -173,7 +173,7 @@ export async function startFakeModel(initial: Script | FakeReply[] = []): Promis
     res.end();
   });
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
 
   return {
@@ -191,6 +191,7 @@ export async function startFakeModel(initial: Script | FakeReply[] = []): Promis
     },
     close: () =>
       new Promise<void>((resolve) => {
+        if (!server.listening) return resolve();
         server.closeAllConnections();
         server.close(() => resolve());
       }),

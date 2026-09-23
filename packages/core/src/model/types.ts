@@ -29,4 +29,6 @@ export interface ModelAdapter {
     req: CompletionRequest,
     opts?: { signal?: AbortSignal; onText?: (delta: string) => void },
   ): Promise<CompletionResult>;
+  /** True when the model endpoint answers (used to detect the end of a proxy outage). */
+  health?(): Promise<boolean>;
 }
