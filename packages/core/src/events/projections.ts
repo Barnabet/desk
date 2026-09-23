@@ -1,0 +1,65 @@
+import { eq, sql } from 'drizzle-orm';
+import type { StoredEvent } from '@desk/protocol';
+import type { Tx } from '../db/open';
+import { agents, projects, usageTotals } from '../db/schema';
+
+function requireAgentId(ev: StoredEvent): string {
+  if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
+  return ev.agent_id;
+}
+
+/** Applies one event to the projection tables. Runs inside the append transaction. */
+export function applyProjections(tx: Tx, ev: StoredEvent): void {
+  switch (ev.type) {
+    case 'project.created':
+      tx.insert(projects)
+        .values({ id: ev.project_id, name: ev.payload.name, goal: ev.payload.goal, instructions: ev.payload.instructions, created_at: ev.ts })
+        .run();
+      return;
+    case 'agent.created':
+      tx.insert(agents)
+        .values({
+          id: requireAgentId(ev),
+          project_id: ev.project_id,
+          role: ev.payload.role,
+          status: 'idle',
+          model: ev.payload.model,
+          title: ev.payload.title,
+          brief: ev.payload.brief,
+          workspace_path: ev.payload.workspace_path,
+          parent_id: ev.payload.parent_id,
+          inbox_cursor: 0,
+          created_at: ev.ts,
+          updated_at: ev.ts,
+        })
+        .run();
+      return;
+    case 'agent.status_changed':
+      tx.update(agents).set({ status: ev.payload.status, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'inbox.drained':
+      tx.update(agents).set({ inbox_cursor: ev.payload.up_to, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'usage':
+      tx.insert(usageTotals)
+        .values({
+          project_id: ev.project_id,
+          agent_id: requireAgentId(ev),
+          model: ev.payload.model,
+          day: ev.ts.slice(0, 10),
+          prompt_tokens: ev.payload.prompt_tokens,
+          completion_tokens: ev.payload.completion_tokens,
+        })
+        .onConflictDoUpdate({
+          target: [usageTotals.project_id, usageTotals.agent_id, usageTotals.model, usageTotals.day],
+          set: {
+            prompt_tokens: sql`${usageTotals.prompt_tokens} + ${ev.payload.prompt_tokens}`,
+            completion_tokens: sql`${usageTotals.completion_tokens} + ${ev.payload.completion_tokens}`,
+          },
+        })
+        .run();
+      return;
+    default:
+      return;
+  }
+}
