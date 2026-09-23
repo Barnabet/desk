@@ -51,3 +51,15 @@ export type MemoryKind = z.infer<typeof MemoryKind>;
 
 export const ArtifactKind = z.enum(['file', 'report', 'code', 'data', 'other']);
 export type ArtifactKind = z.infer<typeof ArtifactKind>;
+
+export const PlanItemStatus = z.enum(['todo', 'in_progress', 'done', 'dropped']);
+export type PlanItemStatus = z.infer<typeof PlanItemStatus>;
+
+export const PlanItem = z.object({
+  id: z.string(),
+  title: z.string().min(1),
+  status: PlanItemStatus,
+  thread_ids: z.array(z.string()),
+  notes: z.string(),
+});
+export type PlanItem = z.infer<typeof PlanItem>;

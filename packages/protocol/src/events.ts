@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentMessageKind, AgentRole, ArtifactKind, AgentStatus, GitInfo, MemoryKind, RunFinishReason, SourceKind, ToolCall, ToolResultStatus } from './domain';
+import { AgentMessageKind, AgentRole, ArtifactKind, AgentStatus, GitInfo, MemoryKind, PlanItem, RunFinishReason, SourceKind, ToolCall, ToolResultStatus } from './domain';
 import { ProjectSettingsPatch } from './settings';
 
 const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
@@ -35,6 +35,14 @@ export const EventBody = z.discriminatedUnion('type', [
   event('source.removed', z.object({ source_id: z.string() })),
   event('agent.status_changed', z.object({ status: AgentStatus, reason: z.string().optional() })),
   event('agent.result', z.object({ summary: z.string().min(1), artifacts: z.array(z.string()) })),
+  event('agent.revision', z.object({ round: z.number().int().min(1), feedback: z.string() })),
+  event('agent.archived', z.object({})),
+  event('plan.updated', z.object({ items: z.array(PlanItem) })),
+  event(
+    'report',
+    z.object({ headline: z.string().min(1), progress: z.string(), needs_you: z.array(z.string()), results: z.array(z.string()) }),
+  ),
+  event('question.asked', z.object({ question: z.string().min(1), options: z.array(z.string()).optional() })),
   event('message.user', z.object({ text: z.string().min(1) })),
   event(
     'message.agent',

@@ -16,6 +16,7 @@ CREATE TABLE `agents` (
 	`git_branch` text,
 	`git_base` text,
 	`git_common_dir` text,
+	`archived_at` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );
@@ -75,6 +76,12 @@ CREATE TABLE `memory` (
 );
 --> statement-breakpoint
 CREATE INDEX `memory_project_idx` ON `memory` (`project_id`,`superseded_by`);--> statement-breakpoint
+CREATE TABLE `plans` (
+	`project_id` text PRIMARY KEY NOT NULL,
+	`items` text NOT NULL,
+	`updated_at` text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `projects` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,

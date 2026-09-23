@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, approvals, artifacts, memory, projects, sources, usageTotals } from '../db/schema';
+import { agents, approvals, artifacts, memory, plans, projects, sources, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -91,6 +91,18 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       tx.update(agents)
         .set({ result_summary: ev.payload.summary, result_artifacts: ev.payload.artifacts, updated_at: ev.ts })
         .where(eq(agents.id, requireAgentId(ev)))
+        .run();
+      return;
+    case 'agent.revision':
+      tx.update(agents).set({ review_round: ev.payload.round, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'agent.archived':
+      tx.update(agents).set({ archived_at: ev.ts, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'plan.updated':
+      tx.insert(plans)
+        .values({ project_id: ev.project_id, items: ev.payload.items, updated_at: ev.ts })
+        .onConflictDoUpdate({ target: plans.project_id, set: { items: ev.payload.items, updated_at: ev.ts } })
         .run();
       return;
     case 'agent.status_changed':

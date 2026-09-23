@@ -1,6 +1,6 @@
 import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 // Type-only import: erased at runtime, so drizzle-kit can still load this file standalone.
-import type { ProjectSettings } from '@desk/protocol';
+import type { PlanItem, ProjectSettings } from '@desk/protocol';
 
 export const events = sqliteTable(
   'events',
@@ -45,6 +45,7 @@ export const agents = sqliteTable(
     git_branch: text('git_branch'),
     git_base: text('git_base'),
     git_common_dir: text('git_common_dir'),
+    archived_at: text('archived_at'),
     created_at: text('created_at').notNull(),
     updated_at: text('updated_at').notNull(),
   },
@@ -127,3 +128,9 @@ export const artifacts = sqliteTable(
   },
   (t) => [index('artifacts_project_idx').on(t.project_id)],
 );
+
+export const plans = sqliteTable('plans', {
+  project_id: text('project_id').primaryKey(),
+  items: text('items', { mode: 'json' }).$type<PlanItem[]>().notNull(),
+  updated_at: text('updated_at').notNull(),
+});

@@ -3,6 +3,7 @@ import { copyFile, realpath } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { AgentMessageKind, ArtifactKind, MemoryKind, ProjectSettingsPatch } from '@desk/protocol';
 import { uniqueLibraryName } from '../library/library';
+import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
@@ -75,6 +76,10 @@ export class Runtime {
       libraryDir: (projectId) => this.libraryDir(projectId),
       publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
       sendAgentMessage: (from, to, kind, text) => this.sendAgentMessage(from, to, kind, text),
+      spawnThread: (parentId, input) => this.spawnThread(parentId, input),
+      stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
+      resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),
+      updateSettings: (projectId, patch) => this.updateSettings(projectId, patch),
     };
     this.scheduler = new Scheduler({
       modelConcurrency: (model) => o.models.get(model).concurrency,
@@ -232,6 +237,63 @@ export class Runtime {
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
     if (!getProject(this.o.store.db, projectId)) throw new Error(`Unknown project: ${projectId}`);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.updated', payload: patch });
+  }
+
+  /** Validates model ids, then applies a settings patch. */
+  updateSettings(projectId: string, patch: ProjectSettingsPatch): void {
+    for (const key of ['desk_model', 'thread_model', 'fallback_model'] as const) {
+      const model = patch[key];
+      if (model) this.o.models.get(model);
+    }
+    this.updateProject(projectId, { settings: patch });
+  }
+
+  /** Creates a thread for Desk: its own workspace (git worktree for a repo source, else a scratch dir), then starts it. */
+  async spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string }): Promise<string> {
+    const parent = this.requireAgent(parentId);
+    const project = getProject(this.o.store.db, parent.project_id)!;
+    const model = input.model ?? project.settings.thread_model;
+    this.o.models.get(model);
+    let gitSource: { id: string; path: string } | undefined;
+    if (input.gitSourceId) {
+      const source = getSource(this.o.store.db, input.gitSourceId);
+      if (!source || source.project_id !== project.id || source.kind !== 'git') throw new Error(`Unknown git source: ${input.gitSourceId}`);
+      gitSource = { id: source.id, path: source.path };
+    }
+    const id = newId();
+    const workspacePath = join(this.o.dataDir, 'workspaces', id);
+    const ws = await createWorkspace({
+      path: workspacePath,
+      ...(gitSource ? { git: { sourcePath: gitSource.path, branch: threadBranchName(input.title, id) } } : {}),
+    });
+    this.o.store.append({
+      project_id: project.id,
+      agent_id: id,
+      type: 'agent.created',
+      payload: {
+        role: 'thread',
+        model,
+        title: input.title,
+        brief: input.brief,
+        workspace_path: workspacePath,
+        parent_id: parent.id,
+        git: ws.git && gitSource ? { source_id: gitSource.id, ...ws.git } : null,
+      },
+    });
+    this.sendAgentMessage(parent.id, id, 'note', 'Begin your assignment.');
+    return id;
+  }
+
+  /** Deletes a finished thread's workspace (keeping any git branch) and marks it archived. */
+  async archiveThread(threadId: string): Promise<void> {
+    const t = this.requireAgent(threadId);
+    if (t.role !== 'thread') throw new Error('Only threads can be archived');
+    if (!TERMINAL.has(t.status)) throw new Error(`Thread ${threadId} is ${t.status}; stop it before archiving`);
+    if (t.workspace_path) {
+      const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
+      await removeWorkspace({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
+    }
+    this.o.store.append({ project_id: t.project_id, agent_id: t.id, type: 'agent.archived', payload: {} });
   }
 
   /** Low-level thread creation in an existing directory. `parentId` defaults to the project's Desk; `null` makes a standalone thread. */
