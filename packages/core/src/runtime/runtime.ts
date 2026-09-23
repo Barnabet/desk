@@ -11,6 +11,7 @@ import type { ProjectSettingsPatch } from '@desk/protocol';
 import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
 import { bashTool } from '../tools/bash';
 import { fileTools } from '../tools/fs';
+import { JobManager } from '../tools/jobs';
 import { completeTool } from '../tools/thread';
 import type { Tool } from '../tools/types';
 import { Scheduler } from './scheduler';
@@ -30,6 +31,7 @@ export type RuntimeOptions = {
 
 export class Runtime {
   readonly scheduler: Scheduler;
+  readonly jobs = new JobManager();
 
   constructor(private readonly o: RuntimeOptions) {
     this.scheduler = new Scheduler({
@@ -117,6 +119,7 @@ export class Runtime {
         tools: this.o.toolsFor?.(agent) ?? defaultThreadTools,
         systemPrompt: this.o.systemPrompt ?? threadSystemPrompt,
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
+        jobs: this.jobs,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
       },
       agentId,

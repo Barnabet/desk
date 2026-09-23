@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bashTool, scrubbedEnv } from './bash';
-import { NO_SANDBOX } from './sandbox';
+import { testToolContext } from '../testing/context';
 import type { ToolContext } from './types';
 
 let ws: string;
 let ctx: ToolContext;
 beforeEach(async () => {
   ws = await realpath(await mkdtemp(join(tmpdir(), 'desk-bash-')));
-  ctx = { projectId: 'p', agentId: 'a', runId: 'r', toolCallId: 't', workspace: ws, readRoots: [ws], signal: new AbortController().signal, sandbox: NO_SANDBOX };
+  ctx = testToolContext(ws);
 });
 afterEach(async () => rm(ws, { recursive: true, force: true }));
 

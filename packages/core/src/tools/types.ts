@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { AgentStatus, ToolResultStatus } from '@desk/protocol';
+import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
 
 export type ToolContext = {
@@ -11,6 +12,7 @@ export type ToolContext = {
   readRoots: string[];
   signal: AbortSignal;
   sandbox: SandboxSpec;
+  jobs: JobManager;
 };
 
 export type ToolYield = { status: AgentStatus; reason?: string };

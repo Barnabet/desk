@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { bashTool, scrubbedEnv } from './bash';
 import { buildSandboxProfile, detectSandbox, shellInvocation, type SandboxSpec } from './sandbox';
+import { testToolContext } from '../testing/context';
 import type { ToolContext } from './types';
 
 let available = false;
@@ -22,16 +23,7 @@ afterEach(async () => {
   await rm(escapee, { force: true });
 });
 
-const ctx = (sandbox: SandboxSpec): ToolContext => ({
-  projectId: 'p',
-  agentId: 'a',
-  runId: 'r',
-  toolCallId: 't',
-  workspace: ws,
-  readRoots: [ws],
-  signal: new AbortController().signal,
-  sandbox,
-});
+const ctx = (sandbox: SandboxSpec): ToolContext => testToolContext(ws, { sandbox });
 
 describe('sandboxed bash', () => {
   it('allows writes inside the workspace', async (t) => {

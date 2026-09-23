@@ -32,6 +32,7 @@ export const bashTool = defineTool({
     command: z.string().min(1),
     timeout_s: z.number().int().min(1).max(600).default(120),
   }),
+  gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command, timeout_s }, ctx) {
     const r = await runProcess({
       ...shellInvocation(command, ctx.sandbox),

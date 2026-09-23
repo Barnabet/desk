@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { executeToolCall, MAX_TOOL_OUTPUT_CHARS, toToolSpecs } from './registry';
-import { NO_SANDBOX } from './sandbox';
+import { testToolContext } from '../testing/context';
 import { defineTool, ToolDenied, type ToolContext } from './types';
 
 let ws: string;
 let ctx: ToolContext;
 beforeEach(async () => {
   ws = await mkdtemp(join(tmpdir(), 'desk-reg-'));
-  ctx = { projectId: 'p', agentId: 'a', runId: 'r', toolCallId: 'toolu_1', workspace: ws, readRoots: [ws], signal: new AbortController().signal, sandbox: NO_SANDBOX };
+  ctx = testToolContext(ws, { toolCallId: 'toolu_1' });
 });
 afterEach(async () => rm(ws, { recursive: true, force: true }));
 

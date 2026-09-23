@@ -6,6 +6,7 @@ import { withRetry, type RetryOptions } from '../model/retry';
 import type { ChatMessage, ModelAdapter } from '../model/types';
 import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
 import { executeToolCall, toToolSpecs } from '../tools/registry';
+import type { JobManager } from '../tools/jobs';
 import { NO_SANDBOX } from '../tools/sandbox';
 import type { Tool } from '../tools/types';
 import { drainInbox } from './inbox';
@@ -18,6 +19,7 @@ export type RunDeps = {
   systemPrompt: (agent: AgentRow, project: ProjectRow) => string;
   maxSteps: number;
   retry?: RetryOptions;
+  jobs: JobManager;
 };
 
 export type RunOutcome = { reason: RunFinishReason; status: AgentStatus };
@@ -107,6 +109,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
             readRoots: [workspace],
             signal,
             sandbox: NO_SANDBOX,
+            jobs: deps.jobs,
           }),
         ),
       );
