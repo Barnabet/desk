@@ -15,10 +15,20 @@ export type ToolYield = { status: AgentStatus; reason?: string };
 export type ToolOutput = string | { content: string; yield?: ToolYield };
 export type ToolResult = { status: ToolResultStatus; content: string; yield?: ToolYield };
 
+export type PolicySubject = { branch?: string; command?: string; domain?: string };
+
+/** Declares that a tool is checked against project policy rules before it runs. */
+export type ToolGate<I = any> = {
+  subject: (input: I) => PolicySubject;
+  /** Decision when no rule matches: `ask` for outward-facing tools, `auto` for sandboxed shell. */
+  unmatched: 'ask' | 'auto';
+};
+
 export type Tool<I = any> = {
   name: string;
   description: string;
   input: z.ZodType<I>;
+  gate?: ToolGate<I>;
   execute(input: I, ctx: ToolContext): Promise<ToolOutput>;
 };
 
@@ -26,6 +36,7 @@ export function defineTool<S extends z.ZodType>(def: {
   name: string;
   description: string;
   input: S;
+  gate?: ToolGate<z.output<S>>;
   execute(input: z.output<S>, ctx: ToolContext): Promise<ToolOutput>;
 }): Tool<z.output<S>> {
   return def as Tool<z.output<S>>;

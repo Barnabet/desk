@@ -16,7 +16,7 @@ export type PolicyRule = z.infer<typeof PolicyRule>;
 
 /** Shell commands that always need a human (or Desk) decision, even inside the sandbox. */
 export const RISKY_COMMAND_PATTERN =
-  String.raw`(?:^|[\s;&|(])(?:sudo|mkfs(?:\.\w+)?|dd\s+if=|chmod\s+-R\s+777|rm\s+-\w*[rR]\w*\s+(?:/|~))|(?:curl|wget)[^|]*\|\s*(?:ba|z)?sh\b`;
+  String.raw`(?:^|[\s;&|(])(?:(?:sudo|mkfs(?:\.\w+)?)\b|dd\s+if=|chmod\s+-R\s+777|rm\s+-\w*[rR]\w*\s+(?:/|~))|(?:curl|wget)[^|]*\|\s*(?:ba|z)?sh\b`;
 
 export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'bash', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
