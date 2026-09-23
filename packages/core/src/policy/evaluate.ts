@@ -8,7 +8,7 @@ export type PolicyDecision = {
   reason: string;
 };
 
-const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly']);
+const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly', 'skill_run']);
 
 export function globToRegExp(glob: string): RegExp {
   const body = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');

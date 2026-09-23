@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { copyFile, realpath } from 'node:fs/promises';
-import { basename, join } from 'node:path';
-import type { AgentMessageKind, ArtifactKind, MemoryKind, ProjectSettingsPatch } from '@desk/protocol';
+import { basename, join, sep } from 'node:path';
+import { GLOBAL_PROJECT_ID, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type SkillScope } from '@desk/protocol';
+import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { uniqueLibraryName } from '../library/library';
 import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
@@ -66,6 +67,7 @@ export class Runtime {
   readonly scheduler: Scheduler;
   readonly jobs = new JobManager();
   readonly services: RuntimeServices;
+  readonly skills: SkillStore;
   private readonly proxy: ProxyGate | undefined;
   /** Threads stopped by their Desk: their cancellation is not reported back to it. */
   private readonly silentStops = new Set<string>();
@@ -87,8 +89,14 @@ export class Runtime {
           }),
         )
       : undefined;
+    this.skills = new SkillStore(o.dataDir);
     this.services = {
       store: o.store,
+      skills: this.skills,
+      activateSkills: (agentId, names) => this.activateSkills(agentId, names),
+      saveSkill: (input, meta) => this.saveSkill(input, meta),
+      deleteSkill: (scope, name, projectId, meta) => this.deleteSkill(scope, name, projectId, meta),
+      skillDraftDir: (projectId, path) => this.skillDraftDir(projectId, path),
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
       libraryDir: (projectId) => this.libraryDir(projectId),
       publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
@@ -276,11 +284,15 @@ export class Runtime {
   }
 
   /** Creates a thread for Desk: its own workspace (git worktree for a repo source, else a scratch dir), then starts it. */
-  async spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string }): Promise<string> {
+  async spawnThread(
+    parentId: string,
+    input: { title: string; brief: string; gitSourceId?: string; model?: string; skills?: string[] },
+  ): Promise<string> {
     const parent = this.requireAgent(parentId);
     const project = getProject(this.o.store.db, parent.project_id)!;
     const model = input.model ?? project.settings.thread_model;
     this.o.models.get(model);
+    const skills = this.requireUsableSkills(project.id, input.skills ?? []);
     let gitSource: { id: string; path: string } | undefined;
     if (input.gitSourceId) {
       const source = getSource(this.o.store.db, input.gitSourceId);
@@ -305,6 +317,7 @@ export class Runtime {
         workspace_path: workspacePath,
         parent_id: parent.id,
         git: ws.git && gitSource ? { source_id: gitSource.id, ...ws.git } : null,
+        ...(skills.length ? { skills } : {}),
       },
     });
     this.sendAgentMessage(parent.id, id, 'note', 'Begin your assignment.');
@@ -343,6 +356,121 @@ export class Runtime {
       },
     });
     return id;
+  }
+
+  // ── skills ───────────────────────────────────────────────────────────
+
+  /** Skills visible to a project (project skills shadow global ones), or global skills only. */
+  listSkills(projectId?: string): SkillSummary[] {
+    if (projectId) this.requireOpenProject(projectId);
+    return this.skills.list(projectId);
+  }
+
+  /** A skill by scope, or as resolved for a project (project first, then global) when no scope is given. */
+  getSkill(name: string, opts: { scope?: SkillScope; projectId?: string } = {}): SkillDetail {
+    const scope = opts.scope ?? this.skills.resolve(name, opts.projectId)?.scope;
+    const skill = scope ? this.skills.get(scope, name, opts.projectId) : undefined;
+    if (!skill) throw new NotFoundError(`Unknown skill: ${name}`);
+    return skill;
+  }
+
+  /**
+   * Creates or refines a skill (the previous version is kept in history).
+   * `projectId` in meta attributes a global change to the project it was made from.
+   */
+  saveSkill(
+    input: SkillSaveInput,
+    meta: { origin?: string; changeNote?: string; projectId?: string; agentId?: string } = {},
+  ): { version: number; dir: string; created: boolean; description: string } {
+    if (input.scope === 'project') this.requireOpenProject(input.projectId ?? '');
+    const r = this.skills.save(input);
+    this.o.store.append({
+      project_id: input.projectId ?? meta.projectId ?? GLOBAL_PROJECT_ID,
+      agent_id: meta.agentId ?? null,
+      type: 'skill.saved',
+      payload: {
+        scope: input.scope,
+        name: input.name,
+        version: r.version,
+        description: r.description,
+        origin: meta.origin ?? 'user',
+        change_note: meta.changeNote ?? (r.created ? 'Created' : 'Updated'),
+      },
+    });
+    return r;
+  }
+
+  deleteSkill(scope: SkillScope, name: string, projectId?: string, meta: { origin?: string; projectId?: string; agentId?: string } = {}): void {
+    if (scope === 'project') this.requireOpenProject(projectId ?? '');
+    this.skills.delete(scope, name, projectId);
+    this.o.store.append({
+      project_id: projectId ?? meta.projectId ?? GLOBAL_PROJECT_ID,
+      agent_id: meta.agentId ?? null,
+      type: 'skill.deleted',
+      payload: { scope, name, origin: meta.origin ?? 'user' },
+    });
+  }
+
+  skillHistory(scope: SkillScope, name: string, projectId?: string) {
+    return this.skills.history(scope, name, projectId);
+  }
+
+  restoreSkill(scope: SkillScope, name: string, version: number, projectId?: string) {
+    const r = this.skills.restore(scope, name, version, projectId);
+    this.o.store.append({
+      project_id: projectId ?? GLOBAL_PROJECT_ID,
+      agent_id: null,
+      type: 'skill.saved',
+      payload: { scope, name, version: r.version, description: r.description, origin: 'user', change_note: `Restored version ${version}` },
+    });
+    return r;
+  }
+
+  /** Imports a skill directory from disk (e.g. a Claude Code skill); its name comes from its SKILL.md unless given. */
+  importSkill(path: string, opts: { scope: SkillScope; projectId?: string; name?: string }) {
+    if (!existsSync(join(path, 'SKILL.md'))) throw new ValidationError(`${path} has no SKILL.md`);
+    const name = opts.name ?? SkillStore.declaredName(path);
+    return this.saveSkill(
+      { scope: opts.scope, name, fromDir: path, ...(opts.projectId ? { projectId: opts.projectId } : {}) },
+      { origin: 'user', changeNote: `Imported from ${path}` },
+    );
+  }
+
+  /** Adds skills to an agent's active set (their instructions join its system prompt from its next run). */
+  activateSkills(agentId: string, names: string[]): SkillSummary[] {
+    const agent = this.requireAgent(agentId);
+    const resolved = this.requireUsableSkills(agent.project_id, names).map((n) => this.skills.resolve(n, agent.project_id)!);
+    const next = [...new Set([...agent.active_skills, ...names])];
+    if (next.length !== agent.active_skills.length) {
+      this.o.store.append({ project_id: agent.project_id, agent_id: agent.id, type: 'agent.skills_changed', payload: { skills: next } });
+    }
+    return resolved;
+  }
+
+  /** Validates a skill draft directory: it must be inside the workspace of an agent of the project. */
+  skillDraftDir(projectId: string, path: string): string {
+    let real: string;
+    try {
+      real = realpathSync(path);
+    } catch {
+      throw new ValidationError(`No such directory: ${path}`);
+    }
+    const inside = listAgents(this.o.store.db, projectId).some((a) => {
+      if (!a.workspace_path || !existsSync(a.workspace_path)) return false;
+      const ws = realpathSync(a.workspace_path);
+      return real === ws || real.startsWith(ws + sep);
+    });
+    if (!inside) throw new ValidationError(`${path} is not inside a workspace of this project`);
+    return real;
+  }
+
+  private requireUsableSkills(projectId: string, names: string[]): string[] {
+    for (const name of names) {
+      const skill = this.skills.resolve(name, projectId);
+      if (!skill) throw new ValidationError(`Unknown skill: ${name}`);
+      if (skill.error) throw new ValidationError(`Skill ${name} is broken: ${skill.error}`);
+    }
+    return [...new Set(names)];
   }
 
   // ── messaging & control ──────────────────────────────────────────────
@@ -529,10 +657,10 @@ export class Runtime {
     return this.o.toolsFor?.(agent) ?? toolsForRole(agent);
   }
 
-  /** Own workspace + every project source + the project library. */
+  /** Own workspace + every project source + the project library + skill directories. */
   private readRoots(agent: AgentRow): string[] {
     const roots = listSources(this.o.store.db, agent.project_id).map((s) => s.path);
-    return [...(agent.workspace_path ? [agent.workspace_path] : []), ...roots, this.libraryDir(agent.project_id)];
+    return [...(agent.workspace_path ? [agent.workspace_path] : []), ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
   }
 
   private systemPrompt(agent: AgentRow, project: ProjectRow): string {

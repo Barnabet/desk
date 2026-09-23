@@ -17,7 +17,8 @@ describe('graceful shutdown and recovery', () => {
     const projectId = rt.createProject({ name: 'P', goal: 'G' });
     const t = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w'), model: FAKE_MODEL.id, parentId: null });
     rt.sendMessage(t, 'go');
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait until the hanging request reached the fake model, so it cannot consume the next script.
+    while (h.fake.requests.length === 0) await new Promise((r) => setTimeout(r, 5));
     await rt.shutdown();
     const fin = h.store.list({ agentId: t, types: ['run.finished'] }).at(-1);
     expect(fin?.type === 'run.finished' && fin.payload).toMatchObject({ reason: 'error', detail: 'daemon_shutdown' });

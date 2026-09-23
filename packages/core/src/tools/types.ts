@@ -1,5 +1,6 @@
 import type { z } from 'zod';
-import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, ToolResultStatus } from '@desk/protocol';
+import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, SkillScope, ToolResultStatus } from '@desk/protocol';
+import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
@@ -22,6 +23,15 @@ export type ToolContext = {
 /** Runtime capabilities available to tools (implemented by Runtime). */
 export interface RuntimeServices {
   readonly store: EventStore;
+  readonly skills: SkillStore;
+  activateSkills(agentId: string, names: string[]): SkillSummary[];
+  saveSkill(
+    input: SkillSaveInput,
+    meta: { origin?: string; changeNote?: string; projectId?: string; agentId?: string },
+  ): { version: number; dir: string; created: boolean; description: string };
+  deleteSkill(scope: SkillScope, name: string, projectId: string | undefined, meta: { origin?: string; projectId?: string; agentId?: string }): void;
+  /** Resolves a skill draft directory, which must lie in a workspace of the project. */
+  skillDraftDir(projectId: string, path: string): string;
   writeMemory(projectId: string, input: { kind: MemoryKind; content: string; supersedes?: string }, source: string): string;
   libraryDir(projectId: string): string;
   publishToLibrary(
@@ -31,7 +41,7 @@ export interface RuntimeServices {
     origin: string,
   ): Promise<{ id: string; path: string }>;
   sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void;
-  spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string }): Promise<string>;
+  spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; skills?: string[] }): Promise<string>;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string }): Promise<void>;
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void;

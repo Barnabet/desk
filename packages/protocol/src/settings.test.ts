@@ -27,6 +27,7 @@ describe('ProjectSettings', () => {
       'bash:ask',
       'bash_background:ask',
       'bash_readonly:ask',
+      'skill_run:ask',
       'git_push:allow',
       'git_push:deny',
       'open_pr:ask',

@@ -6,11 +6,12 @@ import { gitTools } from '../tools/git';
 import { jobTools } from '../tools/jobs';
 import { libraryTools } from '../tools/library';
 import { memoryTools } from '../tools/memory';
+import { skillAuthoringTools, skillUseTools } from '../tools/skills';
 import { threadCoordinationTools } from '../tools/thread';
 import type { Tool } from '../tools/types';
 import { webTools } from '../tools/web';
 
-/** Desk: read anything in the project, draft in its own scratch dir, read-only shell, coordination. */
+/** Desk: read anything in the project, draft in its own scratch dir, read-only shell, skills (use + authoring), coordination. */
 export function deskToolsFor(_agent: AgentRow): Tool[] {
   return [
     readFileTool,
@@ -23,11 +24,13 @@ export function deskToolsFor(_agent: AgentRow): Tool[] {
     ...webTools,
     ...memoryTools,
     ...libraryTools,
+    ...skillUseTools,
+    ...skillAuthoringTools,
     ...deskCoordinationTools,
   ];
 }
 
-/** Threads: full workspace tools; git tools only in worktrees. */
+/** Threads: full workspace tools, skills (use only — Desk installs drafts); git tools only in worktrees. */
 export function threadToolsFor(agent: AgentRow): Tool[] {
   return [
     ...fileTools,
@@ -36,6 +39,7 @@ export function threadToolsFor(agent: AgentRow): Tool[] {
     ...webTools,
     ...memoryTools,
     ...libraryTools,
+    ...skillUseTools,
     ...(agent.git_branch ? gitTools : []),
     ...threadCoordinationTools,
   ];
