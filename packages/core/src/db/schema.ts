@@ -56,3 +56,24 @@ export const usageTotals = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.project_id, t.agent_id, t.model, t.day] })],
 );
+
+export const approvals = sqliteTable(
+  'approvals',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    agent_id: text('agent_id').notNull(),
+    run_id: text('run_id').notNull(),
+    tool_call_id: text('tool_call_id').notNull(),
+    tool: text('tool').notNull(),
+    arguments: text('arguments').notNull(),
+    reason: text('reason').notNull(),
+    delegate_to_desk: integer('delegate_to_desk', { mode: 'boolean' }).notNull(),
+    status: text('status', { enum: ['pending', 'approved', 'denied'] }).notNull(),
+    resolved_by: text('resolved_by', { enum: ['user', 'desk', 'system'] }),
+    note: text('note'),
+    created_at: text('created_at').notNull(),
+    resolved_at: text('resolved_at'),
+  },
+  (t) => [index('approvals_project_idx').on(t.project_id, t.status), index('approvals_agent_idx').on(t.agent_id, t.status)],
+);

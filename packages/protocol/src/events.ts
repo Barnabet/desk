@@ -54,6 +54,27 @@ export const EventBody = z.discriminatedUnion('type', [
     }),
   ),
   event(
+    'approval.requested',
+    z.object({
+      approval_id: z.string(),
+      run_id: z.string(),
+      tool_call_id: z.string(),
+      tool: z.string(),
+      arguments: z.string(),
+      reason: z.string(),
+      delegate_to_desk: z.boolean(),
+    }),
+  ),
+  event(
+    'approval.resolved',
+    z.object({
+      approval_id: z.string(),
+      decision: z.enum(['approved', 'denied']),
+      resolved_by: z.enum(['user', 'desk', 'system']),
+      note: z.string().optional(),
+    }),
+  ),
+  event(
     'usage',
     z.object({
       run_id: z.string(),

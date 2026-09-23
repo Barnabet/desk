@@ -8,6 +8,9 @@ import { getAgent } from '../state/queries';
 import { createHarness, noSleep, seedThread, type Harness } from '../testing/harness';
 import { fileTools } from '../tools/fs';
 import { JobManager } from '../tools/jobs';
+import { buildToolContext } from './context';
+
+const jobs = new JobManager();
 import { completeTool } from '../tools/thread';
 import { defineTool } from '../tools/types';
 import { threadSystemPrompt } from './prompts';
@@ -23,7 +26,8 @@ const deps = (extra: Partial<RunDeps> = {}): RunDeps => ({
   systemPrompt: threadSystemPrompt,
   maxSteps: 20,
   retry: noSleep,
-  jobs: new JobManager(),
+  gate: () => ({ action: 'auto', delegateToDesk: false, reason: 'test' }),
+  toolContext: (a, runId, toolCallId, signal) => buildToolContext(a, runId, toolCallId, signal, { sandboxEnabled: false, jobs }),
   ...extra,
 });
 const say = (agentId: string, projectId: string, text: string) =>

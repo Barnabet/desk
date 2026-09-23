@@ -14,6 +14,25 @@ CREATE TABLE `agents` (
 );
 --> statement-breakpoint
 CREATE INDEX `agents_project_idx` ON `agents` (`project_id`);--> statement-breakpoint
+CREATE TABLE `approvals` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`agent_id` text NOT NULL,
+	`run_id` text NOT NULL,
+	`tool_call_id` text NOT NULL,
+	`tool` text NOT NULL,
+	`arguments` text NOT NULL,
+	`reason` text NOT NULL,
+	`delegate_to_desk` integer NOT NULL,
+	`status` text NOT NULL,
+	`resolved_by` text,
+	`note` text,
+	`created_at` text NOT NULL,
+	`resolved_at` text
+);
+--> statement-breakpoint
+CREATE INDEX `approvals_project_idx` ON `approvals` (`project_id`,`status`);--> statement-breakpoint
+CREATE INDEX `approvals_agent_idx` ON `approvals` (`agent_id`,`status`);--> statement-breakpoint
 CREATE TABLE `events` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`project_id` text NOT NULL,

@@ -24,24 +24,30 @@ async function truncateOutput(content: string, ctx: ToolContext): Promise<string
   return `${content.slice(0, half)}\n\n[... ${content.length - MAX_TOOL_OUTPUT_CHARS} characters truncated; full output saved to ${file} ...]\n\n${content.slice(-half)}`;
 }
 
-/** Validates and executes one tool call. Never throws. */
-export async function executeToolCall(tools: Tool[], call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+export type PreparedCall = { ok: true; tool: Tool; input: unknown } | { ok: false; result: ToolResult };
+
+/** Resolves the tool and validates arguments without executing anything. */
+export function prepareToolCall(tools: Tool[], call: ToolCall): PreparedCall {
   const tool = tools.find((t) => t.name === call.name);
-  if (!tool) return { status: 'error', content: `Unknown tool: ${call.name}` };
+  if (!tool) return { ok: false, result: { status: 'error', content: `Unknown tool: ${call.name}` } };
 
   let raw: unknown;
   try {
     raw = JSON.parse(call.arguments || '{}');
   } catch {
-    return { status: 'error', content: `Invalid JSON arguments for ${call.name}` };
+    return { ok: false, result: { status: 'error', content: `Invalid JSON arguments for ${call.name}` } };
   }
   const parsed = tool.input.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'error', content: `Invalid arguments for ${call.name}:\n${z.prettifyError(parsed.error)}` };
+    return { ok: false, result: { status: 'error', content: `Invalid arguments for ${call.name}:\n${z.prettifyError(parsed.error)}` } };
   }
+  return { ok: true, tool, input: parsed.data };
+}
 
+/** Executes an already-validated call. Never throws. */
+export async function runPreparedTool(tool: Tool, input: unknown, ctx: ToolContext): Promise<ToolResult> {
   try {
-    const out = await tool.execute(parsed.data, ctx);
+    const out = await tool.execute(input, ctx);
     const res = typeof out === 'string' ? { content: out } : out;
     const content = await truncateOutput(res.content, ctx);
     return res.yield ? { status: 'ok', content, yield: res.yield } : { status: 'ok', content };
@@ -49,4 +55,10 @@ export async function executeToolCall(tools: Tool[], call: ToolCall, ctx: ToolCo
     if (err instanceof ToolDenied) return { status: 'denied', content: err.message };
     return { status: 'error', content: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Validates and executes one tool call (no policy check). Never throws. */
+export async function executeToolCall(tools: Tool[], call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const prepared = prepareToolCall(tools, call);
+  return prepared.ok ? runPreparedTool(prepared.tool, prepared.input, ctx) : prepared.result;
 }

@@ -5,10 +5,9 @@ import { classifyModelError } from '../model/errors';
 import { withRetry, type RetryOptions } from '../model/retry';
 import type { ChatMessage, ModelAdapter } from '../model/types';
 import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
-import { executeToolCall, toToolSpecs } from '../tools/registry';
-import type { JobManager } from '../tools/jobs';
-import { NO_SANDBOX } from '../tools/sandbox';
-import type { Tool } from '../tools/types';
+import { prepareToolCall, runPreparedTool, toToolSpecs } from '../tools/registry';
+import type { PolicyDecision } from '../policy/evaluate';
+import type { Tool, ToolContext, ToolResult } from '../tools/types';
 import { drainInbox } from './inbox';
 import { buildConversation } from './transcript';
 
@@ -19,7 +18,9 @@ export type RunDeps = {
   systemPrompt: (agent: AgentRow, project: ProjectRow) => string;
   maxSteps: number;
   retry?: RetryOptions;
-  jobs: JobManager;
+  /** Policy decision for a validated call. */
+  gate: (tool: Tool, input: unknown, project: ProjectRow) => PolicyDecision;
+  toolContext: (agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) => ToolContext;
 };
 
 export type RunOutcome = { reason: RunFinishReason; status: AgentStatus };
@@ -98,30 +99,50 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
           (tc): EventInput => ({ ...base, type: 'tool.call', payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, arguments: tc.arguments } }),
         ),
       );
-      const results = await Promise.all(
-        result.toolCalls.map((tc) =>
-          executeToolCall(deps.tools, tc, {
-            projectId: agent.project_id,
-            agentId,
-            runId,
-            toolCallId: tc.id,
-            workspace,
-            readRoots: [workspace],
-            signal,
-            sandbox: NO_SANDBOX,
-            jobs: deps.jobs,
-          }),
-        ),
+      const freshProject = getProject(store.db, agent.project_id) ?? project;
+      type Outcome = { result: ToolResult; pending?: undefined } | { result?: undefined; pending: PolicyDecision };
+      const outcomes: Outcome[] = await Promise.all(
+        result.toolCalls.map(async (tc): Promise<Outcome> => {
+          const prepared = prepareToolCall(deps.tools, tc);
+          if (!prepared.ok) return { result: prepared.result };
+          const decision = deps.gate(prepared.tool, prepared.input, freshProject);
+          if (decision.action === 'deny') return { result: { status: 'denied', content: `Denied by policy. ${decision.reason}` } };
+          if (decision.action === 'ask') return { pending: decision };
+          return { result: await runPreparedTool(prepared.tool, prepared.input, deps.toolContext(current, runId, tc.id, signal)) };
+        }),
       );
+      const done = result.toolCalls.flatMap((tc, i) => (outcomes[i]!.result ? [{ tc, r: outcomes[i]!.result! }] : []));
       store.append(
-        result.toolCalls.map(
-          (tc, i): EventInput => ({
+        done.map(
+          ({ tc, r }): EventInput => ({
             ...base,
             type: 'tool.result',
-            payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: results[i]!.status, content: results[i]!.content },
+            payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: r.status, content: r.content },
           }),
         ),
       );
+      const pending = result.toolCalls.flatMap((tc, i) => (outcomes[i]!.pending ? [{ tc, d: outcomes[i]!.pending! }] : []));
+      if (pending.length) {
+        store.append(
+          pending.map(
+            ({ tc, d }): EventInput => ({
+              ...base,
+              type: 'approval.requested',
+              payload: {
+                approval_id: newId(),
+                run_id: runId,
+                tool_call_id: tc.id,
+                tool: tc.name,
+                arguments: tc.arguments,
+                reason: d.reason,
+                delegate_to_desk: d.delegateToDesk,
+              },
+            }),
+          ),
+        );
+        return finish('yielded', 'waiting', `Awaiting approval: ${pending.map((p) => p.tc.name).join(', ')}`);
+      }
+      const results = done.map((d) => d.r);
 
       const yielded = results.find((r) => r.yield)?.yield;
       if (yielded) return finish('yielded', yielded.status, yielded.reason);

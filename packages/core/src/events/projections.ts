@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, projects, usageTotals } from '../db/schema';
+import { agents, approvals, projects, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -57,6 +57,29 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       return;
     case 'inbox.drained':
       tx.update(agents).set({ inbox_cursor: ev.payload.up_to, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'approval.requested':
+      tx.insert(approvals)
+        .values({
+          id: ev.payload.approval_id,
+          project_id: ev.project_id,
+          agent_id: requireAgentId(ev),
+          run_id: ev.payload.run_id,
+          tool_call_id: ev.payload.tool_call_id,
+          tool: ev.payload.tool,
+          arguments: ev.payload.arguments,
+          reason: ev.payload.reason,
+          delegate_to_desk: ev.payload.delegate_to_desk,
+          status: 'pending',
+          created_at: ev.ts,
+        })
+        .run();
+      return;
+    case 'approval.resolved':
+      tx.update(approvals)
+        .set({ status: ev.payload.decision, resolved_by: ev.payload.resolved_by, note: ev.payload.note ?? null, resolved_at: ev.ts })
+        .where(eq(approvals.id, ev.payload.approval_id))
+        .run();
       return;
     case 'usage':
       tx.insert(usageTotals)
