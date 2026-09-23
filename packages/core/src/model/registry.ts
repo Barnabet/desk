@@ -35,4 +35,9 @@ export class ModelRegistry {
   upsert(m: ModelInfo): void {
     this.models.set(m.id, m);
   }
+
+  replaceAll(models: ModelInfo[]): void {
+    this.models.clear();
+    for (const m of models) this.models.set(m.id, m);
+  }
 }
