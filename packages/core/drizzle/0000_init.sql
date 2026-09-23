@@ -89,7 +89,8 @@ CREATE TABLE `projects` (
 	`instructions` text NOT NULL,
 	`settings` text NOT NULL,
 	`created_at` text NOT NULL,
-	`updated_at` text NOT NULL
+	`updated_at` text NOT NULL,
+	`archived_at` text
 );
 --> statement-breakpoint
 CREATE TABLE `sources` (

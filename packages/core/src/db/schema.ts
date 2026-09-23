@@ -23,6 +23,7 @@ export const projects = sqliteTable('projects', {
   settings: text('settings', { mode: 'json' }).$type<ProjectSettings>().notNull(),
   created_at: text('created_at').notNull(),
   updated_at: text('updated_at').notNull(),
+  archived_at: text('archived_at'),
 });
 
 export const agents = sqliteTable(

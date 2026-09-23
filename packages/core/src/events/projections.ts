@@ -24,6 +24,9 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
         })
         .run();
       return;
+    case 'project.archived':
+      tx.update(projects).set({ archived_at: ev.ts, updated_at: ev.ts }).where(eq(projects.id, ev.project_id)).run();
+      return;
     case 'project.updated': {
       const current = tx.select().from(projects).where(eq(projects.id, ev.project_id)).get();
       if (!current) throw new Error(`Unknown project: ${ev.project_id}`);

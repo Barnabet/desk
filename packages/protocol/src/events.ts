@@ -10,6 +10,7 @@ export const EventBody = z.discriminatedUnion('type', [
     'project.created',
     z.object({ name: z.string().min(1), goal: z.string(), instructions: z.string(), settings: ProjectSettingsPatch.optional() }),
   ),
+  event('project.archived', z.object({})),
   event(
     'project.updated',
     z.object({

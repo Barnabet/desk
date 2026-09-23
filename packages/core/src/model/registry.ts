@@ -1,4 +1,5 @@
 import type { ModelInfo } from '@desk/protocol';
+import { ValidationError } from '../errors';
 
 export const DEFAULT_MODEL_ID = 'claude-opus-5-5';
 
@@ -19,7 +20,7 @@ export class ModelRegistry {
 
   get(id: string): ModelInfo {
     const m = this.models.get(id);
-    if (!m) throw new Error(`Unknown model: ${id}`);
+    if (!m) throw new ValidationError(`Unknown model: ${id}`);
     return m;
   }
 

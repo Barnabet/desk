@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import type { AgentMessageKind, ArtifactKind, MemoryKind, ProjectSettingsPatch } from '@desk/protocol';
 import { uniqueLibraryName } from '../library/library';
 import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
@@ -23,6 +24,7 @@ import {
   getSource,
   lastEvent,
   listActiveThreads,
+  listAgents,
   listSources,
   pendingApprovalsFor,
   type AgentRow,
@@ -123,13 +125,14 @@ export class Runtime {
   /** Sends a user message to the project's Desk. */
   sendToDesk(projectId: string, text: string): void {
     const desk = getDeskAgent(this.o.store.db, projectId);
-    if (!desk) throw new Error(`Unknown project: ${projectId}`);
+    if (!desk) throw new NotFoundError(`Unknown project: ${projectId}`);
+    this.requireOpenProject(projectId);
     this.sendMessage(desk.id, text);
   }
 
   async addSource(projectId: string, path: string, label?: string): Promise<string> {
-    if (!getProject(this.o.store.db, projectId)) throw new Error(`Unknown project: ${projectId}`);
-    if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Source path does not exist or is not a directory: ${path}`);
+    this.requireOpenProject(projectId);
+    if (!existsSync(path) || !statSync(path).isDirectory()) throw new ValidationError(`Source path does not exist or is not a directory: ${path}`);
     const real = await realpath(path);
     const top = await runProcess({ command: 'git', args: ['rev-parse', '--show-toplevel'], cwd: real, timeoutMs: 10_000 }).catch(() => null);
     const isRepoRoot = top?.exitCode === 0 && (await realpath(top.output.trim()).catch(() => '')) === real;
@@ -145,7 +148,7 @@ export class Runtime {
 
   removeSource(projectId: string, sourceId: string): void {
     const source = getSource(this.o.store.db, sourceId);
-    if (!source || source.project_id !== projectId) throw new Error(`Unknown source: ${sourceId}`);
+    if (!source || source.project_id !== projectId) throw new NotFoundError(`Unknown source: ${sourceId}`);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'source.removed', payload: { source_id: sourceId } });
   }
 
@@ -198,7 +201,7 @@ export class Runtime {
   writeMemory(projectId: string, input: { kind: MemoryKind; content: string; supersedes?: string }, source = 'user'): string {
     if (input.supersedes) {
       const old = getMemory(this.o.store.db, input.supersedes);
-      if (!old || old.project_id !== projectId || old.superseded_by) throw new Error(`Memory ${input.supersedes} is not active in this project`);
+      if (!old || old.project_id !== projectId || old.superseded_by) throw new ConflictError(`Memory ${input.supersedes} is not active in this project`);
     }
     const id = newId();
     this.o.store.append({
@@ -212,7 +215,7 @@ export class Runtime {
 
   deleteMemory(projectId: string, memoryId: string): void {
     const m = getMemory(this.o.store.db, memoryId);
-    if (!m || m.project_id !== projectId) throw new Error(`Unknown memory: ${memoryId}`);
+    if (!m || m.project_id !== projectId) throw new NotFoundError(`Unknown memory: ${memoryId}`);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'memory.deleted', payload: { memory_id: memoryId } });
   }
 
@@ -231,8 +234,17 @@ export class Runtime {
   }
 
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
-    if (!getProject(this.o.store.db, projectId)) throw new Error(`Unknown project: ${projectId}`);
+    this.requireOpenProject(projectId);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.updated', payload: patch });
+  }
+
+  /** Stops every agent of the project and archives it (data is kept). */
+  archiveProject(projectId: string): void {
+    this.requireOpenProject(projectId);
+    for (const agent of listAgents(this.o.store.db, projectId)) {
+      if (!TERMINAL.has(agent.status) || this.scheduler.isActive(agent.id)) this.stopAgent(agent.id, { by: agent.id, reason: 'Project archived' });
+    }
+    this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
   }
 
   /** Validates model ids, then applies a settings patch. */
@@ -253,7 +265,7 @@ export class Runtime {
     let gitSource: { id: string; path: string } | undefined;
     if (input.gitSourceId) {
       const source = getSource(this.o.store.db, input.gitSourceId);
-      if (!source || source.project_id !== project.id || source.kind !== 'git') throw new Error(`Unknown git source: ${input.gitSourceId}`);
+      if (!source || source.project_id !== project.id || source.kind !== 'git') throw new ValidationError(`Unknown git source: ${input.gitSourceId}`);
       gitSource = { id: source.id, path: source.path };
     }
     const id = newId();
@@ -283,8 +295,8 @@ export class Runtime {
   /** Deletes a finished thread's workspace (keeping any git branch) and marks it archived. */
   async archiveThread(threadId: string): Promise<void> {
     const t = this.requireAgent(threadId);
-    if (t.role !== 'thread') throw new Error('Only threads can be archived');
-    if (!TERMINAL.has(t.status)) throw new Error(`Thread ${threadId} is ${t.status}; stop it before archiving`);
+    if (t.role !== 'thread') throw new ValidationError('Only threads can be archived');
+    if (!TERMINAL.has(t.status)) throw new ConflictError(`Thread ${threadId} is ${t.status}; stop it before archiving`);
     if (t.workspace_path) {
       const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
       await removeWorkspace({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
@@ -375,8 +387,8 @@ export class Runtime {
   async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string } = {}): Promise<void> {
     const { store } = this.o;
     const ap = getApproval(store.db, approvalId);
-    if (!ap) throw new Error(`Unknown approval: ${approvalId}`);
-    if (ap.status !== 'pending') throw new Error(`Approval ${approvalId} is already resolved (${ap.status})`);
+    if (!ap) throw new NotFoundError(`Unknown approval: ${approvalId}`);
+    if (ap.status !== 'pending') throw new ConflictError(`Approval ${approvalId} is already resolved (${ap.status})`);
     const by = opts.by ?? 'user';
     const base = { project_id: ap.project_id, agent_id: ap.agent_id };
     store.append({ ...base, type: 'approval.resolved', payload: { approval_id: ap.id, decision, resolved_by: by, ...(opts.note ? { note: opts.note } : {}) } });
@@ -409,8 +421,15 @@ export class Runtime {
 
   private requireAgent(agentId: string): AgentRow {
     const agent = getAgent(this.o.store.db, agentId);
-    if (!agent) throw new Error(`Unknown agent: ${agentId}`);
+    if (!agent) throw new NotFoundError(`Unknown agent: ${agentId}`);
     return agent;
+  }
+
+  private requireOpenProject(projectId: string): ProjectRow {
+    const project = getProject(this.o.store.db, projectId);
+    if (!project) throw new NotFoundError(`Unknown project: ${projectId}`);
+    if (project.archived_at) throw new ConflictError(`Project ${projectId} is archived`);
+    return project;
   }
 
   private toolsFor(agent: AgentRow): Tool[] {

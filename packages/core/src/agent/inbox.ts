@@ -1,10 +1,11 @@
 import { INBOX_EVENT_TYPES } from '@desk/protocol';
 import type { EventStore } from '../events/store';
+import { NotFoundError } from '../errors';
 import { getAgent } from '../state/queries';
 
 function pending(store: EventStore, agentId: string) {
   const agent = getAgent(store.db, agentId);
-  if (!agent) throw new Error(`Unknown agent: ${agentId}`);
+  if (!agent) throw new NotFoundError(`Unknown agent: ${agentId}`);
   return { agent, events: store.list({ agentId, after: agent.inbox_cursor, types: INBOX_EVENT_TYPES }) };
 }
 

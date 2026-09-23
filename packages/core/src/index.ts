@@ -1,4 +1,5 @@
 export { newId } from './ids';
+export { ConflictError, DeskError, NotFoundError, ValidationError, type DeskErrorCode } from './errors';
 export { openDb, type Db, type Tx } from './db/open';
 export { EventStore, type ListQuery, type StreamItem } from './events/store';
 export {
@@ -12,6 +13,7 @@ export {
   listActiveThreads,
   listAgents,
   listApprovals,
+  listProjects,
   listSources,
   listThreads,
   pendingApprovalsFor,

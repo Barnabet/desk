@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { EventType, StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
@@ -65,3 +65,11 @@ export function lastEvent(db: Db, agentId: string, type?: EventType): StoredEven
     .get();
   return row ? ({ ...row } as StoredEvent) : undefined;
 }
+
+export const listProjects = (db: Db, opts: { includeArchived?: boolean } = {}): ProjectRow[] =>
+  db
+    .select()
+    .from(projects)
+    .where(opts.includeArchived ? undefined : isNull(projects.archived_at))
+    .orderBy(asc(projects.created_at), asc(projects.id))
+    .all();
