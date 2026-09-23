@@ -3,11 +3,16 @@ import { formatPlan, getPlan } from '../coordination/plan';
 import { formatThreadLine } from '../coordination/render';
 import { formatArtifactLine, listArtifacts } from '../library/library';
 import { memoryDigest } from '../memory/memory';
+import type { SkillStore } from '../skills/store';
 import { listApprovals, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
+import { formatSkillLine, renderSkill } from '../tools/skills';
 
-export type PromptContext = { db: Db; agent: AgentRow; project: ProjectRow; libraryDir: string };
+export type PromptContext = { db: Db; agent: AgentRow; project: ProjectRow; libraryDir: string; skills?: SkillStore };
 
 const MAX_LIBRARY_LINES = 30;
+const MAX_SKILL_LINES = 60;
+const MAX_ACTIVE_SKILL_CHARS = 12_000;
+const MAX_ACTIVE_SKILLS_TOTAL = 40_000;
 
 const CHECK_IN: Record<ProjectRow['settings']['check_in'], string> = {
   minimal: 'report only when the work is finished or you are blocked',
@@ -49,7 +54,59 @@ function memorySection(db: Db, projectId: string): string {
   return section('Project memory', memoryDigest(db, projectId));
 }
 
-export function deskSystemPrompt({ db, agent, project, libraryDir }: PromptContext): string {
+/** Full instructions of the agent's active skills, then the other skills by name and description. */
+function skillsSections({ agent, project, skills }: PromptContext): string[] {
+  if (!skills) return [];
+  const visible = skills.list(project.id);
+  const active = new Set(agent.active_skills);
+  const blocks: string[] = [];
+  const overflow: string[] = [];
+  let total = 0;
+  for (const name of agent.active_skills) {
+    const s = visible.find((v) => v.name === name);
+    const d = s && !s.error ? skills.get(s.scope, s.name, s.scope === 'project' ? project.id : undefined) : undefined;
+    if (!d) continue;
+    const block = renderSkill(d, MAX_ACTIVE_SKILL_CHARS);
+    if (total + block.length > MAX_ACTIVE_SKILLS_TOTAL) {
+      overflow.push(name);
+      continue;
+    }
+    total += block.length;
+    blocks.push(block);
+  }
+  const others = visible.filter((s) => !active.has(s.name));
+  const shown = others.slice(0, MAX_SKILL_LINES).map((s) => formatSkillLine(s));
+  const out: string[] = [];
+  if (blocks.length || overflow.length) {
+    out.push(
+      '',
+      section(
+        'Active skills',
+        [
+          'These skills are active for you: follow their instructions whenever they apply. Run their scripts with skill_run (name, script, args).',
+          ...(overflow.length ? [`Also active but not shown for space — read them with skill_read: ${overflow.join(', ')}`] : []),
+          '',
+          blocks.join('\n\n'),
+        ].join('\n'),
+      ),
+    );
+  }
+  out.push(
+    '',
+    section(
+      'Available skills',
+      [
+        ...(shown.length ? ['Activate a skill (skill_activate) as soon as its description matches the work; it gives you its instructions and scripts.'] : []),
+        ...shown,
+        ...(others.length > shown.length ? [`(${others.length - shown.length} more — use skill_list)`] : []),
+      ].join('\n'),
+    ),
+  );
+  return out;
+}
+
+export function deskSystemPrompt(ctx: PromptContext): string {
+  const { db, agent, project, libraryDir } = ctx;
   const s = project.settings;
   const threads = listThreads(db, project.id).filter((t) => !t.archived_at);
   const approvals = listApprovals(db, project.id, 'pending');
@@ -65,7 +122,12 @@ export function deskSystemPrompt({ db, agent, project, libraryDir }: PromptConte
         `4. Review — when a thread completes, check its result against the brief (read_thread, library_read, review_diff for code). If it falls short, send it back with specific feedback (message_thread kind "revision"; at most ${s.review_rounds} rounds per thread), otherwise accept it.`,
         '5. Assemble & report — combine accepted results into what the user asked for; draft combined documents in your workspace and publish them with library_publish. Send a report with the outcome. For code, list the branches/PRs and the order to merge them, and describe any conflicts. You never merge branches yourself.',
         '6. Curate memory — record durable decisions, facts, preferences and contacts with memory_write; supersede outdated entries instead of contradicting them.',
-        '7. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
+        '7. Skills — skills are reusable procedures (SKILL.md instructions + prepared scripts) at project scope or global scope (every project of the user). They are how this system gets better at recurring work:',
+        '   - Use: when scoping, check the available skills; activate relevant ones for yourself (skill_activate) and pass relevant ones to every thread you spawn (spawn_thread skills) — they start with the instructions active. Add skills to a running thread with message_thread skills.',
+        '   - Author: when the user asks for an automation or a repeatable task, or explains how a kind of task should be done, capture it as a skill. Simple procedures: write them yourself with skill_write. Scripts: spawn a thread to write and test them as a draft (skill-drafts/<name>/ with SKILL.md + scripts/ in its workspace); review the draft (read_file, run it with bash_readonly if useful) and install it with skill_write from_dir.',
+        '   - Refine: when the user corrects an approach, or a thread reports a skill problem or proposes an improved draft, update the skill (skill_write with a change_note). Keep instructions concise, concrete and tested.',
+        '   - Scope: global for general-purpose automations the user will want everywhere; project for project-specific ones. Tell the user when you create or change a skill.',
+        '8. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
       ].join('\n'),
     ),
     '',
@@ -98,12 +160,14 @@ export function deskSystemPrompt({ db, agent, project, libraryDir }: PromptConte
     memorySection(db, project.id),
     '',
     librarySection(db, project.id, libraryDir, agent.id),
+    ...skillsSections(ctx),
     '',
     section('Your workspace', `${agent.workspace_path} — scratch space for drafting combined documents before publishing them.`),
   ].join('\n');
 }
 
-export function threadSystemPrompt({ db, agent, project, libraryDir }: PromptContext): string {
+export function threadSystemPrompt(ctx: PromptContext): string {
+  const { db, agent, project, libraryDir } = ctx;
   const gitLines = agent.git_branch
     ? [
         `Your workspace is a git worktree on branch ${agent.git_branch} (base ${agent.git_base?.slice(0, 10)}).`,
@@ -130,6 +194,7 @@ export function threadSystemPrompt({ db, agent, project, libraryDir }: PromptCon
     librarySection(db, project.id, libraryDir, agent.id),
     '',
     memorySection(db, project.id),
+    ...skillsSections(ctx),
     '',
     section(
       'Working rules',
@@ -138,6 +203,8 @@ export function threadSystemPrompt({ db, agent, project, libraryDir }: PromptCon
         '- Stay within your assignment. If something consequential is ambiguous, ask Desk (message_desk kind "question", then wait_for_reply) instead of guessing.',
         '- Publish deliverables the user or Desk should see with library_publish.',
         '- Record durable facts you discover with memory_write.',
+        '- Use skills: follow your active skills; activate others (skill_activate) when they match your work; run their scripts with skill_run.',
+        `- Skill drafts: if your brief asks for a skill, or you built a reusable procedure or found a fix for a skill, write it as a draft in ${agent.workspace_path}/skill-drafts/<name>/ (SKILL.md with name + description frontmatter and concise steps, scripts/ with tested scripts) and list the directory in complete skill_drafts. Desk reviews and installs drafts.`,
         '- Finish by calling complete once, with an honest summary: what was done, what was not, and how it was verified.',
       ].join('\n'),
     ),

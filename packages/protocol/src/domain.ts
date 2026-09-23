@@ -49,6 +49,18 @@ export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 export const MemoryKind = z.enum(['fact', 'decision', 'preference', 'contact', 'note']);
 export type MemoryKind = z.infer<typeof MemoryKind>;
 
+export const SkillScope = z.enum(['project', 'global']);
+export type SkillScope = z.infer<typeof SkillScope>;
+
+/** Agent Skills naming: lowercase letters, digits and single hyphens, at most 64 characters. */
+export const SkillName = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'Skill names use lowercase letters, digits and single hyphens (e.g. "weekly-report")');
+
+/** Project id used for events about global skills changed outside any project. */
+export const GLOBAL_PROJECT_ID = '_global';
+
 export const ArtifactKind = z.enum(['file', 'report', 'code', 'data', 'other']);
 export type ArtifactKind = z.infer<typeof ArtifactKind>;
 

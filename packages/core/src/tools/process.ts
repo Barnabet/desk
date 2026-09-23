@@ -10,6 +10,8 @@ export type ProcessOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   maxOutputChars?: number;
+  /** Written to the process's stdin (closed afterwards); stdin is empty otherwise. */
+  stdin?: string;
 };
 
 /** Runs a process in its own process group; stdout and stderr are combined. Rejects only on spawn failure. */
@@ -19,8 +21,12 @@ export function runProcess(opts: ProcessOptions): Promise<ProcessResult> {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
+    if (opts.stdin !== undefined && child.stdin) {
+      child.stdin.on('error', () => {}); // the process may exit without reading its input
+      child.stdin.end(opts.stdin);
+    }
     const max = opts.maxOutputChars ?? 1_000_000;
     let output = '';
     let timedOut = false;
@@ -29,8 +35,8 @@ export function runProcess(opts: ProcessOptions): Promise<ProcessResult> {
     const onData = (buf: Buffer) => {
       if (output.length < max) output += buf.toString('utf8');
     };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
+    child.stdout!.on('data', onData);
+    child.stderr!.on('data', onData);
 
     const killGroup = () => {
       const pid = child.pid;

@@ -65,6 +65,7 @@ export class DeskClient {
   get = <T = any>(path: string) => this.request<T>('GET', path);
   post = <T = any>(path: string, body: unknown = {}) => this.request<T>('POST', path, body);
   patch = <T = any>(path: string, body: unknown) => this.request<T>('PATCH', path, body);
+  put = <T = any>(path: string, body: unknown) => this.request<T>('PUT', path, body);
   del = <T = any>(path: string) => this.request<T>('DELETE', path);
 
   /** Subscribes to the event stream; resolves once replay is done. Returns a closer. */

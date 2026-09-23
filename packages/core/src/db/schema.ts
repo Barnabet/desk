@@ -42,6 +42,7 @@ export const agents = sqliteTable(
     review_round: integer('review_round').notNull().default(0),
     result_summary: text('result_summary'),
     result_artifacts: text('result_artifacts', { mode: 'json' }).$type<string[]>(),
+    active_skills: text('active_skills', { mode: 'json' }).$type<string[]>().notNull().default([]),
     git_source_id: text('git_source_id'),
     git_branch: text('git_branch'),
     git_base: text('git_base'),

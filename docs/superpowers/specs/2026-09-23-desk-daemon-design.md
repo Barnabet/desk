@@ -185,6 +185,10 @@ One per project, owned by Desk: an ordered list of work items `{ id, title, stat
 
 `id, project_id, path (relative to project library dir), title, kind: file | report | code | data | other, origin: user | agent:<id>, description, created_at`
 
+### Skill
+
+A reusable procedure in the Agent Skills format (compatible with Claude Code skills): a directory `<name>/` with `SKILL.md` (YAML frontmatter `name`, `description`, optional extra keys; Markdown instructions) plus optional `scripts/`, `references/`, `assets/`. Scope `global` (every project of the user) or `project` (shadows a global skill of the same name). The filesystem is the source of truth, so users can hand-edit skills; every change keeps the previous version under `.history/<name>/<version>/` (restorable). Changes emit `skill.saved` / `skill.deleted` events. Agents carry `active_skills` (set at spawn or with `skill_activate`). See §8.4.
+
 ### Approval
 
 `id, project_id, requested_by (agent id), tool, args, reason, status: pending | approved | denied, resolved_by: user | desk, resolution_note?, created_at, resolved_at?`
@@ -198,6 +202,8 @@ One per project, owned by Desk: an ordered list of work items `{ id, title, stat
   daemon.lock          single-instance lock
   logs/deskd.log
   projects/<project_id>/library/
+  projects/<project_id>/skills/<name>/   project skills (+ .history/)
+  skills/<name>/                         global skills (+ .history/)
   workspaces/<thread_id>/          scratch dir or git worktree
   workspaces/<thread_id>/.desk/    truncated tool outputs, bash logs
 ```
@@ -395,6 +401,17 @@ The prompt encodes this workflow (the prompt text lives in `core/roles/desk.md` 
 
 Encodes: work only toward the brief; stay in the workspace; publish outputs to the library; use `message_desk` for questions/blockers instead of guessing on consequential ambiguities; write memory for durable facts discovered; finish with `complete` including an honest summary (what was done, what was not, how it was verified).
 
+### 8.4 Skills
+
+Skills are how the system gets better at recurring work; they are central to both Desk and threads (user requirement, 2026-09-23).
+
+- **Prompts.** Every agent's system prompt embeds the full instructions of its active skills (per-run snapshot, so they survive compaction; 12k chars per skill, 40k total, beyond which the agent reads them with `skill_read`) and lists the other visible skills by name and description (≤ 60; `skill_list` searches).
+- **Tools (all agents).** `skill_list`, `skill_read`, `skill_activate` (returns the instructions immediately and keeps them active), `skill_run` (runs a file of the skill in the agent's shell sandbox, cwd = workspace, `SKILL_DIR` set, interpreter by shebang or extension; gated like `bash`).
+- **Tools (Desk only).** `skill_write` (create/refine with a change note; `from_dir` installs a draft from a project workspace), `skill_delete` (gated `ask`). Threads cannot modify installed skills: they write drafts (`<workspace>/skill-drafts/<name>/`) and report them in `complete.skill_drafts`; the completion notice lists them for Desk to review and install — Desk supervises every installed skill.
+- **Dispatch.** `spawn_thread.skills` activates skills on a new thread from its first step; `message_thread.skills` adds more.
+- **Desk behaviour.** Check skills when scoping; activate relevant ones; attach relevant ones to every thread; capture requested automations and user corrections about *how* work is done as skills (scripts built and tested by a thread, then installed); refine skills from feedback; global scope for general-purpose automations, project scope for project-specific ones.
+- **User surface.** HTTP `/v1/skills…` (global) and `/v1/projects/:id/skills…` (project; reads resolve project-then-global): list, show, file download, PUT, import from a local directory, delete, history, restore. CLI `desk skills`, `desk skill show|import|rm|history|restore`.
+
 ---
 
 ## 9. Daemon, API and CLI
@@ -504,6 +521,6 @@ To confirm early in implementation (spike tasks), without changing the design:
 ## 13. Out of scope for v1 (planned)
 
 - **UI/UX** — Electron desktop app, designed separately against this API.
-- **v1.1** — MCP connectors, plugins/skills; thread-level subagents/sub-delegation.
+- **v1.1** — MCP connectors, plugins; thread-level subagents/sub-delegation. (Skills moved into v1.0, §8.4.)
 - **v1.2** — scheduled/proactive Desk wakeups and recurring goals.
 - **Later** — phone access, cost in currency, embeddings-based memory retrieval, multi-user.

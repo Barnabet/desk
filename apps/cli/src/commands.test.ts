@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -92,5 +92,23 @@ describe('launchd plist', () => {
     expect(plist).toContain('<string>/repo/apps/daemon/src/main.ts</string>');
     expect(plist).toContain('<key>KeepAlive</key>');
     expect(plist).toContain('/data/logs/deskd.launchd.log');
+  });
+
+  it('imports, lists, shows and removes skills', async () => {
+    const src = join(dir, 'my-skill');
+    mkdirSync(join(src, 'scripts'), { recursive: true });
+    writeFileSync(join(src, 'SKILL.md'), '---\nname: my-skill\ndescription: Does my thing\n---\nRun scripts/go.sh\n');
+    writeFileSync(join(src, 'scripts', 'go.sh'), 'echo go');
+    expect((await cli('skill', 'import', src)).out).toContain('Imported skill v1');
+    expect((await cli('skills')).out).toContain('my-skill (global, v1) — Does my thing');
+    const shown = (await cli('skill', 'show', 'my-skill')).out;
+    expect(shown).toContain('Files: SKILL.md, scripts/go.sh');
+    expect(shown).toContain('Run scripts/go.sh');
+    await cli('project', 'new', 'Ops', '--goal', 'g');
+    expect((await cli('skills', 'Ops')).out).toContain('my-skill (global, v1)');
+    expect((await cli('skill', 'rm', 'my-skill')).code).toBe(0);
+    expect((await cli('skills')).out).toContain('No skills');
+    expect((await cli('skill', 'restore', 'my-skill', '1')).out).toContain('Restored my-skill v1 as v2');
+    expect((await cli('skill', 'history', 'my-skill')).out).toContain('v2 (current) — Does my thing');
   });
 });

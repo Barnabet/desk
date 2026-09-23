@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ArtifactKind, MemoryKind, ModelInfo } from './domain';
+import { ArtifactKind, MemoryKind, ModelInfo, SkillName } from './domain';
 import { EphemeralEvent } from './events';
 import { ProjectSettingsPatch } from './settings';
 
@@ -44,6 +44,23 @@ export const LibraryUploadRequest = z.object({
   description: z.string().optional(),
 });
 export type LibraryUploadRequest = z.input<typeof LibraryUploadRequest>;
+
+/** Create or refine a skill. For an update, omitted fields keep their value. `SKILL.md` may be sent as a file. */
+export const SkillWriteRequest = z.object({
+  description: z.string().min(1).max(1024).optional(),
+  instructions: z.string().min(1).optional(),
+  files: z.array(z.object({ path: z.string().min(1), content_base64: z.string() })).default([]),
+  remove_files: z.array(z.string()).default([]),
+  change_note: z.string().optional(),
+});
+export type SkillWriteRequest = z.input<typeof SkillWriteRequest>;
+
+/** Import a skill directory from the local disk (e.g. a Claude Code skill). */
+export const SkillImportRequest = z.object({ path: z.string().min(1), name: SkillName.optional() });
+export type SkillImportRequest = z.input<typeof SkillImportRequest>;
+
+export const SkillRestoreRequest = z.object({ version: z.number().int().min(1) });
+export type SkillRestoreRequest = z.input<typeof SkillRestoreRequest>;
 
 export const ModelsPutRequest = z.array(ModelInfo).min(1);
 export type ModelsPutRequest = z.input<typeof ModelsPutRequest>;
