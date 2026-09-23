@@ -21,6 +21,7 @@ export const RISKY_COMMAND_PATTERN =
 export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'bash', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
   { tool: 'bash_background', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
+  { tool: 'bash_readonly', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
   { tool: 'git_push', match: { branch: 'desk/*' }, action: 'allow' },
   { tool: 'git_push', action: 'deny' },
   { tool: 'open_pr', action: 'ask', delegate_to_desk: false },

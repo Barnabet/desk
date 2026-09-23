@@ -45,3 +45,25 @@ export const bashTool = defineTool({
     return `[${status}]\n${r.output}`;
   },
 });
+
+export const bashReadonlyTool = defineTool({
+  name: 'bash_readonly',
+  description:
+    'Run a read-only shell command (zsh) for inspection: listing, searching, git log/diff, running read-only scripts. Writes are blocked except to temp dirs. Default timeout 120s.',
+  input: z.object({
+    command: z.string().min(1),
+    timeout_s: z.number().int().min(1).max(600).default(120),
+  }),
+  gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
+  async execute({ command, timeout_s }, ctx) {
+    const r = await runProcess({
+      ...shellInvocation(command, { enabled: ctx.sandbox.enabled, writable: [] }),
+      cwd: ctx.workspace,
+      env: scrubbedEnv(ctx.workspace),
+      timeoutMs: timeout_s * 1000,
+      signal: ctx.signal,
+    });
+    const status = r.aborted ? 'aborted' : r.timedOut ? `timed out after ${timeout_s}s` : `exit code ${r.exitCode}`;
+    return `[${status}]\n${r.output}`;
+  },
+});

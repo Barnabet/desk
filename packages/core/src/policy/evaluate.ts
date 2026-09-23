@@ -8,7 +8,7 @@ export type PolicyDecision = {
   reason: string;
 };
 
-const SHELL_TOOLS = new Set(['bash', 'bash_background']);
+const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly']);
 
 export function globToRegExp(glob: string): RegExp {
   const body = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
@@ -41,13 +41,13 @@ export function evaluatePolicy(
   tool: Tool,
   input: unknown,
   rules: PolicyRule[],
-  opts: { sandboxAvailable: boolean },
+  opts: { sandboxAvailable: boolean; gitBranch?: string },
 ): PolicyDecision {
   if (!tool.gate) return { action: 'auto', delegateToDesk: false, reason: 'Tool is not policy-gated' };
 
   let subject: PolicySubject;
   try {
-    subject = tool.gate.subject(input);
+    subject = tool.gate.subject(input, opts.gitBranch ? { gitBranch: opts.gitBranch } : {});
   } catch {
     subject = {};
   }

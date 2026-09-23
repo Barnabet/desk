@@ -15,6 +15,8 @@ export type ToolContext = {
   sandbox: SandboxSpec;
   jobs: JobManager;
   services: RuntimeServices;
+  /** Set when the workspace is a git worktree. */
+  git: { branch: string; base: string } | null;
 };
 
 /** Runtime capabilities available to tools (implemented by Runtime). */
@@ -37,8 +39,11 @@ export type ToolResult = { status: ToolResultStatus; content: string; yield?: To
 export type PolicySubject = { branch?: string; command?: string; domain?: string };
 
 /** Declares that a tool is checked against project policy rules before it runs. */
+/** Facts about the calling agent that policy subjects may depend on. */
+export type GateContext = { gitBranch?: string };
+
 export type ToolGate<I = any> = {
-  subject: (input: I) => PolicySubject;
+  subject: (input: I, gctx: GateContext) => PolicySubject;
   /** Decision when no rule matches: `ask` for outward-facing tools, `auto` for sandboxed shell. */
   unmatched: 'ask' | 'auto';
 };

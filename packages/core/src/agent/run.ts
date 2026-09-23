@@ -19,7 +19,7 @@ export type RunDeps = {
   maxSteps: number;
   retry?: RetryOptions;
   /** Policy decision for a validated call. */
-  gate: (tool: Tool, input: unknown, project: ProjectRow) => PolicyDecision;
+  gate: (tool: Tool, input: unknown, project: ProjectRow, agent: AgentRow) => PolicyDecision;
   toolContext: (agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) => ToolContext;
 };
 
@@ -105,7 +105,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         result.toolCalls.map(async (tc): Promise<Outcome> => {
           const prepared = prepareToolCall(deps.tools, tc);
           if (!prepared.ok) return { result: prepared.result };
-          const decision = deps.gate(prepared.tool, prepared.input, freshProject);
+          const decision = deps.gate(prepared.tool, prepared.input, freshProject, current);
           if (decision.action === 'deny') return { result: { status: 'denied', content: `Denied by policy. ${decision.reason}` } };
           if (decision.action === 'ask') return { pending: decision };
           return { result: await runPreparedTool(prepared.tool, prepared.input, deps.toolContext(current, runId, tc.id, signal)) };

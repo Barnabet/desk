@@ -22,6 +22,7 @@ export function testToolContext(workspace: string, overrides: Partial<ToolContex
     sandbox: NO_SANDBOX,
     jobs: new JobManager(),
     services: NO_SERVICES,
+    git: null,
     ...overrides,
   };
 }

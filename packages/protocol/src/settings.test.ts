@@ -26,6 +26,7 @@ describe('ProjectSettings', () => {
     expect(DEFAULT_POLICY.map((r) => `${r.tool}:${r.action}`)).toEqual([
       'bash:ask',
       'bash_background:ask',
+      'bash_readonly:ask',
       'git_push:allow',
       'git_push:deny',
       'open_pr:ask',

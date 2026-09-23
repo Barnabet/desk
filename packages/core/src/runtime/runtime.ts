@@ -347,7 +347,8 @@ export class Runtime {
         systemPrompt: this.o.systemPrompt ?? threadSystemPrompt,
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
-        gate: (tool, input, project) => evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable }),
+        gate: (tool, input, project, a) =>
+          evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
         toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, { sandboxEnabled: sandboxAvailable, jobs: this.jobs, services: this.services }),
       },
       agentId,
