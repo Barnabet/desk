@@ -3,7 +3,7 @@ import type { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { classifyModelError } from '../model/errors';
 import { withRetry, type RetryOptions } from '../model/retry';
-import type { ChatMessage, ModelAdapter } from '../model/types';
+import type { ChatMessage, CompletionResult, ModelAdapter } from '../model/types';
 import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
 import { prepareToolCall, runPreparedTool, toToolSpecs } from '../tools/registry';
 import type { PolicyDecision } from '../policy/evaluate';
@@ -63,7 +63,9 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   // artifact appearing as pre-existing context). Changes made by others arrive as messages instead.
   const system = deps.systemPrompt(agent, project);
 
-  const callModel = async (model: string, messages: ChatMessage[]) => {
+  /** Set once sustained rate limiting switched this run to the project's fallback model. */
+  let fallbackModel: string | undefined;
+  const callModel = async (model: string, messages: ChatMessage[]): Promise<CompletionResult> => {
     for (;;) {
       try {
         return await withRetry(
@@ -80,9 +82,18 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         );
       } catch (e) {
         const err = classifyModelError(e);
-        if (err.kind !== 'proxy_down' || !deps.proxy) throw err;
-        deps.proxy.markDown(agent.project_id);
-        await deps.proxy.waitUntilUp(signal);
+        if (err.kind === 'proxy_down' && deps.proxy) {
+          deps.proxy.markDown(agent.project_id);
+          await deps.proxy.waitUntilUp(signal);
+          continue;
+        }
+        const fallback = getProject(store.db, agent.project_id)?.settings.fallback_model;
+        if (err.kind === 'rate_limited' && !fallbackModel && fallback && fallback !== model) {
+          fallbackModel = fallback;
+          store.append({ ...base, type: 'agent.model_switched', payload: { from: model, to: fallback, reason: err.message, scope: 'run' } });
+          return callModel(fallback, messages);
+        }
+        throw err;
       }
     }
   };
@@ -98,7 +109,9 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         ...buildConversation(store.list({ agentId })),
       ];
 
-      const result = await callModel(current.model, messages);
+      const result = await callModel(fallbackModel ?? current.model, messages);
+      // The call may have switched to the fallback model; attribute usage to the model that answered.
+      const model = fallbackModel ?? current.model;
 
       store.append([
         { ...base, type: 'assistant.message', payload: { run_id: runId, content: result.content, tool_calls: result.toolCalls } },
@@ -107,7 +120,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
           type: 'usage',
           payload: {
             run_id: runId,
-            model: current.model,
+            model,
             prompt_tokens: result.usage.prompt_tokens,
             completion_tokens: result.usage.completion_tokens,
             ...(result.usage.cached_tokens !== undefined ? { cached_tokens: result.usage.cached_tokens } : {}),
