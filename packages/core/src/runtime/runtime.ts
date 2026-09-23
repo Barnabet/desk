@@ -580,6 +580,7 @@ export class Runtime {
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),
+        contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),
         gate: (tool, input, project, a) =>
           evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
         toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, {

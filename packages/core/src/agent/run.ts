@@ -4,12 +4,13 @@ import { newId } from '../ids';
 import { classifyModelError } from '../model/errors';
 import { withRetry, type RetryOptions } from '../model/retry';
 import type { ChatMessage, CompletionResult, ModelAdapter } from '../model/types';
-import { getAgent, getProject, type AgentRow, type ProjectRow } from '../state/queries';
+import { getAgent, getProject, lastEvent, type AgentRow, type ProjectRow } from '../state/queries';
 import { prepareToolCall, runPreparedTool, toToolSpecs } from '../tools/registry';
 import type { PolicyDecision } from '../policy/evaluate';
 import type { Tool, ToolContext, ToolResult } from '../tools/types';
 import { drainInbox } from './inbox';
-import { buildConversation } from './transcript';
+import { chooseSplit, compactionPrompt, DEFAULT_KEEP_MESSAGES, shouldCompact } from './compaction';
+import { buildConversation, buildCurrentConversation } from './transcript';
 
 export type RunDeps = {
   store: EventStore;
@@ -23,7 +24,13 @@ export type RunDeps = {
   toolContext: (agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) => ToolContext;
   /** When set, `proxy_down` errors pause here until the proxy is back instead of failing the run. */
   proxy?: { markDown(projectId: string): void; waitUntilUp(signal: AbortSignal): Promise<void> };
+  /** The model's context window in tokens; without it only a context overflow triggers compaction. */
+  contextWindow?: (model: string) => number | undefined;
+  compaction?: { keepMessages?: number };
 };
+
+/** Budget used to render a compaction request when the model's window is unknown. */
+const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 export type RunOutcome = { reason: RunFinishReason; status: AgentStatus };
 
@@ -98,36 +105,86 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
     }
   };
 
+  const windowOf = (model: string) => deps.contextWindow?.(model);
+  const recordUsage = (model: string, usage: CompletionResult['usage']): EventInput => ({
+    ...base,
+    type: 'usage',
+    payload: {
+      run_id: runId,
+      model,
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+      ...(usage.cached_tokens !== undefined ? { cached_tokens: usage.cached_tokens } : {}),
+      estimated: usage.estimated,
+    },
+  });
+
+  /**
+   * Summarises all but the most recent messages into a checkpoint (originals stay in the event log).
+   * Returns false when there is nothing to compact or the summary call failed; the conversation is then untouched.
+   */
+  const compact = async (model: string, trigger: 'threshold' | 'overflow'): Promise<boolean> => {
+    const conversation = buildCurrentConversation(store.list({ agentId }));
+    const keep = deps.compaction?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
+    const split = chooseSplit(conversation, keep) ?? (trigger === 'overflow' ? chooseSplit(conversation, 1) : null);
+    if (!split) return false;
+    const covered = conversation.slice(0, split.index).map((m) => m.message);
+    try {
+      const result = await withRetry(
+        () => deps.adapter.complete({ model, messages: compactionPrompt(covered, windowOf(model) ?? DEFAULT_CONTEXT_WINDOW), tools: [] }, { signal }),
+        { ...deps.retry, signal },
+      );
+      const checkpoint = result.content?.trim();
+      if (!checkpoint) return false;
+      store.append([
+        { ...base, type: 'context.compacted', payload: { run_id: runId, checkpoint, up_to: split.upTo, trigger } },
+        recordUsage(model, result.usage),
+      ]);
+      return true;
+    } catch (e) {
+      if (classifyModelError(e).kind === 'aborted' || signal.aborted) throw e;
+      return false;
+    }
+  };
+
+  // A conversation that ended the previous run above the threshold is compacted before its first call.
+  const lastMeasure = lastEvent(store.db, agentId, 'usage');
+  const lastCheckpoint = lastEvent(store.db, agentId, 'context.compacted');
+  let compactNext =
+    lastMeasure?.type === 'usage' &&
+    (!lastCheckpoint || lastCheckpoint.id < lastMeasure.id) &&
+    shouldCompact(lastMeasure.payload.prompt_tokens, windowOf(lastMeasure.payload.model) ?? Infinity);
+  /** A failed threshold compaction is not retried every step. */
+  let thresholdCompactionFailed = false;
+
   try {
     for (let step = 0; step < deps.maxSteps; step++) {
       if (signal.aborted) return interrupted();
       drainInbox(store, agentId, runId);
 
       const current = getAgent(store.db, agentId)!;
-      const messages: ChatMessage[] = [
-        { role: 'system', content: system },
-        ...buildConversation(store.list({ agentId })),
-      ];
+      if (compactNext && !thresholdCompactionFailed) {
+        if (!(await compact(fallbackModel ?? current.model, 'threshold'))) thresholdCompactionFailed = true;
+      }
+      const conversation = (): ChatMessage[] => [{ role: 'system', content: system }, ...buildConversation(store.list({ agentId }))];
 
-      const result = await callModel(fallbackModel ?? current.model, messages);
+      let result: CompletionResult;
+      try {
+        result = await callModel(fallbackModel ?? current.model, conversation());
+      } catch (e) {
+        const err = classifyModelError(e);
+        // Forced compaction, once per call; a second overflow fails the run.
+        if (err.kind !== 'context_overflow' || !(await compact(fallbackModel ?? current.model, 'overflow'))) throw err;
+        result = await callModel(fallbackModel ?? current.model, conversation());
+      }
       // The call may have switched to the fallback model; attribute usage to the model that answered.
       const model = fallbackModel ?? current.model;
 
       store.append([
         { ...base, type: 'assistant.message', payload: { run_id: runId, content: result.content, tool_calls: result.toolCalls } },
-        {
-          ...base,
-          type: 'usage',
-          payload: {
-            run_id: runId,
-            model,
-            prompt_tokens: result.usage.prompt_tokens,
-            completion_tokens: result.usage.completion_tokens,
-            ...(result.usage.cached_tokens !== undefined ? { cached_tokens: result.usage.cached_tokens } : {}),
-            estimated: result.usage.estimated,
-          },
-        },
+        recordUsage(model, result.usage),
       ]);
+      compactNext = shouldCompact(result.usage.prompt_tokens, windowOf(model) ?? Infinity);
 
       if (result.toolCalls.length === 0) return finish('no_tool_calls', 'idle');
 

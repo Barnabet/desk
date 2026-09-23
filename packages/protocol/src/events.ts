@@ -122,6 +122,16 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({ level: z.enum(['info', 'warning', 'error']), code: z.string(), message: z.string() }),
   ),
   event(
+    'context.compacted',
+    z.object({
+      run_id: z.string(),
+      /** Structured summary replacing every conversation message produced by events with id <= up_to. */
+      checkpoint: z.string(),
+      up_to: z.number().int().nonnegative(),
+      trigger: z.enum(['threshold', 'overflow']),
+    }),
+  ),
+  event(
     'usage',
     z.object({
       run_id: z.string(),
