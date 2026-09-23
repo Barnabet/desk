@@ -57,6 +57,9 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   const workspace = agent.workspace_path;
   if (!workspace) return finish('error', 'failed', 'Agent has no workspace');
   const specs = toToolSpecs(deps.tools);
+  // Snapshot per run: a stable prefix (prompt caching) and no mid-run surprises (e.g. an agent's own fresh
+  // artifact appearing as pre-existing context). Changes made by others arrive as messages instead.
+  const system = deps.systemPrompt(agent, project);
 
   try {
     for (let step = 0; step < deps.maxSteps; step++) {
@@ -65,7 +68,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
 
       const current = getAgent(store.db, agentId)!;
       const messages: ChatMessage[] = [
-        { role: 'system', content: deps.systemPrompt(current, project) },
+        { role: 'system', content: system },
         ...buildConversation(store.list({ agentId })),
       ];
 

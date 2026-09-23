@@ -147,3 +147,15 @@ describe('runAgent', () => {
     expect(deltas.map((d) => d.payload.text).join('')).toBe('a fairly long streamed reply');
   });
 });
+
+describe('system prompt snapshot', () => {
+  it('builds the system prompt once per run, not per step', async () => {
+    h = await createHarness({ script: [tools(call('list_dir', {})), tools(call('list_dir', {})), text('done')] });
+    const { agentId, projectId } = await seedThread(h.store, h.dir);
+    let builds = 0;
+    say(agentId, projectId, 'go');
+    await runAgent(deps({ systemPrompt: () => `prompt ${++builds}` }), agentId, new AbortController().signal);
+    expect(builds).toBe(1);
+    expect(h.fake.requests.map((r) => r.messages[0]!.content)).toEqual(['prompt 1', 'prompt 1', 'prompt 1']);
+  });
+});
