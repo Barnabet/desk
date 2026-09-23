@@ -494,8 +494,8 @@ Thread archive (API or Desk after assembly) removes the worktree directory; bran
 
 To confirm early in implementation (spike tasks), without changing the design:
 
-1. Streamed tool-call argument deltas and `stream_options.include_usage` behave correctly through the proxy for both families.
-2. Multi-turn tool conversations (assistant `tool_calls` → `tool` role results) round-trip for Claude models via the proxy's Chat Completions translation.
+1. ✅ Verified 2026-09-23 (Plan 1 live smoke): streamed tool-call argument deltas and `stream_options.include_usage` work through the proxy for Claude and GPT families; Claude responses report `prompt_tokens_details.cached_tokens` (automatic prompt caching).
+2. ✅ Verified 2026-09-23: multi-turn tool conversations (parallel `tool_calls` → `tool` results → final answer) round-trip for `claude-opus-5-5`, `gpt-6-astra`, `gpt-6-sol`.
 3. Per-model `context_window` and `reasoning_effort` support, recorded in the registry seed.
 4. `sandbox-exec` profile behaviour on the current macOS version.
 
