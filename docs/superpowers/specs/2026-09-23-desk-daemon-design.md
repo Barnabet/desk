@@ -1,7 +1,7 @@
 # Desk — Daemon & Agent Runtime Design (v1)
 
 - **Date:** 2026-09-23
-- **Status:** Draft for review
+- **Status:** Implemented — v1.0.0 (see §14 for deviations)
 - **Scope:** `deskd` daemon, agent runtime, toolset, policy gate, Desk coordinator, memory, library, public API, `desk` dev CLI.
 - **Explicitly out of scope:** all UI/UX (the Electron app is designed separately and consumes the API defined here).
 
@@ -513,8 +513,8 @@ To confirm early in implementation (spike tasks), without changing the design:
 
 1. ✅ Verified 2026-09-23 (Plan 1 live smoke): streamed tool-call argument deltas and `stream_options.include_usage` work through the proxy for Claude and GPT families; Claude responses report `prompt_tokens_details.cached_tokens` (automatic prompt caching).
 2. ✅ Verified 2026-09-23: multi-turn tool conversations (parallel `tool_calls` → `tool` results → final answer) round-trip for `claude-opus-5-5`, `gpt-6-astra`, `gpt-6-sol`.
-3. Per-model `context_window` and `reasoning_effort` support, recorded in the registry seed.
-4. `sandbox-exec` profile behaviour on the current macOS version.
+3. ✅ Registry seed: every model at a conservative 200k `context_window` (compaction threshold and forced compaction on overflow cover any mismatch); `reasoning_effort` is not exposed in v1.0 (`supports_reasoning_effort: false`). Editable via `PUT /v1/models`.
+4. ✅ Verified 2026-09-23: the SBPL profile blocks writes outside the workspace for the shell and for child processes (node, python) on the current macOS; temp dirs, devices and the git common dir of worktrees stay writable.
 
 ---
 
@@ -524,3 +524,18 @@ To confirm early in implementation (spike tasks), without changing the design:
 - **v1.1** — MCP connectors, plugins; thread-level subagents/sub-delegation. (Skills moved into v1.0, §8.4.)
 - **v1.2** — scheduled/proactive Desk wakeups and recurring goals.
 - **Later** — phone access, cost in currency, embeddings-based memory retrieval, multi-user.
+
+---
+
+## 14. Deviations from this design (as built, v1.0)
+
+- **System prompt snapshot per run.** The system prompt is built once per run rather than per step: a stable prefix for prompt caching, and no mid-run confusion (an agent seeing its own fresh artifact as pre-existing). Changes made by others reach a running agent as messages.
+- **Library uploads** are JSON with base64 content instead of multipart (local-only API; simpler clients). The same applies to skill files.
+- **WebSocket** uses `ws` attached to the Node HTTP server's `upgrade` event instead of `@hono/node-ws`.
+- **Desk can write files** (`write_file`/`edit_file`) — confined to its own scratch workspace `projects/<id>/desk/` — to draft combined documents before publishing. Its shell stays read-only.
+- **Skills moved into v1.0** (§8.4), at the user's request; they were planned for v1.1.
+- **Migrations are squashed** into a single `0000_init` until the first external release; there is no upgrade path from pre-1.0 databases.
+- **Compaction** keeps the last 6 conversation *messages* (not turns) and renders the summarised part as plain text for the checkpoint call (no tool schemas needed); the checkpoint is merged into the next user message.
+- **Orphaned processes after a hard crash.** After `SIGKILL`, shell/background processes started by agents are not reaped or reattached; recovery records their tool calls as `interrupted`.
+- **Role prompts** live in `packages/core/src/agent/prompts.ts` (code) rather than `core/roles/*.md`.
+
