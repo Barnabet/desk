@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, statSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFile, realpath } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { AgentMessageKind, MemoryKind, ProjectSettingsPatch } from '@desk/protocol';
+import type { AgentMessageKind, ArtifactKind, MemoryKind, ProjectSettingsPatch } from '@desk/protocol';
+import { uniqueLibraryName } from '../library/library';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { hasPendingInbox } from '../agent/inbox';
@@ -54,6 +55,8 @@ export class Runtime {
     this.services = {
       store: o.store,
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
+      libraryDir: (projectId) => this.libraryDir(projectId),
+      publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
     };
     this.scheduler = new Scheduler({
       modelConcurrency: (model) => o.models.get(model).concurrency,
@@ -124,6 +127,50 @@ export class Runtime {
     const source = getSource(this.o.store.db, sourceId);
     if (!source || source.project_id !== projectId) throw new Error(`Unknown source: ${sourceId}`);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'source.removed', payload: { source_id: sourceId } });
+  }
+
+  // ── library ──────────────────────────────────────────────────────────
+
+  /** Copies a file into the project library and records it as an artifact. */
+  async publishToLibrary(
+    projectId: string,
+    file: string,
+    meta: { title: string; kind: ArtifactKind; description: string; name?: string },
+    origin: string,
+  ): Promise<{ id: string; path: string }> {
+    const dir = this.libraryDir(projectId);
+    mkdirSync(dir, { recursive: true });
+    const name = uniqueLibraryName(dir, meta.name ?? basename(file));
+    await copyFile(file, join(dir, name));
+    return this.recordArtifact(projectId, name, meta, origin);
+  }
+
+  /** Adds user-provided content to the library. */
+  addLibraryFile(
+    projectId: string,
+    input: { name: string; content: string | Buffer; title?: string; kind?: ArtifactKind; description?: string },
+  ): { id: string; path: string } {
+    const dir = this.libraryDir(projectId);
+    mkdirSync(dir, { recursive: true });
+    const name = uniqueLibraryName(dir, input.name);
+    writeFileSync(join(dir, name), input.content);
+    return this.recordArtifact(projectId, name, { title: input.title ?? name, kind: input.kind ?? 'file', description: input.description ?? '' }, 'user');
+  }
+
+  private recordArtifact(
+    projectId: string,
+    path: string,
+    meta: { title: string; kind: ArtifactKind; description: string },
+    origin: string,
+  ): { id: string; path: string } {
+    const id = newId();
+    this.o.store.append({
+      project_id: projectId,
+      agent_id: null,
+      type: 'artifact.published',
+      payload: { artifact_id: id, path, title: meta.title, kind: meta.kind, origin, description: meta.description },
+    });
+    return { id, path };
   }
 
   // ── memory ───────────────────────────────────────────────────────────

@@ -40,6 +40,18 @@ CREATE TABLE `approvals` (
 --> statement-breakpoint
 CREATE INDEX `approvals_project_idx` ON `approvals` (`project_id`,`status`);--> statement-breakpoint
 CREATE INDEX `approvals_agent_idx` ON `approvals` (`agent_id`,`status`);--> statement-breakpoint
+CREATE TABLE `artifacts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`path` text NOT NULL,
+	`title` text NOT NULL,
+	`kind` text NOT NULL,
+	`origin` text NOT NULL,
+	`description` text NOT NULL,
+	`created_at` text NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `artifacts_project_idx` ON `artifacts` (`project_id`);--> statement-breakpoint
 CREATE TABLE `events` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`project_id` text NOT NULL,

@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { AgentStatus, MemoryKind, ToolResultStatus } from '@desk/protocol';
+import type { AgentStatus, ArtifactKind, MemoryKind, ToolResultStatus } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
@@ -21,6 +21,13 @@ export type ToolContext = {
 export interface RuntimeServices {
   readonly store: EventStore;
   writeMemory(projectId: string, input: { kind: MemoryKind; content: string; supersedes?: string }, source: string): string;
+  libraryDir(projectId: string): string;
+  publishToLibrary(
+    projectId: string,
+    file: string,
+    meta: { title: string; kind: ArtifactKind; description: string; name?: string },
+    origin: string,
+  ): Promise<{ id: string; path: string }>;
 }
 
 export type ToolYield = { status: AgentStatus; reason?: string };

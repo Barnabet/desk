@@ -48,3 +48,6 @@ export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 
 export const MemoryKind = z.enum(['fact', 'decision', 'preference', 'contact', 'note']);
 export type MemoryKind = z.infer<typeof MemoryKind>;
+
+export const ArtifactKind = z.enum(['file', 'report', 'code', 'data', 'other']);
+export type ArtifactKind = z.infer<typeof ArtifactKind>;

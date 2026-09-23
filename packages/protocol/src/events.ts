@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentMessageKind, AgentRole, AgentStatus, GitInfo, MemoryKind, RunFinishReason, SourceKind, ToolCall, ToolResultStatus } from './domain';
+import { AgentMessageKind, AgentRole, ArtifactKind, AgentStatus, GitInfo, MemoryKind, RunFinishReason, SourceKind, ToolCall, ToolResultStatus } from './domain';
 import { ProjectSettingsPatch } from './settings';
 
 const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
@@ -92,6 +92,17 @@ export const EventBody = z.discriminatedUnion('type', [
     }),
   ),
   event('memory.deleted', z.object({ memory_id: z.string() })),
+  event(
+    'artifact.published',
+    z.object({
+      artifact_id: z.string(),
+      path: z.string().min(1),
+      title: z.string(),
+      kind: ArtifactKind,
+      origin: z.string().regex(/^(user|agent:.+)$/),
+      description: z.string(),
+    }),
+  ),
   event(
     'usage',
     z.object({

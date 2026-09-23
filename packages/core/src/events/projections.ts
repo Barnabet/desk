@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, approvals, memory, projects, sources, usageTotals } from '../db/schema';
+import { agents, approvals, artifacts, memory, projects, sources, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -80,6 +80,13 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       tx.delete(memory).where(eq(memory.id, ev.payload.memory_id)).run();
       tx.run(sql`DELETE FROM memory_fts WHERE memory_id = ${ev.payload.memory_id}`);
       return;
+    case 'artifact.published': {
+      const p = ev.payload;
+      tx.insert(artifacts)
+        .values({ id: p.artifact_id, project_id: ev.project_id, path: p.path, title: p.title, kind: p.kind, origin: p.origin, description: p.description, created_at: ev.ts })
+        .run();
+      return;
+    }
     case 'agent.status_changed':
       tx.update(agents).set({ status: ev.payload.status, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
       return;
