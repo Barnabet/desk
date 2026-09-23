@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PlanItemStatus, type EventInput } from '@desk/protocol';
+import { PlanItemStatus, SkillName, type EventInput } from '@desk/protocol';
 import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coordination/render';
 import { newId } from '../ids';
 import { getAgent, getApproval, getProject, lastEvent, listThreads, pendingApprovalsFor, type AgentRow } from '../state/queries';
@@ -23,26 +23,35 @@ export const spawnThreadTool = defineTool({
     brief: z.string().min(1),
     git_source_id: z.string().optional(),
     model: z.string().optional(),
+    skills: z.array(SkillName).optional().describe('Skills to activate on the thread from the start (their instructions join its context)'),
   }),
-  async execute({ title, brief, git_source_id, model }, ctx) {
+  async execute({ title, brief, git_source_id, model, skills = [] }, ctx) {
     const id = await ctx.services.spawnThread(ctx.agentId, {
       title,
       brief,
       ...(git_source_id ? { gitSourceId: git_source_id } : {}),
       ...(model ? { model } : {}),
+      ...(skills.length ? { skills } : {}),
     });
     const t = getAgent(ctx.services.store.db, id)!;
-    return `Spawned thread ${id} "${title}" (${t.model}${t.git_branch ? `, branch ${t.git_branch}` : ''}).`;
+    const extras = [t.model, ...(t.git_branch ? [`branch ${t.git_branch}`] : []), ...(skills.length ? [`skills: ${skills.join(', ')}`] : [])];
+    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).`;
   },
 });
 
 export const messageThreadTool = defineTool({
   name: 'message_thread',
   description:
-    'Send a message to a thread: a `note` (answer, extra context, redirection) or a `revision` (send finished work back with specific feedback; reopens the thread, limited by the project review-round setting).',
-  input: z.object({ thread_id: z.string(), text: z.string().min(1), kind: z.enum(['note', 'revision']).default('note') }),
-  async execute({ thread_id, text, kind }, ctx) {
+    'Send a message to a thread: a `note` (answer, extra context, redirection) or a `revision` (send finished work back with specific feedback; reopens the thread, limited by the project review-round setting). Pass skills to activate more skills on it.',
+  input: z.object({
+    thread_id: z.string(),
+    text: z.string().min(1),
+    kind: z.enum(['note', 'revision']).default('note'),
+    skills: z.array(SkillName).optional().describe('Skills to activate on the thread (effective from its next turn)'),
+  }),
+  async execute({ thread_id, text, kind, skills = [] }, ctx) {
     const t = requireThread(ctx, thread_id);
+    if (skills.length) ctx.services.activateSkills(t.id, skills);
     if (kind === 'revision') {
       const limit = getProject(ctx.services.store.db, ctx.projectId)!.settings.review_rounds;
       if (t.review_round >= limit) {

@@ -665,7 +665,7 @@ export class Runtime {
 
   private systemPrompt(agent: AgentRow, project: ProjectRow): string {
     if (this.o.systemPrompt) return this.o.systemPrompt(agent, project);
-    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id) };
+    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills };
     return agent.role === 'desk' ? deskSystemPrompt(ctx) : threadSystemPrompt(ctx);
   }
 
@@ -740,7 +740,16 @@ export class Runtime {
     switch (agent.status) {
       case 'done': {
         const artifacts = agent.result_artifacts ?? [];
-        send('completed', `Summary: ${agent.result_summary ?? '(none)'}${artifacts.length ? `\nArtifacts: ${artifacts.join(', ')}` : ''}`);
+        const result = lastEvent(this.o.store.db, agent.id, 'agent.result');
+        const drafts = (result?.type === 'agent.result' && result.payload.skill_drafts) || [];
+        send(
+          'completed',
+          [
+            `Summary: ${agent.result_summary ?? '(none)'}`,
+            ...(artifacts.length ? [`Artifacts: ${artifacts.join(', ')}`] : []),
+            ...(drafts.length ? [`Skill drafts to review and install (skill_write from_dir): ${drafts.join(', ')}`] : []),
+          ].join('\n'),
+        );
         return;
       }
       case 'failed':
