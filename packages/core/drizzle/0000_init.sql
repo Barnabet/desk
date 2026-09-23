@@ -12,6 +12,7 @@ CREATE TABLE `agents` (
 	`review_round` integer DEFAULT 0 NOT NULL,
 	`result_summary` text,
 	`result_artifacts` text,
+	`active_skills` text DEFAULT '[]' NOT NULL,
 	`git_source_id` text,
 	`git_branch` text,
 	`git_base` text,

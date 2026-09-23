@@ -1,5 +1,19 @@
 import { z } from 'zod';
-import { AgentMessageKind, AgentRole, ArtifactKind, AgentStatus, GitInfo, MemoryKind, PlanItem, RunFinishReason, SourceKind, ToolCall, ToolResultStatus } from './domain';
+import {
+  AgentMessageKind,
+  AgentRole,
+  ArtifactKind,
+  AgentStatus,
+  GitInfo,
+  MemoryKind,
+  PlanItem,
+  RunFinishReason,
+  SkillName,
+  SkillScope,
+  SourceKind,
+  ToolCall,
+  ToolResultStatus,
+} from './domain';
 import { ProjectSettingsPatch } from './settings';
 
 const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
@@ -30,18 +44,41 @@ export const EventBody = z.discriminatedUnion('type', [
       workspace_path: z.string().nullable(),
       parent_id: z.string().nullable(),
       git: GitInfo.nullable().optional(),
+      /** Skills active from the start (their instructions are in the agent's system prompt). */
+      skills: z.array(SkillName).optional(),
     }),
   ),
   event('source.added', z.object({ source_id: z.string(), path: z.string(), kind: SourceKind, label: z.string() })),
   event('source.removed', z.object({ source_id: z.string() })),
   event('agent.status_changed', z.object({ status: AgentStatus, reason: z.string().optional() })),
-  event('agent.result', z.object({ summary: z.string().min(1), artifacts: z.array(z.string()) })),
+  event(
+    'agent.result',
+    z.object({
+      summary: z.string().min(1),
+      artifacts: z.array(z.string()),
+      /** Skill drafts (workspace directories with a SKILL.md) for Desk to review and install. */
+      skill_drafts: z.array(z.string()).optional(),
+    }),
+  ),
   event(
     'agent.model_switched',
     z.object({ from: z.string(), to: z.string(), reason: z.string(), scope: z.literal('run') }),
   ),
   event('agent.revision', z.object({ round: z.number().int().min(1), feedback: z.string() })),
   event('agent.archived', z.object({})),
+  event('agent.skills_changed', z.object({ skills: z.array(SkillName) })),
+  event(
+    'skill.saved',
+    z.object({
+      scope: SkillScope,
+      name: SkillName,
+      version: z.number().int().min(1),
+      description: z.string(),
+      origin: z.string(),
+      change_note: z.string(),
+    }),
+  ),
+  event('skill.deleted', z.object({ scope: SkillScope, name: SkillName, origin: z.string() })),
   event('plan.updated', z.object({ items: z.array(PlanItem) })),
   event(
     'report',

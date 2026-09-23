@@ -49,6 +49,7 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
           brief: ev.payload.brief,
           workspace_path: ev.payload.workspace_path,
           parent_id: ev.payload.parent_id,
+          active_skills: ev.payload.skills ?? [],
           inbox_cursor: 0,
           git_source_id: ev.payload.git?.source_id ?? null,
           git_branch: ev.payload.git?.branch ?? null,
@@ -98,6 +99,9 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       return;
     case 'agent.revision':
       tx.update(agents).set({ review_round: ev.payload.round, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'agent.skills_changed':
+      tx.update(agents).set({ active_skills: ev.payload.skills, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
       return;
     case 'agent.archived':
       tx.update(agents).set({ archived_at: ev.ts, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
