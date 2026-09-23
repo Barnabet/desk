@@ -34,6 +34,7 @@ export const EventBody = z.discriminatedUnion('type', [
   event('source.added', z.object({ source_id: z.string(), path: z.string(), kind: SourceKind, label: z.string() })),
   event('source.removed', z.object({ source_id: z.string() })),
   event('agent.status_changed', z.object({ status: AgentStatus, reason: z.string().optional() })),
+  event('agent.result', z.object({ summary: z.string().min(1), artifacts: z.array(z.string()) })),
   event('message.user', z.object({ text: z.string().min(1) })),
   event(
     'message.agent',

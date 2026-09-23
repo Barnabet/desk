@@ -14,19 +14,30 @@ import { DEFAULT_MODEL_ID, type ModelRegistry } from '../model/registry';
 import type { RetryOptions } from '../model/retry';
 import type { ModelAdapter } from '../model/types';
 import { evaluatePolicy } from '../policy/evaluate';
-import { getAgent, getApproval, getDeskAgent, getProject, getSource, pendingApprovalsFor, type AgentRow, type ProjectRow } from '../state/queries';
+import {
+  getAgent,
+  getApproval,
+  getDeskAgent,
+  getProject,
+  getSource,
+  lastEvent,
+  listActiveThreads,
+  pendingApprovalsFor,
+  type AgentRow,
+  type ProjectRow,
+} from '../state/queries';
 import { bashTool } from '../tools/bash';
 import { fileTools } from '../tools/fs';
 import { JobManager, jobTools } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
-import { completeTool } from '../tools/thread';
+import { threadCoordinationTools } from '../tools/thread';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
 import { webTools } from '../tools/web';
 import { Scheduler } from './scheduler';
 
-export const defaultThreadTools: Tool[] = [...fileTools, bashTool, ...jobTools, ...webTools, completeTool];
+export const defaultThreadTools: Tool[] = [...fileTools, bashTool, ...jobTools, ...webTools, ...threadCoordinationTools];
 
 export type RuntimeOptions = {
   store: EventStore;
@@ -42,6 +53,8 @@ export type RuntimeOptions = {
   retry?: RetryOptions;
   /** Force sandbox availability; detected via `sandbox-exec` when omitted. */
   sandboxAvailable?: boolean;
+  /** Called with internal errors that are not tied to a request (defaults to console.error). */
+  onError?: (err: unknown, context: string) => void;
 };
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
@@ -50,6 +63,10 @@ export class Runtime {
   readonly scheduler: Scheduler;
   readonly jobs = new JobManager();
   readonly services: RuntimeServices;
+  /** Threads stopped by their Desk: their cancellation is not reported back to it. */
+  private readonly silentStops = new Set<string>();
+  /** Last event id already reported as stalled, per thread. */
+  private readonly stallNotified = new Map<string, number>();
 
   constructor(private readonly o: RuntimeOptions) {
     this.services = {
@@ -57,6 +74,7 @@ export class Runtime {
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
       libraryDir: (projectId) => this.libraryDir(projectId),
       publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
+      sendAgentMessage: (from, to, kind, text) => this.sendAgentMessage(from, to, kind, text),
     };
     this.scheduler = new Scheduler({
       modelConcurrency: (model) => o.models.get(model).concurrency,
@@ -64,6 +82,7 @@ export class Runtime {
         o.maxConcurrentThreads ?? getProject(o.store.db, projectId)?.settings.max_concurrent_threads ?? 4,
       run: (job, signal) => this.execute(job.agentId, signal),
       afterRun: (job) => this.afterRun(job.agentId),
+      onError: (err, job) => (o.onError ?? ((e, c) => console.error(`[desk] ${c}:`, e)))(err, `agent ${job.agentId}`),
     });
   }
 
@@ -215,7 +234,8 @@ export class Runtime {
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.updated', payload: patch });
   }
 
-  createThread(projectId: string, input: { title: string; brief: string; workspacePath: string; model?: string }): string {
+  /** Low-level thread creation in an existing directory. `parentId` defaults to the project's Desk; `null` makes a standalone thread. */
+  createThread(projectId: string, input: { title: string; brief: string; workspacePath: string; model?: string; parentId?: string | null }): string {
     const model = input.model ?? getProject(this.o.store.db, projectId)?.settings.thread_model ?? DEFAULT_MODEL_ID;
     this.o.models.get(model);
     mkdirSync(input.workspacePath, { recursive: true });
@@ -230,7 +250,7 @@ export class Runtime {
         title: input.title,
         brief: input.brief,
         workspace_path: input.workspacePath,
-        parent_id: getDeskAgent(this.o.store.db, projectId)?.id ?? null,
+        parent_id: input.parentId !== undefined ? input.parentId : (getDeskAgent(this.o.store.db, projectId)?.id ?? null),
       },
     });
     return id;
@@ -244,8 +264,15 @@ export class Runtime {
     this.wake(agent);
   }
 
+  /** User-initiated stop. */
   stop(agentId: string): void {
+    this.stopAgent(agentId);
+  }
+
+  /** Stops an agent: kills its jobs, denies its pending approvals, aborts or dequeues its run. `by` = stopping agent (not reported back to it). */
+  stopAgent(agentId: string, opts: { by?: string; reason?: string } = {}): void {
     const agent = this.requireAgent(agentId);
+    if (opts.by) this.silentStops.add(agentId);
     this.jobs.killAll(agentId);
     const state = this.scheduler.stop(agentId);
     for (const ap of pendingApprovalsFor(this.o.store.db, agentId)) {
@@ -264,9 +291,26 @@ export class Runtime {
         project_id: agent.project_id,
         agent_id: agentId,
         type: 'agent.status_changed',
-        payload: { status: 'cancelled', reason: state === 'queued' ? 'Stopped before starting' : 'Stopped' },
+        payload: { status: 'cancelled', reason: opts.reason ?? (state === 'queued' ? 'Stopped before starting' : 'Stopped') },
       });
+      this.notifyParent(this.requireAgent(agentId));
     }
+  }
+
+  /** Reports running/waiting threads with no activity for `thresholdMs` to their Desk, once per stall. Returns reported thread ids. */
+  checkStalls(now = Date.now(), thresholdMs = 15 * 60_000): string[] {
+    const reported: string[] = [];
+    for (const t of listActiveThreads(this.o.store.db)) {
+      if (!t.parent_id) continue;
+      if (pendingApprovalsFor(this.o.store.db, t.id).length) continue;
+      const last = lastEvent(this.o.store.db, t.id);
+      if (!last || now - Date.parse(last.ts) < thresholdMs || this.stallNotified.get(t.id) === last.id) continue;
+      this.stallNotified.set(t.id, last.id);
+      const minutes = Math.round((now - Date.parse(last.ts)) / 60_000);
+      this.sendAgentMessage(t.id, t.parent_id, 'stalled', `No activity for ${minutes} minutes (status: ${t.status}).`);
+      reported.push(t.id);
+    }
+    return reported;
   }
 
   /** Resolves a pending approval: runs (or denies) the held tool call, then resumes the agent. */
@@ -359,7 +403,58 @@ export class Runtime {
   private afterRun(agentId: string): void {
     const agent = this.requireAgent(agentId);
     if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
+    this.notifyParent(agent);
     if (agent.status === 'cancelled') return;
-    if (hasPendingInbox(this.o.store, agentId)) this.wake(agent);
+    if (hasPendingInbox(this.o.store, agentId)) this.wake(this.requireAgent(agentId));
+  }
+
+  /** Tells a thread's Desk about the outcome of its latest run. */
+  private notifyParent(agent: AgentRow): void {
+    if (agent.role !== 'thread' || !agent.parent_id) return;
+    const send = (kind: AgentMessageKind, text: string) => this.sendAgentMessage(agent.id, agent.parent_id!, kind, text);
+    const finished = lastEvent(this.o.store.db, agent.id, 'run.finished');
+    const fin = finished?.type === 'run.finished' ? finished.payload : undefined;
+    switch (agent.status) {
+      case 'done': {
+        const artifacts = agent.result_artifacts ?? [];
+        send('completed', `Summary: ${agent.result_summary ?? '(none)'}${artifacts.length ? `\nArtifacts: ${artifacts.join(', ')}` : ''}`);
+        return;
+      }
+      case 'failed':
+        send('failed', `Failed: ${fin?.detail ?? 'unknown error'}`);
+        return;
+      case 'cancelled':
+        if (this.silentStops.delete(agent.id)) return;
+        send('cancelled', 'Stopped by the user.');
+        return;
+      case 'waiting': {
+        const pending = pendingApprovalsFor(this.o.store.db, agent.id).filter((ap) => ap.run_id === fin?.run_id);
+        if (!pending.length) return;
+        send(
+          'approval',
+          pending
+            .map(
+              (ap) =>
+                `Approval ${ap.id} needed for ${ap.tool}(${ap.arguments}): ${ap.reason}. ${
+                  ap.delegate_to_desk ? 'You may resolve it with resolve_approval.' : 'Waiting for the user to decide.'
+                }`,
+            )
+            .join('\n'),
+        );
+        return;
+      }
+      case 'idle': {
+        if (fin?.reason === 'max_steps') {
+          send('update', 'Reached the step limit without completing.');
+        } else if (fin?.reason === 'no_tool_calls') {
+          const msg = lastEvent(this.o.store.db, agent.id, 'assistant.message');
+          const content = msg?.type === 'assistant.message' ? msg.payload.content : null;
+          send('update', `Ended its turn without completing: ${content ?? '(no text)'}`);
+        }
+        return;
+      }
+      default:
+        return;
+    }
   }
 }

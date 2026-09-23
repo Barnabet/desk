@@ -7,6 +7,8 @@ export type SchedulerOptions = {
   projectConcurrency: (projectId: string) => number;
   run: (job: Job, signal: AbortSignal) => Promise<void>;
   afterRun?: (job: Job) => void;
+  /** Receives errors thrown by `run` or `afterRun` (they never escape the scheduler). */
+  onError?: (err: unknown, job: Job) => void;
 };
 
 type Running = { job: Job; controller: AbortController };
@@ -73,10 +75,14 @@ export class Scheduler {
     this.running.set(job.agentId, { job, controller });
     Promise.resolve()
       .then(() => this.opts.run(job, controller.signal))
-      .catch(() => {})
+      .catch((err: unknown) => this.opts.onError?.(err, job))
       .finally(() => {
         this.running.delete(job.agentId);
-        this.opts.afterRun?.(job);
+        try {
+          this.opts.afterRun?.(job);
+        } catch (err) {
+          this.opts.onError?.(err, job);
+        }
         this.pump();
       });
   }

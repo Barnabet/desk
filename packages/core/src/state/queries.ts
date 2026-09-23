@@ -1,6 +1,7 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import type { EventType, StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
-import { agents, approvals, projects, sources, usageTotals } from '../db/schema';
+import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type AgentRow = typeof agents.$inferSelect;
@@ -48,3 +49,19 @@ export const listSources = (db: Db, projectId: string): SourceRow[] =>
   db.select().from(sources).where(eq(sources.project_id, projectId)).orderBy(asc(sources.created_at), asc(sources.id)).all();
 
 export const getSource = (db: Db, id: string): SourceRow | undefined => db.select().from(sources).where(eq(sources.id, id)).get();
+
+/** Threads that are running or waiting, across all projects. */
+export const listActiveThreads = (db: Db): AgentRow[] =>
+  db.select().from(agents).where(and(eq(agents.role, 'thread'), inArray(agents.status, ['running', 'waiting']))).all();
+
+/** The agent's most recent event (optionally of one type). */
+export function lastEvent(db: Db, agentId: string, type?: EventType): StoredEvent | undefined {
+  const row = db
+    .select()
+    .from(events)
+    .where(and(eq(events.agent_id, agentId), type ? eq(events.type, type) : undefined))
+    .orderBy(desc(events.id))
+    .limit(1)
+    .get();
+  return row ? ({ ...row } as StoredEvent) : undefined;
+}

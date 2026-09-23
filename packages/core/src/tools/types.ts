@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { AgentStatus, ArtifactKind, MemoryKind, ToolResultStatus } from '@desk/protocol';
+import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ToolResultStatus } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
@@ -30,6 +30,7 @@ export interface RuntimeServices {
     meta: { title: string; kind: ArtifactKind; description: string; name?: string },
     origin: string,
   ): Promise<{ id: string; path: string }>;
+  sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void;
 }
 
 export type ToolYield = { status: AgentStatus; reason?: string };

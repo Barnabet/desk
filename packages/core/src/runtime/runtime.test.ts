@@ -19,7 +19,7 @@ describe('Runtime', () => {
     h = await createHarness({ script: [text('hi back')] });
     const rt = makeRuntime();
     const projectId = rt.createProject({ name: 'P', goal: 'G' });
-    const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w1'), model: FAKE_MODEL.id });
+    const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w1'), model: FAKE_MODEL.id, parentId: null });
     rt.sendMessage(agentId, 'hello');
     await rt.whenIdle();
     expect(statuses(agentId)).toEqual(['queued', 'running', 'idle']);
@@ -30,7 +30,7 @@ describe('Runtime', () => {
     h = await createHarness({ script: [text('first', { delayMs: 100 }), text('second')] });
     const rt = makeRuntime();
     const projectId = rt.createProject({ name: 'P', goal: 'G' });
-    const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w1'), model: FAKE_MODEL.id });
+    const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w1'), model: FAKE_MODEL.id, parentId: null });
     rt.sendMessage(agentId, 'one');
     await new Promise((r) => setTimeout(r, 30));
     rt.sendMessage(agentId, 'two');
@@ -44,7 +44,7 @@ describe('Runtime', () => {
     h = await createHarness({ script: () => text('ok', { delayMs: 50 }), concurrency: 1 });
     const rt = makeRuntime();
     const projectId = rt.createProject({ name: 'P', goal: 'G' });
-    const ids = [1, 2, 3].map((n) => rt.createThread(projectId, { title: `T${n}`, brief: 'B', workspacePath: join(h.dir, `w${n}`), model: FAKE_MODEL.id }));
+    const ids = [1, 2, 3].map((n) => rt.createThread(projectId, { title: `T${n}`, brief: 'B', workspacePath: join(h.dir, `w${n}`), model: FAKE_MODEL.id, parentId: null }));
     ids.forEach((id) => rt.sendMessage(id, 'go'));
     await rt.whenIdle();
     expect(h.fake.requests).toHaveLength(3);
@@ -55,7 +55,7 @@ describe('Runtime', () => {
     h = await createHarness({ script: () => text('ok', { delayMs: 50 }) });
     const rt = makeRuntime({ maxConcurrentThreads: 1 });
     const projectId = rt.createProject({ name: 'P', goal: 'G' });
-    const ids = [1, 2].map((n) => rt.createThread(projectId, { title: `T${n}`, brief: 'B', workspacePath: join(h.dir, `w${n}`), model: FAKE_MODEL.id }));
+    const ids = [1, 2].map((n) => rt.createThread(projectId, { title: `T${n}`, brief: 'B', workspacePath: join(h.dir, `w${n}`), model: FAKE_MODEL.id, parentId: null }));
     ids.forEach((id) => rt.sendMessage(id, 'go'));
     await rt.whenIdle();
     expect(h.fake.maxInFlight).toBe(1);
@@ -65,8 +65,8 @@ describe('Runtime', () => {
     h = await createHarness({ script: () => hang(), concurrency: 1 });
     const rt = makeRuntime();
     const projectId = rt.createProject({ name: 'P', goal: 'G' });
-    const a = rt.createThread(projectId, { title: 'A', brief: 'B', workspacePath: join(h.dir, 'wa'), model: FAKE_MODEL.id });
-    const b = rt.createThread(projectId, { title: 'B', brief: 'B', workspacePath: join(h.dir, 'wb'), model: FAKE_MODEL.id });
+    const a = rt.createThread(projectId, { title: 'A', brief: 'B', workspacePath: join(h.dir, 'wa'), model: FAKE_MODEL.id, parentId: null });
+    const b = rt.createThread(projectId, { title: 'B', brief: 'B', workspacePath: join(h.dir, 'wb'), model: FAKE_MODEL.id, parentId: null });
     rt.sendMessage(a, 'go');
     rt.sendMessage(b, 'go');
     await new Promise((r) => setTimeout(r, 50));

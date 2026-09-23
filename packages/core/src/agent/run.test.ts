@@ -5,10 +5,9 @@ import { z } from 'zod';
 import { call, error, hang, text, tools } from '@desk/fake-model';
 import type { EphemeralEvent } from '@desk/protocol';
 import { getAgent } from '../state/queries';
-import { createHarness, noSleep, seedThread, type Harness } from '../testing/harness';
+import { createHarness, newRuntime, noSleep, seedThread, type Harness } from '../testing/harness';
 import { fileTools } from '../tools/fs';
 import { JobManager } from '../tools/jobs';
-import { NO_SERVICES } from '../testing/context';
 import { buildToolContext } from './context';
 
 const jobs = new JobManager();
@@ -28,7 +27,7 @@ const deps = (extra: Partial<RunDeps> = {}): RunDeps => ({
   maxSteps: 20,
   retry: noSleep,
   gate: () => ({ action: 'auto', delegateToDesk: false, reason: 'test' }),
-  toolContext: (a, runId, toolCallId, signal) => buildToolContext(a, runId, toolCallId, signal, { sandboxEnabled: false, jobs, services: NO_SERVICES }),
+  toolContext: (a, runId, toolCallId, signal) => buildToolContext(a, runId, toolCallId, signal, { sandboxEnabled: false, jobs, services: newRuntime(h).services }),
   ...extra,
 });
 const say = (agentId: string, projectId: string, text: string) =>

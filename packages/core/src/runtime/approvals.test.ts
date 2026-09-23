@@ -43,7 +43,7 @@ async function setup(script: NonNullable<Parameters<typeof createHarness>[0]>['s
   const rt = new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep, toolsFor: () => testTools, sandboxAvailable });
   const projectId = rt.createProject({ name: 'P', goal: 'G' });
   const workspace = join(h.dir, 'ws');
-  const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: workspace, model: FAKE_MODEL.id });
+  const agentId = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: workspace, model: FAKE_MODEL.id, parentId: null });
   return { rt, projectId, agentId, workspace };
 }
 const results = (agentId: string) =>
@@ -131,6 +131,7 @@ describe('approvals', () => {
     await rt.whenIdle();
     const [ap] = listApprovals(h.store.db, projectId, 'pending');
     await rt.resolveApproval(ap!.id, 'denied');
+    await rt.whenIdle();
     await expect(rt.resolveApproval(ap!.id, 'approved')).rejects.toThrow(/already resolved/);
   });
 

@@ -87,6 +87,12 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
         .run();
       return;
     }
+    case 'agent.result':
+      tx.update(agents)
+        .set({ result_summary: ev.payload.summary, result_artifacts: ev.payload.artifacts, updated_at: ev.ts })
+        .where(eq(agents.id, requireAgentId(ev)))
+        .run();
+      return;
     case 'agent.status_changed':
       tx.update(agents).set({ status: ev.payload.status, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
       return;

@@ -1,12 +1,48 @@
 import { z } from 'zod';
-import { defineTool } from './types';
+import { listArtifacts } from '../library/library';
+import { getAgent } from '../state/queries';
+import { defineTool, type ToolContext } from './types';
+
+function parentOf(ctx: ToolContext): string {
+  const parent = getAgent(ctx.services.store.db, ctx.agentId)?.parent_id;
+  if (!parent) throw new Error('This agent has no Desk to report to');
+  return parent;
+}
 
 export const completeTool = defineTool({
   name: 'complete',
   description:
-    'Finish your assignment. Call exactly once, when the work is done or cannot be done, with an honest summary: what was done, what was not, and how it was verified.',
-  input: z.object({ summary: z.string().min(1) }),
-  async execute({ summary }) {
-    return { content: 'Completion recorded.', yield: { status: 'done', reason: summary } };
+    'Finish your assignment. Call exactly once, when the work is done or cannot be done, with an honest summary: what was done, what was not, and how it was verified. List library paths of artifacts you published.',
+  input: z.object({ summary: z.string().min(1), artifacts: z.array(z.string()).default([]) }),
+  async execute({ summary, artifacts }, ctx) {
+    if (artifacts.length) {
+      const known = new Set(listArtifacts(ctx.services.store.db, ctx.projectId).map((a) => a.path));
+      const missing = artifacts.filter((a) => !known.has(a));
+      if (missing.length) throw new Error(`Not in the library: ${missing.join(', ')}. Publish them with library_publish first.`);
+    }
+    ctx.services.store.append({ project_id: ctx.projectId, agent_id: ctx.agentId, type: 'agent.result', payload: { summary, artifacts } });
+    return { content: 'Completion recorded.', yield: { status: 'done', reason: summary.split('\n')[0]!.slice(0, 200) } };
   },
 });
+
+export const messageDeskTool = defineTool({
+  name: 'message_desk',
+  description:
+    'Send a message to Desk, the project coordinator: a progress `update`, a `question`, or a `blocker`. After a question or blocker, call wait_for_reply unless you can keep working meanwhile.',
+  input: z.object({ kind: z.enum(['update', 'question', 'blocker']), text: z.string().min(1) }),
+  async execute({ kind, text }, ctx) {
+    ctx.services.sendAgentMessage(ctx.agentId, parentOf(ctx), kind, text);
+    return 'Sent to Desk.';
+  },
+});
+
+export const waitForReplyTool = defineTool({
+  name: 'wait_for_reply',
+  description: 'Pause until Desk or the user replies. Your next turn starts with their message.',
+  input: z.object({}),
+  async execute() {
+    return { content: 'Waiting for a reply.', yield: { status: 'waiting', reason: 'Waiting for a reply' } };
+  },
+});
+
+export const threadCoordinationTools = [messageDeskTool, waitForReplyTool, completeTool];
