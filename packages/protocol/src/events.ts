@@ -36,6 +36,10 @@ export const EventBody = z.discriminatedUnion('type', [
   event('source.removed', z.object({ source_id: z.string() })),
   event('agent.status_changed', z.object({ status: AgentStatus, reason: z.string().optional() })),
   event('agent.result', z.object({ summary: z.string().min(1), artifacts: z.array(z.string()) })),
+  event(
+    'agent.model_switched',
+    z.object({ from: z.string(), to: z.string(), reason: z.string(), scope: z.literal('run') }),
+  ),
   event('agent.revision', z.object({ round: z.number().int().min(1), feedback: z.string() })),
   event('agent.archived', z.object({})),
   event('plan.updated', z.object({ items: z.array(PlanItem) })),
@@ -111,6 +115,20 @@ export const EventBody = z.discriminatedUnion('type', [
       kind: ArtifactKind,
       origin: z.string().regex(/^(user|agent:.+)$/),
       description: z.string(),
+    }),
+  ),
+  event(
+    'system.notice',
+    z.object({ level: z.enum(['info', 'warning', 'error']), code: z.string(), message: z.string() }),
+  ),
+  event(
+    'context.compacted',
+    z.object({
+      run_id: z.string(),
+      /** Structured summary replacing every conversation message produced by events with id <= up_to. */
+      checkpoint: z.string(),
+      up_to: z.number().int().nonnegative(),
+      trigger: z.enum(['threshold', 'overflow']),
     }),
   ),
   event(

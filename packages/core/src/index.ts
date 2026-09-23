@@ -54,7 +54,8 @@ export {
 } from './tools/web';
 export { evaluatePolicy, globToRegExp, type PolicyDecision } from './policy/evaluate';
 export { buildToolContext, type ToolEnvironment } from './agent/context';
-export { buildConversation } from './agent/transcript';
+export { buildConversation, buildCurrentConversation, CHECKPOINT_HEADER } from './agent/transcript';
+export { chooseSplit, compactionPrompt, shouldCompact } from './agent/compaction';
 export { drainInbox, hasPendingInbox } from './agent/inbox';
 export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agent/prompts';
 export { runAgent, SHUTDOWN_REASON, type RunDeps, type RunOutcome } from './agent/run';

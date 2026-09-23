@@ -36,6 +36,7 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
+import { ProxyGate } from './proxy-gate';
 import { Scheduler } from './scheduler';
 import { toolsForRole } from './toolsets';
 
@@ -53,6 +54,8 @@ export type RuntimeOptions = {
   retry?: RetryOptions;
   /** Force sandbox availability; detected via `sandbox-exec` when omitted. */
   sandboxAvailable?: boolean;
+  /** Health-probe interval while the model proxy is down (default 10 s). */
+  proxyProbeIntervalMs?: number;
   /** Called with internal errors that are not tied to a request (defaults to console.error). */
   onError?: (err: unknown, context: string) => void;
 };
@@ -63,6 +66,7 @@ export class Runtime {
   readonly scheduler: Scheduler;
   readonly jobs = new JobManager();
   readonly services: RuntimeServices;
+  private readonly proxy: ProxyGate | undefined;
   /** Threads stopped by their Desk: their cancellation is not reported back to it. */
   private readonly silentStops = new Set<string>();
   /** Last event id already reported as stalled, per thread. */
@@ -70,6 +74,19 @@ export class Runtime {
   private shuttingDown = false;
 
   constructor(private readonly o: RuntimeOptions) {
+    const health = o.adapter.health?.bind(o.adapter);
+    this.proxy = health
+      ? new ProxyGate(health, o.proxyProbeIntervalMs ?? 10_000, (projectId, up) =>
+          o.store.append({
+            project_id: projectId,
+            agent_id: null,
+            type: 'system.notice',
+            payload: up
+              ? { level: 'info', code: 'proxy_up', message: 'The model proxy is reachable again; paused agents resumed.' }
+              : { level: 'error', code: 'proxy_down', message: 'The model proxy is unreachable; agents are paused until it comes back.' },
+          }),
+        )
+      : undefined;
     this.services = {
       store: o.store,
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
@@ -425,10 +442,28 @@ export class Runtime {
     this.scheduler.stopAll(SHUTDOWN_REASON);
     this.jobs.killEverything();
     await this.scheduler.whenIdle();
+    this.proxy?.close();
   }
 
-  /** On startup: reschedules agents left queued (or with undelivered messages) by a previous daemon. Returns their ids. */
+  /**
+   * On startup: repairs runs cut off by a crash (unfinished tool calls become `interrupted`), then reschedules
+   * agents left queued or with undelivered messages. Returns the rescheduled agent ids.
+   */
   recover(): string[] {
+    const repairedByProject = new Map<string, number>();
+    for (const agent of listLiveAgents(this.o.store.db, ['running'])) {
+      this.repairCrashedRun(agent);
+      repairedByProject.set(agent.project_id, (repairedByProject.get(agent.project_id) ?? 0) + 1);
+    }
+    for (const [projectId, count] of repairedByProject) {
+      this.o.store.append({
+        project_id: projectId,
+        agent_id: null,
+        type: 'system.notice',
+        payload: { level: 'warning', code: 'daemon_restart', message: `Recovered ${count} run(s) interrupted by an unclean daemon shutdown.` },
+      });
+    }
+
     const resumed: string[] = [];
     for (const agent of listLiveAgents(this.o.store.db)) {
       const pendingInbox = hasPendingInbox(this.o.store, agent.id);
@@ -439,6 +474,40 @@ export class Runtime {
       }
     }
     return resumed;
+  }
+
+  /** Closes a run that has `run.started` but no `run.finished`: never re-executes calls whose outcome is unknown. */
+  private repairCrashedRun(agent: AgentRow): void {
+    const { store } = this.o;
+    const started = lastEvent(store.db, agent.id, 'run.started');
+    if (started?.type !== 'run.started') return;
+    const runId = started.payload.run_id;
+    const since = store.list({ agentId: agent.id, after: started.id, types: ['tool.call', 'tool.result', 'approval.requested'] });
+    const settled = new Set(since.flatMap((e) => (e.type === 'tool.result' || e.type === 'approval.requested' ? [e.payload.tool_call_id] : [])));
+    const base = { project_id: agent.project_id, agent_id: agent.id };
+    const interrupted = since.flatMap((e) =>
+      e.type === 'tool.call' && !settled.has(e.payload.tool_call_id)
+        ? [
+            {
+              ...base,
+              type: 'tool.result' as const,
+              payload: {
+                run_id: runId,
+                tool_call_id: e.payload.tool_call_id,
+                name: e.payload.name,
+                status: 'interrupted' as const,
+                content: 'The daemon restarted during execution; the state of any side effects is unknown — verify before retrying.',
+              },
+            },
+          ]
+        : [],
+    );
+    const waiting = pendingApprovalsFor(store.db, agent.id).length > 0;
+    store.append([
+      ...interrupted,
+      { ...base, type: 'run.finished', payload: { run_id: runId, reason: 'error', detail: 'daemon_restart' } },
+      { ...base, type: 'agent.status_changed', payload: { status: waiting ? 'waiting' : 'queued', reason: 'Recovered after daemon restart' } },
+    ]);
   }
 
   // ── internals ────────────────────────────────────────────────────────
@@ -510,6 +579,8 @@ export class Runtime {
         systemPrompt: (a, p) => this.systemPrompt(a, p),
         maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
+        ...(this.proxy ? { proxy: this.proxy } : {}),
+        contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),
         gate: (tool, input, project, a) =>
           evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
         toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, {

@@ -18,6 +18,14 @@ export function createModelAdapter(config: ModelConfig, registry: ModelRegistry)
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, maxRetries: 0, timeout: 10 * 60_000 });
 
   return {
+    async health() {
+      try {
+        await client.models.list({ timeout: 5000 });
+        return true;
+      } catch {
+        return false;
+      }
+    },
     async complete(req, { signal, onText } = {}) {
       const info = registry.get(req.model);
       try {
