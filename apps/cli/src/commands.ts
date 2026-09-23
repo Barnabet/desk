@@ -63,13 +63,20 @@ async function sayAndFollow(client: DeskClient, project: Project, text: string, 
   const render = createRenderer(io.out, { deskId });
   let finish!: () => void;
   const finished = new Promise<void>((r) => (finish = r));
+  // Follow until Desk is done: idle/failed/cancelled, or waiting on a question to the user.
+  // Waiting on threads keeps following, so the whole coordinated job is shown.
   let running = false;
+  let askedUser = false;
   const close = await client.stream(project.id, overview.last_seq, (m: StreamServerMessage) => {
     render(m);
-    if (m.kind === 'event' && m.event.agent_id === deskId && m.event.type === 'agent.status_changed') {
-      if (m.event.payload.status === 'running') running = true;
-      else if (running && m.event.payload.status !== 'queued') finish();
-    }
+    if (m.kind !== 'event' || m.event.agent_id !== deskId) return;
+    if (m.event.type === 'question.asked') askedUser = true;
+    if (m.event.type !== 'agent.status_changed') return;
+    const status = m.event.payload.status;
+    if (status === 'running') {
+      running = true;
+      askedUser = false;
+    } else if (running && (['idle', 'failed', 'cancelled'].includes(status) || (status === 'waiting' && askedUser))) finish();
   });
   try {
     await client.post(`/projects/${project.id}/messages`, { text });

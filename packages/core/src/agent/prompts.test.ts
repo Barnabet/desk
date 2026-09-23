@@ -65,6 +65,18 @@ describe('thread prompt', () => {
     expect(p).toContain('Release moved to Friday');
     expect(p).toContain('API (git)');
   });
+
+  it('marks the thread’s own library artifacts', async () => {
+    const { rt, projectId, desk } = await setup();
+    const threadId = await rt.spawnThread(desk.id, { title: 'Writer', brief: 'b' });
+    await rt.whenIdle();
+    const file = join(h.dir, 'mine.md');
+    writeFileSync(file, 'x');
+    await rt.publishToLibrary(projectId, file, { title: 'Mine', kind: 'report', description: '' }, `agent:${threadId}`);
+    const p = threadSystemPrompt({ db: h.store.db, agent: getAgent(h.store.db, threadId)!, project: getProject(h.store.db, projectId)!, libraryDir: rt.libraryDir(projectId) });
+    expect(p).toContain('mine.md — Mine [report]');
+    expect(p).toContain('(published by you)');
+  });
 });
 
 describe('tool sets', () => {

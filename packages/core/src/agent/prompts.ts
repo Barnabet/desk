@@ -36,9 +36,11 @@ function sourcesSection(db: Db, projectId: string): string {
   return section('Sources (read-only)', sources.map((s) => `- ${s.id} ${s.label} (${s.kind}) ${s.path}`).join('\n'));
 }
 
-function librarySection(db: Db, projectId: string, libraryDir: string): string {
+function librarySection(db: Db, projectId: string, libraryDir: string, selfId?: string): string {
   const items = listArtifacts(db, projectId);
-  const shown = items.slice(-MAX_LIBRARY_LINES).map(formatArtifactLine);
+  const shown = items
+    .slice(-MAX_LIBRARY_LINES)
+    .map((a) => (selfId && a.origin === `agent:${selfId}` ? `${formatArtifactLine(a)} (published by you)` : formatArtifactLine(a)));
   const more = items.length - shown.length;
   return section(`Library (${libraryDir})`, [...(more > 0 ? [`(${more} older items — use library_list)`] : []), ...shown].join('\n'));
 }
@@ -95,7 +97,7 @@ export function deskSystemPrompt({ db, agent, project, libraryDir }: PromptConte
     '',
     memorySection(db, project.id),
     '',
-    librarySection(db, project.id, libraryDir),
+    librarySection(db, project.id, libraryDir, agent.id),
     '',
     section('Your workspace', `${agent.workspace_path} — scratch space for drafting combined documents before publishing them.`),
   ].join('\n');
@@ -125,7 +127,7 @@ export function threadSystemPrompt({ db, agent, project, libraryDir }: PromptCon
     '',
     sourcesSection(db, project.id),
     '',
-    librarySection(db, project.id, libraryDir),
+    librarySection(db, project.id, libraryDir, agent.id),
     '',
     memorySection(db, project.id),
     '',
