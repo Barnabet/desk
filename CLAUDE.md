@@ -25,6 +25,10 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `settings.ts`: project settings and the default policy.
   - `api.ts`: HTTP bodies.
   - `domain.ts`
+- `packages/client`: `@desk/client`, the environment-neutral client used by the CLI and the desktop app.
+  - `client.ts`: typed REST (`DeskClient`); `stream.ts`: `DeskStream` (resume, dedupe, reconnect).
+  - `state/*`: pure reducers (event → UI state): project, chat, transcript, timeline, system; attention and skill-graph helpers.
+  - `node.ts` (`@desk/client/node`): data-dir discovery and `daemon.json`. Keep `node:*` imports out of every other file.
 - `packages/core`: the runtime.
   - `agent/run.ts`: the agent loop.
   - `agent/prompts.ts`: the role prompts.

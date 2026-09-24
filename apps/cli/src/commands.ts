@@ -1,12 +1,11 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import type { StreamServerMessage } from '@desk/protocol';
 import { runChat } from './chat';
-import { ApiError, DeskClient, readDaemonInfo } from './client';
+import { ApiError, clientFromDataDir, DeskClient, platformDataDir, readDaemonInfo } from './client';
 import { createRenderer } from './format';
 import { install, isInstalled, plistFor, uninstall } from './launchd';
 
@@ -22,7 +21,7 @@ const repoRoot = () => fileURLToPath(new URL('../../..', import.meta.url));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function defaultDataDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.DESK_DATA_DIR ?? join(homedir(), 'Library', 'Application Support', 'Desk');
+  return platformDataDir(env);
 }
 
 async function resolveProject(client: DeskClient, ref: string): Promise<Project> {
@@ -90,7 +89,7 @@ async function sayAndFollow(client: DeskClient, project: Project, text: string, 
 export async function runCli(argv: string[], io: CliIO): Promise<number> {
   const env = io.env ?? process.env;
   const dataDir = io.dataDir ?? defaultDataDir(env);
-  const client = () => DeskClient.fromDataDir(dataDir);
+  const client = () => clientFromDataDir(dataDir);
   const say = (s: string) => io.out(s.endsWith('\n') ? s : `${s}\n`);
 
   const program = new Command('desk')
@@ -108,7 +107,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       const info = readDaemonInfo(dataDir);
       if (info) {
         try {
-          const h = await new DeskClient(`http://127.0.0.1:${info.port}`, info.token).get('/health');
+          const h = await new DeskClient({ baseUrl: `http://127.0.0.1:${info.port}`, token: info.token }).get('/health');
           say(`deskd ${h.version} is already running on 127.0.0.1:${info.port}`);
           return;
         } catch {}

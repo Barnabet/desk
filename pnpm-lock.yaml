@@ -23,6 +23,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@desk/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@desk/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
