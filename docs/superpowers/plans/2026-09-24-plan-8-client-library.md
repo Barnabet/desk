@@ -445,7 +445,6 @@ import type {
   ModelEndpointStatus,
   ModelEndpointTestResult,
   ModelInfo,
-  PlanItem,
   ProjectSummary,
   SkillImportRequest,
   SkillWriteRequest,
@@ -660,8 +659,6 @@ export class DeskClient {
       req ? this.post<ModelEndpointTestResult>('/config/model-endpoint/test', req) : this.request<ModelEndpointTestResult>('POST', '/config/model-endpoint/test'),
   };
 }
-
-export type { PlanItem };
 ```
 
 For the `/config/model-endpoint/test` POST with no body, `request` sends no body at all, and the route treats an empty body as "test the current endpoint".
