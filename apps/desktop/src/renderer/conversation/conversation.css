@@ -12,10 +12,38 @@
   overflow-y: auto;
   border-bottom: 1px solid var(--rule);
 }
+/* The lanes scroll sideways (older history to the left); the label column and legend stay put. */
+.line-scroll {
+  position: absolute;
+  top: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.line-canvas {
+  position: relative;
+  overflow: hidden;
+}
 .line-svg {
   position: absolute;
   left: 0;
   top: 0;
+}
+/* A finished lane's title, drawn on the lane when a later lane has taken its row. */
+.line-lane-title {
+  position: absolute;
+  padding: 0 3px;
+  background: var(--ground);
+  color: var(--text-min);
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+.line-lane-title:hover {
+  color: var(--ink);
 }
 .line-tick {
   position: absolute;
@@ -105,6 +133,9 @@
   font-weight: 500;
   line-height: 16px;
   white-space: nowrap;
+}
+.line-station-label.start {
+  transform: translateX(-12px);
 }
 .line-station-label.end {
   transform: translateX(calc(-100% + 12px));
