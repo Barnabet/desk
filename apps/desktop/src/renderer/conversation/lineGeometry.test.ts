@@ -43,6 +43,26 @@ describe('lineGeometry', () => {
     expect(b!.signal?.label).toBe('bash');
     expect(a!.signal).toBeNull();
     expect(g.height).toBeGreaterThan(b!.y);
+    expect(g.trunkStart).toBeGreaterThan(g.x0);
+  });
+
+  it('keeps forks and rejoins that happen just now inside the diagram', () => {
+    const now = Date.parse(at(31)) + 500;
+    const g = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now: Date.parse(at(60)), width: 1440 });
+    const late = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now, width: 1440 });
+    for (const geo of [g, late]) {
+      for (const l of geo.lanes) {
+        const xs = [...l.fork.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0])).filter((_, i) => i % 2 === 0);
+        expect(Math.max(...xs)).toBeLessThanOrEqual(geo.nowX + 0.01);
+        for (const r of l.rejoins) {
+          const rx = [...r.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0])).filter((_, i) => i % 2 === 0);
+          expect(Math.max(...rx)).toBeLessThanOrEqual(geo.nowX + 0.01);
+        }
+      }
+      for (const st of geo.stations) expect(st.x).toBeLessThanOrEqual(geo.nowX);
+      const done = geo.lanes[0]!;
+      expect(done.segments.length).toBeGreaterThan(0);
+    }
   });
 
   it('draws a still-empty project around now', () => {

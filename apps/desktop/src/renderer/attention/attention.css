@@ -447,3 +447,18 @@ kbd {
     display: none;
   }
 }
+.why-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.rule-chip {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #f4f1ea;
+  border: 1px solid var(--rule);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text);
+}

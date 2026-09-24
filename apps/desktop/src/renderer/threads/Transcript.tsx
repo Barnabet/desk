@@ -8,6 +8,7 @@ import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
 import { ToolGroup, ToolStatus } from '../components/ToolGroup';
 import { clock } from '../format';
+import { policyReason } from '../policyReason';
 import { href } from '../router';
 import { stopText, type NarrativeRow, type Stop } from './route';
 
@@ -124,7 +125,7 @@ function EntrySummary({ e, projectId }: { e: TranscriptEntry; projectId: string 
           <span className="mono small">
             {e.tool} {clip(e.arguments, 120)}
           </span>
-          <span className="small">{e.reason}</span>
+          <span className="small">{policyReason(e.reason).text}</span>
           {e.state === 'pending' ? (
             <a href={href({ name: 'attention', item: `approval:${e.approvalId}` })}>Review in Attention</a>
           ) : (

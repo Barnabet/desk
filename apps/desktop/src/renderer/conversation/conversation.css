@@ -106,6 +106,12 @@
   line-height: 16px;
   white-space: nowrap;
 }
+.line-station-label.end {
+  transform: translateX(calc(-100% + 12px));
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .line-mark {
   position: absolute;
   transform: translateX(-50%);

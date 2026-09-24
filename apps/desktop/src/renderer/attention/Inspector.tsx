@@ -4,6 +4,7 @@ import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { clock } from '../format';
+import { policyReason } from '../policyReason';
 import { href } from '../router';
 import { useSession, useTranscript } from '../state/session';
 import { KIND_NAME, STRIP_CODE, waited } from './strips';
@@ -62,6 +63,7 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
   }, [transcript.entries]);
   const threadHref = i.ref.thread_id ? href({ name: 'project', id: i.project_id, tab: 'threads', threadId: i.ref.thread_id }) : null;
   const args = approval ? describeArgs(approval.tool, approval.arguments) : null;
+  const why = policyReason(i.detail || approval?.reason || '');
 
   return (
     <article className="card inspector" aria-label={`Selected: ${KIND_NAME[i.kind].toLowerCase()}`}>
@@ -117,7 +119,8 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
             <div className="why-row">
               <span className="why-label">Why it's asking</span>
               <div className="why-body">
-                <p>{i.detail || approval?.reason}</p>
+                <p>{why.text}</p>
+                {why.chip ? <span className="rule-chip mono">{why.chip}</span> : null}
               </div>
             </div>
             <div className="why-row">

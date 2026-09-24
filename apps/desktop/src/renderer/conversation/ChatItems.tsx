@@ -19,6 +19,9 @@ const FEED: Record<string, string> = {
   revision: 'Sent back',
 };
 
+/** The daemon labels threads as `thread "Title" (id)`; people only need the title. */
+export const agentLabel = (label: string) => /^thread "(.*)" \([\w-]+\)$/.exec(label)?.[1] ?? label;
+
 export const chatDomId = (id: string) => `chat-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
 /** The event id a chat item came from (streaming runs sort last). */
@@ -68,7 +71,7 @@ export function ChatItemView(o: {
         <div className={`chat-feed feed-${item.messageKind}`}>
           <span className="feed-chip">{FEED[item.messageKind] ?? item.messageKind}</span>
           <a className="feed-from" href={href({ name: 'project', id: o.projectId, tab: 'threads', threadId: item.fromAgentId })}>
-            {item.fromLabel}
+            {agentLabel(item.fromLabel)}
           </a>
           <span className="muted small">{clock(item.ts)}</span>
           <SafeMarkdown className="feed-text" text={item.text} />

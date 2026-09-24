@@ -64,7 +64,7 @@ export function LineDiagram(o: {
               ))}
           </g>
         ))}
-        <path d={`M${g.x0 - 6} ${g.trunkY} H${g.nowX}`} stroke="#1C1B18" strokeWidth={6} strokeLinecap="round" />
+        <path d={`M${g.trunkStart - 6} ${g.trunkY} H${g.nowX}`} stroke="#1C1B18" strokeWidth={6} strokeLinecap="round" />
       </svg>
 
       {g.ticks.map((t) => (
@@ -110,7 +110,7 @@ export function LineDiagram(o: {
             onClick={() => o.onStation(st)}
           />
           {st.showLabel ? (
-            <span className="line-station-label" style={{ left: st.x, top: g.trunkY - 31 }}>
+            <span className={`line-station-label${st.x > g.x1 - 260 ? ' end' : ''}`} style={{ left: st.x, top: g.trunkY - 31 }}>
               <span className="mono muted">{clock(st.ts)}</span> {st.kind === 'brief' ? `Your brief · ${st.label}` : st.label}
             </span>
           ) : null}

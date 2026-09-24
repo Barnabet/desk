@@ -18,6 +18,8 @@ const TRUNK_Y = 62;
 const FIRST_LANE = 44;
 const LANE_GAP = 36;
 const CURVE = 30;
+const STUB = 16;
+const MIN_SPAN = 3 * 60_000;
 
 export type LaneGeometry = {
   lane: Lane;
@@ -38,6 +40,8 @@ export type LineGeometry = {
   x0: number;
   x1: number;
   trunkY: number;
+  /** Where Desk's line begins: the first event. */
+  trunkStart: number;
   nowX: number;
   ticks: Array<{ x: number; t: number }>;
   stations: Array<Station & { x: number; showLabel: boolean }>;
@@ -48,34 +52,41 @@ export type LineGeometry = {
 export function lineGeometry(o: { timeline: TimelineState; threads: ThreadView[]; now: number; width: number; showArchived?: boolean }): LineGeometry {
   const x0 = LABEL_W + 10;
   const x1 = Math.max(x0 + 240, o.width - LEGEND_W - 30);
-  const start = o.timeline.start ? Date.parse(o.timeline.start) : o.now - 30 * 60_000;
-  const end = Math.max(o.now, start + 10 * 60_000);
+  // The axis always ends at now and spans at least three minutes, with a little air before the brief.
+  const first = o.timeline.start ? Date.parse(o.timeline.start) : o.now - 30 * 60_000;
+  const end = o.now;
+  const start = Math.min(first - (end - first) * 0.04, end - MIN_SPAN);
   const x = (t: string | number) => x0 + (((typeof t === 'number' ? t : Date.parse(t)) - start) / (end - start)) * (x1 - x0);
   const step = (TICK_MINUTES.find((m) => (end - start) / 60_000 / m <= 8) ?? 10080) * 60_000;
   const ticks: Array<{ x: number; t: number }> = [];
-  for (let t = Math.ceil(start / step) * step; t <= end; t += step) ticks.push({ x: x(t), t });
+  // Ticks that would sit under the "now" pill are dropped.
+  for (let t = Math.ceil(start / step) * step; t <= end; t += step) if (x1 - x(t) > 56) ticks.push({ x: x(t), t });
   const nowX = x(o.now);
+  const trunkStart = o.timeline.start ? x(o.timeline.start) : x0;
+  const latest = Math.max(x0, nowX - CURVE * 2);
 
   const byId = new Map(o.threads.map((t) => [t.id, t]));
   const visible = o.timeline.lanes.filter((l) => o.showArchived || !l.archived);
   const lanes = visible.map((lane, i): LaneGeometry => {
     const y = TRUNK_Y + FIRST_LANE + i * LANE_GAP;
-    const xf = x(lane.forkedAt);
+    // Leave room for the fork, a short stub of lane and the rejoin before now.
+    const xf = Math.max(x0, Math.min(x(lane.forkedAt), nowX - CURVE * 4 - STUB));
     const laneStart = xf + CURVE * 2;
     const terminal = lane.status === 'done' || lane.status === 'cancelled' || lane.status === 'failed';
+    const marks = lane.marks.map((m) => ({ ...m, x: Math.min(nowX, Math.max(laneStart, x(m.ts))) }));
+    const rejoinXs = marks.filter((m) => m.kind === 'rejoin').map((m) => Math.min(Math.max(m.x, laneStart + STUB), latest));
+    const lastRejoin = rejoinXs.at(-1);
     const segments = lane.segments
       .map((seg, idx) => {
         const last = idx === lane.segments.length - 1;
-        const a = Math.max(laneStart, x(seg.from));
-        const b = Math.max(a, last ? (terminal ? a : nowX) : x(seg.to ?? o.now));
+        const laneEnd = terminal ? (lastRejoin ?? laneStart) : nowX;
+        const a = idx === 0 ? laneStart : Math.min(Math.max(laneStart, x(seg.from)), laneEnd);
+        const b = Math.min(Math.max(a, last ? laneEnd : x(seg.to ?? o.now)), laneEnd);
         return { a, b, status: seg.status };
       })
       .filter((s) => s.b - s.a > 0.5)
       .map((s) => ({ d: `M${s.a} ${y} H${s.b}`, color: LANE_COLOR[s.status], dashed: s.status === 'idle' || s.status === 'queued' }));
-    const marks = lane.marks.map((m) => ({ ...m, x: Math.max(laneStart, x(m.ts)) }));
-    const rejoins = marks
-      .filter((m) => m.kind === 'rejoin')
-      .map((m) => `M${m.x} ${y} C${m.x + CURVE} ${y} ${m.x + CURVE} ${TRUNK_Y} ${m.x + CURVE * 2} ${TRUNK_Y}`);
+    const rejoins = rejoinXs.map((rx) => `M${rx} ${y} C${rx + CURVE} ${y} ${rx + CURVE} ${TRUNK_Y} ${rx + CURVE * 2} ${TRUNK_Y}`);
     let signal: (LaneMark & { x: number }) | null = null;
     for (const m of marks) {
       if (m.kind === 'signal') signal = m;
@@ -97,12 +108,13 @@ export function lineGeometry(o: { timeline: TimelineState; threads: ThreadView[]
 
   let lastLabel = -Infinity;
   const stations = o.timeline.stations.map((s) => {
-    const sx = x(s.ts);
+    const sx = Math.min(nowX, x(s.ts));
     const showLabel = sx - lastLabel >= 120;
     if (showLabel) lastLabel = sx;
     return { ...s, x: sx, showLabel };
   });
 
   const height = Math.max(120, TRUNK_Y + FIRST_LANE + Math.max(0, lanes.length - 1) * LANE_GAP + 34);
-  return { width: o.width, height, x0, x1, trunkY: TRUNK_Y, nowX, ticks, stations, lanes };
+  const firstFork = Math.min(...lanes.map((l) => Number(/^M(-?[\d.]+)/.exec(l.fork)?.[1] ?? Infinity)));
+  return { width: o.width, height, x0, x1, trunkY: TRUNK_Y, trunkStart: Math.min(trunkStart, firstFork), nowX, ticks, stations, lanes };
 }

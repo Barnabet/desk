@@ -8246,3 +8246,485 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 8: End-to-end flows, plus the polish they surfaced
+
+**Files:**
+- Create: `apps/desktop/e2e/flows.e2e.test.ts`, `apps/desktop/src/renderer/policyReason.test.ts`, `apps/desktop/src/renderer/conversation/lineGeometry.test.ts`, `apps/desktop/src/renderer/policyReason.ts`, `apps/desktop/src/renderer/conversation/lineGeometry.ts`
+- Modify: `apps/desktop/src/renderer/attention/Inspector.tsx`, `apps/desktop/src/renderer/attention/attention.css`, `apps/desktop/src/renderer/threads/Transcript.tsx`, `apps/desktop/src/renderer/threads/RouteView.tsx`, `apps/desktop/src/renderer/conversation/LineDiagram.tsx`, `apps/desktop/src/renderer/conversation/ChatItems.tsx`, `apps/desktop/src/renderer/conversation/conversation.css`
+
+**Interfaces:**
+
+- Consumes: every screen from Tasks 2–7; `startDaemon` from `@desk/daemon`; `startFakeModel` from `@desk/fake-model`; the e2e hooks `trayTitle` and `togglePopover`.
+- Produces:
+
+```ts
+// renderer/policyReason.ts
+export function policyReason(reason: string): { text: string; chip: string | null };
+// conversation/lineGeometry.ts — LineGeometry gains
+trunkStart: number;   // Desk's line begins at the first event or the first fork
+// conversation/ChatItems.tsx
+export const agentLabel: (label: string) => string;   // 'thread "X" (id)' → 'X'
+```
+
+The fake model routes by system prompt. Desk's prompt starts with `You are Desk,`.
+- **Desk:**
+  - On the brief, it calls `spawn_thread` and `ask_user`.
+  - On the first `— completed]` message, it calls `message_thread` with kind `revision`; the thread id comes from `Spawned thread <id> `.
+  - On the second, it calls `report` with a `needs_you` item.
+- **Thread:**
+  - It runs `bash echo sudo …`, which matches the risky pattern and so asks for approval.
+  - After the bash result it calls `complete`, and after a revision it calls `complete` again.
+  - It replies `Will do.` to steering.
+
+Run `DESK_E2E_SHOTS=<dir> pnpm test:e2e` to keep screenshots of each step.
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/e2e/flows.e2e.test.ts`:
+
+```ts
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { clientFromDataDir } from '@desk/client/node';
+import { startDaemon, type RunningDaemon } from '@desk/daemon';
+import { call, startFakeModel, text, tools, type ChatRequest, type FakeModelServer, type FakeReply } from '@desk/fake-model';
+
+const appDir = fileURLToPath(new URL('..', import.meta.url));
+let dir: string;
+let fake: FakeModelServer;
+let daemon: RunningDaemon;
+let app: ElectronApplication;
+
+const content = (m: Record<string, unknown> | undefined) => (typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? ''));
+const system = (req: ChatRequest) => content(req.messages[0]);
+
+/** Desk: dispatch a thread and ask a question; send the first result back for revision; report on the second. */
+function desk(req: ChatRequest): FakeReply {
+  const last = req.messages.at(-1);
+  if (last?.role === 'tool') return text('On it.');
+  const said = content(last);
+  if (said.includes('Relaunch onboarding')) {
+    return tools(
+      call('spawn_thread', { title: 'Signup checklist', brief: 'Draft the signup checklist.' }),
+      call('ask_user', { question: 'Data source or teammate invite first?', options: ['Data source', 'Teammate invite'] }),
+    );
+  }
+  if (said.includes('— completed]')) {
+    const spawned = req.messages.map(content).join('\n').match(/Spawned thread (\S+) /)?.[1] ?? '';
+    const results = req.messages.filter((m) => m.role === 'user' && content(m).includes('— completed]')).length;
+    return results === 1
+      ? tools(call('message_thread', { thread_id: spawned, kind: 'revision', text: 'Item 3 reads as salesy; tighten it.' }))
+      : tools(call('report', { headline: 'The signup checklist is in', progress: 'Two rounds, now tight.', needs_you: ['Review the checklist copy'], results: [] }));
+  }
+  return text('Noted.');
+}
+
+/** The thread: run a command that needs approval, then complete; complete again after a revision; acknowledge steering. */
+function thread(req: ChatRequest): FakeReply {
+  const last = req.messages.at(-1);
+  if (last?.role === 'tool') {
+    const assistant = [...req.messages].reverse().find((m) => m.role === 'assistant' && Array.isArray(m.tool_calls));
+    const name = (assistant?.tool_calls as Array<{ function: { name: string } }> | undefined)?.[0]?.function.name;
+    return name === 'bash' ? tools(call('complete', { summary: 'Checklist drafted: five steps, one first win.' })) : text('Done.');
+  }
+  const said = content(last);
+  if (said.includes('Keep it short')) return text('Will do.');
+  if (said.includes('— revision]')) return tools(call('complete', { summary: 'Checklist tightened.' }));
+  return tools(call('bash', { command: 'echo sudo make me a checklist' }));
+}
+
+beforeAll(async () => {
+  dir = mkdtempSync(join(tmpdir(), 'desk-flows-'));
+  fake = await startFakeModel((req) => (system(req).startsWith('You are Desk,') ? desk(req) : thread(req)));
+  daemon = await startDaemon({ dataDir: join(dir, 'data'), port: 0, modelConfig: { baseURL: fake.url, apiKey: 'test' } });
+  const { default: electronPath } = await import('electron');
+  app = await electron.launch({
+    executablePath: electronPath as unknown as string,
+    args: [appDir],
+    env: { ...process.env, DESK_DATA_DIR: join(dir, 'data'), DESK_USER_DATA: join(dir, 'user'), DESK_E2E: '1' },
+  });
+});
+
+afterAll(async () => {
+  await app?.close();
+  await daemon?.stop();
+  await fake?.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const hooks = <T>(fn: string) => app.evaluate((_e, f) => (globalThis as unknown as { __deskTest: Record<string, () => unknown> }).__deskTest[f]!(), fn) as Promise<T>;
+
+/** Set DESK_E2E_SHOTS=<dir> to keep screenshots of each step for visual review. */
+async function shot(page: Page, name: string) {
+  const out = process.env.DESK_E2E_SHOTS;
+  if (out) await page.screenshot({ path: join(out, `${name}.png`) });
+}
+
+async function go(page: Page, hash: string) {
+  await page.evaluate((h) => (window.location.hash = h), hash);
+}
+
+describe('core screens, end to end', () => {
+  it('briefs Desk, forks a thread, answers, approves, loops a revision, steers, and updates the tray', async () => {
+    const client = clientFromDataDir(join(dir, 'data'));
+    const { project } = await client.projects.create({ name: 'Onboarding revamp', goal: 'Relaunch onboarding next month' });
+    const page = await app.firstWindow();
+    await page.evaluate(() => localStorage.setItem('desk.onboarded', '1'));
+    await go(page, `#/p/${project.id}/conversation`);
+
+    // Brief Desk from the composer.
+    const composer = page.getByLabel('Message Desk');
+    await composer.fill('Relaunch onboarding: start with a signup checklist.');
+    await composer.press('Enter');
+    await page.getByText('Relaunch onboarding: start with a signup checklist.').first().waitFor();
+
+    // The thread forks on the line diagram, and Desk's question arrives.
+    const diagram = page.getByRole('region', { name: /Line diagram/ });
+    await diagram.getByRole('link', { name: /Signup checklist/ }).first().waitFor({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Data source', exact: true }).click();
+    await page.getByText('Answered').waitFor({ timeout: 15_000 });
+    await shot(page, '1-conversation-forked');
+
+    // Approve the thread's command from Attention.
+    await page.getByRole('link', { name: /need you$/ }).click();
+    const inspector = page.getByRole('article', { name: /clearance request/ });
+    await expect.poll(() => inspector.getByLabel('Command').textContent(), { timeout: 15_000 }).toBe('$ echo sudo make me a checklist');
+    await inspector.getByLabel('Note to the thread (optional)').fill('Fine, it only echoes.');
+    await shot(page, '2-attention');
+    await inspector.getByRole('button', { name: /^Approve once/ }).click();
+
+    // The thread reports, Desk sends it back, it reports again, and Desk reports to you.
+    await go(page, `#/p/${project.id}/conversation`);
+    await page.getByRole('heading', { name: 'The signup checklist is in' }).waitFor({ timeout: 30_000 });
+    expect(await diagram.getByText(/^sent back/).count()).toBeGreaterThan(0);
+    await page.getByRole('link', { name: 'Review the checklist copy' }).waitFor();
+    await shot(page, '3-conversation-report');
+
+    // The thread's route shows the revision; steer it.
+    const [t] = await client.threads.list(project.id);
+    await go(page, `#/p/${project.id}/threads/${t!.id}`);
+    await page.getByRole('button', { name: /Desk sent it back/ }).waitFor();
+    const transcript = page.getByRole('complementary', { name: 'Transcript' });
+    await transcript.getByLabel('Steer this thread').fill('Keep it short');
+    await transcript.getByRole('button', { name: 'Steer' }).click();
+    await transcript.getByText(/^You steered/).first().waitFor({ timeout: 15_000 });
+    await transcript.getByText('Will do.').waitFor({ timeout: 15_000 });
+    await shot(page, '4-thread');
+    await go(page, `#/p/${project.id}/threads`);
+    await page.getByRole('heading', { name: 'Threads' }).waitFor();
+    await shot(page, '5-roster');
+    await go(page, '#/map');
+    await page.getByRole('heading', { name: 'Projects', exact: true }).waitFor();
+    await shot(page, '6-map');
+
+    // The tray counts the one hand-off left, and the popover shows it.
+    await expect.poll(() => hooks<string>('trayTitle'), { timeout: 10_000 }).toBe('1');
+    await hooks('togglePopover');
+    const popover = await expect
+      .poll(() => app.windows().find((w) => w.url().endsWith('#/tray')), { timeout: 10_000 })
+      .toBeTruthy()
+      .then(() => app.windows().find((w) => w.url().endsWith('#/tray'))!);
+    await popover.getByText('1 need you').waitFor();
+    await popover.getByText('Review the checklist copy').waitFor();
+    await shot(popover, '7-popover');
+    await popover.getByRole('button', { name: /^Open Desk/ }).click();
+  });
+});
+```
+
+`apps/desktop/src/renderer/policyReason.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { RISKY_COMMAND_PATTERN } from '@desk/protocol';
+import { policyReason } from './policyReason';
+
+describe('policyReason', () => {
+  it('explains the risky-command rule in words', () => {
+    const r = policyReason(`Policy rule ${JSON.stringify({ tool: 'bash', match: { command: RISKY_COMMAND_PATTERN } })} → ask`);
+    expect(r.text).toMatch(/^Your policy always asks before a risky command/);
+    expect(r.chip).toBe('bash · risky command → ask');
+  });
+
+  it('names other rules and passes plain reasons through', () => {
+    expect(policyReason('Policy rule {"tool":"web_fetch"} → ask')).toEqual({ text: 'Your policy asks before every web_fetch call.', chip: 'web_fetch → ask' });
+    expect(policyReason('Policy rule {"tool":"git_push","match":{"branch":"main"}} → ask').text).toBe('A policy rule asks before git_push runs with branch matching main.');
+    expect(policyReason('No policy rule allows bash')).toEqual({ text: 'No policy rule allows bash', chip: null });
+  });
+});
+```
+
+`apps/desktop/src/renderer/conversation/lineGeometry.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { emptyTimeline, reduceTimeline, type ThreadView } from '@desk/client';
+import { ev } from '@desk/client/testing';
+import { lineGeometry } from './lineGeometry';
+
+const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
+const thread = (id: string, status: ThreadView['status'], activity: string | null = null) => ({ id, status, activity }) as ThreadView;
+
+function timeline() {
+  const d = { agent: 'd' };
+  const created = (id: number, t: string, title: string, min: number) =>
+    ev(id, 'agent.created', { role: 'thread', model: 'm', title, brief: 'b', workspace_path: '/w', parent_id: 'd' }, { agent: t, ts: at(min) });
+  return [
+    ev(1, 'message.user', { text: 'Relaunch onboarding' }, { ...d, ts: at(0) }),
+    created(2, 'a', 'Research', 1),
+    created(3, 'b', 'Emails', 1),
+    ev(4, 'agent.status_changed', { status: 'running' }, { agent: 'a', ts: at(2) }),
+    ev(5, 'agent.status_changed', { status: 'running' }, { agent: 'b', ts: at(2) }),
+    ev(6, 'agent.model_switched', { from: 'opus', to: 'fable', reason: 'rate', scope: 'run' }, { agent: 'b', ts: at(10) }),
+    ev(7, 'agent.result', { summary: 'Done', artifacts: [] }, { agent: 'a', ts: at(30) }),
+    ev(8, 'agent.status_changed', { status: 'done' }, { agent: 'a', ts: at(30) }),
+    ev(9, 'approval.requested', { approval_id: 'x', run_id: 'r', tool_call_id: 'c', tool: 'bash', arguments: '{}', reason: 'r', delegate_to_desk: false }, { agent: 'b', ts: at(40) }),
+    ev(10, 'report', { headline: 'Research is in', progress: '', needs_you: [], results: [] }, { ...d, ts: at(31) }),
+  ].reduce(reduceTimeline, emptyTimeline('d'));
+}
+
+describe('lineGeometry', () => {
+  it('lays out time, stations and lanes', () => {
+    const now = Date.parse(at(60));
+    const g = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running', 'bash · ls')], now, width: 1440 });
+    expect(g.nowX).toBeCloseTo(g.x1);
+    expect(g.ticks.length).toBeGreaterThan(2);
+    expect(g.ticks.length).toBeLessThanOrEqual(9);
+    for (let i = 1; i < g.ticks.length; i++) expect(g.ticks[i]!.x).toBeGreaterThan(g.ticks[i - 1]!.x);
+    expect(g.stations.map((s) => s.kind)).toEqual(['brief', 'dispatch', 'result_in', 'report']);
+    expect(g.stations[0]!.showLabel).toBe(true);
+    const [a, b] = g.lanes;
+    expect(b!.y).toBeGreaterThan(a!.y);
+    expect(a!.rejoins).toHaveLength(1);
+    expect(a!.trainX).toBeNull();
+    expect(b!.trainX).toBe(g.nowX);
+    expect(b!.marks.map((m) => m.kind)).toEqual(['detour', 'signal']);
+    expect(b!.signal?.label).toBe('bash');
+    expect(a!.signal).toBeNull();
+    expect(g.height).toBeGreaterThan(b!.y);
+    expect(g.trunkStart).toBeGreaterThan(g.x0);
+  });
+
+  it('keeps forks and rejoins that happen just now inside the diagram', () => {
+    const now = Date.parse(at(31)) + 500;
+    const g = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now: Date.parse(at(60)), width: 1440 });
+    const late = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now, width: 1440 });
+    for (const geo of [g, late]) {
+      for (const l of geo.lanes) {
+        const xs = [...l.fork.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0])).filter((_, i) => i % 2 === 0);
+        expect(Math.max(...xs)).toBeLessThanOrEqual(geo.nowX + 0.01);
+        for (const r of l.rejoins) {
+          const rx = [...r.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0])).filter((_, i) => i % 2 === 0);
+          expect(Math.max(...rx)).toBeLessThanOrEqual(geo.nowX + 0.01);
+        }
+      }
+      for (const st of geo.stations) expect(st.x).toBeLessThanOrEqual(geo.nowX);
+      const done = geo.lanes[0]!;
+      expect(done.segments.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('draws a still-empty project around now', () => {
+    const now = Date.parse(at(5));
+    const g = lineGeometry({ timeline: emptyTimeline('d'), threads: [], now, width: 1200 });
+    expect(g.lanes).toEqual([]);
+    expect(g.nowX).toBeGreaterThan(g.x0);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm test:e2e`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/policyReason.ts`:
+
+```ts
+import { RISKY_COMMAND_PATTERN } from '@desk/protocol';
+
+/**
+ * The daemon explains an approval with the raw rule ("Policy rule {…} → ask"). This turns it into
+ * a sentence for people, plus a short chip that names the rule.
+ */
+export function policyReason(reason: string): { text: string; chip: string | null } {
+  const m = /^Policy rule (\{.*\}) → (\w+)$/s.exec(reason.trim());
+  if (!m) return { text: reason, chip: null };
+  try {
+    const rule = JSON.parse(m[1]!) as { tool: string; match?: Record<string, string> };
+    const action = m[2]!;
+    const chip = `${rule.tool}${rule.match ? ` · ${Object.keys(rule.match).join(', ')} matches` : ''} → ${action}`;
+    if (rule.match?.command === RISKY_COMMAND_PATTERN)
+      return { text: 'Your policy always asks before a risky command, such as sudo, piping a download into a shell, or a recursive delete, even inside the sandbox.', chip: `${rule.tool} · risky command → ${action}` };
+    if (rule.match) {
+      const what = Object.entries(rule.match)
+        .map(([k, v]) => `${k} matching ${v}`)
+        .join(' and ');
+      return { text: `A policy rule asks before ${rule.tool} runs with ${what}.`, chip };
+    }
+    return { text: `Your policy asks before every ${rule.tool} call.`, chip };
+  } catch {
+    return { text: reason, chip: null };
+  }
+}
+```
+
+`apps/desktop/src/renderer/conversation/lineGeometry.ts`:
+
+```ts
+import type { Lane, LaneMark, Station, ThreadView, TimelineState } from '@desk/client';
+import type { AgentStatus } from '@desk/protocol';
+
+export const LANE_COLOR: Record<AgentStatus, string> = {
+  running: '#2F5BD3',
+  waiting: '#A15C00',
+  queued: '#A15C00',
+  idle: '#B9B3A7',
+  done: '#8A857B',
+  cancelled: '#8A857B',
+  failed: '#C4441C',
+};
+
+const TICK_MINUTES = [1, 2, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440, 2880, 10080];
+export const LABEL_W = 200;
+const LEGEND_W = 120;
+const TRUNK_Y = 62;
+const FIRST_LANE = 44;
+const LANE_GAP = 36;
+const CURVE = 30;
+const STUB = 16;
+const MIN_SPAN = 3 * 60_000;
+
+export type LaneGeometry = {
+  lane: Lane;
+  thread: ThreadView | undefined;
+  y: number;
+  color: string;
+  fork: string;
+  segments: Array<{ d: string; color: string; dashed: boolean }>;
+  rejoins: string[];
+  marks: Array<LaneMark & { x: number }>;
+  signal: (LaneMark & { x: number }) | null;
+  trainX: number | null;
+};
+
+export type LineGeometry = {
+  width: number;
+  height: number;
+  x0: number;
+  x1: number;
+  trunkY: number;
+  /** Where Desk's line begins: the first event. */
+  trunkStart: number;
+  nowX: number;
+  ticks: Array<{ x: number; t: number }>;
+  stations: Array<Station & { x: number; showLabel: boolean }>;
+  lanes: LaneGeometry[];
+};
+
+/** Positions for the conversation's transit diagram: a time axis, Desk's trunk with stations, one lane per thread. */
+export function lineGeometry(o: { timeline: TimelineState; threads: ThreadView[]; now: number; width: number; showArchived?: boolean }): LineGeometry {
+  const x0 = LABEL_W + 10;
+  const x1 = Math.max(x0 + 240, o.width - LEGEND_W - 30);
+  // The axis always ends at now and spans at least three minutes, with a little air before the brief.
+  const first = o.timeline.start ? Date.parse(o.timeline.start) : o.now - 30 * 60_000;
+  const end = o.now;
+  const start = Math.min(first - (end - first) * 0.04, end - MIN_SPAN);
+  const x = (t: string | number) => x0 + (((typeof t === 'number' ? t : Date.parse(t)) - start) / (end - start)) * (x1 - x0);
+  const step = (TICK_MINUTES.find((m) => (end - start) / 60_000 / m <= 8) ?? 10080) * 60_000;
+  const ticks: Array<{ x: number; t: number }> = [];
+  // Ticks that would sit under the "now" pill are dropped.
+  for (let t = Math.ceil(start / step) * step; t <= end; t += step) if (x1 - x(t) > 56) ticks.push({ x: x(t), t });
+  const nowX = x(o.now);
+  const trunkStart = o.timeline.start ? x(o.timeline.start) : x0;
+  const latest = Math.max(x0, nowX - CURVE * 2);
+
+  const byId = new Map(o.threads.map((t) => [t.id, t]));
+  const visible = o.timeline.lanes.filter((l) => o.showArchived || !l.archived);
+  const lanes = visible.map((lane, i): LaneGeometry => {
+    const y = TRUNK_Y + FIRST_LANE + i * LANE_GAP;
+    // Leave room for the fork, a short stub of lane and the rejoin before now.
+    const xf = Math.max(x0, Math.min(x(lane.forkedAt), nowX - CURVE * 4 - STUB));
+    const laneStart = xf + CURVE * 2;
+    const terminal = lane.status === 'done' || lane.status === 'cancelled' || lane.status === 'failed';
+    const marks = lane.marks.map((m) => ({ ...m, x: Math.min(nowX, Math.max(laneStart, x(m.ts))) }));
+    const rejoinXs = marks.filter((m) => m.kind === 'rejoin').map((m) => Math.min(Math.max(m.x, laneStart + STUB), latest));
+    const lastRejoin = rejoinXs.at(-1);
+    const segments = lane.segments
+      .map((seg, idx) => {
+        const last = idx === lane.segments.length - 1;
+        const laneEnd = terminal ? (lastRejoin ?? laneStart) : nowX;
+        const a = idx === 0 ? laneStart : Math.min(Math.max(laneStart, x(seg.from)), laneEnd);
+        const b = Math.min(Math.max(a, last ? laneEnd : x(seg.to ?? o.now)), laneEnd);
+        return { a, b, status: seg.status };
+      })
+      .filter((s) => s.b - s.a > 0.5)
+      .map((s) => ({ d: `M${s.a} ${y} H${s.b}`, color: LANE_COLOR[s.status], dashed: s.status === 'idle' || s.status === 'queued' }));
+    const rejoins = rejoinXs.map((rx) => `M${rx} ${y} C${rx + CURVE} ${y} ${rx + CURVE} ${TRUNK_Y} ${rx + CURVE * 2} ${TRUNK_Y}`);
+    let signal: (LaneMark & { x: number }) | null = null;
+    for (const m of marks) {
+      if (m.kind === 'signal') signal = m;
+      if (m.kind === 'signal_cleared') signal = null;
+    }
+    return {
+      lane,
+      thread: byId.get(lane.threadId),
+      y,
+      color: LANE_COLOR[lane.status],
+      fork: `M${xf} ${TRUNK_Y} C${xf + CURVE} ${TRUNK_Y} ${xf + CURVE} ${y} ${laneStart} ${y}`,
+      segments,
+      rejoins,
+      marks,
+      signal,
+      trainX: byId.get(lane.threadId)?.status === 'running' ? nowX : null,
+    };
+  });
+
+  let lastLabel = -Infinity;
+  const stations = o.timeline.stations.map((s) => {
+    const sx = Math.min(nowX, x(s.ts));
+    const showLabel = sx - lastLabel >= 120;
+    if (showLabel) lastLabel = sx;
+    return { ...s, x: sx, showLabel };
+  });
+
+  const height = Math.max(120, TRUNK_Y + FIRST_LANE + Math.max(0, lanes.length - 1) * LANE_GAP + 34);
+  const firstFork = Math.min(...lanes.map((l) => Number(/^M(-?[\d.]+)/.exec(l.fork)?.[1] ?? Infinity)));
+  return { width: o.width, height, x0, x1, trunkY: TRUNK_Y, trunkStart: Math.min(trunkStart, firstFork), nowX, ticks, stations, lanes };
+}
+```
+
+The screenshots surfaced these fixes, included above or listed here:
+- **Line geometry:**
+  - The axis ends at now and spans at least three minutes, starting just before the brief.
+  - Ticks under the "now" pill are dropped.
+  - A fork is clamped so the fork, a 16px stub and the rejoin all fit before now.
+  - A finished lane runs to its last rejoin.
+  - The trunk starts at the first event or the first fork.
+- `LineDiagram.tsx` draws the trunk from `g.trunkStart`. A station label near the right edge gets the `end` class, which right-aligns and truncates it; this is the `.line-station-label.end` rule.
+- `ChatItems.tsx` shows `agentLabel(item.fromLabel)`.
+- `Inspector.tsx` shows `policyReason(...)` as a sentence plus a `.rule-chip`. `Transcript.tsx` shows `policyReason(e.reason).text` on approval entries.
+- `RouteView.tsx` shows a text-only work stop as `¶`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "test(desktop): end-to-end core flows — brief, fork, answer, approve, revision loop, report, steer, tray popover; line-geometry and policy-reason polish
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
