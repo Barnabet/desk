@@ -54,6 +54,12 @@ CREATE TABLE `artifacts` (
 );
 --> statement-breakpoint
 CREATE INDEX `artifacts_project_idx` ON `artifacts` (`project_id`);--> statement-breakpoint
+CREATE TABLE `attention_dismissals` (
+	`item_id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`dismissed_at` text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `events` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`project_id` text NOT NULL,

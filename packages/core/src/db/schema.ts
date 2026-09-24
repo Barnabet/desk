@@ -136,3 +136,10 @@ export const plans = sqliteTable('plans', {
   items: text('items', { mode: 'json' }).$type<PlanItem[]>().notNull(),
   updated_at: text('updated_at').notNull(),
 });
+
+/** Attention items the user dismissed (report needs_you, stalled and failed threads). */
+export const attentionDismissals = sqliteTable('attention_dismissals', {
+  item_id: text('item_id').primaryKey(),
+  project_id: text('project_id').notNull(),
+  dismissed_at: text('dismissed_at').notNull(),
+});

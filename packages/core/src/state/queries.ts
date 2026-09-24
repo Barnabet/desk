@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, inArray, isNull, max } from 'drizzle-orm';
-import type { EventType, StoredEvent } from '@desk/protocol';
+import { and, asc, desc, eq, gt, inArray, isNull, max, sql } from 'drizzle-orm';
+import type { EventOf, EventType, StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
 
@@ -88,3 +88,46 @@ export const listLiveAgents = (db: Db, statuses?: AgentRow['status'][]): AgentRo
 /** Highest event id of a project (0 if none): a stream cursor meaning "from now on". */
 export const lastProjectSeq = (db: Db, projectId: string): number =>
   db.select({ seq: max(events.id) }).from(events).where(eq(events.project_id, projectId)).get()?.seq ?? 0;
+
+/** The project's most recent event of `type`. */
+export function lastProjectEvent<T extends EventType>(db: Db, projectId: string, type: T): EventOf<T> | undefined {
+  const row = db
+    .select()
+    .from(events)
+    .where(and(eq(events.project_id, projectId), eq(events.type, type)))
+    .orderBy(desc(events.id))
+    .limit(1)
+    .get();
+  return row ? ({ ...row } as unknown as EventOf<T>) : undefined;
+}
+
+/** Whether the project has an event of `type` after event id `afterId`. */
+export function hasProjectEventAfter(db: Db, projectId: string, type: EventType, afterId: number): boolean {
+  return (
+    db
+      .select({ id: events.id })
+      .from(events)
+      .where(and(eq(events.project_id, projectId), eq(events.type, type), gt(events.id, afterId)))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
+/** The latest `stalled` notice sent on behalf of `threadId`. */
+export function lastStallFor(db: Db, projectId: string, threadId: string): EventOf<'message.agent'> | undefined {
+  const row = db
+    .select()
+    .from(events)
+    .where(
+      and(
+        eq(events.project_id, projectId),
+        eq(events.type, 'message.agent'),
+        sql`json_extract(${events.payload}, '$.kind') = 'stalled'`,
+        sql`json_extract(${events.payload}, '$.from_agent_id') = ${threadId}`,
+      ),
+    )
+    .orderBy(desc(events.id))
+    .limit(1)
+    .get();
+  return row ? ({ ...row } as unknown as EventOf<'message.agent'>) : undefined;
+}

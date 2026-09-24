@@ -9,7 +9,10 @@ export {
   getUsageTotals,
   getDeskAgent,
   getSource,
+  hasProjectEventAfter,
   lastEvent,
+  lastProjectEvent,
+  lastStallFor,
   lastProjectSeq,
   listActiveThreads,
   listAgents,
@@ -26,6 +29,7 @@ export {
   type SourceRow,
   type UsageRow,
 } from './state/queries';
+export { listAttention } from './state/attention';
 export { loadModelConfig, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { DEFAULT_MODEL_ID, ModelRegistry, SEED_MODELS } from './model/registry';
 export { classifyModelError, ModelError, type ModelErrorKind } from './model/errors';

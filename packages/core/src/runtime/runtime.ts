@@ -32,6 +32,7 @@ import {
   type AgentRow,
   type ProjectRow,
 } from '../state/queries';
+import { listAttention } from '../state/attention';
 import { JobManager } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
@@ -139,6 +140,15 @@ export class Runtime {
       payload: { role: 'desk', model: deskModel, title: 'Desk', brief: null, workspace_path: deskDir, parent_id: null },
     });
     return id;
+  }
+
+  /** Dismisses a needs_you, stalled or failed attention item. Approvals and questions leave the list when answered. */
+  dismissAttention(itemId: string): void {
+    const kind = itemId.split(':')[0];
+    if (kind === 'approval' || kind === 'question') throw new ConflictError(`${kind} items leave the list when they are answered`);
+    const item = listAttention(this.o.store.db).find((i) => i.id === itemId);
+    if (!item) throw new NotFoundError(`No attention item ${itemId}`);
+    this.o.store.append({ project_id: item.project_id, agent_id: null, type: 'attention.dismissed', payload: { item_id: itemId } });
   }
 
   projectDir(projectId: string): string {
