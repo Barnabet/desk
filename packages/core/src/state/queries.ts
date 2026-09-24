@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, max, sql } from 'drizzle-orm';
 import type { EventOf, EventType, StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
@@ -131,3 +131,23 @@ export function lastStallFor(db: Db, projectId: string, threadId: string): Event
     .get();
   return row ? ({ ...row } as unknown as EventOf<'message.agent'>) : undefined;
 }
+
+/** Token usage per project and model, optionally from `sinceDay` (YYYY-MM-DD) on. */
+export function getUsageByProject(db: Db, sinceDay?: string): Array<{ project_id: string; model: string; prompt_tokens: number; completion_tokens: number }> {
+  return db
+    .select({
+      project_id: usageTotals.project_id,
+      model: usageTotals.model,
+      prompt_tokens: sql<number>`sum(${usageTotals.prompt_tokens})`,
+      completion_tokens: sql<number>`sum(${usageTotals.completion_tokens})`,
+    })
+    .from(usageTotals)
+    .where(sinceDay ? gte(usageTotals.day, sinceDay) : undefined)
+    .groupBy(usageTotals.project_id, usageTotals.model)
+    .orderBy(asc(usageTotals.project_id), asc(usageTotals.model))
+    .all()
+    .map((r) => ({ ...r, prompt_tokens: Number(r.prompt_tokens), completion_tokens: Number(r.completion_tokens) }));
+}
+
+/** Highest event id overall (0 if none). */
+export const lastSeq = (db: Db): number => db.select({ seq: max(events.id) }).from(events).get()?.seq ?? 0;

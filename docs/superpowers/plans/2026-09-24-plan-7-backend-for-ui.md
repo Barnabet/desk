@@ -1435,8 +1435,8 @@ describe('thread inspection', () => {
     await writeFile(join(repo, 'a.txt'), 'one\n');
     g('add', '.');
     g('commit', '-qm', 'init');
-    await runtime.addSource(projectId, repo);
-    const threadId = await runtime.services.spawnThread(getDeskAgent(h.store.db, projectId)!.id, { title: 'Checklist', brief: 'b' });
+    const gitSourceId = await runtime.addSource(projectId, repo);
+    const threadId = await runtime.services.spawnThread(getDeskAgent(h.store.db, projectId)!.id, { title: 'Checklist', brief: 'b', gitSourceId });
     const t = (await api('GET', `/threads/${threadId}`)).body;
     await writeFile(join(t.workspace_path, 'a.txt'), 'two\n');
     await mkdir(join(t.workspace_path, 'docs'));
@@ -1452,6 +1452,7 @@ describe('thread inspection', () => {
     expect(raw).toMatchObject({ status: 200, body: '# x' });
     expect((await api('GET', `/threads/${threadId}/files/raw/..%2F..%2Fetc%2Fpasswd`)).status).toBe(403);
     expect((await api('GET', `/threads/${threadId}/files/raw/nope.txt`)).status).toBe(404);
+    await runtime.shutdown();
   });
 
   it('409s for a thread without git', async () => {
@@ -1489,7 +1490,7 @@ describe('usage', () => {
 });
 ```
 
-`runtime.services.spawnThread(parentId, { title, brief })` returns `Promise<string>`. With exactly one git source on the project, it creates the thread's git worktree.
+`runtime.services.spawnThread(parentId, { title, brief, gitSourceId })` returns `Promise<string>` and creates the thread's git worktree on that source.
 
 - [ ] **Step 2: Run to verify failure**
 

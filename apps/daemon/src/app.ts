@@ -7,6 +7,7 @@ import { knowledgeRoutes } from './routes/knowledge';
 import { projectRoutes } from './routes/projects';
 import { skillRoutes } from './routes/skills';
 import { systemRoutes } from './routes/system';
+import { uiRoutes } from './routes/ui';
 
 export type AppDeps = {
   runtime: Runtime;
@@ -28,6 +29,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/v1', projectRoutes(deps));
   app.route('/v1', agentRoutes(deps));
   app.route('/v1', knowledgeRoutes(deps));
+  app.route('/v1', uiRoutes(deps));
   app.route('/v1', skillRoutes(deps));
   app.route('/v1', systemRoutes(deps));
   return app;
