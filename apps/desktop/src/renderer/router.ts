@@ -5,6 +5,7 @@ export const PROJECT_TABS: ProjectTab[] = ['conversation', 'threads', 'library',
 
 export type Route =
   | { name: 'onboarding' }
+  | { name: 'tray' }
   | { name: 'map'; newProject?: boolean }
   | { name: 'attention'; item?: string }
   | { name: 'skills'; skill?: string }
@@ -20,6 +21,8 @@ export function parseRoute(hash: string): Route {
   switch (parts[0]) {
     case 'onboarding':
       return { name: 'onboarding' };
+    case 'tray':
+      return { name: 'tray' };
     case 'attention': {
       const item = q.get('item');
       return item ? { name: 'attention', item } : { name: 'attention' };
@@ -45,6 +48,8 @@ export function href(r: Route): string {
   switch (r.name) {
     case 'onboarding':
       return '#/onboarding';
+    case 'tray':
+      return '#/tray';
     case 'map':
       return r.newProject ? '#/map?new=1' : '#/map';
     case 'attention':

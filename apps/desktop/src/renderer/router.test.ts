@@ -12,6 +12,7 @@ describe('router', () => {
       { name: 'skills' },
       { name: 'skills', skill: 'brand-voice' },
       { name: 'system' },
+      { name: 'tray' },
       { name: 'project', id: 'p1', tab: 'conversation' },
       { name: 'project', id: 'p1', tab: 'threads', threadId: 't9' },
       { name: 'project', id: 'p1', tab: 'settings' },

@@ -32,6 +32,7 @@ async function setup(overrides: Partial<HandlerContext> = {}) {
       pickFolder: async () => '/picked',
       revealLogs: async () => {},
       saveFile: async () => true,
+      openMain: (route) => void opened.push(`main:${route ?? ''}`),
       settings: () => ({ notifications: true }),
       updateSettings: (p) => ({ notifications: p.notifications ?? true }),
     },
@@ -80,6 +81,16 @@ describe('IPC dispatch', () => {
       expect(await dispatch('app.openExternal', { url }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_url' } });
     }
     expect(opened).toEqual(['https://example.com/a?b=1', 'mailto:a@b.c']);
+  });
+
+  it('opens the main window only at an in-app hash route', async () => {
+    const { ctx, opened } = await setup();
+    expect(await dispatch('app.openMain', {}, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('app.openMain', { route: '#/attention?item=approval%3Aa1' }, ctx)).toMatchObject({ ok: true });
+    for (const route of ['https://evil.example', 'javascript:alert(1)', '#/a b']) {
+      expect(await dispatch('app.openMain', { route }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    }
+    expect(opened).toEqual(['main:', 'main:#/attention?item=approval%3Aa1']);
   });
 
   it('returns raw bytes and passes the sender to the broker', async () => {

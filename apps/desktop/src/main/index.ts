@@ -15,6 +15,7 @@ import { createLog } from './log';
 import { buildAppMenu } from './menu';
 import { attentionRoute, notificationFor } from './notify';
 import { AppSettingsStore } from './settings';
+import { TrayPopover } from './popover';
 import { DeskTray } from './tray';
 import { createMainWindow, hardenSession, isAppUrl, registerAppScheme, serveRenderer } from './windows';
 
@@ -22,7 +23,7 @@ const e2e = process.env.DESK_E2E === '1';
 if (process.env.DESK_USER_DATA) app.setPath('userData', process.env.DESK_USER_DATA);
 registerAppScheme();
 
-const testHooks = { trayTitle: () => '', notifications: [] as Array<{ title: string; body: string }> };
+const testHooks = { trayTitle: () => '', notifications: [] as Array<{ title: string; body: string }>, togglePopover: () => {} };
 if (e2e) (globalThis as { __deskTest?: typeof testHooks }).__deskTest = testHooks;
 
 async function start(): Promise<void> {
@@ -56,8 +57,11 @@ async function start(): Promise<void> {
   });
 
   let tray: DeskTray | null = null;
+  const popover = new TrayPopover({ preload, hideOnBlur: !e2e });
+  const mainWindow = () => BrowserWindow.getAllWindows().find((w) => !popover.is(w) && !w.isDestroyed());
   const openRoute = (route?: string) => {
-    const win = BrowserWindow.getAllWindows()[0];
+    popover.hide();
+    const win = mainWindow();
     if (!win) {
       createMainWindow({ preload, ...(route ? { route } : {}) });
       return;
@@ -69,7 +73,8 @@ async function start(): Promise<void> {
   };
 
   const notify = (items: AttentionItem[]) => {
-    if (!settings.get().notifications || BrowserWindow.getFocusedWindow()) return;
+    const focused = BrowserWindow.getFocusedWindow();
+    if (!settings.get().notifications || (focused && !popover.is(focused))) return;
     for (const item of items.slice(0, 3)) {
       const n = notificationFor(item);
       if (e2e) {
@@ -145,6 +150,7 @@ async function start(): Promise<void> {
         const err = await shell.openPath(dir);
         if (err) throw new UserFacingError('reveal_failed', err);
       },
+      openMain: (route) => openRoute(route),
       saveFile: async (name, data) => {
         const r = await dialog.showSaveDialog({ defaultPath: join(app.getPath('downloads'), basename(name)) });
         if (r.canceled || !r.filePath) return false;
@@ -173,8 +179,9 @@ async function start(): Promise<void> {
   hardenSession();
   serveRenderer(join(__dirname, 'renderer'));
   Menu.setApplicationMenu(buildAppMenu({ navigate: openRoute, dev: !app.isPackaged }));
-  tray = new DeskTray({ open: openRoute, quit: () => app.quit() });
+  tray = new DeskTray({ open: openRoute, quit: () => app.quit(), toggle: (bounds) => popover.toggle(bounds) });
   testHooks.trayTitle = () => tray?.title ?? '';
+  testHooks.togglePopover = () => popover.toggle();
   tray.update(broker.snapshot());
 
   if (app.isPackaged) await daemon.ensureCurrent().catch((err) => log('daemon refresh failed', err));

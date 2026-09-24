@@ -23,6 +23,7 @@ export type HandlerContext = {
     pickFolder(purpose: 'source' | 'skill-import'): Promise<string | null>;
     revealLogs(): Promise<void>;
     saveFile(name: string, data: Uint8Array): Promise<boolean>;
+    openMain(route?: string): void;
     settings(): AppSettings;
     updateSettings(patch: AppSettingsPatch): AppSettings;
   };
@@ -137,6 +138,10 @@ export const handlers = {
   'app.revealLogs': async (_i, c) => {
     await c.app.revealLogs();
     return ok;
+  },
+  'app.openMain': (i, c) => {
+    c.app.openMain(i.route);
+    return { ok: true as const };
   },
   'app.saveFile': (i, c) => c.app.saveFile(i.name, i.data),
   'app.settings': (_i, c) => c.app.settings(),

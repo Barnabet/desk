@@ -104,6 +104,8 @@ export const channels = {
   'app.openExternal': z.object({ url: z.string().min(1).max(4096) }),
   'app.pickFolder': z.object({ purpose: z.enum(['source', 'skill-import']) }),
   'app.revealLogs': none,
+  /** From the tray popover: bring up the main window, optionally at a hash route. */
+  'app.openMain': z.object({ route: z.string().max(512).regex(/^#\/[^\s]*$/).optional() }),
   'app.saveFile': z.object({ name: z.string().min(1).max(255), data: z.instanceof(Uint8Array) }),
   'app.settings': none,
   'app.updateSettings': AppSettingsPatch,

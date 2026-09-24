@@ -1,5 +1,6 @@
 import type { AttentionItem } from '@desk/protocol';
 import { gauge, STRIP_CODE, stripWho, waited } from './strips';
+import './attention.css';
 
 const CAP_COLOR: Record<AttentionItem['kind'], string> = { approval: 'var(--accent)', question: 'var(--ink)', needs_you: 'var(--ink)', stalled: 'var(--wait)', failed: 'var(--accent)' };
 

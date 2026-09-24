@@ -7470,3 +7470,779 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 7: Menu-bar popover — mini line, clearance in place, also waiting
+
+**Files:**
+- Create: `apps/desktop/src/main/popoverPosition.test.ts`, `apps/desktop/src/renderer/tray/miniLine.test.ts`, `apps/desktop/src/renderer/tray/TrayPopover.test.tsx`, `apps/desktop/src/main/popoverPosition.ts`, `apps/desktop/src/main/popover.ts`, `apps/desktop/src/main/tray.ts`, `apps/desktop/src/renderer/tray/miniLine.ts`, `apps/desktop/src/renderer/tray/TrayPopover.tsx`, `apps/desktop/src/renderer/tray/tray.css`
+- Modify: `apps/desktop/src/shared/ipc.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/main/handlers.test.ts`, `apps/desktop/src/main/index.ts`, `apps/desktop/src/renderer/router.ts`, `apps/desktop/src/renderer/router.test.ts`, `apps/desktop/src/renderer/App.tsx`, `apps/desktop/src/renderer/attention/FlightStrip.tsx`
+
+**Interfaces:**
+
+- Consumes: the global state (attention, overview, connection, proxy); `FlightStrip` (compact), `describeArgs`, `rackOrder` and `waited` (Task 5).
+- Produces:
+
+```ts
+// shared/ipc.ts — new channel
+'app.openMain': z.object({ route: z.string().max(512).regex(/^#\/[^\s]*$/).optional() })   // → { ok: true }
+// main/handlers.ts — HandlerContext.app gains
+openMain(route?: string): void;
+// main/popoverPosition.ts
+export function popoverPosition(anchor: Rect, size: { width: number; height: number }, work: Rect, gap?: number): { x: number; y: number };
+// main/popover.ts
+export class TrayPopover { is(w): boolean; visible: boolean; window: BrowserWindow | null; toggle(anchor?): void; show(anchor?): void; hide(): void }
+// router.ts — Route gains { name: 'tray' }  (#/tray)
+// renderer/tray/miniLine.ts
+export function miniLine(o: { overview: ProjectSummary[]; attention: AttentionItem[]; now: number; width?: number; height?: number; maxLanes?: number }): MiniLine;
+// renderer/tray/TrayPopover.tsx
+export function TrayPopover(): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/main/popoverPosition.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { popoverPosition } from './popoverPosition';
+
+const size = { width: 400, height: 600 };
+
+describe('popoverPosition', () => {
+  it('centres under a menu-bar icon', () => {
+    expect(popoverPosition({ x: 1000, y: 0, width: 24, height: 24 }, size, { x: 0, y: 25, width: 1512, height: 920 })).toEqual({ x: 812, y: 31 });
+  });
+
+  it('stays on screen at the right edge', () => {
+    expect(popoverPosition({ x: 1490, y: 0, width: 22, height: 24 }, size, { x: 0, y: 25, width: 1512, height: 920 }).x).toBe(1512 - 400 - 6);
+  });
+
+  it('opens above a taskbar icon at the bottom', () => {
+    expect(popoverPosition({ x: 1700, y: 1040, width: 24, height: 40 }, size, { x: 0, y: 0, width: 1920, height: 1040 })).toEqual({ x: 1512, y: 434 });
+  });
+});
+```
+
+`apps/desktop/src/renderer/tray/miniLine.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import type { AttentionItem, ProjectSummary } from '@desk/protocol';
+import { miniLine } from './miniLine';
+
+const now = Date.parse('2026-09-24T11:27:00.000Z');
+const at = (min: number) => new Date(now - min * 60_000).toISOString();
+const thread = (id: string, status: string, created: number, updated: number, title = id) => ({ id, title, status, reason: null, activity: null, model: 'm', git_branch: null, skills: [], review_round: 0, created_at: at(created), updated_at: at(updated) });
+const project = (id: string, threads: ReturnType<typeof thread>[]) =>
+  ({ project: { id, name: id, goal: '', updated_at: at(0) }, desk_status: 'idle', threads, latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 }) as unknown as ProjectSummary;
+
+describe('miniLine', () => {
+  it('forks the busiest threads, newest nearest the trunk, with signals and trains', () => {
+    const overview = [
+      project('a', [thread('funnel', 'running', 20, 0), thread('emails', 'running', 60, 0), thread('old', 'done', 60 * 30, 60 * 30)]),
+      project('b', [thread('checklist', 'waiting', 90, 10), thread('backup', 'running', 120, 22), thread('extra', 'done', 100, 50)]),
+    ];
+    const attention = [
+      { id: 'approval:x', kind: 'approval', project_id: 'b', project_name: 'b', agent_id: 'checklist', title: '', detail: '', created_at: at(10), ref: { thread_id: 'checklist' } },
+      { id: 'stalled:backup:1', kind: 'stalled', project_id: 'b', project_name: 'b', agent_id: 'backup', title: '', detail: '', created_at: at(22), ref: { thread_id: 'backup' } },
+    ] as AttentionItem[];
+    const m = miniLine({ overview, attention, now });
+    expect(m.lanes.map((l) => l.id)).toEqual(['funnel', 'emails', 'checklist', 'backup']);
+    expect(m.lanes.map((l) => l.y)).toEqual([...m.lanes.map((l) => l.y)].sort((a, b) => a - b));
+    expect(m.lanes[0]!.end).toEqual({ x: m.nowX, kind: 'train' });
+    expect(m.lanes[2]!.end.kind).toBe('signal');
+    expect(m.lanes[3]).toMatchObject({ title: 'backup · stalled', dashed: true });
+    expect(m.lanes[3]!.end.kind).toBe('train');
+    for (const l of m.lanes) expect(l.y).toBeLessThan(m.height);
+  });
+
+  it('draws just the trunk on a quiet day', () => {
+    const m = miniLine({ overview: [project('a', [thread('old', 'done', 60 * 30, 60 * 30)])], attention: [], now });
+    expect(m.lanes).toEqual([]);
+    expect(m.trunk).toBe(`M8 18 H ${m.nowX}`);
+  });
+});
+```
+
+`apps/desktop/src/renderer/tray/TrayPopover.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { AttentionItem, ProjectSummary } from '@desk/protocol';
+import { initialGlobalState } from '../../shared/state';
+import { globalStore } from '../state/global';
+import { installBridge } from '../test/bridge';
+import { TrayPopover } from './TrayPopover';
+
+afterEach(cleanup);
+
+const ts = new Date(Date.now() - 4 * 60_000).toISOString();
+const attention: AttentionItem[] = [
+  { id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Onboarding', agent_id: 't', title: 'Signup checklist wants to run bash', detail: '', created_at: ts, ref: { approval_id: 'a1', thread_id: 't' } },
+  { id: 'question:5', kind: 'question', project_id: 'p', project_name: 'Onboarding', agent_id: 'd', title: 'Data source or teammate first?', detail: '', created_at: ts, ref: { event_id: 5 } },
+];
+const overview = [
+  {
+    project: { id: 'p', name: 'Onboarding', goal: '', updated_at: ts },
+    desk_status: 'idle',
+    threads: [{ id: 't', title: 'Signup checklist', status: 'waiting', reason: null, activity: null, model: 'm', git_branch: null, skills: [], review_round: 0, created_at: ts, updated_at: ts }],
+    latest_report: null,
+    plan_progress: { done: 0, total: 0 },
+    attention_count: 2,
+  },
+] as unknown as ProjectSummary[];
+
+describe('TrayPopover', () => {
+  it('clears approvals in place and opens Desk where you need it', async () => {
+    globalStore.set({ ...initialGlobalState(), connection: { status: 'live' }, system: { proxy: 'up', notices: [], lastSeq: 0 }, attention, overview });
+    const bridge = installBridge({
+      'approvals.list': () => [{ id: 'a1', project_id: 'p', agent_id: 't', run_id: 'r', tool_call_id: 'c', tool: 'bash', arguments: '{"command":"curl -fsSL https://bun.sh/install | bash"}', reason: 'r', delegate_to_desk: false, status: 'pending', resolved_by: null, note: null, created_at: ts, resolved_at: null }],
+      'approvals.resolve': () => ({ ok: true }),
+      'app.openMain': () => ({ ok: true }),
+    });
+    render(<TrayPopover />);
+    expect(screen.getByText('2 need you')).toBeTruthy();
+    const card = screen.getByRole('article', { name: /^Approval: Signup checklist/ });
+    expect(await within(card).findByText('curl -fsSL https://bun.sh/install | bash')).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'approved' }));
+    expect(screen.getByText('ALSO WAITING · 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^ASK, Onboarding: Data source/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Signup checklist' }));
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+    await waitFor(() =>
+      expect(bridge.calls.filter((c) => c.channel === 'app.openMain').map((c) => c.input)).toEqual([{ route: '#/attention?item=question%3A5' }, { route: '#/p/p/threads/t' }, {}]),
+    );
+    expect(screen.getByText('deskd running · proxy up')).toBeTruthy();
+  });
+
+  it('is calm when nothing needs you', () => {
+    globalStore.set({ ...initialGlobalState(), connection: { status: 'live' } });
+    installBridge();
+    render(<TrayPopover />);
+    expect(screen.getByText('All clear')).toBeTruthy();
+    expect(screen.getByText(/Nothing needs you/)).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/tray apps/desktop/src/main`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/main/popoverPosition.ts`:
+
+```ts
+export type Rect = { x: number; y: number; width: number; height: number };
+
+/**
+ * Where the popover goes: centred under the tray icon (macOS menu bar), or above it when the
+ * tray sits at the bottom of the screen (the Windows taskbar), kept inside the work area.
+ */
+export function popoverPosition(anchor: Rect, size: { width: number; height: number }, work: Rect, gap = 6): { x: number; y: number } {
+  const below = anchor.y + anchor.height / 2 < work.y + work.height / 2;
+  const x = Math.round(anchor.x + anchor.width / 2 - size.width / 2);
+  const y = below ? anchor.y + anchor.height + gap : anchor.y - size.height - gap;
+  return {
+    x: Math.min(Math.max(x, work.x + gap), work.x + work.width - size.width - gap),
+    y: Math.min(Math.max(y, work.y + gap), work.y + work.height - size.height - gap),
+  };
+}
+```
+
+`apps/desktop/src/main/popover.ts`:
+
+```ts
+import { BrowserWindow, screen, type Rectangle } from 'electron';
+import { popoverPosition } from './popoverPosition';
+import { isAppUrl, rendererUrl } from './windows';
+
+const SIZE = { width: 400, height: 620 };
+
+/** The menu-bar popover: a small frameless window at #/tray that hides when it loses focus. */
+export class TrayPopover {
+  private win: BrowserWindow | null = null;
+
+  constructor(private readonly o: { preload: string; hideOnBlur: boolean }) {}
+
+  is(w: BrowserWindow | null | undefined): boolean {
+    return !!w && w === this.win;
+  }
+
+  get visible(): boolean {
+    return !!this.win && !this.win.isDestroyed() && this.win.isVisible();
+  }
+
+  get window(): BrowserWindow | null {
+    return this.win;
+  }
+
+  toggle(anchor?: Rectangle): void {
+    if (this.visible) this.hide();
+    else this.show(anchor);
+  }
+
+  show(anchor?: Rectangle): void {
+    const win = this.ensure();
+    const point = anchor ? { x: anchor.x, y: anchor.y } : screen.getCursorScreenPoint();
+    const work = screen.getDisplayNearestPoint(point).workArea;
+    const a = anchor ?? { x: point.x, y: point.y, width: 1, height: 1 };
+    const { x, y } = popoverPosition(a, SIZE, work);
+    win.setBounds({ x, y, ...SIZE });
+    win.show();
+    win.focus();
+  }
+
+  hide(): void {
+    if (this.win && !this.win.isDestroyed()) this.win.hide();
+  }
+
+  private ensure(): BrowserWindow {
+    if (this.win && !this.win.isDestroyed()) return this.win;
+    const win = new BrowserWindow({
+      ...SIZE,
+      show: false,
+      frame: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      title: 'Desk',
+      backgroundColor: '#FBFAF7',
+      webPreferences: { preload: this.o.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false },
+    });
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', (e, url) => {
+      if (!isAppUrl(url)) e.preventDefault();
+    });
+    if (this.o.hideOnBlur) win.on('blur', () => this.hide());
+    win.on('closed', () => {
+      this.win = null;
+    });
+    void win.loadURL(`${rendererUrl()}#/tray`);
+    this.win = win;
+    return win;
+  }
+}
+```
+
+`apps/desktop/src/main/tray.ts`:
+
+```ts
+import { Menu, nativeImage, Tray, type Rectangle } from 'electron';
+import type { GlobalState } from '../shared/state';
+import { trayIconBitmap } from './trayIcon';
+import { trayModel } from './trayModel';
+
+/** The menu-bar item. The app keeps running here after its last window closes. */
+export class DeskTray {
+  private readonly tray: Tray;
+  private menu: Menu | null = null;
+  title = '';
+
+  /** Left click toggles the popover; right click (or ctrl-click) shows the menu. */
+  constructor(private readonly o: { open(route?: string): void; quit(): void; toggle(bounds: Rectangle): void }) {
+    const icon = nativeImage.createFromBitmap(trayIconBitmap(32), { width: 32, height: 32, scaleFactor: 2 });
+    icon.setTemplateImage(true);
+    this.tray = new Tray(icon);
+    this.tray.on('click', (e, bounds) => (e.ctrlKey ? this.popUpMenu() : this.o.toggle(bounds)));
+    this.tray.on('right-click', () => this.popUpMenu());
+  }
+
+  private popUpMenu(): void {
+    if (this.menu) this.tray.popUpContextMenu(this.menu);
+  }
+
+  update(state: GlobalState): void {
+    const m = trayModel(state);
+    this.title = m.title;
+    if (process.platform === 'darwin') this.tray.setTitle(m.title ? ` ${m.title}` : '');
+    this.tray.setToolTip(m.tooltip);
+    this.menu = Menu.buildFromTemplate(
+      m.items.map((item) =>
+        'separator' in item
+          ? { type: 'separator' as const }
+          : { label: item.label, enabled: item.enabled ?? true, click: () => (item.action === 'quit' ? this.o.quit() : this.o.open(item.route)) },
+      ),
+    );
+  }
+}
+```
+
+`apps/desktop/src/renderer/tray/miniLine.ts`:
+
+```ts
+import type { AgentStatus, AttentionItem, ProjectSummary } from '@desk/protocol';
+
+export type MiniLane = {
+  id: string;
+  projectId: string;
+  title: string;
+  status: AgentStatus;
+  y: number;
+  d: string;
+  color: string;
+  text: string;
+  dashed: boolean;
+  end: { x: number; kind: 'train' | 'signal' | 'stalled' | 'stop' | 'none' };
+};
+export type MiniLine = { width: number; height: number; trunkY: number; x0: number; nowX: number; trunk: string; lanes: MiniLane[] };
+
+const COLOR: Record<AgentStatus, [string, string]> = {
+  running: ['#2F5BD3', '#1F45A8'],
+  waiting: ['#A15C00', '#7A4500'],
+  queued: ['#A15C00', '#7A4500'],
+  idle: ['#B9B3A7', '#4A4740'],
+  done: ['#8A857B', '#4A4740'],
+  cancelled: ['#8A857B', '#4A4740'],
+  failed: ['#C4441C', '#C4441C'],
+};
+const RANK: Record<AgentStatus, number> = { waiting: 1, running: 2, queued: 3, failed: 4, idle: 5, done: 6, cancelled: 7 };
+
+/**
+ * Today at a glance for the menu-bar popover: Desk's trunk across every project, and the busiest
+ * threads forking off it, newest nearest the trunk. Threads that need you end in a signal.
+ */
+export function miniLine(o: { overview: ProjectSummary[]; attention: AttentionItem[]; now: number; width?: number; height?: number; maxLanes?: number }): MiniLine {
+  const width = o.width ?? 378;
+  const height = o.height ?? 118;
+  const maxLanes = o.maxLanes ?? 4;
+  const x0 = 8;
+  const nowX = width - 164;
+  const trunkY = 18;
+  const signal = new Set(o.attention.filter((i) => i.kind === 'approval' || i.kind === 'failed').map((i) => i.ref.thread_id ?? i.agent_id));
+  const stalled = new Set(o.attention.filter((i) => i.kind === 'stalled').map((i) => i.ref.thread_id ?? i.agent_id));
+  const dayAgo = o.now - 24 * 3_600_000;
+  const threads = o.overview
+    .flatMap((p) => p.threads.map((t) => ({ ...t, projectId: p.project.id })))
+    .filter((t) => t.status === 'running' || t.status === 'waiting' || t.status === 'queued' || Date.parse(t.updated_at) >= dayAgo)
+    .sort((a, b) => Number(signal.has(b.id) || stalled.has(b.id)) - Number(signal.has(a.id) || stalled.has(a.id)) || RANK[a.status] - RANK[b.status] || b.updated_at.localeCompare(a.updated_at))
+    .slice(0, maxLanes)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const start = Math.min(o.now - 30 * 60_000, ...threads.map((t) => Date.parse(t.created_at)));
+  const x = (ts: string) => x0 + 8 + ((Date.parse(ts) - start) / Math.max(1, o.now - start)) * (nowX - x0 - 24);
+  const gap = Math.min(20, (height - trunkY - 20) / Math.max(1, threads.length));
+  const lanes = threads.map((t, i): MiniLane => {
+    const y = trunkY + gap * (i + 1);
+    const xf = Math.min(x(t.created_at), nowX - 24);
+    const live = t.status === 'running';
+    const endX = live ? nowX : Math.max(xf + 16, Math.min(nowX - 6, x(t.updated_at)));
+    const [color, text] = COLOR[t.status];
+    const r = Math.min(8, (y - trunkY) / 2);
+    return {
+      id: t.id,
+      projectId: t.projectId,
+      title: `${t.title ?? 'Thread'}${stalled.has(t.id) ? ' · stalled' : ''}`,
+      status: t.status,
+      y,
+      d: `M${xf} ${trunkY} Q ${xf + r} ${trunkY} ${xf + r} ${trunkY + r} V ${y - r} Q ${xf + r} ${y} ${xf + 2 * r} ${y} H ${endX}`,
+      color,
+      text,
+      dashed: t.status === 'queued' || stalled.has(t.id),
+      end: { x: endX, kind: live ? 'train' : signal.has(t.id) ? 'signal' : stalled.has(t.id) ? 'stalled' : t.status === 'done' ? 'stop' : 'none' },
+    };
+  });
+  return { width, height, trunkY, x0, nowX, trunk: `M${x0} ${trunkY} H ${nowX}`, lanes };
+}
+```
+
+`apps/desktop/src/renderer/tray/TrayPopover.tsx`:
+
+```tsx
+import { useEffect, useMemo, useState } from 'react';
+import type { ApprovalRow } from '@desk/client';
+import type { AttentionItem } from '@desk/protocol';
+import { call, DeskCallError } from '../bridge';
+import { describeArgs } from '../attention/Inspector';
+import { FlightStrip } from '../attention/FlightStrip';
+import { rackOrder, STRIP_CODE, waited } from '../attention/strips';
+import { Button } from '../components/Button';
+import { describeError } from '../components/Toast';
+import { href } from '../router';
+import { useGlobal } from '../state/global';
+import { useNow } from '../state/now';
+import { miniLine } from './miniLine';
+import './tray.css';
+
+const MAX_CLEARANCE = 2;
+const MAX_WAITING = 4;
+
+const openMain = (route?: string) => void call('app.openMain', route ? { route } : {}).catch(() => {});
+
+function useApprovalArgs(items: AttentionItem[]): Map<string, ApprovalRow> {
+  const key = items.map((i) => i.id).join(',');
+  const [rows, setRows] = useState<Map<string, ApprovalRow>>(new Map());
+  useEffect(() => {
+    let live = true;
+    const projects = [...new Set(items.map((i) => i.project_id))];
+    void Promise.all(projects.map((p) => call('approvals.list', { projectId: p, status: 'pending' }).catch(() => [] as ApprovalRow[]))).then((lists) => {
+      if (live) setRows(new Map(lists.flat().map((a) => [a.id, a])));
+    });
+    return () => {
+      live = false;
+    };
+    // Refetch only when the set of approvals changes.
+  }, [key]);
+  return rows;
+}
+
+function Clearance({ item, row, now }: { item: AttentionItem; row: ApprovalRow | undefined; now: number }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const cmd = row ? describeArgs(row.tool, row.arguments) : null;
+  const resolve = async (decision: 'approved' | 'denied') => {
+    if (!item.ref.approval_id) return;
+    setBusy(decision);
+    setMessage(null);
+    try {
+      await call('approvals.resolve', { id: item.ref.approval_id, decision });
+    } catch (err) {
+      setMessage(err instanceof DeskCallError && err.status === 409 ? 'Already decided.' : describeError(err).message);
+      setBusy(null);
+    }
+  };
+  return (
+    <article className="tray-clearance" aria-label={`Approval: ${item.title}`}>
+      <span className="tray-cap" aria-hidden="true">
+        <span className="strip-code">{STRIP_CODE.approval}</span>
+        <span className="strip-age">{waited(item.created_at, now)}</span>
+      </span>
+      <div className="tray-clearance-body">
+        <span className="strip-project">
+          {item.project_name} · {item.ref.thread_id ? 'thread' : 'Desk'}
+        </span>
+        <span className="tray-clearance-title">{item.title}</span>
+        {cmd ? <code className="tray-command">{cmd.command ?? cmd.pretty.replace(/\s+/g, ' ')}</code> : null}
+        <div className="tray-clearance-actions">
+          <Button size="sm" variant="primary" pending={busy === 'approved'} disabled={busy !== null} onClick={() => void resolve('approved')}>
+            Approve
+          </Button>
+          <Button size="sm" pending={busy === 'denied'} disabled={busy !== null} onClick={() => void resolve('denied')}>
+            Deny
+          </Button>
+          <span className="grow" />
+          <button type="button" className="link small" onClick={() => openMain(href({ name: 'attention', item: item.id }))}>
+            Details
+          </button>
+        </div>
+        {message ? (
+          <span className="small muted" role="status">
+            {message}
+          </span>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+/** The menu-bar popover: today's line, approvals you can clear in place, what else is waiting, and a way into Desk. */
+export function TrayPopover() {
+  const attention = useGlobal((g) => g.attention);
+  const overview = useGlobal((g) => g.overview);
+  const status = useGlobal((g) => g.connection.status);
+  const proxy = useGlobal((g) => g.system.proxy);
+  const now = useNow();
+  const { flat } = useMemo(() => rackOrder(attention), [attention]);
+  const clearance = flat.filter((i) => i.kind === 'approval');
+  const others = flat.filter((i) => i.kind !== 'approval');
+  const args = useApprovalArgs(clearance.slice(0, MAX_CLEARANCE));
+  const line = useMemo(() => miniLine({ overview, attention, now }), [overview, attention, now]);
+  const titles = useMemo(() => new Map(overview.flatMap((p) => p.threads.map((t) => [t.id, t.title] as const))), [overview]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        openMain();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const daemon = status === 'live' ? `deskd running · proxy ${proxy}` : status === 'offline' ? 'deskd is not running' : status === 'reconnecting' ? 'Reconnecting…' : 'Connecting…';
+  return (
+    <div className="tray-pop">
+      <header className="tray-head">
+        <h1>Desk</h1>
+        <span className={flat.length ? 'tray-count needs' : 'tray-count'}>{flat.length ? `${flat.length} need you` : 'All clear'}</span>
+      </header>
+      <div className="tray-line" role="img" aria-label={`Today: ${line.lanes.map((l) => `${l.title} ${l.status}`).join(', ') || 'no threads'}`}>
+        <svg width={line.width} height={line.height} aria-hidden="true">
+          <path d={`M${line.nowX} 6 V ${line.height - 20}`} stroke="#8A857B" strokeWidth="1" strokeDasharray="2 3" />
+          {line.lanes.map((l) => (
+            <path key={l.id} d={l.d} fill="none" stroke={l.color} strokeWidth="2" strokeDasharray={l.dashed ? '4 3' : undefined} />
+          ))}
+          <path d={line.trunk} stroke="#1C1B18" strokeWidth="2" />
+          <circle cx={line.x0} cy={line.trunkY} r="3" fill="#1C1B18" />
+          {line.lanes.map((l) =>
+            l.end.kind === 'train' ? (
+              <g key={`e${l.id}`}>
+                <circle cx={l.end.x} cy={l.y} r="8" fill="#2F5BD3" fillOpacity="0.18" />
+                <circle cx={l.end.x} cy={l.y} r="4.5" fill="#2F5BD3" />
+              </g>
+            ) : l.end.kind === 'signal' ? (
+              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="5" fill="#C4441C" stroke="#F4F1EA" strokeWidth="1.5" />
+            ) : l.end.kind === 'stalled' ? (
+              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="3.5" fill="#fff" stroke="#A15C00" strokeWidth="1.8" />
+            ) : l.end.kind === 'stop' ? (
+              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="3" fill="#8A857B" />
+            ) : null,
+          )}
+        </svg>
+        <span className="tray-line-label desk" style={{ left: line.nowX + 12, top: line.trunkY - 8 }}>
+          Desk
+        </span>
+        {line.lanes.map((l) => (
+          <button key={l.id} type="button" className="tray-line-label" style={{ left: line.nowX + 12, top: l.y - 8, color: l.text }} onClick={() => openMain(href({ name: 'project', id: l.projectId, tab: 'threads', threadId: l.id }))}>
+            {l.title}
+          </button>
+        ))}
+        <span className="tray-line-now" style={{ left: line.nowX, top: line.height - 17 }}>
+          now
+        </span>
+      </div>
+      <div className="tray-body">
+        {clearance.length ? (
+          <>
+            <span className="tray-section">CLEARANCE · {clearance.length}</span>
+            {clearance.slice(0, MAX_CLEARANCE).map((i) => (
+              <Clearance key={i.id} item={i} row={i.ref.approval_id ? args.get(i.ref.approval_id) : undefined} now={now} />
+            ))}
+          </>
+        ) : null}
+        {others.length || clearance.length > MAX_CLEARANCE ? (
+          <>
+            <span className="tray-section">ALSO WAITING · {others.length + Math.max(0, clearance.length - MAX_CLEARANCE)}</span>
+            {[...clearance.slice(MAX_CLEARANCE), ...others].slice(0, MAX_WAITING).map((i) => (
+              <FlightStrip key={i.id} item={i} now={now} selected={false} compact threadTitle={(id) => titles.get(id) ?? null} onSelect={() => openMain(href({ name: 'attention', item: i.id }))} />
+            ))}
+          </>
+        ) : null}
+        {!flat.length ? <p className="tray-clear">Nothing needs you. Threads keep working in the background.</p> : null}
+      </div>
+      <footer className="tray-foot">
+        <span className={`dot ${status === 'live' ? (proxy === 'down' ? 'warn' : 'ok') : 'bad'}`} aria-hidden="true" />
+        <span className="grow">{daemon}</span>
+        <button type="button" className="tray-open" onClick={() => openMain()}>
+          Open Desk <span className="mono muted">⌘O</span>
+        </button>
+      </footer>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/tray/tray.css`:
+
+```css
+.tray-pop {
+  height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #fbfaf7;
+  border: 1px solid #cfc9bd;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.tray-head {
+  height: 44px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  -webkit-app-region: drag;
+}
+.tray-head h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.tray-count {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ok);
+}
+.tray-count.needs {
+  color: var(--accent);
+}
+.tray-line {
+  position: relative;
+  height: 118px;
+  flex-shrink: 0;
+  background: #f4f1ea;
+  border-top: 1px solid var(--rule-soft);
+  border-bottom: 1px solid var(--rule-soft);
+  overflow: hidden;
+}
+.tray-line svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.tray-line-label {
+  position: absolute;
+  max-width: 150px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  text-align: left;
+}
+.tray-line-label.desk {
+  font-weight: 600;
+  color: var(--ink);
+  cursor: default;
+}
+.tray-line-now {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--text-min);
+}
+.tray-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+.tray-section {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text);
+}
+.tray-clearance {
+  display: flex;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(28, 27, 24, 0.08);
+  overflow: hidden;
+}
+.tray-cap {
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+}
+.tray-cap .strip-code {
+  font-size: 13px;
+}
+.tray-clearance-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+}
+.tray-clearance-title {
+  font-size: 13.5px;
+  line-height: 18px;
+  font-weight: 600;
+}
+.tray-command {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tray-clearance-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tray-clear {
+  margin: 16px 4px;
+  font-size: 13px;
+  color: var(--text-min);
+}
+.tray-foot {
+  height: 40px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 12px;
+  color: var(--text-min);
+}
+.tray-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+}
+```
+
+Other changes:
+- `handlers.test.ts`: the context gains `openMain`, and a test checks that only `#/…` routes are accepted.
+- `main/index.ts`:
+  - Create `new TrayPopover({ preload, hideOnBlur: !e2e })`.
+  - `openRoute` hides the popover and picks the first window that is not the popover.
+  - The notification check ignores a focused popover.
+  - `ctx.app.openMain = openRoute`.
+  - The tray gets `toggle: (bounds) => popover.toggle(bounds)`.
+  - The e2e hooks gain `togglePopover`.
+- `tray.ts`: a left click toggles the popover; a right click or ctrl-click calls `popUpContextMenu`. It no longer calls `setContextMenu`.
+- `App.tsx`: `#/tray` renders `<TrayPopover />` alone, with no title bar and no onboarding redirect.
+- `FlightStrip.tsx` imports `./attention.css`, so the popover gets the strip styles.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): menu-bar popover — today's mini line, approve/deny in place, also-waiting strips, open main at a route
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

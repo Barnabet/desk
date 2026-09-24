@@ -11,6 +11,7 @@ import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
 import { ThreadsScreen } from './threads/ThreadsScreen';
+import { TrayPopover } from './tray/TrayPopover';
 import { startGlobalSync } from './state/global';
 import { startSessionRouting } from './state/session';
 
@@ -39,9 +40,10 @@ export function App() {
   useEffect(() => startSessionRouting(), []);
   useEffect(() => onPush<string>('desk:navigate', (r) => navigate(r)), []);
   useEffect(() => {
-    if (!isOnboarded() && route.name !== 'onboarding') navigate({ name: 'onboarding' });
+    if (!isOnboarded() && route.name !== 'onboarding' && route.name !== 'tray') navigate({ name: 'onboarding' });
   }, [route.name]);
 
+  if (route.name === 'tray') return <TrayPopover />;
   if (route.name === 'onboarding') {
     return (
       <>
