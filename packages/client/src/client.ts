@@ -86,7 +86,7 @@ export class DeskClient {
   }
 
   async request<T = unknown>(method: string, path: string, body?: unknown, opts: { raw?: boolean } = {}): Promise<T> {
-    const send = async () => {
+    const send = async (): Promise<Response | null> => {
       try {
         return await (this.o.fetch ?? fetch)(`${this.creds.baseUrl}/v1${path}`, {
           method,
@@ -94,11 +94,13 @@ export class DeskClient {
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         });
       } catch {
-        throw new DaemonUnavailable(this.creds.baseUrl);
+        return null;
       }
     };
     let res = await send();
-    if (res.status === 401 && (await this.refresh())) res = await send();
+    // The daemon may have restarted with a new token or port: re-read credentials once and retry.
+    if ((!res || res.status === 401) && (await this.refresh())) res = await send();
+    if (!res) throw new DaemonUnavailable(this.creds.baseUrl);
     if (opts.raw && res.ok) return new Uint8Array(await res.arrayBuffer()) as T;
     const isJson = (res.headers.get('content-type') ?? '').includes('json');
     const data: unknown = isJson ? await res.json() : await res.text();

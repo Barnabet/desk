@@ -69,6 +69,12 @@ describe('DeskClient', () => {
     expect([bad.status, bad.code]).toEqual([401, 'unauthorized']);
     await expect(new DeskClient({ baseUrl: 'http://127.0.0.1:9', token: 'x' }).projects.list()).rejects.toBeInstanceOf(DaemonUnavailable);
   });
+  it('follows the daemon to a new port after refreshing credentials', async () => {
+    const { baseUrl } = await setup();
+    const client = new DeskClient({ baseUrl: 'http://127.0.0.1:9', token: TOKEN, refresh: async () => ({ baseUrl, token: TOKEN }) });
+    expect(await client.projects.list()).toEqual([]);
+    expect(client.baseUrl).toBe(baseUrl);
+  });
 });
 
 describe('node discovery', () => {
