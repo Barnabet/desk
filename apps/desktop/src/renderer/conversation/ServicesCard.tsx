@@ -55,6 +55,7 @@ export function ServicesCard({ project }: { project: ProjectState }) {
   const services = project.services;
   if (!services.length) return null;
   const titles = new Map(project.threads.map((t) => [t.id, t.title ?? 'thread']));
+  const sourceLabels = new Map(project.sources.map((x) => [x.id, x.label]));
   const act = async (s: ServiceRow, what: 'start' | 'stop' | 'restart') => {
     setBusy(`${s.id}:${what}`);
     try {
@@ -85,7 +86,7 @@ export function ServicesCard({ project }: { project: ProjectState }) {
                   {s.status === 'running' && port(s.url) ? <span className="service-port">{port(s.url)}</span> : null}
                 </span>
                 <span className="service-sub">
-                  {state.text} · from {titles.get(s.agent_id) ?? 'an archived thread'}
+                  {state.text} · from {s.source_id ? (sourceLabels.get(s.source_id) ?? 'a removed folder') : (titles.get(s.agent_id) ?? 'an archived thread')}
                 </span>
               </div>
               <div className="service-actions">

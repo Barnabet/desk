@@ -12,15 +12,21 @@ export function formatThreadLine(t: AgentRow): string {
   return `- ${parts.join('; ')}`;
 }
 
-/** One line per project service (service_list and Desk's prompt). */
-export function formatServiceLine(s: ServiceRow, threadTitle?: string | null): string {
+/** Where a service runs, for service lines: a source folder or a thread's workspace. */
+export function servicePlace(s: ServiceRow, source?: { label: string; path: string } | null, threadTitle?: string | null): string {
+  if (s.source_id) return `source ${s.source_id} "${source?.label ?? 'removed'}"${source ? ` (${source.path})` : ''}`;
+  return `thread ${s.agent_id}${threadTitle ? ` "${threadTitle}"` : ''}`;
+}
+
+/** One line per project service (service_list and Desk's prompt); `place` from servicePlace. */
+export function formatServiceLine(s: ServiceRow, place: string): string {
   const state =
     s.status === 'running'
       ? `running${s.url ? ` at ${s.url}` : ''} since ${s.started_at}`
       : s.status === 'exited'
         ? `exited (${s.exit_signal ?? `code ${s.exit_code}`}) at ${s.ended_at}`
         : `stopped (${s.stop_reason ?? 'requested'}) at ${s.ended_at}`;
-  const where = `thread ${s.agent_id}${threadTitle ? ` "${threadTitle}"` : ''}${s.cwd !== '.' ? `, in ${s.cwd}` : ''}`;
+  const where = `${place}${s.cwd !== '.' ? `, in ${s.cwd}` : ''}`;
   return `- ${s.name}: ${state}; ${where}; \`${clip(s.command, 200)}\``;
 }
 

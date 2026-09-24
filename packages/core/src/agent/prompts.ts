@@ -1,6 +1,6 @@
 import type { Db } from '../db/open';
 import { formatPlan, getPlan } from '../coordination/plan';
-import { formatServiceLine, formatThreadLine } from '../coordination/render';
+import { formatServiceLine, formatThreadLine, servicePlace } from '../coordination/render';
 import { formatArtifactLine, listArtifacts } from '../library/library';
 import { memoryDigest } from '../memory/memory';
 import type { SkillStore } from '../skills/store';
@@ -47,7 +47,10 @@ function projectSection(project: ProjectRow): string {
 
 function sourcesSection(db: Db, projectId: string): string {
   const sources = listSources(db, projectId);
-  return section('Sources (read-only)', sources.map((s) => `- ${s.id} ${s.label} (${s.kind}) ${s.path}`).join('\n'));
+  return section(
+    'Sources',
+    sources.map((s) => `- ${s.id} ${s.label} (${s.kind}) ${s.path} — ${s.agent_write ? 'writable: you may change files and run the project\'s tools and services here' : 'read-only'}`).join('\n'),
+  );
 }
 
 function librarySection(db: Db, projectId: string, libraryDir: string, selfId?: string): string {
@@ -137,8 +140,9 @@ export function deskSystemPrompt(ctx: PromptContext): string {
         '   - Refine: when the user corrects an approach, or a thread reports a skill problem or proposes an improved draft, update the skill (skill_write with a change_note). Keep instructions concise, concrete and tested.',
         '   - Catalog: the user can install reviewed skills from the Skills catalog in the Desk app (research, documents, writing, planning, code). If one would fit the work better than writing a new skill, suggest it to the user by name; you cannot install it yourself.',
         '   - Scope: global for general-purpose automations the user will want everywhere; project for project-specific ones. Tell the user when you create or change a skill.',
-        '8. Services — when the user needs something running to try the work (a backend, a frontend dev server), start it as a project service with service_start in the workspace of the thread that built it (thread_id); threads can start services in their own workspace too. Services keep running after the thread finishes and show in the user\'s Services panel with their URL; tell the user the URL. Check the Services section below: restart or fix a service that exited unexpectedly (service_logs shows why), and stop services that are no longer needed.',
-        '9. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
+        '8. Services — when the user needs something running to try the work (a backend, a frontend dev server), start it as a project service with service_start: in the workspace of the thread that built it (thread_id) to try a branch, or in a writable project source (source_id) for the project\'s own tools and apps over its real data; threads can start services too. Services keep running after the thread finishes and show in the user\'s Services panel with their URL; tell the user the URL. Check the Services section below: restart or fix a service that exited unexpectedly (service_logs shows why), and stop services that are no longer needed.',
+        '9. Do things, don\'t delegate them to the user — never give the user shell commands to run. Threads can operate the project directly: sources marked writable are the user\'s real folders (tools, data), and services can run there (service_start source_id), e.g. start the project\'s local app and queue work into it. Only hand something to the user when it truly needs them (a decision, a review, credentials, a destructive command). If a source is read-only and the work needs it, ask the user once whether agents may write there (they turn it on in Settings → Sources).',
+        '10. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
       ].join('\n'),
     ),
     '',
@@ -161,7 +165,12 @@ export function deskSystemPrompt(ctx: PromptContext): string {
     '',
     section('Threads', threads.map(formatThreadLine).join('\n')),
     '',
-    section('Services', listServices(db, project.id).map((s) => formatServiceLine(s, threads.find((t) => t.id === s.agent_id)?.title)).join('\n')),
+    section(
+      'Services',
+      listServices(db, project.id)
+        .map((s) => formatServiceLine(s, servicePlace(s, listSources(db, project.id).find((x) => x.id === s.source_id), threads.find((t) => t.id === s.agent_id)?.title)))
+        .join('\n'),
+    ),
     '',
     section(
       'Pending approvals',
@@ -199,7 +208,12 @@ export function threadSystemPrompt(ctx: PromptContext): string {
     '',
     section(
       'Workspace',
-      [`${agent.workspace_path} — the only directory you can write to.`, ...gitLines].join('\n'),
+      [
+        `${agent.workspace_path} — your own directory; do your work here.`,
+        ...gitLines,
+        'Sources marked writable below are the user\'s real project folders: you may also write there and run the project\'s own tools and services against its real data (e.g. enqueue into a local tool, start its server). Make code changes in your workspace (your branch), not in the user\'s checkout, unless your brief says otherwise.',
+        'Never ask the user to run commands for you: do it yourself. If something is blocked (a read-only source, a missing tool), say exactly what in your result so Desk can fix it.',
+      ].join('\n'),
     ),
     '',
     sourcesSection(db, project.id),

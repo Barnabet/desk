@@ -100,7 +100,10 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
 
       <section className="card settings-section" aria-labelledby="set-sources">
         <h2 id="set-sources">Sources</h2>
-        <p className="field-hint">Folders Desk and its threads can read. A git repository gets its own branch per thread; Desk never merges.</p>
+        <p className="field-hint">
+          Folders Desk and its threads work with. A git repository gets its own branch per thread; Desk never merges. With write access, agents can also change files here and run the
+          project&apos;s own tools and servers (sandboxed, without your secrets).
+        </p>
         {s.project.sources.length ? (
           <ul className="sources">
             {s.project.sources.map((src) => (
@@ -109,6 +112,18 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
                 <span className="grow">
                   <strong>{src.label}</strong> <span className="mono small muted">{src.path}</span>
                 </span>
+                <label className="source-write">
+                  <input
+                    type="checkbox"
+                    checked={src.agent_write}
+                    disabled={busy === `w-${src.id}`}
+                    onChange={(e) => {
+                      const agentWrite = e.target.checked;
+                      void run(`w-${src.id}`, () => call('projects.setSourceWrite', { id: projectId, sourceId: src.id, agentWrite }));
+                    }}
+                  />
+                  Agents can write here
+                </label>
                 <Button size="sm" variant="ghost" aria-label={`Remove ${src.label}`} pending={busy === `rm-${src.id}`} onClick={() => void run(`rm-${src.id}`, () => call('projects.removeSource', { id: projectId, sourceId: src.id }))}>
                   Remove
                 </Button>

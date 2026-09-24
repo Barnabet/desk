@@ -8,6 +8,8 @@ export type ToolEnvironment = {
   jobs: JobManager;
   services: RuntimeServices;
   readRoots?: (agent: AgentRow) => string[];
+  /** Extra folders the agent may write to: project sources that allow it. */
+  writeRoots?: (agent: AgentRow) => string[];
 };
 
 /** Builds the execution context for one tool call of an agent. */
@@ -15,7 +17,8 @@ export function buildToolContext(agent: AgentRow, runId: string, toolCallId: str
   const workspace = agent.workspace_path;
   if (!workspace) throw new Error(`Agent ${agent.id} has no workspace`);
   // Worktree threads may also write their repo's shared git dir (objects, refs) so plain `git` works in the shell.
-  const writable = agent.git_common_dir ? [workspace, agent.git_common_dir] : [workspace];
+  const extra = env.writeRoots?.(agent) ?? [];
+  const writable = [workspace, ...(agent.git_common_dir ? [agent.git_common_dir] : []), ...extra];
   const sandbox: SandboxSpec = { enabled: env.sandboxEnabled, writable };
   return {
     projectId: agent.project_id,
@@ -24,6 +27,7 @@ export function buildToolContext(agent: AgentRow, runId: string, toolCallId: str
     toolCallId,
     workspace,
     readRoots: env.readRoots?.(agent) ?? [workspace],
+    writeRoots: [workspace, ...extra],
     signal,
     sandbox,
     jobs: env.jobs,

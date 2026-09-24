@@ -40,6 +40,7 @@ export const channels = {
   'projects.archive': z.object({ id }),
   'projects.addSource': z.object({ id, source: AddSourceRequest }),
   'projects.removeSource': z.object({ id, sourceId: id }),
+  'projects.setSourceWrite': z.object({ id, sourceId: id, agentWrite: z.boolean() }),
   'projects.send': z.object({ id, text }),
   'projects.chat': z.object({ id, after, limit }),
   'projects.plan': z.object({ id }),

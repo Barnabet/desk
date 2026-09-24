@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { Hono } from 'hono';
-import { AddSourceRequest, CreateProjectRequest, MessageRequest, UpdateProjectRequest, type EventType } from '@desk/protocol';
+import { AddSourceRequest, CreateProjectRequest, MessageRequest, UpdateProjectRequest, UpdateSourceRequest, type EventType } from '@desk/protocol';
 import {
   getDeskAgent,
   getPlan,
@@ -90,11 +90,17 @@ export function projectRoutes({ runtime, store }: AppDeps): Hono {
   r.post('/projects/:id/sources', async (c) => {
     const id = c.req.param('id');
     const req = await body(c, AddSourceRequest);
-    const sourceId = await runtime.addSource(id, req.path, req.label);
+    const sourceId = await runtime.addSource(id, req.path, req.label, req.agent_write ?? true);
     return c.json(
       listSources(db, id).find((s) => s.id === sourceId),
       201,
     );
+  });
+
+  r.patch('/projects/:id/sources/:sid', async (c) => {
+    const req = await body(c, UpdateSourceRequest);
+    runtime.setSourceWrite(c.req.param('id'), c.req.param('sid'), req.agent_write);
+    return c.json(listSources(db, c.req.param('id')).find((s) => s.id === c.req.param('sid')));
   });
 
   r.delete('/projects/:id/sources/:sid', (c) => {

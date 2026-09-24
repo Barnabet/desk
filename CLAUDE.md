@@ -88,7 +88,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - An agent with pending approvals is never scheduled.
 - Graceful shutdown leaves agents `queued`, not `cancelled`.
 - Shell tools (`bash`, `bash_background`, `bash_readonly`, `skill_run`, `service_start`) never run unsandboxed without approval.
-- Project services run only in thread workspaces (sandboxed, no secrets), outlive their thread, and are stopped on archive and shutdown; their output goes to log files, never to events.
+- Agents write only to their workspace, temp dirs, and project sources with `agent_write` (on by default; the user can turn it off per source). Project services run in a thread workspace or such a source (sandboxed, no secrets), outlive their thread, and are stopped on archive and shutdown; their output goes to log files, never to events.
 - Threads cannot modify installed skills. They submit drafts, which Desk installs with `skill_write from_dir`.
 - Only the user installs catalog skills; every install is checked against its pinned digest, and `<data>/runtimes` is read-only to agents. Installers get a minimal environment (no secrets), npm install scripts never run, and `` !`cmd` `` blocks in skills are never executed.
 - Desk never merges branches.

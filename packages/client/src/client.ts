@@ -156,6 +156,7 @@ export class DeskClient {
     update: (id: string, patch: UpdateProjectRequest) => this.patch<ProjectRow>(`/projects/${enc(id)}`, patch),
     archive: (id: string) => this.post<{ ok: true }>(`/projects/${enc(id)}/archive`),
     addSource: (id: string, req: AddSourceRequest) => this.post<SourceRow>(`/projects/${enc(id)}/sources`, req),
+    setSourceWrite: (id: string, sourceId: string, agentWrite: boolean) => this.patch<SourceRow>(`/projects/${enc(id)}/sources/${enc(sourceId)}`, { agent_write: agentWrite }),
     removeSource: (id: string, sourceId: string) => this.del<{ ok: true }>(`/projects/${enc(id)}/sources/${enc(sourceId)}`),
     send: (id: string, text: string) => this.post<{ ok: true }>(`/projects/${enc(id)}/messages`, { text }),
     chat: (id: string, p?: { after?: number; limit?: number }) => this.get<EventPage>(`/projects/${enc(id)}/chat${page(p)}`),

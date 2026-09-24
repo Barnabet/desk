@@ -13,6 +13,8 @@ export type ToolContext = {
   toolCallId: string;
   workspace: string;
   readRoots: string[];
+  /** Where file tools may write: the workspace, plus project sources that allow agents to write. */
+  writeRoots?: string[];
   signal: AbortSignal;
   sandbox: SandboxSpec;
   jobs: JobManager;
@@ -52,7 +54,7 @@ export interface RuntimeServices {
    */
   skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null };
   /** Starts (or restarts, under an existing name) a project service in a thread's workspace. `by` = `user` or `agent:<id>`. */
-  startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId: string; by: string }): Promise<ServiceRow>;
+  startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId?: string; sourceId?: string; by: string }): Promise<ServiceRow>;
   stopService(serviceId: string, by: string): Promise<ServiceRow>;
   restartService(serviceId: string, by: string): Promise<ServiceRow>;
   serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean };

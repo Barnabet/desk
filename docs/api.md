@@ -45,7 +45,8 @@ Pass `next_after` as the next `after` to continue.
 | GET | `/v1/projects/:id` | | Overview: project, desk, sources, plan, threads, pending approvals, `last_seq` (the stream cursor to resume from) |
 | PATCH | `/v1/projects/:id` | `UpdateProjectRequest { name?, goal?, instructions?, settings? }` | `settings` is a partial patch |
 | POST | `/v1/projects/:id/archive` | | Stops every agent and hides the project |
-| POST | `/v1/projects/:id/sources` | `{ path, label? }` | Detects `git` vs `folder`. 201 |
+| POST | `/v1/projects/:id/sources` | `{ path, label?, agent_write? }` | Detects `git` vs `folder`. `agent_write` (default `true`): Desk and its threads may write there (sandboxed) and run services there. 201 |
+| PATCH | `/v1/projects/:id/sources/:sid` | `{ agent_write }` | Turns agents' write access to the folder on or off (`source.updated`) |
 | DELETE | `/v1/projects/:id/sources/:sid` | | |
 | POST | `/v1/projects/:id/messages` | `{ text }` | Message to Desk. 202; Desk wakes |
 | GET | `/v1/projects/:id/chat` | paging | Desk conversation events: user and agent messages, assistant messages, reports, questions, notices |
@@ -68,7 +69,7 @@ Pass `next_after` as the next `after` to continue.
 
 ## Services
 
-Project services are long-lived processes (dev servers, APIs, workers) that Desk or a thread starts with `service_start` in a thread's workspace. They run sandboxed, keep running after the thread finishes, and stop when the user or an agent stops them, when their thread or project is archived, or when deskd shuts down. A service row: `{ id, project_id, name, command, cwd, agent_id (the workspace's thread), status: running|exited|stopped, pid, exit_code, exit_signal, stop_reason, url, started_by, started_at, ended_at }`. `url` is the first loopback URL the current run printed.
+Project services are long-lived processes (dev servers, APIs, workers) that Desk or a thread starts with `service_start`, in a thread's workspace or in a project source folder that allows agents to write (`source_id`). They run sandboxed, keep running after the thread finishes, and stop when the user or an agent stops them, when their thread or project is archived, or when deskd shuts down. A service row: `{ id, project_id, name, command, cwd, agent_id (the workspace's thread, or who started a source service), source_id, status: running|exited|stopped, pid, exit_code, exit_signal, stop_reason, url, started_by, started_at, ended_at }`. `url` is the first loopback URL the current run printed.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -210,7 +211,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 
 | Area | Types |
 |---|---|
-| Projects | `project.created`, `project.updated`, `project.archived`, `source.added`, `source.removed` |
+| Projects | `project.created`, `project.updated`, `project.archived`, `source.added`, `source.updated`, `source.removed` |
 | Agents | `agent.created`, `agent.status_changed`, `agent.result`, `agent.revision`, `agent.model_switched`, `agent.skills_changed`, `agent.archived` |
 | Coordination | `plan.updated`, `report`, `question.asked` |
 | Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result`, `context.compacted`, `usage` |

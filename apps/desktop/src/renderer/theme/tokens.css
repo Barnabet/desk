@@ -679,6 +679,16 @@ pre {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+.source-write {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--font-sans, inherit);
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+}
 
 /* Shared utilities */
 .grow {

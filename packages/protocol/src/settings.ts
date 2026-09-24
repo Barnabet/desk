@@ -17,7 +17,12 @@ export type PolicyRule = z.infer<typeof PolicyRule>;
 
 /** Shell commands that always need a human (or Desk) decision, even inside the sandbox. */
 export const RISKY_COMMAND_PATTERN =
-  String.raw`(?:^|[\s;&|(])(?:(?:sudo|mkfs(?:\.\w+)?)\b|dd\s+if=|chmod\s+-R\s+777|rm\s+-\w*[rR]\w*\s+(?:/|~))|(?:curl|wget)[^|]*\|\s*(?:ba|z)?sh\b`;
+  String.raw`(?:^|[\s;&|(])(?:(?:sudo|mkfs(?:\.\w+)?)\b|dd\s+if=|chmod\s+-R\s+777|rm\s+-\w*[rR]\w*\s+(?:/(?!(?:(?:private/)?tmp|var/folders)/(?!\S*\.\.)\S)|~))|(?:curl|wget)[^|]*\|\s*(?:ba|z)?sh\b`;
+
+/** Earlier versions of the pattern, upgraded in saved policies (they also flagged deleting temp folders). */
+const LEGACY_RISKY_PATTERNS = [
+  String.raw`(?:^|[\s;&|(])(?:(?:sudo|mkfs(?:\.\w+)?)\b|dd\s+if=|chmod\s+-R\s+777|rm\s+-\w*[rR]\w*\s+(?:/|~))|(?:curl|wget)[^|]*\|\s*(?:ba|z)?sh\b`,
+];
 
 export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'bash', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
@@ -26,7 +31,7 @@ export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'skill_run', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
   { tool: 'git_push', match: { branch: 'desk/*' }, action: 'allow' },
   { tool: 'git_push', action: 'deny' },
-  { tool: 'open_pr', action: 'ask', delegate_to_desk: false },
+  { tool: 'open_pr', action: 'allow' },
   { tool: 'web_fetch', action: 'allow' },
   { tool: 'web_search', action: 'allow' },
 ];
@@ -65,5 +70,18 @@ export const ProjectSettingsPatch = z.object(settingsFields).partial();
 export type ProjectSettingsPatch = z.input<typeof ProjectSettingsPatch>;
 
 export function resolveSettings(partial: ProjectSettingsPatch = {}): ProjectSettings {
-  return ProjectSettings.parse(partial);
+  const settings = ProjectSettings.parse(partial);
+  return { ...settings, policy: upgradePolicy(settings.policy) };
+}
+
+/**
+ * Brings a saved policy up to date with changed defaults: the risky-command pattern no longer flags deleting temp
+ * folders, and opening a PR no longer needs the user (rules the user changed are left alone).
+ */
+export function upgradePolicy(rules: PolicyRule[]): PolicyRule[] {
+  return rules.map((r) => {
+    if (r.match?.command !== undefined && LEGACY_RISKY_PATTERNS.includes(r.match.command)) return { ...r, match: { ...r.match, command: RISKY_COMMAND_PATTERN } };
+    if (r.tool === 'open_pr' && r.action === 'ask' && r.delegate_to_desk === false && !r.match) return { tool: 'open_pr', action: 'allow' };
+    return r;
+  });
 }

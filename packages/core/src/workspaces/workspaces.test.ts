@@ -92,11 +92,11 @@ describe('git tools', () => {
     expect(git(remote, 'branch', '--list', branch)).toContain(branch);
   });
 
-  it('gates push by the thread branch and asks for PRs', async () => {
+  it('gates push by the thread branch and opens PRs without asking', async () => {
     const on = { sandboxAvailable: true };
     expect(evaluatePolicy(gitPushTool, {}, DEFAULT_POLICY, { ...on, gitBranch: 'desk/x-123456' }).action).toBe('allow');
     expect(evaluatePolicy(gitPushTool, {}, DEFAULT_POLICY, { ...on, gitBranch: 'main' }).action).toBe('deny');
-    expect(evaluatePolicy(openPrTool, { title: 't', body: 'b' }, DEFAULT_POLICY, on).action).toBe('ask');
+    expect(evaluatePolicy(openPrTool, { title: 't', body: 'b' }, DEFAULT_POLICY, on).action).toBe('allow');
   });
 
   it('refuses git tools outside a worktree', async () => {

@@ -71,7 +71,9 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
     case 'project.archived':
       return { ...s, project: { ...s.project, archived_at: e.ts } };
     case 'source.added':
-      return { ...s, sources: [...s.sources, { id: e.payload.source_id, project_id: e.project_id, path: e.payload.path, kind: e.payload.kind, label: e.payload.label, created_at: e.ts }] };
+      return { ...s, sources: [...s.sources, { id: e.payload.source_id, project_id: e.project_id, path: e.payload.path, kind: e.payload.kind, label: e.payload.label, agent_write: e.payload.agent_write ?? true, created_at: e.ts }] };
+    case 'source.updated':
+      return { ...s, sources: s.sources.map((x) => (x.id === e.payload.source_id ? { ...x, agent_write: e.payload.agent_write } : x)) };
     case 'source.removed':
       return { ...s, sources: s.sources.filter((x) => x.id !== e.payload.source_id) };
     case 'agent.created': {
@@ -154,7 +156,7 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
       return { ...s, approvals: s.approvals.filter((a) => a.id !== e.payload.approval_id) };
     case 'service.started': {
       const p = e.payload;
-      const run = { command: p.command, cwd: p.cwd, agent_id: p.workspace_agent_id, status: 'running' as const, pid: p.pid, exit_code: null, exit_signal: null, stop_reason: null, url: null, started_by: p.by, started_at: e.ts, ended_at: null };
+      const run = { command: p.command, cwd: p.cwd, agent_id: p.workspace_agent_id, source_id: p.source_id ?? null, status: 'running' as const, pid: p.pid, exit_code: null, exit_signal: null, stop_reason: null, url: null, started_by: p.by, started_at: e.ts, ended_at: null };
       const rest = s.services.filter((x) => x.id !== p.service_id);
       const prior = s.services.find((x) => x.id === p.service_id);
       const row: ServiceRow = { ...(prior ?? { id: p.service_id, project_id: e.project_id, name: p.name }), ...run };

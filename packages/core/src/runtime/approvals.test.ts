@@ -14,9 +14,9 @@ import { Runtime } from './runtime';
 let h: Harness;
 afterEach(async () => h?.cleanup());
 
-// A gated tool that the default policy classifies as "ask" (open_pr).
+// A gated tool with no default rule, so the default policy asks (like an outward-facing action).
 const openPr = defineTool({
-  name: 'open_pr',
+  name: 'post_update',
   description: 'Open a PR',
   input: z.object({ title: z.string() }),
   gate: { subject: () => ({}), unmatched: 'ask' },
@@ -52,7 +52,7 @@ const results = (agentId: string) =>
 describe('approvals', () => {
   it('requests approval, still runs parallel safe calls, and waits', async () => {
     const { rt, projectId, agentId, workspace } = await setup([
-      tools(call('open_pr', { title: 'Fix' }, 'c1'), call('write_file', { path: 'notes.md', content: 'n' }, 'c2')),
+      tools(call('post_update', { title: 'Fix' }, 'c1'), call('write_file', { path: 'notes.md', content: 'n' }, 'c2')),
     ]);
     rt.sendMessage(agentId, 'go');
     await rt.whenIdle();
@@ -61,26 +61,26 @@ describe('approvals', () => {
     expect(existsSync(join(workspace, 'PR_OPENED'))).toBe(false);
     const pending = listApprovals(h.store.db, projectId, 'pending');
     expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({ tool: 'open_pr', agent_id: agentId, delegate_to_desk: false });
+    expect(pending[0]).toMatchObject({ tool: 'post_update', agent_id: agentId, delegate_to_desk: false });
     expect(h.fake.requests).toHaveLength(1);
   });
 
   it('executes the call on approval and continues the run', async () => {
-    const { rt, projectId, agentId, workspace } = await setup([tools(call('open_pr', { title: 'Fix' }, 'c1')), text('PR is open')]);
+    const { rt, projectId, agentId, workspace } = await setup([tools(call('post_update', { title: 'Fix' }, 'c1')), text('PR is open')]);
     rt.sendMessage(agentId, 'go');
     await rt.whenIdle();
     const [ap] = listApprovals(h.store.db, projectId, 'pending');
     await rt.resolveApproval(ap!.id, 'approved');
     await rt.whenIdle();
     expect(existsSync(join(workspace, 'PR_OPENED'))).toBe(true);
-    expect(results(agentId)).toEqual([{ name: 'open_pr', status: 'ok', content: 'Opened PR "Fix"' }]);
+    expect(results(agentId)).toEqual([{ name: 'post_update', status: 'ok', content: 'Opened PR "Fix"' }]);
     expect(h.fake.requests[1]!.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'c1', content: 'Opened PR "Fix"' });
     expect(getAgent(h.store.db, agentId)?.status).toBe('idle');
     expect(listApprovals(h.store.db, projectId, 'approved')).toHaveLength(1);
   });
 
   it('returns a denial with the note to the model', async () => {
-    const { rt, projectId, agentId, workspace } = await setup([tools(call('open_pr', { title: 'Fix' }, 'c1')), text('ok, no PR')]);
+    const { rt, projectId, agentId, workspace } = await setup([tools(call('post_update', { title: 'Fix' }, 'c1')), text('ok, no PR')]);
     rt.sendMessage(agentId, 'go');
     await rt.whenIdle();
     const [ap] = listApprovals(h.store.db, projectId, 'pending');
@@ -92,7 +92,7 @@ describe('approvals', () => {
   });
 
   it('queues messages while an approval is pending', async () => {
-    const { rt, projectId, agentId } = await setup([tools(call('open_pr', { title: 'Fix' }, 'c1')), text('done')]);
+    const { rt, projectId, agentId } = await setup([tools(call('post_update', { title: 'Fix' }, 'c1')), text('done')]);
     rt.sendMessage(agentId, 'go');
     await rt.whenIdle();
     rt.sendMessage(agentId, 'also mention the changelog');
@@ -116,7 +116,7 @@ describe('approvals', () => {
   });
 
   it('stopping a waiting agent denies its approvals', async () => {
-    const { rt, projectId, agentId } = await setup([tools(call('open_pr', { title: 'Fix' }, 'c1'))]);
+    const { rt, projectId, agentId } = await setup([tools(call('post_update', { title: 'Fix' }, 'c1'))]);
     rt.sendMessage(agentId, 'go');
     await rt.whenIdle();
     rt.stop(agentId);
@@ -126,7 +126,7 @@ describe('approvals', () => {
   });
 
   it('rejects resolving twice', async () => {
-    const { rt, projectId, agentId } = await setup([tools(call('open_pr', { title: 'Fix' }, 'c1')), text('ok')]);
+    const { rt, projectId, agentId } = await setup([tools(call('post_update', { title: 'Fix' }, 'c1')), text('ok')]);
     rt.sendMessage(agentId, 'go');
     await rt.whenIdle();
     const [ap] = listApprovals(h.store.db, projectId, 'pending');

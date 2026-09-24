@@ -23,7 +23,7 @@ const overview = () =>
   ({
     project: { id: 'p', name: 'Tax 2026', goal: 'File on time', instructions: '', settings, created_at: 't', updated_at: 't', archived_at: null },
     desk: null,
-    sources: [{ id: 's1', project_id: 'p', path: '/Users/me/tax', kind: 'folder', label: 'tax', created_at: 't' }],
+    sources: [{ id: 's1', project_id: 'p', path: '/Users/me/tax', kind: 'folder', label: 'tax', agent_write: true, created_at: 't' }],
     plan: null,
     threads: [],
     approvals: [],
@@ -122,8 +122,12 @@ describe('SettingsScreen', () => {
   });
 
   it('adds and removes sources, and archives the project after confirming', async () => {
-    const bridge = setup({ 'app.pickFolder': () => '/Users/me/repo', 'projects.addSource': () => ({}), 'projects.removeSource': () => ({ ok: true }), 'projects.archive': () => ({ ok: true }) });
+    const bridge = setup({ 'app.pickFolder': () => '/Users/me/repo', 'projects.addSource': () => ({}), 'projects.removeSource': () => ({ ok: true }), 'projects.setSourceWrite': () => ({}), 'projects.archive': () => ({ ok: true }) });
     const sources = await screen.findByRole('region', { name: 'Sources' });
+    const write = within(sources).getByLabelText('Agents can write here') as HTMLInputElement;
+    expect(write.checked).toBe(true);
+    fireEvent.click(write);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.setSourceWrite')?.input).toEqual({ id: 'p', sourceId: 's1', agentWrite: false }));
     fireEvent.click(within(sources).getByRole('button', { name: 'Add folder…' }));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.addSource')?.input).toEqual({ id: 'p', source: { path: '/Users/me/repo' } }));
     fireEvent.click(within(sources).getByRole('button', { name: 'Remove tax' }));

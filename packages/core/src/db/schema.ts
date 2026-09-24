@@ -98,6 +98,8 @@ export const sources = sqliteTable(
     path: text('path').notNull(),
     kind: text('kind', { enum: ['folder', 'git'] }).notNull(),
     label: text('label').notNull(),
+    /** Desk and its threads may write here (sandboxed) and run services here. */
+    agent_write: integer('agent_write', { mode: 'boolean' }).notNull().default(true),
     created_at: text('created_at').notNull(),
   },
   (t) => [index('sources_project_idx').on(t.project_id)],
@@ -151,6 +153,8 @@ export const services = sqliteTable(
     /** The thread whose workspace the service runs in. */
     agent_id: text('agent_id').notNull(),
     status: text('status', { enum: ['running', 'exited', 'stopped'] }).notNull(),
+    /** Set when the service runs in a project source folder instead of a thread workspace (`agent_id` then = who started it). */
+    source_id: text('source_id'),
     pid: integer('pid'),
     exit_code: integer('exit_code'),
     exit_signal: text('exit_signal'),

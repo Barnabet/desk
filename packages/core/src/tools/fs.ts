@@ -11,7 +11,7 @@ const MAX_LIST_RESULTS = 500;
 const IGNORE = ['**/node_modules/**', '**/.git/**'];
 
 const readable = (p: string, ctx: ToolContext) => resolveInside(p, ctx.readRoots, ctx.workspace);
-const writable = (p: string, ctx: ToolContext) => resolveInside(p, [ctx.workspace], ctx.workspace);
+const writable = (p: string, ctx: ToolContext) => resolveInside(p, ctx.writeRoots ?? [ctx.workspace], ctx.workspace);
 
 export const readFileTool = defineTool({
   name: 'read_file',
@@ -33,7 +33,7 @@ export const readFileTool = defineTool({
 
 export const writeFileTool = defineTool({
   name: 'write_file',
-  description: 'Create or overwrite a file in your workspace. Parent directories are created.',
+  description: 'Create or overwrite a file in your workspace (or a project source that allows agents to write). Parent directories are created.',
   input: z.object({ path: z.string(), content: z.string() }),
   async execute({ path, content }, ctx) {
     const file = await writable(path, ctx);

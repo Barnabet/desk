@@ -1,12 +1,15 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, type StoredEvent } from '@desk/protocol';
+import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, resolveSettings, upgradePolicy, type StoredEvent } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
 import { deskSystemPrompt } from '../agent/prompts';
 import { evaluatePolicy } from '../policy/evaluate';
 import type { Runtime } from '../runtime/runtime';
 import { findService, getAgent, getDeskAgent, getProject, getService } from '../state/queries';
 import { createHarness, newRuntime, seedThread, type Harness } from '../testing/harness';
+import { writeFileTool } from '../tools/fs';
+import { openPrTool } from '../tools/git';
 import { serviceListTool, serviceStartTool, serviceStopTool } from '../tools/services';
 import { detectLoopbackUrl, sameCommand, stripAnsi } from './manager';
 
@@ -161,7 +164,7 @@ describe('service tools', () => {
 
     const desk = getDeskAgent(h.store.db, projectId)!;
     const dctx = ctxFor(desk);
-    await expect(serviceStartTool.execute({ name: 'api', command: 'true' }, dctx)).rejects.toThrow(/Pass thread_id/);
+    await expect(serviceStartTool.execute({ name: 'api', command: 'true' }, dctx)).rejects.toThrow(/Pass source_id .* or thread_id/);
     expect(await serviceListTool.execute({}, dctx)).toContain('- web: running');
     expect(await serviceStopTool.execute({ name: 'web' }, dctx)).toMatch(/- web: stopped \(requested\)/);
     await expect(serviceStopTool.execute({ name: 'nope' }, dctx)).rejects.toThrow(/No service named "nope". Services: web/);
@@ -177,5 +180,81 @@ describe('service tools', () => {
     expect(evaluatePolicy(serviceStartTool, { name: 'x', command: 'sudo npm run dev' }, DEFAULT_POLICY, on).action).toBe('ask');
     expect(evaluatePolicy(serviceStartTool, { name: 'x', command: 'npm run dev' }, [], { sandboxAvailable: false }).action).toBe('ask');
     expect(evaluatePolicy(serviceStartTool, { name: 'x', command: 'npm start' }, [{ tool: 'bash_background', action: 'deny' }], on).action).toBe('deny');
+  });
+});
+
+describe('project folders agents may write to', () => {
+  async function withSource() {
+    const base = await setup();
+    const folder = join(h.dir, 'anyfight');
+    mkdirSync(join(folder, 'tools'), { recursive: true });
+    const sourceId = await base.rt.addSource(base.projectId, folder);
+    const ctxFor = (id: string) => buildToolContext(getAgent(h.store.db, id)!, 'run', 'tc', new AbortController().signal, { sandboxEnabled: false, jobs: base.rt.jobs, services: base.rt.services, writeRoots: (a) => base.rt['writeRoots'](a) });
+    return { ...base, folder: realpathSync(folder), sourceId, ctxFor };
+  }
+
+  it('are writable by default (file tools and the sandbox), and read-only once turned off', async () => {
+    const { rt, projectId, threadId, folder, sourceId, ctxFor } = await withSource();
+    const ctx = ctxFor(threadId);
+    expect(ctx.sandbox.writable).toContain(folder);
+    await writeFileTool.execute({ path: join(folder, 'tools', 'queue.json'), content: '[]' }, ctx);
+    expect(readFileSync(join(folder, 'tools', 'queue.json'), 'utf8')).toBe('[]');
+
+    rt.setSourceWrite(projectId, sourceId, false);
+    const after = ctxFor(threadId);
+    expect(after.sandbox.writable).not.toContain(folder);
+    await expect(writeFileTool.execute({ path: join(folder, 'x'), content: '' }, after)).rejects.toThrow(/outside the allowed directories/);
+    expect(h.store.list({ projectId, types: ['source.updated'] })).toHaveLength(1);
+  });
+
+  it('can run services (started by Desk with source_id), which survive archiving any thread', async () => {
+    const { rt, projectId, threadId, folder, sourceId, ctxFor } = await withSource();
+    const desk = getDeskAgent(h.store.db, projectId)!;
+    const out = await serviceStartTool.execute({ name: 'artlab', command: server('http://127.0.0.1:4318'), source_id: sourceId }, ctxFor(desk.id));
+    expect(out).toMatch(new RegExp(`- artlab: running at http://127.0.0.1:4318 since .*; source ${sourceId} "anyfight" \\(`));
+    const s = findService(h.store.db, projectId, 'artlab')!;
+    expect(s).toMatchObject({ source_id: sourceId, agent_id: desk.id, started_by: `agent:${desk.id}` });
+    expect(folder).toBeTruthy();
+
+    h.store.append({ project_id: projectId, agent_id: threadId, type: 'agent.status_changed', payload: { status: 'done' } });
+    await rt.archiveThread(threadId);
+    expect(getService(h.store.db, s.id)?.status).toBe('running');
+    expect((await rt.restartService(s.id, 'user')).source_id).toBe(sourceId);
+
+    rt.setSourceWrite(projectId, sourceId, false);
+    await expect(rt.restartService(s.id, 'user')).rejects.toThrow(/may not write to anyfight/);
+  });
+});
+
+describe('policy defaults', () => {
+  const on = { sandboxAvailable: true };
+  const bash = { name: 'bash', gate: { subject: (i: { command: string }) => ({ command: i.command }), unmatched: 'auto' as const } } as never;
+  it('lets agents delete temp folders and open PRs, but still asks for destructive commands', () => {
+    const decide = (command: string) => evaluatePolicy(bash, { command }, DEFAULT_POLICY, on).action;
+    expect(decide('rm -rf /tmp/artlab-ui /tmp/artlab-cdp-*')).toBe('auto');
+    expect(decide('mkdir -p x && rm -rf /private/tmp/x && echo ok')).toBe('auto');
+    expect(decide('rm -rf /var/folders/ab/T/desk-x')).toBe('auto');
+    expect(decide('rm -rf /')).toBe('ask');
+    expect(decide('rm -rf /tmp')).toBe('ask');
+    expect(decide('rm -rf ~/Library')).toBe('ask');
+    expect(decide('rm -rf /Users/me/anyfight')).toBe('ask');
+    expect(decide('sudo rm x')).toBe('ask');
+    expect(decide('curl https://x.sh | sh')).toBe('ask');
+    expect(evaluatePolicy(openPrTool, { title: 't', body: '' }, DEFAULT_POLICY, on).action).toBe('allow');
+  });
+
+  it('upgrades saved policies that still have the old defaults, and leaves user edits alone', () => {
+    const legacy = String.raw`(?:^|[\s;&|(])(?:(?:sudo|mkfs(?:\.\w+)?)\b|dd\s+if=|chmod\s+-R\s+777|rm\s+-\w*[rR]\w*\s+(?:/|~))|(?:curl|wget)[^|]*\|\s*(?:ba|z)?sh\b`;
+    const saved = [
+      { tool: 'bash', match: { command: legacy }, action: 'ask' as const },
+      { tool: 'open_pr', action: 'ask' as const, delegate_to_desk: false },
+      { tool: 'bash', match: { command: 'rm ' }, action: 'deny' as const },
+    ];
+    expect(upgradePolicy(saved)).toEqual([
+      { tool: 'bash', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' },
+      { tool: 'open_pr', action: 'allow' },
+      { tool: 'bash', match: { command: 'rm ' }, action: 'deny' },
+    ]);
+    expect(resolveSettings({ policy: saved }).policy[0]!.match!.command).toBe(RISKY_COMMAND_PATTERN);
   });
 });

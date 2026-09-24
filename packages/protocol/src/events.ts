@@ -54,7 +54,9 @@ export const EventBody = z.discriminatedUnion('type', [
       skills: z.array(SkillName).optional(),
     }),
   ),
-  event('source.added', z.object({ source_id: z.string(), path: z.string(), kind: SourceKind, label: z.string() })),
+  event('source.added', z.object({ source_id: z.string(), path: z.string(), kind: SourceKind, label: z.string(), agent_write: z.boolean().optional() })),
+  /** Whether agents may write to (and run services in) the source folder. */
+  event('source.updated', z.object({ source_id: z.string(), agent_write: z.boolean() })),
   event('source.removed', z.object({ source_id: z.string() })),
   event('agent.status_changed', z.object({ status: AgentStatus, reason: z.string().optional() })),
   event(
@@ -180,6 +182,8 @@ export const EventBody = z.discriminatedUnion('type', [
       /** Relative to the workspace ('.' = its root). */
       cwd: z.string(),
       workspace_agent_id: z.string(),
+      /** Runs in this project source folder instead of `workspace_agent_id`'s workspace (then the agent that started it). */
+      source_id: z.string().nullable().optional(),
       pid: z.number().int().nullable(),
       by: ServiceActor,
     }),

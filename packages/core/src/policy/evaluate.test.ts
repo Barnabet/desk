@@ -22,7 +22,7 @@ describe('evaluatePolicy', () => {
     expect(evaluatePolicy(push, { branch: 'desk/fix-1' }, DEFAULT_POLICY, on).action).toBe('allow');
     expect(evaluatePolicy(push, { branch: 'main' }, DEFAULT_POLICY, on).action).toBe('deny');
     const d = evaluatePolicy(pr, {}, DEFAULT_POLICY, on);
-    expect(d).toMatchObject({ action: 'ask', delegateToDesk: false });
+    expect(d).toMatchObject({ action: 'allow', delegateToDesk: false });
     expect(evaluatePolicy(fetchTool, { url: 'https://x.dev/a' }, DEFAULT_POLICY, on).action).toBe('allow');
   });
 

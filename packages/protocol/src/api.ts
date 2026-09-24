@@ -20,7 +20,9 @@ export const UpdateProjectRequest = z.object({
 });
 export type UpdateProjectRequest = z.input<typeof UpdateProjectRequest>;
 
-export const AddSourceRequest = z.object({ path: z.string().min(1), label: z.string().optional() });
+export const AddSourceRequest = z.object({ path: z.string().min(1), label: z.string().optional(), agent_write: z.boolean().optional() });
+export const UpdateSourceRequest = z.object({ agent_write: z.boolean() });
+export type UpdateSourceRequest = z.input<typeof UpdateSourceRequest>;
 export type AddSourceRequest = z.input<typeof AddSourceRequest>;
 
 export const MessageRequest = z.object({ text: z.string().min(1) });

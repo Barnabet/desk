@@ -36,7 +36,7 @@ The CLI's `desk up --install` uses the same LaunchAgent label, so there is only 
 | **Skills** | A map and a list covering global, project and shadowed skills, with live usage. The detail view has instructions, files, history (compare, restore, change notes), an editor with uploads, import, delete, and Ask Desk. **Catalog** shows 20 pinned skills in five bays. Each has a review sheet (source at its commit, licence, every file with scripts marked, warnings, what Desk sets up, scope) and installs with live runtime progress. Installed catalog skills carry a "From catalog" mark, a runtime line with Retry, and "Update available". |
 | **Library** | A grid with a safe preview (Markdown, text, code and images from the daemon). It shows each file's origin, supports drag-and-drop upload, and has Save a copy. |
 | **Memory** | Entries grouped by kind, with search. You can add, correct (with the supersession chain shown) and delete. |
-| **Settings** | About, sources, working style (check-ins, autonomy, review rounds, models, slots), the ordered policy editor with reset, and archive. |
+| **Settings** | About, sources (each with "Agents can write here", on by default), working style (check-ins, autonomy, review rounds, models, reasoning effort, slots), the ordered policy editor with reset, and archive. |
 | **System** | deskd start/restart/stop/repair and the proxy state; the model endpoint; notifications; the data directory and logs; the model registry editor; usage by model and project; and system notices. |
 | **Menu bar** | A count badge and a popover with a mini line diagram of today. The strips let you approve or deny in place. The popover also shows what's running and has Open Desk. |
 

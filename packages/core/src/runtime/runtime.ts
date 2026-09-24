@@ -200,7 +200,7 @@ export class Runtime {
     this.sendMessage(desk.id, text);
   }
 
-  async addSource(projectId: string, path: string, label?: string): Promise<string> {
+  async addSource(projectId: string, path: string, label?: string, agentWrite = true): Promise<string> {
     this.requireOpenProject(projectId);
     if (!existsSync(path) || !statSync(path).isDirectory()) throw new ValidationError(`Source path does not exist or is not a directory: ${path}`);
     const real = await realpath(path);
@@ -211,9 +211,17 @@ export class Runtime {
       project_id: projectId,
       agent_id: null,
       type: 'source.added',
-      payload: { source_id: id, path: real, kind: isRepoRoot ? 'git' : 'folder', label: label ?? basename(real) },
+      payload: { source_id: id, path: real, kind: isRepoRoot ? 'git' : 'folder', label: label ?? basename(real), agent_write: agentWrite },
     });
     return id;
+  }
+
+  /** Lets agents write to a source folder (sandboxed) and run services there, or takes that back. */
+  setSourceWrite(projectId: string, sourceId: string, agentWrite: boolean): void {
+    const source = getSource(this.o.store.db, sourceId);
+    if (!source || source.project_id !== projectId) throw new NotFoundError(`Unknown source: ${sourceId}`);
+    if (source.agent_write === agentWrite) return;
+    this.o.store.append({ project_id: projectId, agent_id: null, type: 'source.updated', payload: { source_id: sourceId, agent_write: agentWrite } });
   }
 
   removeSource(projectId: string, sourceId: string): void {
@@ -591,24 +599,27 @@ export class Runtime {
    * Starts a project service in a thread's workspace, sandboxed like the thread's own shell tools. A name that is
    * already running is stopped first and started again under the same id.
    */
-  async startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId: string; by: string }): Promise<ServiceRow> {
+  async startService(
+    projectId: string,
+    input: { name: string; command: string; cwd?: string; threadId?: string; sourceId?: string; by: string },
+  ): Promise<ServiceRow> {
     this.requireOpenProject(projectId);
     const name = ServiceName.safeParse(input.name);
     if (!name.success) throw new ValidationError(`Invalid service name "${input.name}": ${name.error.issues[0]?.message ?? 'invalid'}`);
     const command = input.command.trim();
     if (!command) throw new ValidationError('A service needs a command');
-    const thread = this.serviceWorkspaceOwner(projectId, input.threadId);
-    const workspace = realpathSync(thread.workspace_path!);
+    const place = this.servicePlace(projectId, input);
+    const workspace = place.root;
     const cwd = await resolveInside(input.cwd ?? '.', [workspace], workspace).catch(() => {
-      throw new ValidationError(`cwd must be a directory inside the thread's workspace: ${input.cwd}`);
+      throw new ValidationError(`cwd must be a directory inside ${place.label}: ${input.cwd}`);
     });
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new ValidationError(`cwd must be a directory inside the thread's workspace: ${input.cwd}`);
+    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new ValidationError(`cwd must be a directory inside ${place.label}: ${input.cwd}`);
 
     const existing = findService(this.o.store.db, projectId, name.data);
     if (existing?.status === 'running') await this.stopServiceRun(existing, input.by, 'restart');
     const serviceId = existing?.id ?? `svc_${newId()}`;
-    const env = withSkillEnv(scrubbedEnv(workspace), this.skillEnv(thread.id));
-    const sandbox = { enabled: await this.sandboxAvailable(), writable: thread.git_common_dir ? [workspace, thread.git_common_dir] : [workspace] };
+    const env = withSkillEnv(scrubbedEnv(workspace), this.skillEnv(place.agent.id));
+    const sandbox = { enabled: await this.sandboxAvailable(), writable: [workspace, ...place.writable, ...this.writeRoots(place.agent)] };
     const relCwd = cwd === workspace ? '.' : cwd.slice(workspace.length + 1);
     const pid = this.serviceProcs.start(serviceId, {
       command,
@@ -622,7 +633,7 @@ export class Runtime {
       project_id: projectId,
       agent_id: null,
       type: 'service.started',
-      payload: { service_id: serviceId, name: name.data, command, cwd: relCwd, workspace_agent_id: thread.id, pid, by: input.by },
+      payload: { service_id: serviceId, name: name.data, command, cwd: relCwd, workspace_agent_id: place.agent.id, source_id: place.sourceId, pid, by: input.by },
     });
     return getService(this.o.store.db, serviceId)!;
   }
@@ -637,7 +648,7 @@ export class Runtime {
   /** Runs a service's recorded command again in its recorded workspace (stopping the current run first). */
   async restartService(serviceId: string, by: string): Promise<ServiceRow> {
     const s = this.requireService(serviceId);
-    return this.startService(s.project_id, { name: s.name, command: s.command, cwd: s.cwd, threadId: s.agent_id, by });
+    return this.startService(s.project_id, { name: s.name, command: s.command, cwd: s.cwd, ...(s.source_id ? { sourceId: s.source_id } : { threadId: s.agent_id }), by });
   }
 
   serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean } {
@@ -653,7 +664,7 @@ export class Runtime {
 
   /** Stops the running services of a project, or only those in one thread's workspace. */
   private stopServicesOf(projectId: string, reason: ServiceStopReason, threadId?: string): Promise<void> {
-    const running = listServices(this.o.store.db, projectId).filter((s) => s.status === 'running' && (!threadId || s.agent_id === threadId));
+    const running = listServices(this.o.store.db, projectId).filter((s) => s.status === 'running' && (!threadId || (s.agent_id === threadId && !s.source_id)));
     return Promise.all(running.map((s) => this.stopServiceRun(s, 'system', reason))).then(() => undefined);
   }
 
@@ -665,6 +676,29 @@ export class Runtime {
     const s = getService(this.o.store.db, serviceId);
     if (!s) throw new NotFoundError(`Unknown service: ${serviceId}`);
     return s;
+  }
+
+  /**
+   * Where a service runs: a thread's workspace, or a project source folder that allows agents to write (then its
+   * environment follows the agent that started it, or Desk when the user did).
+   */
+  private servicePlace(
+    projectId: string,
+    input: { threadId?: string; sourceId?: string; by: string },
+  ): { root: string; label: string; agent: AgentRow; sourceId: string | null; writable: string[] } {
+    if (input.sourceId) {
+      const source = getSource(this.o.store.db, input.sourceId);
+      if (!source || source.project_id !== projectId) throw new ValidationError(`Unknown source in this project: ${input.sourceId}`);
+      if (!source.agent_write) throw new ConflictError(`Agents may not write to ${source.label}; turn it on in the project's Settings → Sources`);
+      if (!existsSync(source.path)) throw new ConflictError(`Source folder is missing: ${source.path}`);
+      const starter = input.by.startsWith('agent:') ? getAgent(this.o.store.db, input.by.slice(6)) : undefined;
+      const agent = starter && starter.project_id === projectId ? starter : getDeskAgent(this.o.store.db, projectId);
+      if (!agent) throw new NotFoundError(`Project ${projectId} has no Desk agent`);
+      return { root: realpathSync(source.path), label: `${source.label} (${source.path})`, agent, sourceId: source.id, writable: [] };
+    }
+    if (!input.threadId) throw new ValidationError('A service needs a thread workspace or a project source to run in');
+    const thread = this.serviceWorkspaceOwner(projectId, input.threadId);
+    return { root: realpathSync(thread.workspace_path!), label: "the thread's workspace", agent: thread, sourceId: null, writable: thread.git_common_dir ? [thread.git_common_dir] : [] };
   }
 
   private serviceWorkspaceOwner(projectId: string, threadId: string): AgentRow {
@@ -867,6 +901,13 @@ export class Runtime {
   }
 
   /** Own workspace + every project source + the project library + skill directories. */
+  /** Source folders agents of the project may write to (besides their own workspace). */
+  private writeRoots(agent: AgentRow): string[] {
+    return listSources(this.o.store.db, agent.project_id)
+      .filter((s) => s.agent_write && existsSync(s.path))
+      .map((s) => s.path);
+  }
+
   private readRoots(agent: AgentRow): string[] {
     const roots = listSources(this.o.store.db, agent.project_id).map((s) => s.path);
     return [...(agent.workspace_path ? [agent.workspace_path] : []), ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
@@ -890,6 +931,7 @@ export class Runtime {
       jobs: this.jobs,
       services: this.services,
       readRoots: (a) => this.readRoots(a),
+      writeRoots: (a) => this.writeRoots(a),
     });
   }
 

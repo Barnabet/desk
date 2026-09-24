@@ -58,6 +58,7 @@ export const handlers = {
   'projects.archive': (i, c) => c.client().projects.archive(i.id),
   'projects.addSource': (i, c) => c.client().projects.addSource(i.id, i.source),
   'projects.removeSource': (i, c) => c.client().projects.removeSource(i.id, i.sourceId),
+  'projects.setSourceWrite': (i, c) => c.client().projects.setSourceWrite(i.id, i.sourceId, i.agentWrite),
   'projects.send': (i, c) => c.client().projects.send(i.id, i.text),
   'projects.chat': (i, c) => c.client().projects.chat(i.id, { ...(i.after !== undefined ? { after: i.after } : {}), ...(i.limit ? { limit: i.limit } : {}) }),
   'projects.plan': (i, c) => c.client().projects.plan(i.id),

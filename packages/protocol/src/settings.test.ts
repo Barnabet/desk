@@ -30,7 +30,7 @@ describe('ProjectSettings', () => {
       'skill_run:ask',
       'git_push:allow',
       'git_push:deny',
-      'open_pr:ask',
+      'open_pr:allow',
       'web_fetch:allow',
       'web_search:allow',
     ]);

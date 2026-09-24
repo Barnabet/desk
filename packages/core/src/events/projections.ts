@@ -63,8 +63,11 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       return;
     case 'source.added':
       tx.insert(sources)
-        .values({ id: ev.payload.source_id, project_id: ev.project_id, path: ev.payload.path, kind: ev.payload.kind, label: ev.payload.label, created_at: ev.ts })
+        .values({ id: ev.payload.source_id, project_id: ev.project_id, path: ev.payload.path, kind: ev.payload.kind, label: ev.payload.label, agent_write: ev.payload.agent_write ?? true, created_at: ev.ts })
         .run();
+      return;
+    case 'source.updated':
+      tx.update(sources).set({ agent_write: ev.payload.agent_write }).where(eq(sources.id, ev.payload.source_id)).run();
       return;
     case 'source.removed':
       tx.delete(sources).where(eq(sources.id, ev.payload.source_id)).run();
@@ -163,7 +166,7 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       return;
     case 'service.started': {
       const p = ev.payload;
-      const run = { command: p.command, cwd: p.cwd, agent_id: p.workspace_agent_id, status: 'running' as const, pid: p.pid, exit_code: null, exit_signal: null, stop_reason: null, url: null, started_by: p.by, started_at: ev.ts, ended_at: null };
+      const run = { command: p.command, cwd: p.cwd, agent_id: p.workspace_agent_id, source_id: p.source_id ?? null, status: 'running' as const, pid: p.pid, exit_code: null, exit_signal: null, stop_reason: null, url: null, started_by: p.by, started_at: ev.ts, ended_at: null };
       tx.insert(services)
         .values({ id: p.service_id, project_id: ev.project_id, name: p.name, ...run })
         .onConflictDoUpdate({ target: services.id, set: run })
