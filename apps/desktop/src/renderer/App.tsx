@@ -5,6 +5,7 @@ import { ProjectNav } from './components/ProjectNav';
 import { TitleBar } from './components/TitleBar';
 import { Toaster } from './components/Toast';
 import { navigate, useRoute, type Route } from './router';
+import { ConversationScreen } from './conversation/ConversationScreen';
 import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
@@ -22,6 +23,7 @@ function Screen({ route }: { route: Route }) {
     case 'system':
       return <Pending title="System" />;
     case 'project':
+      if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} />;
       return <Pending title={route.tab[0]!.toUpperCase() + route.tab.slice(1)} />;
     default:
       return null;

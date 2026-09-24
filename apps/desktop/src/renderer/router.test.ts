@@ -15,6 +15,7 @@ describe('router', () => {
       { name: 'project', id: 'p1', tab: 'conversation' },
       { name: 'project', id: 'p1', tab: 'threads', threadId: 't9' },
       { name: 'project', id: 'p1', tab: 'settings' },
+      { name: 'project', id: 'p1', tab: 'library', file: 'emails/01 welcome.md' },
     ];
     for (const r of routes) expect(parseRoute(href(r))).toEqual(r);
   });

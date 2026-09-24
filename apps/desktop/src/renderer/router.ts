@@ -9,7 +9,7 @@ export type Route =
   | { name: 'attention'; item?: string }
   | { name: 'skills'; skill?: string }
   | { name: 'system' }
-  | { name: 'project'; id: string; tab: ProjectTab; threadId?: string };
+  | { name: 'project'; id: string; tab: ProjectTab; threadId?: string; file?: string };
 
 const enc = encodeURIComponent;
 
@@ -32,7 +32,9 @@ export function parseRoute(hash: string): Route {
       const id = parts[1];
       if (!id) return { name: 'map' };
       const tab = PROJECT_TABS.includes(parts[2] as ProjectTab) ? (parts[2] as ProjectTab) : 'conversation';
-      return tab === 'threads' && parts[3] ? { name: 'project', id, tab, threadId: parts[3] } : { name: 'project', id, tab };
+      if (tab === 'threads' && parts[3]) return { name: 'project', id, tab, threadId: parts[3] };
+      const file = q.get('file');
+      return tab === 'library' && file ? { name: 'project', id, tab, file } : { name: 'project', id, tab };
     }
     default:
       return q.get('new') === '1' ? { name: 'map', newProject: true } : { name: 'map' };
@@ -52,13 +54,21 @@ export function href(r: Route): string {
     case 'system':
       return '#/system';
     case 'project':
-      return `#/p/${enc(r.id)}/${r.tab}${r.threadId ? `/${enc(r.threadId)}` : ''}`;
+      return `#/p/${enc(r.id)}/${r.tab}${r.threadId ? `/${enc(r.threadId)}` : ''}${r.file ? `?file=${enc(r.file)}` : ''}`;
   }
 }
 
 export function navigate(to: Route | string): void {
   const target = typeof to === 'string' ? to : href(to);
   window.location.hash = target.replace(/^#/, '');
+}
+
+/** Changes the route without adding a history entry (selection within a screen). */
+export function replaceRoute(to: Route | string): void {
+  const target = typeof to === 'string' ? to : href(to);
+  if (window.location.hash === target) return;
+  history.replaceState(null, '', target);
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
 }
 
 const subscribeHash = (fn: () => void) => {
