@@ -164,6 +164,15 @@ pnpm typecheck
 pnpm deskd --data-dir /tmp/desk-dev --port 0      # run the daemon in the foreground
 ```
 
+### Desktop app (development)
+
+```sh
+pnpm desktop       # Electron app with Vite HMR; finds (or starts) the repo daemon
+pnpm test:e2e      # builds the app and runs the Playwright-for-Electron smoke test against a real deskd
+```
+
+The app keeps running in the menu bar when its window closes. It stores its own preferences in Electron's `userData` folder and never stores the daemon token.
+
 The spec is in [`docs/superpowers/specs/2026-09-23-desk-daemon-design.md`](docs/superpowers/specs/2026-09-23-desk-daemon-design.md) and the implementation plans are in [`docs/superpowers/plans/`](docs/superpowers/plans/). Contributor notes for agents are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Known limitations (v1.0)

@@ -4717,7 +4717,7 @@ function TestResult({ result }: { result: ModelEndpointTestResult | null }) {
   return result.ok ? (
     <p className="status-line">
       <span className="dot ok" aria-hidden="true" />
-      {`Connected. ${result.models?.length ?? 0} models available.`}
+      {`Connected. ${result.models?.length ?? 0} model${result.models?.length === 1 ? '' : 's'} available.`}
     </p>
   ) : (
     <p className="field-error" role="alert">
@@ -4959,20 +4959,22 @@ describe('desktop shell', () => {
     await page.getByText('Welcome to Desk').waitFor();
     await page.getByText('deskd 1.0.0 is running.').waitFor();
     await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByText(/manages its model endpoint itself/).waitFor();
+    await page.getByText(/from the DESK_OPENAI_\* environment variables/).waitFor();
+    await page.getByRole('button', { name: 'Test connection' }).click();
+    await page.getByText(/^Connected\. \d+ models? available\.$/).waitFor();
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('Name').fill('Launch');
     await page.getByLabel('Goal').fill('Relaunch onboarding next month');
     await page.getByRole('button', { name: 'Create project' }).click();
-    await page.getByRole('heading', { name: 'Projects' }).waitFor();
-    await page.getByRole('heading', { name: 'Launch' }).waitFor();
+    await page.getByRole('heading', { name: 'Projects', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Launch', exact: true }).waitFor();
     expect(await page.getByRole('link', { name: 'All clear' }).isVisible()).toBe(true);
     expect(await trayTitle()).toBe('');
 
     const client = clientFromDataDir(join(dir, 'data'));
     const [project] = await client.projects.list();
     await client.projects.send(project!.id, 'Kick things off');
-    await page.getByRole('link', { name: '1 need you' }).waitFor({ timeout: 20_000 });
+    await page.getByRole('link', { name: '1 need you', exact: true }).waitFor({ timeout: 20_000 });
     await expect.poll(trayTitle, { timeout: 10_000 }).toBe('1');
 
     const csp = await page.evaluate(async () => (await fetch(location.href)).headers.get('content-security-policy'));

@@ -95,7 +95,7 @@ function TestResult({ result }: { result: ModelEndpointTestResult | null }) {
   return result.ok ? (
     <p className="status-line">
       <span className="dot ok" aria-hidden="true" />
-      {`Connected. ${result.models?.length ?? 0} models available.`}
+      {`Connected. ${result.models?.length ?? 0} model${result.models?.length === 1 ? '' : 's'} available.`}
     </p>
   ) : (
     <p className="field-error" role="alert">

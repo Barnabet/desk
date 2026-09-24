@@ -14,9 +14,11 @@ pnpm typecheck    # tsc --noEmit; must pass before any commit
 pnpm test:live    # live smokes against the local model proxy (slow; DESK_LIVE=1)
 bin/desk …        # CLI (tsx loader, no build step)
 pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.mjs (+ migrations, better-sqlite3 prebuilds)
+pnpm desktop      # the Electron app against the repo daemon (Vite HMR)
+pnpm test:e2e     # builds the app and runs the Playwright-for-Electron smoke (opens a window)
 ```
 
-There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly.
+There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly. The desktop app is the exception: esbuild bundles its main and preload, and Vite builds its renderer.
 
 ## Layout
 
@@ -46,6 +48,10 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `testing/`: the harness, exported as `@desk/core/testing`.
 - `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle, `notifier.ts` (macOS notifications), `scripts/bundle.mjs`.
 - `apps/cli`: commander CLI over `DeskClient`.
+- `apps/desktop`: Electron + React app (spec: `docs/superpowers/specs/2026-09-24-desk-desktop-app-design.md`).
+  - `src/main/`: the only deskd client. `broker.ts` (global state, event forwarding), `handlers.ts` (IPC ops, zod-validated in `shared/ipc.ts`), `daemon.ts` (start/LaunchAgent), tray, windows (CSP, `desk-app://`).
+  - `src/preload/`: exposes only `window.desk.{invoke,on,platform}`.
+  - `src/renderer/`: React UI; talks to main only through `bridge.ts`. Agent text goes through `SafeMarkdown`.
 - `test/fake-model`: a scriptable OpenAI-compatible server. Every non-live test talks to it.
 
 ## Conventions
@@ -79,3 +85,4 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - Shell tools (`bash`, `bash_background`, `bash_readonly`, `skill_run`) never run unsandboxed without approval.
 - Threads cannot modify installed skills. They submit drafts, which Desk installs with `skill_write from_dir`.
 - Desk never merges branches.
+- The desktop renderer never sees the daemon token; every IPC payload is validated in main.
