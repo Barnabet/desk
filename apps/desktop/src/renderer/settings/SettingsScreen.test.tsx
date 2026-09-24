@@ -76,7 +76,7 @@ describe('SettingsScreen', () => {
   it('edits the policy in order, resets to the default, and shows the risky pattern by name', async () => {
     const bridge = setup();
     const policy = await screen.findByRole('region', { name: 'Policy' });
-    expect(within(policy).getAllByText('risky commands (built-in)')).toHaveLength(4);
+    expect(within(policy).getAllByText('risky commands')).toHaveLength(4);
     expect(within(policy).getByText('This is the default policy.')).toBeTruthy();
     fireEvent.click(within(policy).getByRole('button', { name: 'Add rule' }));
     fireEvent.change(within(policy).getByLabelText('Rule 10 tool'), { target: { value: 'web_fetch' } });

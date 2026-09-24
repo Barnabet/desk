@@ -55,7 +55,7 @@ export function PolicyEditor({ rules, onChange }: { rules: PolicyRule[]; onChang
                 <span />
               ) : risky ? (
                 <span className="policy-risky">
-                  <span className="chip chip-idle">risky commands (built-in)</span>
+                  <span className="chip chip-idle" title="The built-in pattern: sudo, piping a download into a shell, recursive deletes of / or ~, and similar">risky commands</span>
                   <button type="button" className="link small" onClick={() => set(i, withMatch(r, key, ''))}>
                     Replace
                   </button>

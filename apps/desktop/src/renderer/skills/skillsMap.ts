@@ -34,7 +34,7 @@ export function layoutSkillsMap(o: { nodes: SkillNode[]; projects: Array<{ id: s
   const skills = new Map<string, PlacedSkill>();
   globals.forEach((n, i) => {
     const a = (i / Math.max(1, globals.length)) * Math.PI * 2 - Math.PI / 2;
-    skills.set(n.key, { key: n.key, x: center.x + Math.cos(a) * globalRadius, y: center.y + Math.sin(a) * globalRadius, r: skillR(n, 30) });
+    skills.set(n.key, { key: n.key, x: center.x + Math.cos(a) * globalRadius, y: center.y + Math.sin(a) * globalRadius, r: skillR(n, 38) });
   });
 
   const territories: Territory[] = o.projects.map((p, i) => {
@@ -46,7 +46,7 @@ export function layoutSkillsMap(o: { nodes: SkillNode[]; projects: Array<{ id: s
     own.forEach((n, k) => {
       const ring = own.length === 1 ? 0 : r * 0.45;
       const b = (k / own.length) * Math.PI * 2 - Math.PI / 2;
-      skills.set(n.key, { key: n.key, x: x + Math.cos(b) * ring, y: y + Math.sin(b) * ring, r: skillR(n, 22) });
+      skills.set(n.key, { key: n.key, x: x + Math.cos(b) * ring, y: y + Math.sin(b) * ring, r: skillR(n, 32) });
     });
     return { projectId: p.id, name: p.name, tone: p.tone, x, y, r, count: own.length };
   });

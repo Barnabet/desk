@@ -192,3 +192,7 @@
   text-decoration: line-through;
   color: var(--text-min);
 }
+.memory-add-row .select {
+  width: 150px;
+  flex: 0 0 150px;
+}

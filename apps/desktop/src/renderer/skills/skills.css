@@ -66,6 +66,10 @@
   padding: 0;
   overflow: hidden;
 }
+.skills-body .map-zoom {
+  right: 16px;
+  top: 8px;
+}
 .skills-svg {
   position: absolute;
   left: 0;
@@ -179,11 +183,12 @@
 .skill-node-name {
   max-width: 100%;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 1.2;
   text-align: center;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  hyphens: none;
 }
 .skill-node-v {
   font-size: 10.5px;

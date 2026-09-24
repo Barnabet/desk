@@ -7,7 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { FileViewer } from '../components/FileViewer';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { describeError, toast, toastError } from '../components/Toast';
-import { ago, bytes } from '../format';
+import { bytes, since } from '../format';
 import { href } from '../router';
 import { useNow } from '../state/now';
 import { scopeArg, whoLabel, type SkillRef } from './data';
@@ -208,7 +208,7 @@ export function SkillPanel(o: {
                   <div className="skill-change">
                     <strong className="small">
                       {whoLabel(current.origin, o.threadTitles)} · v{current.version}
-                      {current.ts ? ` · ${ago(current.ts, now)} ago` : ''}
+                      {current.ts ? ` · ${since(current.ts, now)}` : ''}
                     </strong>
                     <span className="small">{current.change_note || 'No change note.'}</span>
                   </div>
@@ -268,7 +268,7 @@ export function SkillPanel(o: {
                         <span className="grow">
                           <span className="small">
                             <strong>{whoLabel(h.origin, o.threadTitles)}</strong>
-                            {h.ts ? ` · ${ago(h.ts, now)} ago` : ''}
+                            {h.ts ? ` · ${since(h.ts, now)}` : ''}
                           </span>
                           <span className="small muted">{h.change_note || h.description}</span>
                         </span>

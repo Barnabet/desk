@@ -18,6 +18,12 @@ export function duration(ms: number): string {
 }
 
 /** Time since `ts`: "now" under a minute, else a short duration. */
+/** "just now", or "5m ago" style text for past moments. */
+export const since = (ts: string, now: number): string => {
+  const a = ago(ts, now);
+  return a === 'now' ? 'just now' : `${a} ago`;
+};
+
 export function ago(ts: string, now: number): string {
   const ms = now - Date.parse(ts);
   return ms < 60_000 ? 'now' : duration(ms);

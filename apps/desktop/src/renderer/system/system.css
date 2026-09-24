@@ -77,9 +77,19 @@
 .models-table td {
   padding: 4px 6px;
 }
+.models-editor {
+  overflow-x: auto;
+}
 .models-table .input {
   width: 100%;
   box-sizing: border-box;
+}
+.models-table .input.narrow {
+  width: 72px;
+}
+.models-table td:last-child,
+.models-table th:last-child {
+  width: 36px;
 }
 .usage-grid {
   display: grid;

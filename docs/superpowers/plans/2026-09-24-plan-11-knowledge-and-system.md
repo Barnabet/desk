@@ -5283,3 +5283,209 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 7: End-to-end knowledge flows and visual polish
+
+**Files:**
+- Create: `apps/desktop/e2e/knowledge.e2e.test.ts`
+- Modify: `apps/desktop/src/renderer/format.ts`, `apps/desktop/src/renderer/skills/SkillPanel.tsx`, `apps/desktop/src/renderer/skills/skills.css`, `apps/desktop/src/renderer/skills/skillsMap.ts`, `apps/desktop/src/renderer/knowledge/knowledge.css`, `apps/desktop/src/renderer/settings/PolicyEditor.tsx`, `apps/desktop/src/renderer/settings/SettingsScreen.test.tsx`, `apps/desktop/src/renderer/settings/settings.css`, `apps/desktop/src/renderer/system/system.css`
+
+**Interfaces:**
+
+- Consumes: the built app (`pnpm test:e2e` builds first), a real deskd on a temp data dir, the fake model, and `DeskClient` for seeding (project 'Tax paperwork', global skill 'receipt-sorting', one memory entry).
+- Produces:
+
+```ts
+// renderer/format.ts
+export function since(ts: string, now: number): string; // 'just now' under a minute, else 'Xm ago' / relative
+```
+
+`DESK_E2E_SHOTS=<dir>` saves k1–k6 screenshots (skills, library, memory, settings, system, palette) for visual review.
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/e2e/knowledge.e2e.test.ts`:
+
+```ts
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { clientFromDataDir } from '@desk/client/node';
+import { startDaemon, type RunningDaemon } from '@desk/daemon';
+import { startFakeModel, text, type FakeModelServer } from '@desk/fake-model';
+
+const appDir = fileURLToPath(new URL('..', import.meta.url));
+let dir: string;
+let fake: FakeModelServer;
+let daemon: RunningDaemon;
+let app: ElectronApplication;
+
+beforeAll(async () => {
+  dir = mkdtempSync(join(tmpdir(), 'desk-knowledge-'));
+  fake = await startFakeModel(() => text('Noted.'));
+  daemon = await startDaemon({ dataDir: join(dir, 'data'), port: 0, modelConfig: { baseURL: fake.url, apiKey: 'test' } });
+  const { default: electronPath } = await import('electron');
+  app = await electron.launch({
+    executablePath: electronPath as unknown as string,
+    args: [appDir],
+    env: { ...process.env, DESK_DATA_DIR: join(dir, 'data'), DESK_USER_DATA: join(dir, 'user'), DESK_E2E: '1' },
+  });
+});
+
+afterAll(async () => {
+  await app?.close();
+  await daemon?.stop();
+  await fake?.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const b64 = (s: string) => Buffer.from(s).toString('base64');
+/** Set DESK_E2E_SHOTS=<dir> to keep screenshots of each screen for visual review. */
+async function shot(page: Page, name: string) {
+  const out = process.env.DESK_E2E_SHOTS;
+  if (out) await page.screenshot({ path: join(out, `${name}.png`) });
+}
+
+async function go(page: Page, hash: string) {
+  await page.evaluate((h) => (window.location.hash = h), hash);
+}
+
+describe('knowledge and system screens, end to end', () => {
+  it('refines a skill and restores v1, uploads to the library, corrects memory, changes settings, and searches', async () => {
+    const client = clientFromDataDir(join(dir, 'data'));
+    const { project } = await client.projects.create({ name: 'Tax paperwork', goal: 'File on time' });
+    await client.skills.save({}, 'receipt-sorting', { description: 'Sort receipts into tax categories', instructions: 'Sort by category.', change_note: 'First version' });
+    await client.memory.add(project.id, { kind: 'fact', content: 'The accountant is Dana' });
+
+    const page = await app.firstWindow();
+    await page.evaluate(() => localStorage.setItem('desk.onboarded', '1'));
+
+    // Skills: refine by hand, then restore v1.
+    await go(page, '#/skills');
+    await page.getByRole('button', { name: /^receipt-sorting, global, version 1/ }).click();
+    const panel = page.getByRole('article', { name: 'Skill receipt-sorting' });
+    await panel.getByText('First version').waitFor();
+    await panel.getByRole('button', { name: 'Edit' }).click();
+    const editor = page.getByRole('dialog', { name: 'Edit receipt-sorting' });
+    await editor.getByLabel('Instructions (SKILL.md)').fill('Sort by category, then flag unclear ones.');
+    await editor.getByLabel('Change note (optional)').fill('Flag unclear receipts');
+    await editor.getByRole('button', { name: 'Save new version' }).click();
+    await panel.getByText('Flag unclear receipts').waitFor();
+    await panel.getByRole('tab', { name: /^History/ }).click();
+    await expect.poll(() => panel.getByLabel('Changes from v1 to v2').textContent()).toContain('+ Sort by category, then flag unclear ones.');
+    await shot(page, 'k1-skills');
+    await panel.getByRole('button', { name: 'Restore' }).click();
+    await page.getByRole('dialog', { name: 'Restore v1?' }).getByRole('button', { name: 'Restore' }).click();
+    await expect.poll(async () => (await client.skills.get({}, 'receipt-sorting')).version).toBe(3);
+    expect((await client.skills.get({}, 'receipt-sorting')).instructions.trim()).toBe('Sort by category.');
+
+    // Library: upload through the picker and preview it.
+    await go(page, `#/p/${project.id}/library`);
+    await page.getByTestId('library-input').setInputFiles({ name: 'checklist.md', mimeType: 'text/markdown', buffer: Buffer.from('# Documents to gather\n\n- W-2\n- 1099') });
+    const preview = page.getByRole('complementary', { name: 'Preview' });
+    await preview.getByRole('heading', { name: 'Documents to gather' }).waitFor({ timeout: 15_000 });
+    await page.getByRole('button', { name: /checklist\.md/ }).first().waitFor();
+    await shot(page, 'k2-library');
+
+    // Memory: correct an entry; the old version stays in the chain.
+    await go(page, `#/p/${project.id}/memory`);
+    const entry = page.getByRole('listitem', { name: /The accountant is Dana/ });
+    await entry.getByRole('button', { name: 'Correct' }).click();
+    await entry.getByLabel('Correct this entry').fill('The accountant is Dana Reyes');
+    await entry.getByRole('button', { name: 'Save correction' }).click();
+    const corrected = page.getByRole('listitem', { name: /The accountant is Dana Reyes/ });
+    await corrected.getByRole('button', { name: 'Corrected 1 time' }).click();
+    await corrected.getByRole('list', { name: 'Earlier versions' }).getByText('The accountant is Dana').waitFor();
+    expect((await client.memory.list(project.id)).map((m) => m.content)).toEqual(['The accountant is Dana Reyes']);
+    await shot(page, 'k3-memory');
+
+    // Settings: review rounds and a policy rule.
+    await go(page, `#/p/${project.id}/settings`);
+    const style = page.getByRole('region', { name: 'How Desk works' });
+    await style.getByLabel('Review rounds').fill('3');
+    await style.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(async () => (await client.projects.get(project.id)).project.settings.review_rounds).toBe(3);
+    const policy = page.getByRole('region', { name: 'Policy' });
+    await policy.getByRole('button', { name: 'Add rule' }).click();
+    await policy.getByLabel('Rule 10 tool').fill('web_fetch');
+    await policy.getByLabel('Rule 10 action').selectOption('deny');
+    await policy.getByRole('button', { name: 'Save policy' }).click();
+    await expect.poll(async () => (await client.projects.get(project.id)).project.settings.policy.at(-1)).toEqual({ tool: 'web_fetch', action: 'deny' });
+    await shot(page, 'k4-settings');
+
+    // System shows the running daemon and the registry.
+    await go(page, '#/system');
+    await page.getByRole('region', { name: 'deskd' }).getByText('Running').waitFor();
+    await page.getByRole('region', { name: 'Model registry' }).getByLabel('Model 1 id').waitFor();
+    await shot(page, 'k5-system');
+
+    // ⌘K finds the project.
+    await page.keyboard.press('Meta+k');
+    await page.getByRole('combobox', { name: /Search projects/ }).fill('tax');
+    await shot(page, 'k6-palette');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(`#/p/${project.id}/conversation`);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm test:e2e`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+The flow: edit the skill → v2 → History diff → restore v1 (becomes v3); upload a library file with `setInputFiles` and see its preview; correct a memory entry and see the 'Corrected 1 time' chain; set review rounds to 3 and add a `web_fetch` deny rule; System shows Running; ⌘K 'tax' ⏎ opens the conversation.
+
+Polish found in the screenshots:
+- SkillPanel shows 'saved just now' via `since()`.
+- The skills map zoom sits at the top right, node names are 11px without mid-word breaks, and the radii are 38 (global) and 32 (project).
+- The memory add-row kind select is fixed at 150px.
+- Policy rows use `22px minmax(150px,1.3fr) 108px minmax(150px,1.2fr) 84px max-content auto` with `min-width:0` children. The risky chip reads 'risky commands' (the tooltip names the built-in pattern) and never wraps.
+- In the model registry, the concurrency input is 72px, the remove column is 36px, and the editor scrolls horizontally when narrow.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "test(desktop): end-to-end knowledge flows — refine and restore a skill, library upload, memory correction, settings and policy, system, ⌘K; visual polish
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+
+## Self-review
+
+Coverage against spec §7, items 5–9, and the ⌘K palette:
+
+| Spec item | Where |
+|---|---|
+| Skills: map and list; global, project and shadowed skills; what's in use | Task 4 (`skillsMap.ts`, `SkillsMapView`, `SkillList`, `useSkills`) |
+| Skills: detail with safe Markdown instructions, files tree and viewer, "Used by" | Task 4 (`SkillPanel`, `FileViewer` from Task 1) |
+| Skills: history diff between any two versions, restore, change notes | Task 4 (`diff.ts`, History tab), plus the core `skillHistory` join (change note, origin, time) |
+| Skills: create or edit by hand, with SKILL.md and files, add, remove and upload | Task 4 (`SkillEditor`) |
+| Skills: import a folder (default `~/.claude/skills`), delete, scope switcher | Task 4 (`ImportSheet`, Delete, scope select in `SkillEditor` and `SkillsScreen`) |
+| Skills: Ask Desk to build or refine, naming the skill | Task 4 (`AskDesk`) |
+| Library: grid and preview; Markdown, text and code, daemon images, download fallback | Task 1 (`LibraryScreen`, `FileViewer`, `files.ts`) |
+| Library: origin (you or a linked thread) and kind; drag-and-drop or picker upload; download | Task 1 |
+| Memory: grouped by kind, search, add, correct with the chain, delete | Task 2 |
+| Settings: name, goal, instructions; sources with detected kind | Task 3 (`SettingsScreen`) |
+| Settings: check-in, autonomy, review rounds, models, slots | Task 3 (`SettingsFields`, also reused as "More options" in `ProjectForm`) |
+| Settings: ordered policy editor with the default policy and reset; archive | Task 3 (`PolicyEditor`) |
+| System: daemon state, version and uptime; Start, Restart, Stop; install or repair the LaunchAgent | Task 5 (`SystemScreen`, `DaemonManager.repair`, `daemon.repair` channel) |
+| System: proxy state; model endpoint source, base URL, change key, test | Task 5 (`EndpointPanel`, shared with onboarding) |
+| System: model registry editor, usage by model and project, notices, notifications, data dir, Reveal logs | Task 5 (`ModelsEditor`, `SystemScreen`) |
+| Shell: ⌘K palette over projects, threads, skills and library titles, with memory search via `?q=` | Task 6 |
+| E2E for items 5–9 and ⌘K | Task 7 |
+
+Tasks 1 and 2 were written before execution. Tasks 3–7 were appended from the code that shipped, so their listings are the final versions. The visual polish in Task 7 overrides the CSS values in the listings of Tasks 3 and 4.

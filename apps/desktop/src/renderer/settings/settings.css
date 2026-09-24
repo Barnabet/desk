@@ -102,7 +102,7 @@
 }
 .policy-rule {
   display: grid;
-  grid-template-columns: 22px minmax(120px, 1fr) 110px minmax(160px, 1.6fr) 90px 110px auto;
+  grid-template-columns: 22px minmax(150px, 1.3fr) 108px minmax(150px, 1.2fr) 84px max-content auto;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -116,6 +116,8 @@
   color: var(--text-min);
 }
 .policy-risky {
+  min-width: 0;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -139,4 +141,7 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
+}
+.policy-rule > * {
+  min-width: 0;
 }
