@@ -2645,7 +2645,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create under `apps/desktop/src/renderer/`:
-  - `bridge.ts`, `store.ts`, `state/global.ts`, `router.ts`, `theme/tokens.css`
+  - `bridge.ts`, `store.ts`, `state/global.ts`, `router.ts`, `theme/tokens.css`, `vite-env.d.ts`
   - `components/{Button,Field,Sheet,ConfirmDialog,Toast,EmptyState,StatusChip,SkillBadge,CodeBlock,ExternalLink,SafeMarkdown,TitleBar,ProjectNav,ConnectionOverlay}.tsx`
   - `screens/{MapScreen,ProjectForm,Pending}.tsx`, `App.tsx`
   - `test/bridge.ts`
@@ -4489,6 +4489,12 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+```
+
+`apps/desktop/src/renderer/vite-env.d.ts` gives TypeScript the Vite client types, so CSS side-effect imports typecheck:
+
+```ts
+/// <reference types="vite/client" />
 ```
 
 `App.tsx` imports `Onboarding` and `isOnboarded`, which Task 9 creates. This task adds a minimal `screens/Onboarding.tsx` so it compiles; Task 9 replaces it:
