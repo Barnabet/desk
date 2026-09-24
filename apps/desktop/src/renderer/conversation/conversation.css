@@ -588,18 +588,6 @@
   align-items: center;
   gap: 10px;
 }
-.icon-btn {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  background: #fff;
-  cursor: pointer;
-}
 .plan-panel {
   margin-top: 16px;
   margin-bottom: 0;

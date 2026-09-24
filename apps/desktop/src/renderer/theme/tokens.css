@@ -826,3 +826,16 @@ pre {
   border-radius: 6px;
   background: repeating-conic-gradient(#f4f1ea 0 25%, #fff 0 50%) 0 0 / 16px 16px;
 }
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}

@@ -1105,3 +1105,795 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 3: Project settings, policy editor, and More options when creating a project
+
+**Files:**
+- Create: `apps/desktop/src/renderer/settings/SettingsScreen.test.tsx`, `apps/desktop/src/renderer/screens/ProjectForm.test.tsx`, `apps/desktop/src/renderer/settings/useModels.ts`, `apps/desktop/src/renderer/settings/SettingsFields.tsx`, `apps/desktop/src/renderer/settings/PolicyEditor.tsx`, `apps/desktop/src/renderer/settings/SettingsScreen.tsx`, `apps/desktop/src/renderer/settings/settings.css`
+- Modify: `apps/desktop/src/renderer/screens/ProjectForm.tsx`, `apps/desktop/src/renderer/conversation/conversation.css`, `apps/desktop/src/renderer/theme/tokens.css`, `apps/desktop/src/renderer/App.tsx`
+
+**Interfaces:**
+
+- Consumes: `useSession(projectId).project` (project, settings and sources, kept live by `project.updated` and `source.*`); the `projects.update`, `projects.addSource`, `projects.removeSource`, `projects.archive`, `models.list` and `app.pickFolder` channels; `DEFAULT_POLICY` and `RISKY_COMMAND_PATTERN` from `@desk/protocol`.
+- Produces:
+
+```ts
+// settings/useModels.ts
+export function useModels(): ModelInfo[] | null;
+// settings/SettingsFields.tsx
+export type WorkingStyle = Pick<ProjectSettings, 'desk_model' | 'thread_model' | 'fallback_model' | 'max_concurrent_threads' | 'check_in' | 'autonomy' | 'review_rounds'>;
+export const workingStyleOf: (s: ProjectSettings) => WorkingStyle;
+export const DEFAULT_STYLE: WorkingStyle;
+export function SettingsFields(props: { value: WorkingStyle; models: ModelInfo[] | null; onChange(patch: Partial<WorkingStyle>): void; idPrefix?: string }): JSX.Element;
+// settings/PolicyEditor.tsx — first match wins; the built-in risky pattern shows as a named chip
+export const sameRules: (a: PolicyRule[], b: PolicyRule[]) => boolean;
+export function PolicyEditor(props: { rules: PolicyRule[]; onChange(rules: PolicyRule[]): void }): JSX.Element;
+// settings/SettingsScreen.tsx
+export function SettingsScreen(props: { projectId: string }): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/settings/SettingsScreen.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProjectOverview } from '@desk/client';
+import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, type StoredEvent } from '@desk/protocol';
+import { ev } from '@desk/client/testing';
+import { initialGlobalState } from '../../shared/state';
+import { globalStore } from '../state/global';
+import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
+import { installBridge } from '../test/bridge';
+import { SettingsScreen } from './SettingsScreen';
+
+afterEach(cleanup);
+beforeEach(() => {
+  resetSessions();
+  setReleaseDelay(0);
+  window.location.hash = '#/p/p/settings';
+  globalStore.set({ ...initialGlobalState(), connection: { status: 'live' } });
+});
+
+const settings = { desk_model: 'claude-opus-5-5', thread_model: 'claude-opus-5-5', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: DEFAULT_POLICY };
+const overview = () =>
+  ({
+    project: { id: 'p', name: 'Tax 2026', goal: 'File on time', instructions: '', settings, created_at: 't', updated_at: 't', archived_at: null },
+    desk: null,
+    sources: [{ id: 's1', project_id: 'p', path: '/Users/me/tax', kind: 'folder', label: 'tax', created_at: 't' }],
+    plan: null,
+    threads: [],
+    approvals: [],
+    last_seq: 0,
+  }) as unknown as ProjectOverview;
+const models = ['claude-opus-5-5', 'claude-fable-5-1', 'gpt-6-sol'].map((id) => ({ id, family: 'claude', context_window: 1, max_output_tokens: 1, supports_reasoning_effort: false, concurrency: 1 }));
+
+function setup(extra: Record<string, (input: any) => unknown> = {}, events: StoredEvent[] = []) {
+  const bridge = installBridge({
+    'projects.get': () => overview(),
+    'broker.watch': () => {
+      for (const e of events) bridge.emit('desk:event', e);
+      return { ok: true };
+    },
+    'broker.unwatch': () => ({ ok: true }),
+    'models.list': () => models,
+    'projects.update': () => ({}),
+    ...extra,
+  });
+  startSessionRouting();
+  render(<SettingsScreen projectId="p" />);
+  return bridge;
+}
+
+const updates = (bridge: ReturnType<typeof installBridge>) => bridge.calls.filter((c) => c.channel === 'projects.update').map((c) => c.input);
+
+describe('SettingsScreen', () => {
+  it('saves the name and goal, and how Desk works', async () => {
+    const bridge = setup();
+    fireEvent.change(await screen.findByLabelText('Goal'), { target: { value: 'File by April' } });
+    const about = screen.getByRole('region', { name: 'About this project' });
+    fireEvent.click(within(about).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updates(bridge)[0]).toEqual({ id: 'p', patch: { name: 'Tax 2026', goal: 'File by April', instructions: '' } }));
+
+    const style = screen.getByRole('region', { name: 'How Desk works' });
+    fireEvent.click(within(style).getByLabelText(/Detailed/));
+    fireEvent.click(within(style).getByLabelText(/Ask before dispatching/));
+    await waitFor(() => expect((within(style).getByLabelText("Threads' model") as HTMLSelectElement).options.length).toBe(3));
+    fireEvent.change(within(style).getByLabelText('Fallback when rate limited'), { target: { value: 'claude-fable-5-1' } });
+    fireEvent.click(within(style).getByRole('button', { name: '6 threads at once' }));
+    fireEvent.click(within(style).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(updates(bridge)[1]).toEqual({
+        id: 'p',
+        patch: { settings: { desk_model: 'claude-opus-5-5', thread_model: 'claude-opus-5-5', fallback_model: 'claude-fable-5-1', max_concurrent_threads: 6, check_in: 'detailed', autonomy: 'ask-before-dispatch', review_rounds: 2 } },
+      }),
+    );
+  });
+
+  it('edits the policy in order, resets to the default, and shows the risky pattern by name', async () => {
+    const bridge = setup();
+    const policy = await screen.findByRole('region', { name: 'Policy' });
+    expect(within(policy).getAllByText('risky commands (built-in)')).toHaveLength(4);
+    expect(within(policy).getByText('This is the default policy.')).toBeTruthy();
+    fireEvent.click(within(policy).getByRole('button', { name: 'Add rule' }));
+    fireEvent.change(within(policy).getByLabelText('Rule 10 tool'), { target: { value: 'web_fetch' } });
+    fireEvent.change(within(policy).getByLabelText('Rule 10 match'), { target: { value: 'domain' } });
+    fireEvent.change(within(policy).getByLabelText('Rule 10 pattern'), { target: { value: '*.internal' } });
+    fireEvent.change(within(policy).getByLabelText('Rule 10 action'), { target: { value: 'deny' } });
+    for (let i = 10; i > 1; i--) fireEvent.click(within(policy).getByRole('button', { name: `Move rule ${i} up` }));
+    fireEvent.click(within(policy).getByRole('button', { name: 'Save policy' }));
+    await waitFor(() => expect(updates(bridge)).toHaveLength(1));
+    const saved = (updates(bridge)[0] as { patch: { settings: { policy: unknown[] } } }).patch.settings.policy;
+    expect(saved[0]).toEqual({ tool: 'web_fetch', match: { domain: '*.internal' }, action: 'deny' });
+    expect(saved[1]).toEqual({ tool: 'bash', match: { command: RISKY_COMMAND_PATTERN }, action: 'ask' });
+    fireEvent.click(within(policy).getByRole('button', { name: 'Reset to the default policy' }));
+    expect(within(policy).getByText('This is the default policy.')).toBeTruthy();
+  });
+
+  it('adds and removes sources, and archives the project after confirming', async () => {
+    const bridge = setup({ 'app.pickFolder': () => '/Users/me/repo', 'projects.addSource': () => ({}), 'projects.removeSource': () => ({ ok: true }), 'projects.archive': () => ({ ok: true }) });
+    const sources = await screen.findByRole('region', { name: 'Sources' });
+    fireEvent.click(within(sources).getByRole('button', { name: 'Add folder…' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.addSource')?.input).toEqual({ id: 'p', source: { path: '/Users/me/repo' } }));
+    fireEvent.click(within(sources).getByRole('button', { name: 'Remove tax' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.removeSource')?.input).toEqual({ id: 'p', sourceId: 's1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive project…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/map'));
+  });
+
+  it('follows the live project after a save', async () => {
+    setup({}, [ev(9, 'project.updated', { goal: 'File by April' })]);
+    await waitFor(() => expect((screen.getByLabelText('Goal') as HTMLTextAreaElement).value).toBe('File by April'));
+  });
+});
+```
+
+`apps/desktop/src/renderer/screens/ProjectForm.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { installBridge } from '../test/bridge';
+import { ProjectForm } from './ProjectForm';
+
+afterEach(cleanup);
+
+describe('ProjectForm', () => {
+  it('sends settings only when More options changed them', async () => {
+    const bridge = installBridge({
+      'models.list': () => [{ id: 'claude-opus-5-5' }, { id: 'claude-fable-5-1' }],
+      'projects.create': () => ({ project: { id: 'new' } }),
+    });
+    let created = '';
+    render(<ProjectForm onCreated={(id) => (created = id)} />);
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Launch' } });
+    const more = screen.getByText('More options').closest('details')!;
+    more.open = true;
+    fireEvent(more, new Event('toggle'));
+    fireEvent.click(await screen.findByLabelText(/Minimal/));
+    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+    await waitFor(() => expect(created).toBe('new'));
+    expect(bridge.calls.find((c) => c.channel === 'projects.create')?.input).toMatchObject({ name: 'Launch', settings: { check_in: 'minimal', review_rounds: 2 } });
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/settings apps/desktop/src/renderer/screens`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/settings/useModels.ts`:
+
+```ts
+import { useEffect, useState } from 'react';
+import type { ModelInfo } from '@desk/protocol';
+import { call } from '../bridge';
+
+/** The model registry, fetched once per mount; null while loading or unavailable. */
+export function useModels(): ModelInfo[] | null {
+  const [models, setModels] = useState<ModelInfo[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    call('models.list', {})
+      .then((m) => live && setModels(m))
+      .catch(() => live && setModels(null));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return models;
+}
+```
+
+`apps/desktop/src/renderer/settings/SettingsFields.tsx`:
+
+```tsx
+import type { ModelInfo, ProjectSettings } from '@desk/protocol';
+
+export type WorkingStyle = Pick<ProjectSettings, 'desk_model' | 'thread_model' | 'fallback_model' | 'max_concurrent_threads' | 'check_in' | 'autonomy' | 'review_rounds'>;
+
+export const workingStyleOf = (s: ProjectSettings): WorkingStyle => ({
+  desk_model: s.desk_model,
+  thread_model: s.thread_model,
+  fallback_model: s.fallback_model,
+  max_concurrent_threads: s.max_concurrent_threads,
+  check_in: s.check_in,
+  autonomy: s.autonomy,
+  review_rounds: s.review_rounds,
+});
+
+export const DEFAULT_STYLE: WorkingStyle = { desk_model: 'claude-opus-5-5', thread_model: 'claude-opus-5-5', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2 };
+
+const CHECK_IN: Array<[WorkingStyle['check_in'], string, string]> = [
+  ['minimal', 'Minimal', 'Reports only when done or blocked'],
+  ['normal', 'Normal', 'Reports at milestones'],
+  ['detailed', 'Detailed', 'Reports every step of the plan'],
+];
+const AUTONOMY: Array<[WorkingStyle['autonomy'], string, string]> = [
+  ['dispatch-freely', 'Dispatch freely', 'Desk starts threads as it sees fit'],
+  ['ask-before-dispatch', 'Ask before dispatching', 'Desk proposes threads and waits for your go'],
+];
+const SLOTS = 12;
+
+function ModelSelect(o: { id: string; label: string; value: string | null; models: ModelInfo[] | null; allowNone?: boolean; onChange(v: string | null): void }) {
+  const ids = o.models?.map((m) => m.id) ?? [];
+  const options = o.value && !ids.includes(o.value) ? [o.value, ...ids] : ids;
+  return (
+    <div className="field">
+      <label htmlFor={o.id}>{o.label}</label>
+      <select id={o.id} className="select" value={o.value ?? ''} onChange={(e) => o.onChange(e.target.value || null)} disabled={!o.models}>
+        {o.allowNone ? <option value="">None</option> : null}
+        {options.map((m) => (
+          <option key={m} value={m}>
+            {m}
+            {o.models && !ids.includes(m) ? ' (not in the registry)' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** How Desk works on a project: check-ins, autonomy, review rounds, models and thread slots. */
+export function SettingsFields({ value, models, onChange, idPrefix = 'settings' }: { value: WorkingStyle; models: ModelInfo[] | null; onChange(patch: Partial<WorkingStyle>): void; idPrefix?: string }) {
+  return (
+    <div className="settings-fields">
+      <fieldset className="choice">
+        <legend>Check-ins</legend>
+        {CHECK_IN.map(([v, label, hint]) => (
+          <label key={v} className={value.check_in === v ? 'on' : undefined}>
+            <input type="radio" name={`${idPrefix}-check-in`} value={v} checked={value.check_in === v} onChange={() => onChange({ check_in: v })} />
+            <span>
+              <strong>{label}</strong>
+              <span className="muted small">{hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="choice">
+        <legend>Autonomy</legend>
+        {AUTONOMY.map(([v, label, hint]) => (
+          <label key={v} className={value.autonomy === v ? 'on' : undefined}>
+            <input type="radio" name={`${idPrefix}-autonomy`} value={v} checked={value.autonomy === v} onChange={() => onChange({ autonomy: v })} />
+            <span>
+              <strong>{label}</strong>
+              <span className="muted small">{hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-rounds`}>Review rounds</label>
+        <input id={`${idPrefix}-rounds`} className="input narrow" type="number" min={0} max={10} value={value.review_rounds} onChange={(e) => onChange({ review_rounds: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })} />
+        <p className="field-hint">How many times Desk may send a thread's work back before accepting or escalating it.</p>
+      </div>
+      <div className="settings-models">
+        <ModelSelect id={`${idPrefix}-desk-model`} label="Desk's model" value={value.desk_model} models={models} onChange={(v) => v && onChange({ desk_model: v })} />
+        <ModelSelect id={`${idPrefix}-thread-model`} label="Threads' model" value={value.thread_model} models={models} onChange={(v) => v && onChange({ thread_model: v })} />
+        <ModelSelect id={`${idPrefix}-fallback-model`} label="Fallback when rate limited" value={value.fallback_model} models={models} allowNone onChange={(v) => onChange({ fallback_model: v })} />
+      </div>
+      <div className="field">
+        <span className="label" id={`${idPrefix}-slots-label`}>
+          Threads at once · {value.max_concurrent_threads}
+        </span>
+        <div className="slots" role="group" aria-labelledby={`${idPrefix}-slots-label`}>
+          {Array.from({ length: SLOTS }, (_, i) => i + 1).map((n) => (
+            <button key={n} type="button" className={n <= value.max_concurrent_threads ? 'slot on' : 'slot'} aria-label={`${n} thread${n === 1 ? '' : 's'} at once`} aria-pressed={n === value.max_concurrent_threads} onClick={() => onChange({ max_concurrent_threads: n })} />
+          ))}
+          <input
+            className="input narrow"
+            type="number"
+            min={1}
+            max={32}
+            aria-label="Threads at once"
+            value={value.max_concurrent_threads}
+            onChange={(e) => onChange({ max_concurrent_threads: Math.max(1, Math.min(32, Number(e.target.value) || 1)) })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/settings/PolicyEditor.tsx`:
+
+```tsx
+import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, type PolicyRule } from '@desk/protocol';
+import { Button } from '../components/Button';
+
+type MatchKey = 'branch' | 'command' | 'domain';
+const TOOLS = ['bash', 'bash_background', 'bash_readonly', 'skill_run', 'git_push', 'open_pr', 'web_fetch', 'web_search'];
+const MATCH_HINT: Record<MatchKey, string> = { branch: 'a glob such as desk/*', command: 'a regular expression', domain: 'a glob such as *.github.com' };
+
+export const sameRules = (a: PolicyRule[], b: PolicyRule[]) => JSON.stringify(a) === JSON.stringify(b);
+
+function matchOf(r: PolicyRule): [MatchKey | 'none', string] {
+  const m = r.match ?? {};
+  for (const k of ['branch', 'command', 'domain'] as const) if (m[k] !== undefined) return [k, m[k]!];
+  return ['none', ''];
+}
+
+function withMatch(r: PolicyRule, key: MatchKey | 'none', pattern: string): PolicyRule {
+  const { match: _m, ...rest } = r;
+  return key === 'none' ? rest : { ...rest, match: { [key]: pattern } };
+}
+
+/** The ordered policy: the first rule that matches a tool call decides whether it runs, asks or is refused. */
+export function PolicyEditor({ rules, onChange }: { rules: PolicyRule[]; onChange(rules: PolicyRule[]): void }) {
+  const set = (i: number, r: PolicyRule) => onChange(rules.map((x, k) => (k === i ? r : x)));
+  const move = (i: number, d: -1 | 1) => {
+    const next = [...rules];
+    const [r] = next.splice(i, 1);
+    next.splice(i + d, 0, r!);
+    onChange(next);
+  };
+  return (
+    <div className="policy">
+      <datalist id="policy-tools">
+        {TOOLS.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
+      <p className="field-hint">Rules are checked top to bottom; the first match decides. Tools no rule matches use their built-in default. Shell tools always run in the sandbox.</p>
+      <ol className="policy-rules">
+        {rules.map((r, i) => {
+          const [key, pattern] = matchOf(r);
+          const risky = key === 'command' && pattern === RISKY_COMMAND_PATTERN;
+          return (
+            <li key={i} className="policy-rule" aria-label={`Rule ${i + 1}`}>
+              <span className="policy-num" aria-hidden="true">
+                {i + 1}
+              </span>
+              <input className="input" list="policy-tools" aria-label={`Rule ${i + 1} tool`} value={r.tool} onChange={(e) => set(i, { ...r, tool: e.target.value })} />
+              <select className="select" aria-label={`Rule ${i + 1} match`} value={key} onChange={(e) => set(i, withMatch(r, e.target.value as MatchKey | 'none', pattern))}>
+                <option value="none">any call</option>
+                <option value="branch">branch</option>
+                <option value="command">command</option>
+                <option value="domain">domain</option>
+              </select>
+              {key === 'none' ? (
+                <span />
+              ) : risky ? (
+                <span className="policy-risky">
+                  <span className="chip chip-idle">risky commands (built-in)</span>
+                  <button type="button" className="link small" onClick={() => set(i, withMatch(r, key, ''))}>
+                    Replace
+                  </button>
+                </span>
+              ) : (
+                <input className="input mono" aria-label={`Rule ${i + 1} pattern`} placeholder={MATCH_HINT[key]} value={pattern} onChange={(e) => set(i, withMatch(r, key, e.target.value))} />
+              )}
+              <select className="select" aria-label={`Rule ${i + 1} action`} value={r.action} onChange={(e) => set(i, { ...r, action: e.target.value as PolicyRule['action'] })}>
+                <option value="allow">allow</option>
+                <option value="ask">ask</option>
+                <option value="deny">deny</option>
+              </select>
+              <label className={`policy-delegate small${r.action === 'ask' ? '' : ' hidden'}`}>
+                <input
+                  type="checkbox"
+                  checked={r.delegate_to_desk ?? false}
+                  disabled={r.action !== 'ask'}
+                  onChange={(e) => {
+                    const { delegate_to_desk: _d, ...rest } = r;
+                    set(i, e.target.checked ? { ...rest, delegate_to_desk: true } : rest);
+                  }}
+                />{' '}
+                Desk decides
+              </label>
+              <span className="policy-row-actions">
+                <button type="button" className="icon-btn" aria-label={`Move rule ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)}>
+                  ↑
+                </button>
+                <button type="button" className="icon-btn" aria-label={`Move rule ${i + 1} down`} disabled={i === rules.length - 1} onClick={() => move(i, 1)}>
+                  ↓
+                </button>
+                <button type="button" className="icon-btn" aria-label={`Remove rule ${i + 1}`} onClick={() => onChange(rules.filter((_, k) => k !== i))}>
+                  ✕
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="actions">
+        <Button size="sm" onClick={() => onChange([...rules, { tool: 'bash', action: 'ask' }])}>
+          Add rule
+        </Button>
+        <Button size="sm" variant="ghost" disabled={sameRules(rules, DEFAULT_POLICY)} onClick={() => onChange(DEFAULT_POLICY.map((r) => ({ ...r, ...(r.match ? { match: { ...r.match } } : {}) })))}>
+          Reset to the default policy
+        </Button>
+        {sameRules(rules, DEFAULT_POLICY) ? <span className="muted small">This is the default policy.</span> : null}
+      </div>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/settings/SettingsScreen.tsx`:
+
+```tsx
+import { useEffect, useState } from 'react';
+import type { PolicyRule } from '@desk/protocol';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { EmptyState } from '../components/EmptyState';
+import { Field } from '../components/Field';
+import { toast, toastError } from '../components/Toast';
+import { navigate } from '../router';
+import { useSession } from '../state/session';
+import { PolicyEditor, sameRules } from './PolicyEditor';
+import { SettingsFields, workingStyleOf, type WorkingStyle } from './SettingsFields';
+import { useModels } from './useModels';
+import './settings.css';
+
+function useSaver() {
+  const [busy, setBusy] = useState<string | null>(null);
+  const run = async (what: string, fn: () => Promise<unknown>, done?: string) => {
+    setBusy(what);
+    try {
+      await fn();
+      if (done) toast({ tone: 'info', message: done });
+      return true;
+    } catch (err) {
+      toastError(err);
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+  return { busy, run };
+}
+
+/** A project's settings: what it is, where its sources are, how Desk works, the policy, and archiving. */
+export function SettingsScreen({ projectId }: { projectId: string }) {
+  const s = useSession(projectId);
+  const models = useModels();
+  const project = s.project?.project;
+  const { busy, run } = useSaver();
+  const [about, setAbout] = useState<{ name: string; goal: string; instructions: string } | null>(null);
+  const [style, setStyle] = useState<WorkingStyle | null>(null);
+  const [policy, setPolicy] = useState<PolicyRule[] | null>(null);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+
+  // Drafts start from the live project and reset when it changes underneath (after a save, or another client).
+  const settingsKey = JSON.stringify(project?.settings ?? null);
+  useEffect(() => {
+    if (!project) return;
+    setAbout({ name: project.name, goal: project.goal, instructions: project.instructions });
+  }, [project?.name, project?.goal, project?.instructions]);
+  useEffect(() => {
+    if (!project) return;
+    setStyle(workingStyleOf(project.settings));
+    setPolicy(project.settings.policy);
+  }, [settingsKey]);
+
+  if (s.status === 'loading' || !about || !style || !policy) return <div className="page muted">Loading…</div>;
+  if (s.status !== 'ready' || !project || !s.project)
+    return (
+      <div className="page">
+        <EmptyState title="Couldn't load this project">{s.error}</EmptyState>
+      </div>
+    );
+
+  const aboutDirty = about.name !== project.name || about.goal !== project.goal || about.instructions !== project.instructions;
+  const styleDirty = JSON.stringify(style) !== JSON.stringify(workingStyleOf(project.settings));
+  const policyDirty = !sameRules(policy, project.settings.policy);
+
+  const addSource = async () => {
+    const path = await call('app.pickFolder', { purpose: 'source' }).catch((err) => (toastError(err), null));
+    if (path) await run('source', () => call('projects.addSource', { id: projectId, source: { path } }));
+  };
+
+  return (
+    <div className="page settings">
+      <h1 className="title">Settings</h1>
+
+      <section className="card settings-section" aria-labelledby="set-about">
+        <h2 id="set-about">About this project</h2>
+        <Field id="set-name" label="Name">
+          <input id="set-name" className="input" value={about.name} onChange={(e) => setAbout({ ...about, name: e.target.value })} />
+        </Field>
+        <Field id="set-goal" label="Goal">
+          <textarea id="set-goal" className="textarea" value={about.goal} onChange={(e) => setAbout({ ...about, goal: e.target.value })} />
+        </Field>
+        <Field id="set-instructions" label="Standing instructions" hint="Desk and every thread read these before they start.">
+          <textarea id="set-instructions" className="textarea" rows={4} value={about.instructions} onChange={(e) => setAbout({ ...about, instructions: e.target.value })} />
+        </Field>
+        <div className="actions">
+          <Button
+            variant="primary"
+            pending={busy === 'about'}
+            disabled={!aboutDirty || !about.name.trim()}
+            onClick={() => void run('about', () => call('projects.update', { id: projectId, patch: { name: about.name.trim(), goal: about.goal, instructions: about.instructions } }), 'Saved.')}
+          >
+            Save
+          </Button>
+        </div>
+      </section>
+
+      <section className="card settings-section" aria-labelledby="set-sources">
+        <h2 id="set-sources">Sources</h2>
+        <p className="field-hint">Folders Desk and its threads can read. A git repository gets its own branch per thread; Desk never merges.</p>
+        {s.project.sources.length ? (
+          <ul className="sources">
+            {s.project.sources.map((src) => (
+              <li key={src.id}>
+                <span className={`chip ${src.kind === 'git' ? 'chip-run' : 'chip-idle'}`}>{src.kind}</span>
+                <span className="grow">
+                  <strong>{src.label}</strong> <span className="mono small muted">{src.path}</span>
+                </span>
+                <Button size="sm" variant="ghost" aria-label={`Remove ${src.label}`} pending={busy === `rm-${src.id}`} onClick={() => void run(`rm-${src.id}`, () => call('projects.removeSource', { id: projectId, sourceId: src.id }))}>
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted">No sources yet.</p>
+        )}
+        <div>
+          <Button size="sm" pending={busy === 'source'} onClick={() => void addSource()}>
+            Add folder…
+          </Button>
+        </div>
+      </section>
+
+      <section className="card settings-section" aria-labelledby="set-style">
+        <h2 id="set-style">How Desk works</h2>
+        <SettingsFields value={style} models={models} onChange={(p) => setStyle({ ...style, ...p })} />
+        <div className="actions">
+          <Button variant="primary" pending={busy === 'style'} disabled={!styleDirty} onClick={() => void run('style', () => call('projects.update', { id: projectId, patch: { settings: style } }), 'Saved.')}>
+            Save
+          </Button>
+          {styleDirty ? (
+            <Button variant="ghost" onClick={() => setStyle(workingStyleOf(project.settings))}>
+              Discard changes
+            </Button>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="card settings-section" aria-labelledby="set-policy">
+        <h2 id="set-policy">Policy</h2>
+        <PolicyEditor rules={policy} onChange={setPolicy} />
+        <div className="actions">
+          <Button
+            variant="primary"
+            pending={busy === 'policy'}
+            disabled={!policyDirty || policy.some((r) => !r.tool.trim())}
+            onClick={() => void run('policy', () => call('projects.update', { id: projectId, patch: { settings: { policy } } }), 'Policy saved.')}
+          >
+            Save policy
+          </Button>
+          {policyDirty ? (
+            <Button variant="ghost" onClick={() => setPolicy(project.settings.policy)}>
+              Discard changes
+            </Button>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="card settings-section danger" aria-labelledby="set-archive">
+        <h2 id="set-archive">Archive</h2>
+        <p className="small">Archiving stops the project's threads and hides it from the map. Its library, memory and branches are kept.</p>
+        <div>
+          <Button variant="danger" pending={busy === 'archive'} onClick={() => setConfirmArchive(true)}>
+            Archive project…
+          </Button>
+        </div>
+      </section>
+      {confirmArchive ? (
+        <ConfirmDialog
+          title={`Archive ${project.name}?`}
+          confirmLabel="Archive"
+          danger
+          onCancel={() => setConfirmArchive(false)}
+          onConfirm={() => {
+            setConfirmArchive(false);
+            void run('archive', () => call('projects.archive', { id: projectId })).then((ok) => ok && navigate({ name: 'map' }));
+          }}
+        >
+          Running threads are stopped. Nothing is deleted.
+        </ConfirmDialog>
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/settings/settings.css`:
+
+```css
+.settings {
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  max-width: 920px;
+}
+.settings-section {
+  margin: 0;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-section h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+}
+.settings-section.danger {
+  border: 1px solid var(--accent-tint);
+}
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.choice {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.choice legend {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.choice label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.choice label.on {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+.choice label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.input.narrow {
+  width: 80px;
+}
+.settings-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.slots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.slot {
+  width: 22px;
+  height: 30px;
+  padding: 0;
+  border: 1.5px dashed var(--muted);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.slot.on {
+  border: 1.5px solid var(--run);
+  background: var(--run-pastel);
+}
+.slots .input {
+  margin-left: 10px;
+}
+.policy-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.policy-rule {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 1fr) 110px minmax(160px, 1.6fr) 90px 110px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fbfaf7;
+  border: 1px solid var(--rule-soft);
+}
+.policy-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-min);
+}
+.policy-risky {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.policy-delegate.hidden {
+  visibility: hidden;
+}
+.policy-row-actions {
+  display: flex;
+  gap: 4px;
+}
+.policy-row-actions .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.new-project-more {
+  border-top: 1px solid var(--rule-soft);
+  padding-top: 10px;
+}
+.new-project-more summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+```
+
+Other changes:
+- `ProjectForm.tsx` gains a `<details>` "More options" with `<SettingsFields idPrefix="new-project">`. It sends `settings` only when the style differs from `DEFAULT_STYLE`.
+- `.icon-btn` moves from `conversation.css` to `tokens.css`.
+- `App.tsx` routes `tab === 'settings'` to `<SettingsScreen key={route.id} projectId={route.id} />`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): project settings — about, sources, how Desk works (check-ins, autonomy, rounds, models, slots), ordered policy editor with reset, archive; More options on new projects
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

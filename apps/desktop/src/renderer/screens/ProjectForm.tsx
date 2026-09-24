@@ -3,8 +3,10 @@ import { call, DeskCallError } from '../bridge';
 import { Button } from '../components/Button';
 import { Field } from '../components/Field';
 import { toastError } from '../components/Toast';
+import { useModels } from '../settings/useModels';
+import { DEFAULT_STYLE, SettingsFields, type WorkingStyle } from '../settings/SettingsFields';
 
-/** Name, goal, instructions and source folders (native picker). Used by onboarding and the new-project sheet. */
+/** Name, goal, instructions, source folders (native picker) and, under More options, how Desk works. Used by onboarding and the new-project sheet. */
 export function ProjectForm({ onCreated, onCancel, submitLabel = 'Create project' }: { onCreated(id: string): void; onCancel?(): void; submitLabel?: string }) {
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
@@ -13,6 +15,9 @@ export function ProjectForm({ onCreated, onCancel, submitLabel = 'Create project
   const [nameError, setNameError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [style, setStyle] = useState<WorkingStyle>(DEFAULT_STYLE);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const models = useModels();
 
   const pick = async () => {
     try {
@@ -38,6 +43,7 @@ export function ProjectForm({ onCreated, onCancel, submitLabel = 'Create project
         goal: goal.trim(),
         ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
         ...(sources.length ? { sources: sources.map((path) => ({ path })) } : {}),
+        ...(JSON.stringify(style) !== JSON.stringify(DEFAULT_STYLE) ? { settings: style } : {}),
       });
       onCreated(created.project.id);
     } catch (err) {
@@ -81,6 +87,10 @@ export function ProjectForm({ onCreated, onCancel, submitLabel = 'Create project
           </Button>
         </div>
       </div>
+      <details className="new-project-more" open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
+        <summary>More options</summary>
+        {moreOpen ? <SettingsFields idPrefix="new-project" value={style} models={models} onChange={(p) => setStyle({ ...style, ...p })} /> : null}
+      </details>
       {formError ? (
         <p className="field-error" role="alert">
           {formError}

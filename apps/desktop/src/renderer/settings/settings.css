@@ -1,0 +1,142 @@
+.settings {
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  max-width: 920px;
+}
+.settings-section {
+  margin: 0;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-section h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+}
+.settings-section.danger {
+  border: 1px solid var(--accent-tint);
+}
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.choice {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.choice legend {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.choice label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.choice label.on {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+.choice label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.input.narrow {
+  width: 80px;
+}
+.settings-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.slots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.slot {
+  width: 22px;
+  height: 30px;
+  padding: 0;
+  border: 1.5px dashed var(--muted);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.slot.on {
+  border: 1.5px solid var(--run);
+  background: var(--run-pastel);
+}
+.slots .input {
+  margin-left: 10px;
+}
+.policy-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.policy-rule {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 1fr) 110px minmax(160px, 1.6fr) 90px 110px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fbfaf7;
+  border: 1px solid var(--rule-soft);
+}
+.policy-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-min);
+}
+.policy-risky {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.policy-delegate.hidden {
+  visibility: hidden;
+}
+.policy-row-actions {
+  display: flex;
+  gap: 4px;
+}
+.policy-row-actions .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.new-project-more {
+  border-top: 1px solid var(--rule-soft);
+  padding-top: 10px;
+}
+.new-project-more summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
