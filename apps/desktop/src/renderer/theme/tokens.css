@@ -867,3 +867,19 @@ pre {
   color: var(--text-min);
   font-weight: 600;
 }
+
+/* Usage tables (threads, system) */
+.usage-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.usage-table th,
+.usage-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  text-align: right;
+}
+.usage-table th:first-child,
+.usage-table td:first-child {
+  text-align: left;
+}

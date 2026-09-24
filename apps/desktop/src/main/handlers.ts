@@ -16,7 +16,7 @@ export type HandlerContext = {
     watch(senderId: number, projectId: string, afterSeq: number): Promise<void>;
     unwatch(senderId: number, projectId: string): void;
   };
-  daemon: { status(): Promise<DaemonStatus>; start(): Promise<DaemonStatus>; restart(): Promise<DaemonStatus>; stop(): Promise<DaemonStatus> };
+  daemon: { status(): Promise<DaemonStatus>; start(): Promise<DaemonStatus>; restart(): Promise<DaemonStatus>; stop(): Promise<DaemonStatus>; repair(): Promise<DaemonStatus> };
   app: {
     info(): AppInfo;
     openExternal(url: string): Promise<void>;
@@ -128,6 +128,7 @@ export const handlers = {
   'daemon.start': (_i, c) => c.daemon.start(),
   'daemon.restart': (_i, c) => c.daemon.restart(),
   'daemon.stop': (_i, c) => c.daemon.stop(),
+  'daemon.repair': (_i, c) => c.daemon.repair(),
 
   'app.info': (_i, c) => c.app.info(),
   'app.openExternal': async (i, c) => {

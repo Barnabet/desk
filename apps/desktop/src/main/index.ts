@@ -131,6 +131,11 @@ async function start(): Promise<void> {
         await broker.reconnect();
         return s;
       },
+      repair: async () => {
+        const s = await daemon.repair();
+        await broker.reconnect();
+        return s;
+      },
     },
     app: {
       info: () => ({ version: app.getVersion(), platform: process.platform, packaged: app.isPackaged, dataDir }),

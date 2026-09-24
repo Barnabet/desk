@@ -99,6 +99,8 @@ export const channels = {
   'daemon.start': none,
   'daemon.restart': none,
   'daemon.stop': none,
+  /** Reinstall the LaunchAgent (packaged macOS); elsewhere a restart. */
+  'daemon.repair': none,
 
   'app.info': none,
   'app.openExternal': z.object({ url: z.string().min(1).max(4096) }),

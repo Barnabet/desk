@@ -144,6 +144,14 @@ export class DaemonManager {
     return this.status();
   }
 
+  /** Rewrites and reloads the LaunchAgent (System → Repair). Where there is no LaunchAgent, a restart. */
+  async repair(): Promise<DaemonStatus> {
+    if (!this.launchd) return this.restart();
+    const before = await this.status();
+    await this.installAgent();
+    return this.waitHealthy(before.running ? before.pid : null);
+  }
+
   /** Packaged builds: when the installed agent runs an older daemon than the bundled one, reinstall it. */
   async ensureCurrent(): Promise<boolean> {
     if (!this.launchd || !existsSync(plistPath(this.o.home))) return false;

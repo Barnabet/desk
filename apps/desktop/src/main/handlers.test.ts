@@ -25,7 +25,7 @@ async function setup(overrides: Partial<HandlerContext> = {}) {
     senderId: 7,
     client: () => client,
     broker: { snapshot: () => initialGlobalState(), watch: async (s, p, a) => void watched.push([s, p, a]), unwatch: () => {} },
-    daemon: { status: vi.fn(), start: vi.fn(), restart: vi.fn(), stop: vi.fn() },
+    daemon: { status: vi.fn(), start: vi.fn(), restart: vi.fn(), stop: vi.fn(), repair: vi.fn() },
     app: {
       info: () => ({ version: '1.0.0', platform: 'darwin', packaged: false, dataDir: '/d' }),
       openExternal: async (url) => void opened.push(url),

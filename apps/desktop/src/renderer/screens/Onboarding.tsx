@@ -1,8 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import type { ModelEndpointStatus, ModelEndpointTestResult } from '@desk/protocol';
-import { call, DeskCallError } from '../bridge';
+import { useState } from 'react';
+import { call } from '../bridge';
 import { Button } from '../components/Button';
-import { Field } from '../components/Field';
+import { EndpointPanel, type EndpointState } from '../components/EndpointPanel';
 import { describeError } from '../components/Toast';
 import { navigate } from '../router';
 import { useGlobal } from '../state/global';
@@ -84,73 +83,8 @@ function DaemonStep({ onNext }: { onNext(): void }) {
   );
 }
 
-const SOURCE_LABEL: Record<NonNullable<ModelEndpointStatus['source']>, string> = {
-  env: 'the DESK_OPENAI_* environment variables',
-  file: '~/.config/cliproxyapi.env',
-  keychain: 'your Keychain',
-};
-
-function TestResult({ result }: { result: ModelEndpointTestResult | null }) {
-  if (!result) return null;
-  return result.ok ? (
-    <p className="status-line">
-      <span className="dot ok" aria-hidden="true" />
-      {`Connected. ${result.models?.length ?? 0} model${result.models?.length === 1 ? '' : 's'} available.`}
-    </p>
-  ) : (
-    <p className="field-error" role="alert">
-      Couldn’t connect: {result.error ?? 'unknown error'}
-    </p>
-  );
-}
-
 function EndpointStep({ onNext }: { onNext(): void }) {
-  const [status, setStatus] = useState<ModelEndpointStatus | 'unsupported' | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:8317/v1');
-  const [apiKey, setApiKey] = useState('');
-  const [result, setResult] = useState<ModelEndpointTestResult | null>(null);
-  const [pending, setPending] = useState<'test' | 'save' | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    call('config.endpoint', {})
-      .then((s) => setStatus(s))
-      .catch((err) => {
-        if (err instanceof DeskCallError && (err.code === 'unsupported' || err.status === 501)) setStatus('unsupported');
-        else setError(describeError(err).message);
-      });
-  }, []);
-
-  const test = async () => {
-    setPending('test');
-    setError(null);
-    try {
-      setResult(await call('config.testEndpoint', {}));
-    } catch (err) {
-      setError(describeError(err).message);
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
-    setPending('save');
-    setError(null);
-    try {
-      const saved = await call('config.saveEndpoint', { base_url: baseUrl.trim(), api_key: apiKey });
-      setApiKey('');
-      setStatus(saved);
-      setEditing(false);
-      setResult(await call('config.testEndpoint', {}));
-    } catch (err) {
-      setError(describeError(err).message);
-    } finally {
-      setPending(null);
-    }
-  };
-
+  const [status, setStatus] = useState<EndpointState>(null);
   const configured = status !== null && status !== 'unsupported' && status.configured;
   return (
     <section className="sheet-body" aria-labelledby="step-title">
@@ -158,50 +92,9 @@ function EndpointStep({ onNext }: { onNext(): void }) {
         Connect a model endpoint
       </h1>
       <p className="subtitle">Desk talks to an OpenAI-compatible endpoint, such as a local proxy. The key goes to your macOS Keychain and is never shown again.</p>
-      {status === 'unsupported' ? <p className="status-line">This deskd manages its model endpoint itself.</p> : null}
-      {configured && !editing ? (
-        <>
-          <p className="status-line">
-            <span className="dot ok" aria-hidden="true" />
-            <span>
-              Using <span className="mono">{status.base_url}</span> from {status.source ? SOURCE_LABEL[status.source] : 'the daemon'}.
-            </span>
-          </p>
-          <div className="actions">
-            <Button size="sm" pending={pending === 'test'} onClick={() => void test()}>
-              Test connection
-            </Button>
-            {status.source === 'keychain' ? (
-              <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-                Change key
-              </Button>
-            ) : null}
-          </div>
-        </>
-      ) : null}
-      {status !== null && status !== 'unsupported' && (!configured || editing) ? (
-        <form className="sheet-body" onSubmit={save} noValidate>
-          <Field id="endpoint-url" label="Base URL">
-            <input id="endpoint-url" className="input mono" type="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-          </Field>
-          <Field id="endpoint-key" label="API key" hint="Stored in the Keychain; Desk never displays it.">
-            <input id="endpoint-key" className="input mono" type="password" autoComplete="off" spellCheck={false} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-          </Field>
-          <div className="actions">
-            <Button type="submit" variant="primary" size="sm" pending={pending === 'save'} disabled={!apiKey || !baseUrl}>
-              Save and test
-            </Button>
-          </div>
-        </form>
-      ) : null}
-      <TestResult result={result} />
-      {error ? (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      ) : null}
+      <EndpointPanel onStatus={setStatus} />
       <div className="actions">
-        <Button variant={configured || status === 'unsupported' ? 'primary' : 'ghost'} onClick={onNext} disabled={status === null && !error}>
+        <Button variant={configured || status === 'unsupported' ? 'primary' : 'ghost'} onClick={onNext}>
           {configured || status === 'unsupported' ? 'Continue' : 'Skip for now'}
         </Button>
       </div>

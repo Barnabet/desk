@@ -110,6 +110,20 @@ describe('DaemonManager', () => {
     expect(calls.at(-1)).toEqual(['launchctl', 'bootout', 'gui/501/dev.desk.deskd']);
   });
 
+  it('repairs by reinstalling the LaunchAgent, or restarts in dev', async () => {
+    const { m, calls, up } = manager({ mode: 'packaged' });
+    await m.start();
+    up(7); // the agent's daemon has since been replaced by another process; repair must bring up a fresh one
+    calls.length = 0;
+    const s = await m.repair();
+    expect(s).toMatchObject({ running: true, agent: 'installed' });
+    expect(calls.map((c) => c[1])).toEqual(['bootout', 'bootstrap']);
+    const dev = manager();
+    dev.up();
+    expect((await dev.m.repair()).running).toBe(true);
+    expect(dev.calls.map((c) => c[0])).toEqual(['kill', 'spawn']);
+  });
+
   it('stops a dev daemon by pid and times out when a start never comes up', async () => {
     const { m, calls, up } = manager();
     up();

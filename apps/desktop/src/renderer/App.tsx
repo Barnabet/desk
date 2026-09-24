@@ -11,9 +11,9 @@ import { LibraryScreen } from './knowledge/LibraryScreen';
 import { MemoryScreen } from './knowledge/MemoryScreen';
 import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
-import { Pending } from './screens/Pending';
 import { SettingsScreen } from './settings/SettingsScreen';
 import { SkillsScreen } from './skills/SkillsScreen';
+import { SystemScreen } from './system/SystemScreen';
 import { ThreadsScreen } from './threads/ThreadsScreen';
 import { TrayPopover } from './tray/TrayPopover';
 import { startGlobalSync } from './state/global';
@@ -28,7 +28,7 @@ function Screen({ route }: { route: Route }) {
     case 'skills':
       return <SkillsScreen {...(route.skill ? { skill: route.skill } : {})} />;
     case 'system':
-      return <Pending title="System" />;
+      return <SystemScreen />;
     case 'project':
       if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} />;
       if (route.tab === 'library') return <LibraryScreen key={route.id} projectId={route.id} {...(route.file ? { file: route.file } : {})} />;

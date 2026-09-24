@@ -3864,3 +3864,1055 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 5: System — deskd controls and repair, endpoint, model registry, usage, notices, notifications, data
+
+**Files:**
+- Create: `apps/desktop/src/renderer/system/SystemScreen.test.tsx`, `apps/desktop/src/main/daemon.test.ts`, `apps/desktop/src/renderer/components/EndpointPanel.tsx`, `apps/desktop/src/renderer/system/ModelsEditor.tsx`, `apps/desktop/src/renderer/system/SystemScreen.tsx`, `apps/desktop/src/renderer/system/system.css`
+- Modify: `apps/desktop/src/main/daemon.ts`, `apps/desktop/src/shared/ipc.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/main/handlers.test.ts`, `apps/desktop/src/main/index.ts`, `apps/desktop/src/renderer/screens/Onboarding.tsx`, `apps/desktop/src/renderer/threads/threads.css`, `apps/desktop/src/renderer/theme/tokens.css`, `apps/desktop/src/renderer/App.tsx`
+
+**Interfaces:**
+
+- Consumes: the `daemon.*`, `config.*`, `models.*`, `usage`, `app.info`, `app.settings`, `app.updateSettings` and `app.revealLogs` channels; the global `system.notices` and `overview`; `tokens` from the thread Usage tab.
+- Produces:
+
+```ts
+// main/daemon.ts
+async repair(): Promise<DaemonStatus>;   // packaged macOS: installAgent() then waitHealthy(previous pid); elsewhere restart()
+// shared/ipc.ts
+'daemon.repair': none;                   // HandlerContext.daemon gains repair(); index.ts reconnects the broker afterwards
+// components/EndpointPanel.tsx (extracted from Onboarding; also in System)
+export type EndpointState = ModelEndpointStatus | 'unsupported' | null;
+export function EndpointPanel(props: { onStatus?(s: EndpointState): void }): JSX.Element;
+// system/ModelsEditor.tsx
+export function modelProblems(list: ModelInfo[]): string[];
+export function ModelsEditor(): JSX.Element;
+// system/SystemScreen.tsx
+export function SystemScreen(): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/system/SystemScreen.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProjectSummary } from '@desk/protocol';
+import { initialGlobalState } from '../../shared/state';
+import { globalStore } from '../state/global';
+import { installBridge } from '../test/bridge';
+import { modelProblems } from './ModelsEditor';
+import { SystemScreen } from './SystemScreen';
+
+afterEach(cleanup);
+beforeEach(() => {
+  globalStore.set({
+    ...initialGlobalState(),
+    connection: { status: 'live' },
+    overview: [{ project: { id: 'p1', name: 'Onboarding', goal: '', updated_at: 't' }, desk_status: 'idle', threads: [], latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 } as unknown as ProjectSummary],
+    system: { proxy: 'down', lastSeq: 3, notices: [{ eventId: 3, ts: new Date().toISOString(), projectId: 'p1', level: 'warning', code: 'proxy_down', message: 'The model proxy is unreachable.' }] },
+  });
+});
+
+const status = { running: true, version: '1.0.0', pid: 42, uptime_s: 3700, proxy: 'down', mode: 'packaged', bundledVersion: '1.0.0', agent: 'installed' };
+const model = (id: string) => ({ id, family: 'claude' as const, context_window: 200000, max_output_tokens: 32000, supports_reasoning_effort: true, concurrency: 4 });
+
+function setup(extra: Record<string, (input: any) => unknown> = {}) {
+  const bridge = installBridge({
+    'daemon.status': () => status,
+    'daemon.restart': () => ({ ...status, pid: 43 }),
+    'daemon.stop': () => ({ ...status, running: false }),
+    'daemon.repair': () => status,
+    'config.endpoint': () => ({ configured: true, source: 'keychain', base_url: 'http://127.0.0.1:8317/v1' }),
+    'config.get': () => ({ notifications: 'auto' }),
+    'config.patch': (p: { notifications: string }) => p,
+    'app.settings': () => ({ notifications: true }),
+    'app.updateSettings': (p: { notifications: boolean }) => p,
+    'app.info': () => ({ version: '1.0.0', platform: 'darwin', packaged: true, dataDir: '/Users/me/Library/Application Support/Desk' }),
+    'app.revealLogs': () => undefined,
+    'models.list': () => [model('claude-opus-5-5'), model('claude-fable-5-1')],
+    'models.replace': ({ models }: { models: unknown[] }) => models,
+    usage: () => ({ rows: [{ project_id: 'p1', model: 'claude-opus-5-5', prompt_tokens: 12000, completion_tokens: 3000 }], totals: { prompt_tokens: 12000, completion_tokens: 3000 } }),
+    ...extra,
+  });
+  render(<SystemScreen />);
+  return bridge;
+}
+
+describe('modelProblems', () => {
+  it('explains what the daemon would reject', () => {
+    expect(modelProblems([])).toEqual(['Keep at least one model.']);
+    expect(modelProblems([model('a'), model('a')])).toEqual(['a is listed twice.']);
+    expect(modelProblems([{ ...model(''), concurrency: 0 }])).toEqual(['Every model needs an id.', 'Token limits must be positive and concurrency at least 1.']);
+  });
+});
+
+describe('SystemScreen', () => {
+  it('shows deskd and controls it', async () => {
+    const bridge = setup();
+    const d = screen.getByRole('region', { name: 'deskd' });
+    expect(await within(d).findByText(/v1\.0\.0 · pid 42 · up 1h/)).toBeTruthy();
+    expect(d.textContent).toContain('Unreachable. Threads pause');
+    fireEvent.click(within(d).getByRole('button', { name: 'Restart' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'daemon.restart')).toBe(true));
+    fireEvent.click(await within(d).findByRole('button', { name: 'Repair LaunchAgent' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'daemon.repair')).toBe(true));
+    fireEvent.click(await within(d).findByRole('button', { name: 'Stop' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Stop' }).at(-1)!);
+    expect(await within(d).findByRole('button', { name: 'Start' })).toBeTruthy();
+  });
+
+  it('shows the endpoint without the key, and both notification switches', async () => {
+    const bridge = setup();
+    const ep = screen.getByRole('region', { name: 'Model endpoint' });
+    expect(await within(ep).findByText('http://127.0.0.1:8317/v1')).toBeTruthy();
+    fireEvent.click(within(ep).getByRole('button', { name: 'Change key' }));
+    expect((within(ep).getByLabelText('API key') as HTMLInputElement).type).toBe('password');
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    await waitFor(() => expect((within(n).getByLabelText(/From deskd/) as HTMLInputElement).checked).toBe(true));
+    fireEvent.click(within(n).getByLabelText(/From the app/));
+    fireEvent.click(within(n).getByLabelText(/From deskd/));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'app.updateSettings')?.input).toEqual({ notifications: false }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'config.patch')?.input).toEqual({ notifications: 'off' }));
+  });
+
+  it('edits the model registry', async () => {
+    const bridge = setup();
+    const reg = screen.getByRole('region', { name: 'Model registry' });
+    fireEvent.click(await within(reg).findByRole('button', { name: 'Add model' }));
+    fireEvent.change(within(reg).getByLabelText('Model 3 id'), { target: { value: 'claude-opus-5-5' } });
+    expect(within(reg).getByRole('alert').textContent).toContain('claude-opus-5-5 is listed twice.');
+    expect((within(reg).getByRole('button', { name: 'Save registry' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(reg).getByLabelText('Model 3 id'), { target: { value: 'gpt-6-sol' } });
+    fireEvent.change(within(reg).getByLabelText('Model 3 family'), { target: { value: 'gpt' } });
+    fireEvent.click(within(reg).getByRole('button', { name: 'Remove model 2' }));
+    fireEvent.click(within(reg).getByRole('button', { name: 'Save registry' }));
+    await waitFor(() => expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: Array<{ id: string }> }).models.map((m) => m.id)).toEqual(['claude-opus-5-5', 'gpt-6-sol']));
+  });
+
+  it('shows usage by model and project, notices, and the data directory', async () => {
+    const bridge = setup();
+    const u = screen.getByRole('region', { name: 'Usage' });
+    expect(await within(u).findByRole('link', { name: 'Onboarding' })).toBeTruthy();
+    expect(within(u).getByText('claude-opus-5-5')).toBeTruthy();
+    expect((bridge.calls.find((c) => c.channel === 'usage')?.input as { since?: string }).since).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    fireEvent.click(within(u).getByRole('button', { name: 'All time' }));
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'usage').at(-1)?.input).toEqual({}));
+    expect(screen.getByRole('region', { name: 'System notices' }).textContent).toContain('The model proxy is unreachable.');
+    const data = screen.getByRole('region', { name: 'Data' });
+    expect(await within(data).findByText('/Users/me/Library/Application Support/Desk')).toBeTruthy();
+    fireEvent.click(within(data).getByRole('button', { name: 'Reveal logs' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'app.revealLogs')).toBe(true));
+  });
+});
+```
+
+`apps/desktop/src/main/daemon.test.ts`:
+
+```ts
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { compareVersions, DaemonManager, type DaemonManagerOptions } from './daemon';
+import { launchdPlist, plistPath } from './launchd';
+
+let dir: string;
+beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), 'desk-dm-'))));
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+function manager(o: Partial<DaemonManagerOptions> = {}) {
+  const calls: string[][] = [];
+  const dataDir = join(dir, 'data');
+  mkdirSync(dataDir, { recursive: true });
+  const up = (pid = 42) => writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ port: 1234, token: 't', pid, version: '1.0.0' }));
+  const down = () => rmSync(join(dataDir, 'daemon.json'), { force: true });
+  let version = '1.0.0';
+  const m = new DaemonManager({
+    dataDir,
+    mode: 'dev',
+    platform: 'darwin',
+    home: join(dir, 'home'),
+    uid: 501,
+    bundledVersion: '1.0.0',
+    execPath: '/Applications/Desk.app/Contents/MacOS/Desk',
+    bundlePath: '/Applications/Desk.app/Contents/Resources/deskd/deskd.mjs',
+    repoRoot: '/repo',
+    nodePath: 'node',
+    exec: async (file, args) => {
+      calls.push([file, ...args]);
+      if (args[0] === 'bootstrap' || args[0] === 'kickstart') {
+        up(args[0] === 'kickstart' ? 43 : 42);
+        version = '1.0.0';
+      }
+      if (args[0] === 'bootout') down();
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    spawnDetached: (file, args) => {
+      calls.push(['spawn', file, ...args]);
+      up();
+    },
+    kill: (pid) => {
+      calls.push(['kill', String(pid)]);
+      down();
+    },
+    fetchHealth: async () => ({ version, protocol_version: 1, proxy: 'up', uptime_s: 5 }),
+    sleep: async () => {},
+    startTimeoutMs: 200,
+    ...o,
+  });
+  return { m, calls, up, down, dataDir, setVersion: (v: string) => void (version = v) };
+}
+
+describe('launchd plist', () => {
+  it('runs the bundle with Electron as Node and escapes paths', () => {
+    const xml = launchdPlist({ programArguments: ['/A & B/Desk', 'x.mjs'], env: { ELECTRON_RUN_AS_NODE: '1' }, workingDirectory: '/w', logFile: '/l/deskd.log' });
+    expect(xml).toContain('<string>dev.desk.deskd</string>');
+    expect(xml).toContain('<string>/A &amp; B/Desk</string>');
+    expect(xml).toContain('<key>ELECTRON_RUN_AS_NODE</key>');
+    expect(xml).toContain('<key>KeepAlive</key>');
+  });
+});
+
+describe('DaemonManager', () => {
+  it('reports status from daemon.json and health', async () => {
+    const { m, up } = manager();
+    expect(await m.status()).toMatchObject({ running: false, agent: 'unsupported', mode: 'dev' });
+    up();
+    expect(await m.status()).toMatchObject({ running: true, version: '1.0.0', pid: 42, proxy: 'up' });
+  });
+
+  it('starts the repo daemon through tsx in dev', async () => {
+    const { m, calls } = manager();
+    expect((await m.start()).running).toBe(true);
+    expect(calls[0]).toEqual(['spawn', 'node', '--import', '/repo/node_modules/tsx/dist/loader.mjs', '/repo/apps/daemon/src/main.ts', '--data-dir', join(dir, 'data')]);
+  });
+
+  it('installs and bootstraps the LaunchAgent when packaged on macOS', async () => {
+    const { m, calls } = manager({ mode: 'packaged' });
+    expect((await m.start()).agent).toBe('installed');
+    const file = plistPath(join(dir, 'home'));
+    expect(readFileSync(file, 'utf8')).toContain('<string>/Applications/Desk.app/Contents/Resources/deskd/deskd.mjs</string>');
+    expect(calls).toEqual([['launchctl', 'bootstrap', 'gui/501', file]]);
+  });
+
+  it('refreshes an older daemon under an installed agent, and leaves others alone', async () => {
+    const { m, calls, up, setVersion } = manager({ mode: 'packaged' });
+    up();
+    setVersion('0.9.0');
+    expect(await m.ensureCurrent()).toBe(false); // no agent installed: a daemon started by hand is left alone
+    await m.installAgent(); // bootstrap brings up the bundled 1.0.0
+    setVersion('0.9.0');
+    calls.length = 0;
+    expect(await m.ensureCurrent()).toBe(true);
+    expect(calls.map((c) => c[1])).toEqual(['bootout', 'bootstrap']);
+    calls.length = 0;
+    expect(await m.ensureCurrent()).toBe(false);
+    expect(calls).toEqual([]);
+    expect(await manager().m.ensureCurrent()).toBe(false);
+  });
+
+  it('restarts with kickstart and stops with bootout', async () => {
+    const { m, calls } = manager({ mode: 'packaged' });
+    await m.start();
+    calls.length = 0;
+    expect((await m.restart()).pid).toBe(43);
+    expect(calls[0]).toEqual(['launchctl', 'kickstart', '-k', 'gui/501/dev.desk.deskd']);
+    expect((await m.stop()).running).toBe(false);
+    expect(calls.at(-1)).toEqual(['launchctl', 'bootout', 'gui/501/dev.desk.deskd']);
+  });
+
+  it('repairs by reinstalling the LaunchAgent, or restarts in dev', async () => {
+    const { m, calls, up } = manager({ mode: 'packaged' });
+    await m.start();
+    up(7); // the agent's daemon has since been replaced by another process; repair must bring up a fresh one
+    calls.length = 0;
+    const s = await m.repair();
+    expect(s).toMatchObject({ running: true, agent: 'installed' });
+    expect(calls.map((c) => c[1])).toEqual(['bootout', 'bootstrap']);
+    const dev = manager();
+    dev.up();
+    expect((await dev.m.repair()).running).toBe(true);
+    expect(dev.calls.map((c) => c[0])).toEqual(['kill', 'spawn']);
+  });
+
+  it('stops a dev daemon by pid and times out when a start never comes up', async () => {
+    const { m, calls, up } = manager();
+    up();
+    expect((await m.stop()).running).toBe(false);
+    expect(calls).toEqual([['kill', '42']]);
+    const stuck = manager({ spawnDetached: () => {} }).m;
+    await expect(stuck.start()).rejects.toMatchObject({ code: 'daemon_start_timeout' });
+  });
+
+  it('refuses to start automatically where there is no LaunchAgent', async () => {
+    const { m } = manager({ mode: 'packaged', platform: 'win32' });
+    await expect(m.start()).rejects.toMatchObject({ code: 'unsupported' });
+    expect(existsSync(plistPath(join(dir, 'home')))).toBe(false);
+  });
+
+  it('compares versions numerically', () => {
+    expect(compareVersions('0.9.0', '1.0.0')).toBeLessThan(0);
+    expect(compareVersions('1.10.0', '1.9.3')).toBeGreaterThan(0);
+    expect(compareVersions('1.0', '1.0.0')).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/system apps/desktop/src/main`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/components/EndpointPanel.tsx`:
+
+```tsx
+import { useEffect, useState, type FormEvent } from 'react';
+import type { ModelEndpointStatus, ModelEndpointTestResult } from '@desk/protocol';
+import { call, DeskCallError } from '../bridge';
+import { Button } from './Button';
+import { Field } from './Field';
+import { describeError } from './Toast';
+
+export type EndpointState = ModelEndpointStatus | 'unsupported' | null;
+
+const SOURCE_LABEL: Record<NonNullable<ModelEndpointStatus['source']>, string> = {
+  env: 'the DESK_OPENAI_* environment variables',
+  file: '~/.config/cliproxyapi.env',
+  keychain: 'your Keychain',
+};
+
+function TestResult({ result }: { result: ModelEndpointTestResult | null }) {
+  if (!result) return null;
+  return result.ok ? (
+    <p className="status-line">
+      <span className="dot ok" aria-hidden="true" />
+      {`Connected. ${result.models?.length ?? 0} model${result.models?.length === 1 ? '' : 's'} available.`}
+    </p>
+  ) : (
+    <p className="field-error" role="alert">
+      Couldn’t connect: {result.error ?? 'unknown error'}
+    </p>
+  );
+}
+
+/**
+ * The model endpoint: where it comes from, a connection test, and a form that writes a new base URL and key
+ * (the key goes to the Keychain and is never shown). Used by onboarding and System.
+ */
+export function EndpointPanel({ onStatus }: { onStatus?(s: EndpointState): void }) {
+  const [status, setStatusState] = useState<EndpointState>(null);
+  const [editing, setEditing] = useState(false);
+  const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:8317/v1');
+  const [apiKey, setApiKey] = useState('');
+  const [result, setResult] = useState<ModelEndpointTestResult | null>(null);
+  const [pending, setPending] = useState<'test' | 'save' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const setStatus = (s: EndpointState) => {
+    setStatusState(s);
+    onStatus?.(s);
+  };
+
+  useEffect(() => {
+    call('config.endpoint', {})
+      .then((s) => {
+        setStatus(s);
+        if (s.base_url) setBaseUrl(s.base_url);
+      })
+      .catch((err) => {
+        if (err instanceof DeskCallError && (err.code === 'unsupported' || err.status === 501)) setStatus('unsupported');
+        else setError(describeError(err).message);
+      });
+    // Loaded once; onStatus is a notification, not an input.
+  }, []);
+
+  const test = async () => {
+    setPending('test');
+    setError(null);
+    try {
+      setResult(await call('config.testEndpoint', {}));
+    } catch (err) {
+      setError(describeError(err).message);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setPending('save');
+    setError(null);
+    try {
+      const saved = await call('config.saveEndpoint', { base_url: baseUrl.trim(), api_key: apiKey });
+      setApiKey('');
+      setStatus(saved);
+      setEditing(false);
+      setResult(await call('config.testEndpoint', {}));
+    } catch (err) {
+      setError(describeError(err).message);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const configured = status !== null && status !== 'unsupported' && status.configured;
+  return (
+    <div className="endpoint">
+      {status === 'unsupported' ? <p className="status-line">This deskd manages its model endpoint itself.</p> : null}
+      {configured && !editing ? (
+        <>
+          <p className="status-line">
+            <span className="dot ok" aria-hidden="true" />
+            <span>
+              Using <span className="mono">{status.base_url}</span> from {status.source ? SOURCE_LABEL[status.source] : 'the daemon'}.
+            </span>
+          </p>
+          <div className="actions">
+            <Button size="sm" pending={pending === 'test'} onClick={() => void test()}>
+              Test connection
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+              {status.source === 'keychain' ? 'Change key' : 'Use a different endpoint'}
+            </Button>
+          </div>
+        </>
+      ) : null}
+      {status !== null && status !== 'unsupported' && (!configured || editing) ? (
+        <form className="sheet-body" onSubmit={save} noValidate>
+          {configured && status.source !== 'keychain' ? (
+            <p className="field-hint">Saving stores this endpoint in your Keychain. Environment variables, if set, still take precedence when deskd starts.</p>
+          ) : null}
+          <Field id="endpoint-url" label="Base URL">
+            <input id="endpoint-url" className="input mono" type="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          </Field>
+          <Field id="endpoint-key" label="API key" hint="Stored in the Keychain; Desk never displays it.">
+            <input id="endpoint-key" className="input mono" type="password" autoComplete="off" spellCheck={false} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          </Field>
+          <div className="actions">
+            <Button type="submit" variant="primary" size="sm" pending={pending === 'save'} disabled={!apiKey || !baseUrl}>
+              Save and test
+            </Button>
+            {editing ? (
+              <Button size="sm" variant="ghost" onClick={() => (setEditing(false), setApiKey(''))}>
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
+      <TestResult result={result} />
+      {error ? (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/system/ModelsEditor.tsx`:
+
+```tsx
+import { useEffect, useState } from 'react';
+import type { ModelInfo } from '@desk/protocol';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { describeError, toast, toastError } from '../components/Toast';
+
+const blank = (): ModelInfo => ({ id: '', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, supports_reasoning_effort: false, concurrency: 4 });
+
+/** Problems that would make PUT /models fail, in words. */
+export function modelProblems(list: ModelInfo[]): string[] {
+  const out: string[] = [];
+  if (!list.length) out.push('Keep at least one model.');
+  const ids = list.map((m) => m.id.trim());
+  if (ids.some((id) => !id)) out.push('Every model needs an id.');
+  const dup = ids.find((id, i) => id && ids.indexOf(id) !== i);
+  if (dup) out.push(`${dup} is listed twice.`);
+  if (list.some((m) => !(m.context_window > 0) || !(m.max_output_tokens > 0) || !(m.concurrency >= 1))) out.push('Token limits must be positive and concurrency at least 1.');
+  return out;
+}
+
+/** The model registry (PUT /models): the models Desk can pick, their limits and how many calls may run at once. */
+export function ModelsEditor() {
+  const [saved, setSaved] = useState<ModelInfo[] | null>(null);
+  const [draft, setDraft] = useState<ModelInfo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    call('models.list', {})
+      .then((m) => (setSaved(m), setDraft(m)))
+      .catch((err) => setError(describeError(err).message));
+  }, []);
+  if (error) return <p className="field-error">{error}</p>;
+  if (!saved) return <p className="muted">Loading…</p>;
+  const set = (i: number, patch: Partial<ModelInfo>) => setDraft((d) => d.map((m, k) => (k === i ? { ...m, ...patch } : m)));
+  const problems = modelProblems(draft);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const save = async () => {
+    setPending(true);
+    try {
+      const next = await call('models.replace', { models: draft.map((m) => ({ ...m, id: m.id.trim() })) });
+      setSaved(next);
+      setDraft(next);
+      toast({ tone: 'info', message: 'Model registry saved.' });
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setPending(false);
+    }
+  };
+  const num = (v: string) => Math.max(0, Math.floor(Number(v) || 0));
+  return (
+    <div className="models-editor">
+      <table className="models-table">
+        <thead>
+          <tr>
+            <th scope="col">Model id</th>
+            <th scope="col">Family</th>
+            <th scope="col">Context</th>
+            <th scope="col">Max output</th>
+            <th scope="col">Reasoning effort</th>
+            <th scope="col">At once</th>
+            <th scope="col">
+              <span className="sr-only">Remove</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {draft.map((m, i) => (
+            <tr key={i}>
+              <td>
+                <input className="input mono" aria-label={`Model ${i + 1} id`} value={m.id} onChange={(e) => set(i, { id: e.target.value })} />
+              </td>
+              <td>
+                <select className="select" aria-label={`Model ${i + 1} family`} value={m.family} onChange={(e) => set(i, { family: e.target.value as ModelInfo['family'] })}>
+                  <option value="claude">claude</option>
+                  <option value="gpt">gpt</option>
+                </select>
+              </td>
+              <td>
+                <input className="input" type="number" aria-label={`Model ${i + 1} context window`} value={m.context_window} onChange={(e) => set(i, { context_window: num(e.target.value) })} />
+              </td>
+              <td>
+                <input className="input" type="number" aria-label={`Model ${i + 1} max output tokens`} value={m.max_output_tokens} onChange={(e) => set(i, { max_output_tokens: num(e.target.value) })} />
+              </td>
+              <td>
+                <input type="checkbox" aria-label={`Model ${i + 1} supports reasoning effort`} checked={m.supports_reasoning_effort} onChange={(e) => set(i, { supports_reasoning_effort: e.target.checked })} />
+              </td>
+              <td>
+                <input className="input narrow" type="number" aria-label={`Model ${i + 1} concurrency`} value={m.concurrency} onChange={(e) => set(i, { concurrency: num(e.target.value) })} />
+              </td>
+              <td>
+                <button type="button" className="icon-btn" aria-label={`Remove model ${i + 1}`} onClick={() => setDraft((d) => d.filter((_, k) => k !== i))}>
+                  ✕
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {problems.length ? (
+        <ul className="field-error" role="alert">
+          {problems.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="actions">
+        <Button size="sm" onClick={() => setDraft((d) => [...d, blank()])}>
+          Add model
+        </Button>
+        <Button size="sm" variant="primary" pending={pending} disabled={!dirty || problems.length > 0} onClick={() => void save()}>
+          Save registry
+        </Button>
+        {dirty ? (
+          <Button size="sm" variant="ghost" onClick={() => setDraft(saved)}>
+            Discard changes
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/system/SystemScreen.tsx`:
+
+```tsx
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { UsageResponse } from '@desk/protocol';
+import type { ChannelOutput } from '../../main/handlers';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { EndpointPanel } from '../components/EndpointPanel';
+import { describeError, toastError } from '../components/Toast';
+import { clock, duration } from '../format';
+import { href } from '../router';
+import { useGlobal } from '../state/global';
+import { tokens } from '../threads/tabs/UsageTab';
+import { ModelsEditor } from './ModelsEditor';
+import './system.css';
+
+type DaemonStatusView = ChannelOutput<'daemon.status'>;
+type AppInfo = ChannelOutput<'app.info'>;
+
+type Period = 'all' | '30d' | '7d';
+const PERIOD_DAYS: Record<Exclude<Period, 'all'>, number> = { '30d': 30, '7d': 7 };
+
+function DaemonSection() {
+  const [s, setS] = useState<DaemonStatusView | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    call('daemon.status', {})
+      .then((v) => (setS(v), setError(null)))
+      .catch((err) => setError(describeError(err).message));
+  }, []);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, [load]);
+  const act = async (what: 'start' | 'restart' | 'stop' | 'repair') => {
+    setConfirmStop(false);
+    setBusy(what);
+    try {
+      setS(await call(`daemon.${what}`, {}));
+    } catch (err) {
+      toastError(err);
+      load();
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <section className="card sys-section" aria-labelledby="sys-daemon">
+      <h2 id="sys-daemon">deskd</h2>
+      {error ? <p className="field-error">{error}</p> : null}
+      {s ? (
+        <>
+          <p className="status-line">
+            <span className={`dot ${s.running ? (s.proxy === 'down' ? 'warn' : 'ok') : 'bad'}`} aria-hidden="true" />
+            <strong>{s.running ? 'Running' : 'Not running'}</strong>
+            {s.running ? (
+              <span className="muted">
+                · v{s.version} · pid {s.pid}
+                {s.uptime_s !== null ? ` · up ${duration(s.uptime_s * 1000)}` : ''}
+              </span>
+            ) : null}
+          </p>
+          <dl className="sys-facts">
+            <div>
+              <dt>Model proxy</dt>
+              <dd>{s.proxy === 'up' ? 'Reachable' : s.proxy === 'down' ? 'Unreachable. Threads pause and resume when it is back.' : 'Unknown'}</dd>
+            </div>
+            <div>
+              <dt>Mode</dt>
+              <dd>{s.mode === 'packaged' ? `Bundled deskd ${s.bundledVersion}` : 'Development (runs from this repository)'}</dd>
+            </div>
+            <div>
+              <dt>Starts at login</dt>
+              <dd>{s.agent === 'installed' ? 'Yes, as a LaunchAgent' : s.agent === 'missing' ? 'No. Install the LaunchAgent to keep Desk running.' : 'Not on this platform'}</dd>
+            </div>
+          </dl>
+          {s.running && s.version && s.mode === 'packaged' && s.version !== s.bundledVersion ? (
+            <p className="field-hint">This deskd is v{s.version}; the app bundles v{s.bundledVersion}. Repair installs the bundled one.</p>
+          ) : null}
+          <div className="actions">
+            {s.running ? (
+              <>
+                <Button size="sm" pending={busy === 'restart'} disabled={busy !== null} onClick={() => void act('restart')}>
+                  Restart
+                </Button>
+                <Button size="sm" variant="ghost" pending={busy === 'stop'} disabled={busy !== null} onClick={() => setConfirmStop(true)}>
+                  Stop
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="primary" pending={busy === 'start'} disabled={busy !== null} onClick={() => void act('start')}>
+                Start
+              </Button>
+            )}
+            {s.agent !== 'unsupported' ? (
+              <Button size="sm" variant="ghost" pending={busy === 'repair'} disabled={busy !== null} onClick={() => void act('repair')}>
+                {s.agent === 'installed' ? 'Repair LaunchAgent' : 'Install LaunchAgent'}
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : error ? null : (
+        <p className="muted">Checking…</p>
+      )}
+      {confirmStop ? (
+        <ConfirmDialog title="Stop deskd?" confirmLabel="Stop" danger onCancel={() => setConfirmStop(false)} onConfirm={() => void act('stop')}>
+          Running threads pause. They resume where they were when deskd starts again.
+        </ConfirmDialog>
+      ) : null}
+    </section>
+  );
+}
+
+function UsageSection() {
+  const overview = useGlobal((g) => g.overview);
+  const [period, setPeriod] = useState<Period>('30d');
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const since = period === 'all' ? undefined : new Date(Date.now() - PERIOD_DAYS[period] * 86_400_000).toISOString().slice(0, 10);
+    call('usage', since ? { since } : {})
+      .then((u) => live && (setUsage(u), setError(null)))
+      .catch((err) => live && setError(describeError(err).message));
+    return () => {
+      live = false;
+    };
+  }, [period]);
+  const names = useMemo(() => new Map(overview.map((p) => [p.project.id, p.project.name])), [overview]);
+  const sum = (key: 'model' | 'project_id') => {
+    const by = new Map<string, { prompt: number; completion: number }>();
+    for (const r of usage?.rows ?? []) {
+      const k = r[key];
+      const v = by.get(k) ?? { prompt: 0, completion: 0 };
+      v.prompt += r.prompt_tokens;
+      v.completion += r.completion_tokens;
+      by.set(k, v);
+    }
+    return [...by].sort((a, b) => b[1].prompt + b[1].completion - (a[1].prompt + a[1].completion));
+  };
+  const table = (title: string, rows: Array<[string, { prompt: number; completion: number }]>, label: (k: string) => React.ReactNode) => (
+    <table className="usage-table">
+      <caption>{title}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{title === 'By model' ? 'Model' : 'Project'}</th>
+          <th scope="col">Prompt</th>
+          <th scope="col">Completion</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([k, v]) => (
+          <tr key={k}>
+            <td>{label(k)}</td>
+            <td title={v.prompt.toLocaleString()}>{tokens(v.prompt)}</td>
+            <td title={v.completion.toLocaleString()}>{tokens(v.completion)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  return (
+    <section className="card sys-section" aria-labelledby="sys-usage">
+      <div className="sys-head">
+        <h2 id="sys-usage">Usage</h2>
+        <div className="segmented" role="group" aria-label="Period">
+          {(['7d', '30d', 'all'] as Period[]).map((p) => (
+            <button key={p} type="button" aria-pressed={period === p} onClick={() => setPeriod(p)}>
+              {p === 'all' ? 'All time' : p === '7d' ? '7 days' : '30 days'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error ? <p className="field-error">{error}</p> : null}
+      {usage ? (
+        usage.rows.length ? (
+          <>
+            <p className="small">
+              {tokens(usage.totals.prompt_tokens)} prompt and {tokens(usage.totals.completion_tokens)} completion tokens.
+            </p>
+            <div className="usage-grid">
+              {table('By model', sum('model'), (k) => <span className="mono">{k}</span>)}
+              {table('By project', sum('project_id'), (k) => (names.has(k) ? <a href={href({ name: 'project', id: k, tab: 'conversation' })}>{names.get(k)}</a> : <span className="muted">{k === '_global' ? 'Outside projects' : 'Archived project'}</span>))}
+            </div>
+          </>
+        ) : (
+          <p className="muted">No model calls in this period.</p>
+        )
+      ) : error ? null : (
+        <p className="muted">Loading…</p>
+      )}
+    </section>
+  );
+}
+
+function NoticesSection() {
+  const notices = useGlobal((g) => g.system.notices);
+  const overview = useGlobal((g) => g.overview);
+  const names = useMemo(() => new Map(overview.map((p) => [p.project.id, p.project.name])), [overview]);
+  return (
+    <section className="card sys-section" aria-labelledby="sys-notices">
+      <h2 id="sys-notices">System notices</h2>
+      {notices.length ? (
+        <ol className="notices" reversed>
+          {notices
+            .slice()
+            .reverse()
+            .slice(0, 50)
+            .map((n) => (
+              <li key={n.eventId} className={`notice notice-${n.level}`}>
+                <span className="mono small muted">{clock(n.ts)}</span>
+                <span className="grow">{n.message}</span>
+                <span className="small muted">{names.get(n.projectId) ?? ''}</span>
+              </li>
+            ))}
+        </ol>
+      ) : (
+        <p className="muted">Nothing to report since the app started. Proxy outages, restarts and recoveries show up here.</p>
+      )}
+    </section>
+  );
+}
+
+function NotificationsSection() {
+  const [appOn, setAppOn] = useState<boolean | null>(null);
+  const [daemon, setDaemon] = useState<'auto' | 'off' | null>(null);
+  useEffect(() => {
+    call('app.settings', {})
+      .then((s) => setAppOn(s.notifications))
+      .catch(() => setAppOn(null));
+    call('config.get', {})
+      .then((c) => setDaemon(c.notifications))
+      .catch(() => setDaemon(null));
+  }, []);
+  const setApp = async (v: boolean) => {
+    try {
+      setAppOn((await call('app.updateSettings', { notifications: v })).notifications);
+    } catch (err) {
+      toastError(err);
+    }
+  };
+  const setD = async (v: 'auto' | 'off') => {
+    try {
+      setDaemon((await call('config.patch', { notifications: v })).notifications);
+    } catch (err) {
+      toastError(err);
+    }
+  };
+  return (
+    <section className="card sys-section" aria-labelledby="sys-notify">
+      <h2 id="sys-notify">Notifications</h2>
+      <label className="toggle">
+        <input type="checkbox" checked={appOn ?? false} disabled={appOn === null} onChange={(e) => void setApp(e.target.checked)} />
+        <span>
+          <strong>From the app</strong>
+          <span className="muted small">Approvals, questions, hand-offs and stuck threads, while Desk is open or in the menu bar. Silent while a Desk window is focused.</span>
+        </span>
+      </label>
+      <label className="toggle">
+        <input type="checkbox" checked={daemon === 'auto'} disabled={daemon === null} onChange={(e) => void setD(e.target.checked ? 'auto' : 'off')} />
+        <span>
+          <strong>From deskd when the app is closed</strong>
+          <span className="muted small">deskd stays quiet while the app is running, so you never get both.</span>
+        </span>
+      </label>
+    </section>
+  );
+}
+
+function AboutSection() {
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  useEffect(() => {
+    call('app.info', {})
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, []);
+  return (
+    <section className="card sys-section" aria-labelledby="sys-about">
+      <h2 id="sys-about">Data</h2>
+      <dl className="sys-facts">
+        <div>
+          <dt>Data directory</dt>
+          <dd className="mono">{info?.dataDir ?? '…'}</dd>
+        </div>
+        <div>
+          <dt>App</dt>
+          <dd>
+            Desk {info?.version ?? ''} {info && !info.packaged ? '(development)' : ''}
+          </dd>
+        </div>
+      </dl>
+      <div className="actions">
+        <Button size="sm" onClick={() => void call('app.revealLogs', {}).catch(toastError)}>
+          Reveal logs
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** The machine room: deskd, the model endpoint and registry, usage, notices, notifications and data. */
+export function SystemScreen() {
+  return (
+    <div className="page system">
+      <h1 className="title">System</h1>
+      <div className="sys-grid">
+        <DaemonSection />
+        <section className="card sys-section" aria-labelledby="sys-endpoint">
+          <h2 id="sys-endpoint">Model endpoint</h2>
+          <EndpointPanel />
+        </section>
+        <NotificationsSection />
+        <AboutSection />
+      </div>
+      <section className="card sys-section" aria-labelledby="sys-models">
+        <h2 id="sys-models">Model registry</h2>
+        <p className="field-hint">The models projects can choose. Concurrency caps how many calls to a model run at once across all projects.</p>
+        <ModelsEditor />
+      </section>
+      <UsageSection />
+      <NoticesSection />
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/system/system.css`:
+
+```css
+.system {
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  max-width: 1180px;
+}
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 16px;
+}
+.sys-section {
+  margin: 0;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sys-section h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+}
+.sys-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sys-head h2 {
+  flex: 1;
+}
+.sys-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sys-facts div {
+  display: flex;
+  gap: 12px;
+}
+.sys-facts dt {
+  width: 120px;
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--text-min);
+}
+.sys-facts dd {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.models-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.models-table th {
+  padding: 4px 6px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-min);
+}
+.models-table td {
+  padding: 4px 6px;
+}
+.models-table .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.usage-table caption {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  padding-bottom: 6px;
+}
+.notices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.notice {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f4f1ea;
+  font-size: 13px;
+}
+.notice-warning {
+  background: var(--wait-pastel);
+}
+.notice-error {
+  background: var(--accent-tint);
+}
+```
+
+Other changes:
+- `daemon.test.ts` gains "repairs by reinstalling the LaunchAgent, or restarts in dev". It sets pid 7 before repair so the fake bootstrap's pid 42 counts as a fresh daemon.
+- `Onboarding.tsx`: `EndpointStep` becomes a heading plus `<EndpointPanel onStatus>` plus Continue/Skip. `SOURCE_LABEL` and `TestResult` move into `EndpointPanel`. A non-Keychain endpoint can now be replaced ("Use a different endpoint"), with a note that environment variables still take precedence.
+- `.usage-table` moves from `threads.css` to `tokens.css`.
+- `App.tsx` routes `system` to `<SystemScreen />`. `screens/Pending.tsx` is deleted, since every route now has its screen.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): system — deskd start/restart/stop/repair, proxy, endpoint panel (shared with onboarding), model registry editor, usage by model and project, notices, notification switches, data dir and logs
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
