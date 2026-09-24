@@ -1897,3 +1897,1970 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 4: Skills — map and list, detail with files and history (compare, restore), editor, import, delete, Ask Desk
+
+**Files:**
+- Create: `apps/desktop/src/renderer/skills/diff.test.ts`, `apps/desktop/src/renderer/skills/skillsMap.test.ts`, `apps/desktop/src/renderer/skills/SkillsScreen.test.tsx`, `apps/desktop/src/renderer/skills/diff.ts`, `apps/desktop/src/renderer/skills/skillsMap.ts`, `apps/desktop/src/renderer/skills/data.ts`, `apps/desktop/src/renderer/skills/SkillsMapView.tsx`, `apps/desktop/src/renderer/skills/SkillList.tsx`, `apps/desktop/src/renderer/skills/SkillPanel.tsx`, `apps/desktop/src/renderer/skills/SkillEditor.tsx`, `apps/desktop/src/renderer/skills/AskDesk.tsx`, `apps/desktop/src/renderer/skills/SkillsScreen.tsx`, `apps/desktop/src/renderer/skills/skills.css`
+- Modify: `packages/core/src/runtime/runtime.ts`, `packages/client/src/types.ts`, `apps/daemon/src/skills.test.ts`, `docs/api.md`, `apps/desktop/src/renderer/threads/threads.css`, `apps/desktop/src/renderer/theme/tokens.css`, `apps/desktop/src/renderer/App.tsx`
+
+**Interfaces:**
+
+- Consumes: the `skills.*`, `app.pickFolder` (`skill-import`) and `projects.send` channels; `buildSkillGraph` from `@desk/client`; the overview (projects, and thread skills and status); `MapCanvas`, `projectTone`, `FileViewer` and `replaceRoute`.
+- Backend change, committed separately before the UI:
+  - `Runtime.skillHistory` joins the `skill.saved` log, so each entry is `{ version, description, current, change_note, origin, ts }`.
+  - A global skill is looked up across the whole log, because an agent saves it under its own project.
+  - `SkillHistoryEntry` in `@desk/client` gains those fields.
+  - `docs/api.md` documents the new history shape.
+- Produces:
+
+```ts
+// skills/diff.ts
+export function diffLines(before: string, after: string): DiffLine[];
+export function withContext(lines: DiffLine[], context?: number): Array<DiffLine | null>;
+export function diffFiles(before: Array<{ path; size }>, after: Array<{ path; size }>): FileChange[];
+// skills/skillsMap.ts
+export function layoutSkillsMap(o: { nodes: SkillNode[]; projects: Array<{ id; name; tone }>; width; height }): SkillsMapLayout;
+// skills/data.ts
+export type SkillRef = { scope: 'global' | 'project'; projectId?: string; name: string };
+export const skillKey: (r: SkillRef) => string;              // 'global:name' | 'project:<pid>:name' (the #/skills/<key> route)
+export function parseSkillKey(key: string): SkillRef | null;
+export const scopeArg: (r: SkillRef) => { projectId?: string };
+export function useSkills(): { status; error; nodes: SkillNode[]; refresh(): Promise<void> };
+export function whoLabel(origin: string | null, titles: Map<string, string>): string;
+// skills/SkillsScreen.tsx
+export function SkillsScreen(props: { skill?: string }): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/skills/diff.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { diffFiles, diffLines, withContext } from './diff';
+
+describe('diffLines', () => {
+  it('finds added and removed lines', () => {
+    expect(diffLines('a\nb\nc', 'a\nc\nd')).toEqual([
+      { kind: 'same', text: 'a' },
+      { kind: 'del', text: 'b' },
+      { kind: 'same', text: 'c' },
+      { kind: 'add', text: 'd' },
+    ]);
+  });
+
+  it('trims unchanged runs to context', () => {
+    const before = Array.from({ length: 20 }, (_, i) => `l${i}`).join('\n');
+    const after = before.replace('l10', 'L10');
+    const shown = withContext(diffLines(before, after), 1);
+    expect(shown.map((l) => (l ? `${l.kind}:${l.text}` : '…'))).toEqual(['same:l9', 'del:l10', 'add:L10', 'same:l11']);
+  });
+});
+
+describe('diffFiles', () => {
+  it('reports added, removed and resized files', () => {
+    expect(diffFiles([{ path: 'SKILL.md', size: 10 }, { path: 'a.py', size: 3 }], [{ path: 'SKILL.md', size: 12 }, { path: 'b.py', size: 4 }])).toEqual([
+      { path: 'SKILL.md', change: 'changed', before: 10, after: 12 },
+      { path: 'a.py', change: 'removed', before: 3 },
+      { path: 'b.py', change: 'added', after: 4 },
+    ]);
+  });
+});
+```
+
+`apps/desktop/src/renderer/skills/skillsMap.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import type { SkillNode } from '@desk/client';
+import { layoutSkillsMap } from './skillsMap';
+
+const node = (key: string, extra: Partial<SkillNode> = {}): SkillNode => {
+  const [scope, a, b] = key.split(':');
+  return { key, name: b ?? a!, scope: scope as 'global' | 'project', projectId: b ? a! : null, projectName: null, version: 1, description: '', shadowedIn: [], shadows: false, usedBy: [], ...extra };
+};
+
+describe('layoutSkillsMap', () => {
+  it('rings globals, fills territories, links live threads and shadows', () => {
+    const nodes = [
+      node('global:email-sequence', { usedBy: [{ threadId: 't1', title: 'Welcome emails', status: 'running', projectId: 'p1' }] }),
+      node('global:brand-voice', { shadowedIn: ['p1'] }),
+      node('global:csv-analysis', { usedBy: [{ threadId: 't9', title: 'Old', status: 'done', projectId: 'p2' }] }),
+      node('project:p1:brand-voice', { shadows: true, usedBy: [{ threadId: 't1', title: 'Welcome emails', status: 'running', projectId: 'p1' }] }),
+      node('project:p2:receipts'),
+    ];
+    const l = layoutSkillsMap({ nodes, projects: [{ id: 'p1', name: 'Onboarding', tone: 'running' }, { id: 'p2', name: 'Tax', tone: 'waiting' }, { id: 'p3', name: 'Notes', tone: 'idle' }], width: 1100, height: 800 });
+    expect(l.skills).toHaveLength(5);
+    const g = l.skills.filter((s) => s.key.startsWith('global:'));
+    for (const s of g) expect(Math.hypot(s.x - l.center.x, s.y - l.center.y)).toBeCloseTo(l.globalRadius, 5);
+    expect(l.skills.find((s) => s.key === 'global:email-sequence')!.r).toBeGreaterThan(l.skills.find((s) => s.key === 'global:brand-voice')!.r);
+    const p1 = l.territories.find((t) => t.projectId === 'p1')!;
+    const own = l.skills.find((s) => s.key === 'project:p1:brand-voice')!;
+    expect(Math.hypot(own.x - p1.x, own.y - p1.y)).toBeLessThan(p1.r);
+    expect(l.territories.find((t) => t.projectId === 'p3')!.count).toBe(0);
+    expect(l.markers).toHaveLength(1);
+    expect(l.markers[0]).toMatchObject({ threadId: 't1', status: 'running' });
+    expect(l.markers[0]!.to).toHaveLength(2);
+    expect(l.shadows).toEqual([expect.objectContaining({ fromKey: 'global:brand-voice', toKey: 'project:p1:brand-voice' })]);
+    for (const t of l.territories) {
+      expect(t.x - t.r).toBeGreaterThanOrEqual(0);
+      expect(t.x + t.r).toBeLessThanOrEqual(1100);
+      expect(t.y + t.r).toBeLessThanOrEqual(800);
+    }
+  });
+});
+```
+
+`apps/desktop/src/renderer/skills/SkillsScreen.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProjectSummary } from '@desk/protocol';
+import { initialGlobalState } from '../../shared/state';
+import { useRoute } from '../router';
+import { globalStore } from '../state/global';
+import { installBridge } from '../test/bridge';
+import { SkillsScreen } from './SkillsScreen';
+
+afterEach(cleanup);
+beforeEach(() => {
+  window.location.hash = '#/skills';
+  localStorage.clear();
+  const summary = (id: string, name: string, threads: unknown[]) =>
+    ({ project: { id, name, goal: '', updated_at: 't' }, desk_status: 'idle', threads, latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 }) as unknown as ProjectSummary;
+  globalStore.set({
+    ...initialGlobalState(),
+    connection: { status: 'live' },
+    overview: [
+      summary('p1', 'Onboarding', [{ id: 't1', title: 'Welcome emails', status: 'running', reason: null, activity: null, model: 'm', git_branch: null, skills: ['email-sequence', 'brand-voice'], review_round: 0, created_at: 't', updated_at: 't' }]),
+      summary('p2', 'Tax', []),
+    ],
+  });
+});
+
+const sk = (name: string, scope: 'global' | 'project', version = 1, description = `${name} does things`) => ({ name, scope, description, dir: `/s/${name}`, version });
+const lists: Record<string, unknown[]> = {
+  global: [sk('email-sequence', 'global', 2), sk('brand-voice', 'global')],
+  p1: [sk('brand-voice', 'project', 3, 'House tone'), sk('email-sequence', 'global', 2)],
+  p2: [sk('email-sequence', 'global', 2), sk('brand-voice', 'global')],
+};
+const detail = (v: number, instructions: string) => ({ ...sk('email-sequence', 'global', v), instructions, frontmatter: {}, files: [{ path: 'SKILL.md', size: 40 }, { path: 'scripts/count.py', size: 12 }] });
+
+function Routed() {
+  const r = useRoute();
+  return <SkillsScreen {...(r.name === 'skills' && r.skill ? { skill: r.skill } : {})} />;
+}
+
+function setup(extra: Record<string, (input: any) => unknown> = {}) {
+  const bridge = installBridge({
+    'skills.list': ({ projectId }: { projectId?: string }) => lists[projectId ?? 'global'],
+    'skills.get': () => detail(2, 'Plan the sequence.\nCheck the voice.'),
+    'skills.history': () => [
+      { version: 1, description: 'd', current: false, change_note: 'First draft', origin: 'user', ts: new Date().toISOString() },
+      { version: 2, description: 'd', current: true, change_note: 'Added a voice check', origin: 'agent:t1', ts: new Date().toISOString() },
+    ],
+    'skills.version': ({ version }: { version: number }) => (version === 1 ? detail(1, 'Plan the sequence.') : detail(2, 'Plan the sequence.\nCheck the voice.')),
+    'skills.file': () => new TextEncoder().encode('print(1)'),
+    ...extra,
+  });
+  render(<Routed />);
+  return bridge;
+}
+
+describe('SkillsScreen', () => {
+  it('maps global, project and shadowed skills with live usage, and lists them too', async () => {
+    setup();
+    const map = await screen.findByRole('group', { name: 'Skill map' });
+    expect(within(map).getByRole('button', { name: /^email-sequence, global, version 2, used by 1$/ })).toBeTruthy();
+    expect(within(map).getByRole('button', { name: /^brand-voice, global, version 1, shadowed/ })).toBeTruthy();
+    expect(within(map).getByRole('button', { name: /^brand-voice, Onboarding project skill, version 3/ })).toBeTruthy();
+    expect(within(map).getByRole('link', { name: 'Welcome emails' }).getAttribute('href')).toBe('#/p/p1/threads/t1');
+    expect(screen.getByRole('button', { name: 'In use now · 2' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    const onboarding = screen.getByRole('region', { name: 'Onboarding skills' });
+    expect(onboarding.textContent).toContain('shadows global');
+  });
+
+  it('opens a skill with its change notes, compares versions and restores one', async () => {
+    const bridge = setup({ 'skills.restore': () => ({ version: 3 }) });
+    fireEvent.click(await screen.findByRole('button', { name: /^email-sequence, global/ }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/global%3Aemail-sequence'));
+    const panel = await screen.findByRole('article', { name: 'Skill email-sequence' });
+    expect(await within(panel).findByText('Added a voice check')).toBeTruthy();
+    expect(panel.textContent).toContain('Welcome emails');
+    fireEvent.click(within(panel).getByRole('tab', { name: /^History/ }));
+    const changes = await within(panel).findByLabelText('Changes from v1 to v2');
+    expect(changes.textContent).toContain('+ Check the voice.');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Restore' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Restore' }).at(-1)!);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'skills.restore')?.input).toEqual({ name: 'email-sequence', version: 1 }));
+    fireEvent.click(within(panel).getByRole('tab', { name: /^Files/ }));
+    fireEvent.click(within(panel).getByRole('button', { name: /scripts\/count\.py/ }));
+    expect(await within(panel).findByText('print(1)')).toBeTruthy();
+  });
+
+  it('edits by hand, deletes, and asks Desk to refine', async () => {
+    const bridge = setup({ 'skills.save': () => ({ version: 3 }), 'skills.remove': () => ({ ok: true }), 'projects.send': () => ({ ok: true }) });
+    window.location.hash = '#/skills/global%3Aemail-sequence';
+    const panel = await screen.findByRole('article', { name: 'Skill email-sequence' });
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Edit' }));
+    const sheet = screen.getByRole('dialog', { name: 'Edit email-sequence' });
+    fireEvent.change(within(sheet).getByLabelText('Instructions (SKILL.md)'), { target: { value: 'Plan it.' } });
+    fireEvent.click(within(sheet).getByRole('checkbox'));
+    fireEvent.change(within(sheet).getByLabelText('Change note (optional)'), { target: { value: 'Shorter' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Save new version' }));
+    await waitFor(() =>
+      expect(bridge.calls.find((c) => c.channel === 'skills.save')?.input).toEqual({ name: 'email-sequence', skill: { instructions: 'Plan it.', files: [], remove_files: ['scripts/count.py'], change_note: 'Shorter' } }),
+    );
+    fireEvent.click(within(panel).getByRole('button', { name: 'Refine with Desk' }));
+    const ask = screen.getByRole('dialog', { name: 'Refine email-sequence with Desk' });
+    expect((within(ask).getByLabelText("Which project's Desk") as HTMLSelectElement).value).toBe('p1');
+    fireEvent.click(within(ask).getByRole('button', { name: 'Send to Desk' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.send')?.input).toEqual({ id: 'p1', text: 'Refine the skill "email-sequence":' }));
+    expect(window.location.hash).toBe('#/p/p1/conversation');
+    window.location.hash = '#/skills/global%3Aemail-sequence';
+    const again = await screen.findByRole('article', { name: 'Skill email-sequence' });
+    fireEvent.click(await within(again).findByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' }).at(-1)!);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'skills.remove')?.input).toEqual({ name: 'email-sequence' }));
+  });
+
+  it('creates a project skill with an uploaded script, and imports a folder', async () => {
+    const bridge = setup({ 'skills.save': () => ({ version: 1 }), 'app.pickFolder': () => '/Users/me/.claude/skills/pdf', 'skills.import': () => ({ version: 1, dir: '/data/skills/pdf', created: true, description: '' }) });
+    fireEvent.click(await screen.findByRole('button', { name: 'New skill' }));
+    const sheet = screen.getByRole('dialog', { name: 'New skill' });
+    fireEvent.change(within(sheet).getByLabelText('Name'), { target: { value: 'Bad Name' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Create skill' }));
+    expect(await within(sheet).findByText(/lowercase letters/)).toBeTruthy();
+    fireEvent.change(within(sheet).getByLabelText('Name'), { target: { value: 'receipt-sorting' } });
+    fireEvent.change(within(sheet).getByLabelText('Scope'), { target: { value: 'p2' } });
+    fireEvent.change(within(sheet).getByLabelText('Description'), { target: { value: 'Sort receipts' } });
+    fireEvent.change(within(sheet).getByLabelText('Instructions (SKILL.md)'), { target: { value: 'Sort them.' } });
+    fireEvent.change(within(sheet).getByTestId('skill-upload'), { target: { files: [new File(['hi'], 'sort.py')] } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Create skill' }));
+    await waitFor(() =>
+      expect(bridge.calls.find((c) => c.channel === 'skills.save')?.input).toEqual({
+        projectId: 'p2',
+        name: 'receipt-sorting',
+        skill: { description: 'Sort receipts', instructions: 'Sort them.', files: [{ path: 'scripts/sort.py', content_base64: 'aGk=' }], remove_files: [] },
+      }),
+    );
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/project%3Ap2%3Areceipt-sorting'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import from ~/.claude/skills' }));
+    const imp = await screen.findByRole('dialog', { name: 'Import a skill' });
+    fireEvent.click(within(imp).getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'skills.import')?.input).toEqual({ path: '/Users/me/.claude/skills/pdf' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/global%3Apdf'));
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/skills`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/skills/diff.ts`:
+
+```ts
+export type DiffLine = { kind: 'same' | 'add' | 'del'; text: string };
+
+const MAX = 4000;
+
+/** A line diff (longest common subsequence). Very long inputs fall back to "all removed, all added". */
+export function diffLines(before: string, after: string): DiffLine[] {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  if (a.length * b.length > MAX * MAX / 4) return [...a.map((text) => ({ kind: 'del' as const, text })), ...b.map((text) => ({ kind: 'add' as const, text }))];
+  const n = a.length;
+  const m = b.length;
+  const lcs: Uint32Array[] = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ kind: 'same', text: a[i]! });
+      i++;
+      j++;
+    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) out.push({ kind: 'del', text: a[i++]! });
+    else out.push({ kind: 'add', text: b[j++]! });
+  }
+  while (i < n) out.push({ kind: 'del', text: a[i++]! });
+  while (j < m) out.push({ kind: 'add', text: b[j++]! });
+  return out;
+}
+
+/** Keeps changed lines with `context` unchanged lines around them; gaps become a single `…` marker (null). */
+export function withContext(lines: DiffLine[], context = 3): Array<DiffLine | null> {
+  const keep = new Set<number>();
+  lines.forEach((l, i) => {
+    if (l.kind !== 'same') for (let k = i - context; k <= i + context; k++) keep.add(k);
+  });
+  const out: Array<DiffLine | null> = [];
+  lines.forEach((l, i) => {
+    if (keep.has(i)) out.push(l);
+    else if (out.at(-1) !== null) out.push(null);
+  });
+  if (out[0] === null) out.shift();
+  if (out.at(-1) === null) out.pop();
+  return out;
+}
+
+export type FileChange = { path: string; change: 'added' | 'removed' | 'changed' | 'same'; before?: number; after?: number };
+
+/** Compares two file lists by path and size. */
+export function diffFiles(before: Array<{ path: string; size: number }>, after: Array<{ path: string; size: number }>): FileChange[] {
+  const a = new Map(before.map((f) => [f.path, f.size]));
+  const b = new Map(after.map((f) => [f.path, f.size]));
+  const paths = [...new Set([...a.keys(), ...b.keys()])].sort();
+  return paths.map((path) => {
+    const x = a.get(path);
+    const y = b.get(path);
+    if (x === undefined) return { path, change: 'added', after: y! };
+    if (y === undefined) return { path, change: 'removed', before: x };
+    return { path, change: x === y ? 'same' : 'changed', before: x, after: y };
+  });
+}
+```
+
+`apps/desktop/src/renderer/skills/skillsMap.ts`:
+
+```ts
+import type { SkillNode } from '@desk/client';
+import type { AgentStatus } from '@desk/protocol';
+
+export type MapTone = 'running' | 'waiting' | 'idle';
+export type PlacedSkill = { key: string; x: number; y: number; r: number };
+export type Territory = { projectId: string; name: string; tone: MapTone; x: number; y: number; r: number; count: number };
+export type UsageMarker = { threadId: string; projectId: string; title: string; status: AgentStatus; x: number; y: number; to: Array<{ x: number; y: number }> };
+export type ShadowLink = { fromKey: string; toKey: string; d: string; mx: number; my: number };
+export type SkillsMapLayout = {
+  width: number;
+  height: number;
+  center: { x: number; y: number };
+  globalRadius: number;
+  skills: PlacedSkill[];
+  territories: Territory[];
+  markers: UsageMarker[];
+  shadows: ShadowLink[];
+};
+
+const LIVE = new Set<AgentStatus>(['running', 'waiting', 'queued']);
+const skillR = (n: SkillNode, base: number) => base + Math.min(24, 6 * n.usedBy.length);
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * The skills map: global skills on a ring in the middle; each project a territory on an outer
+ * ellipse holding its own skills; markers for live threads linked to the skills they use; and a
+ * dashed link from a global skill to each project skill that shadows it.
+ */
+export function layoutSkillsMap(o: { nodes: SkillNode[]; projects: Array<{ id: string; name: string; tone: MapTone }>; width: number; height: number }): SkillsMapLayout {
+  const { width: w, height: h } = o;
+  const center = { x: w * 0.44, y: h * 0.52 };
+  const globals = o.nodes.filter((n) => n.scope === 'global');
+  const globalRadius = globals.length <= 1 ? 0 : Math.min(Math.min(w, h) * 0.2, 60 + 16 * globals.length);
+  const skills = new Map<string, PlacedSkill>();
+  globals.forEach((n, i) => {
+    const a = (i / Math.max(1, globals.length)) * Math.PI * 2 - Math.PI / 2;
+    skills.set(n.key, { key: n.key, x: center.x + Math.cos(a) * globalRadius, y: center.y + Math.sin(a) * globalRadius, r: skillR(n, 30) });
+  });
+
+  const territories: Territory[] = o.projects.map((p, i) => {
+    const own = o.nodes.filter((n) => n.scope === 'project' && n.projectId === p.id);
+    const r = 56 + 24 * Math.sqrt(own.length);
+    const a = (i / Math.max(1, o.projects.length)) * Math.PI * 2 - Math.PI / 3;
+    const x = clamp(center.x + Math.cos(a) * w * 0.36, r + 12, w - r - 12);
+    const y = clamp(center.y + Math.sin(a) * h * 0.36, r + 40, h - r - 12);
+    own.forEach((n, k) => {
+      const ring = own.length === 1 ? 0 : r * 0.45;
+      const b = (k / own.length) * Math.PI * 2 - Math.PI / 2;
+      skills.set(n.key, { key: n.key, x: x + Math.cos(b) * ring, y: y + Math.sin(b) * ring, r: skillR(n, 22) });
+    });
+    return { projectId: p.id, name: p.name, tone: p.tone, x, y, r, count: own.length };
+  });
+
+  const byThread = new Map<string, { title: string; status: AgentStatus; projectId: string; keys: string[] }>();
+  for (const n of o.nodes)
+    for (const u of n.usedBy) {
+      if (!LIVE.has(u.status)) continue;
+      const t = byThread.get(u.threadId) ?? { title: u.title ?? 'Thread', status: u.status, projectId: u.projectId, keys: [] };
+      t.keys.push(n.key);
+      byThread.set(u.threadId, t);
+    }
+  const markers: UsageMarker[] = [];
+  for (const [threadId, t] of byThread) {
+    const to = t.keys.map((k) => skills.get(k)).filter((s): s is PlacedSkill => !!s);
+    if (!to.length) continue;
+    const mx = to.reduce((a, s) => a + s.x, 0) / to.length;
+    const my = to.reduce((a, s) => a + s.y, 0) / to.length;
+    const home = territories.find((x) => x.projectId === t.projectId);
+    // Sit between the skills and the thread's project, a little off the skills themselves.
+    const tx = home ? mx + (home.x - mx) * 0.35 : mx + 60;
+    const ty = home ? my + (home.y - my) * 0.35 : my + 40;
+    const k = markers.filter((m) => Math.hypot(m.x - tx, m.y - ty) < 30).length;
+    markers.push({ threadId, projectId: t.projectId, title: t.title, status: t.status, x: tx, y: ty + k * 24, to: to.map((s) => ({ x: s.x, y: s.y })) });
+  }
+
+  const shadows: ShadowLink[] = [];
+  for (const n of o.nodes) {
+    if (n.scope !== 'project' || !n.shadows) continue;
+    const from = skills.get(`global:${n.name}`);
+    const to = skills.get(n.key);
+    if (!from || !to) continue;
+    const mx = (from.x + to.x) / 2;
+    const my = (from.y + to.y) / 2 - 60;
+    shadows.push({ fromKey: from.key, toKey: to.key, d: `M${from.x} ${from.y} Q ${mx} ${my} ${to.x} ${to.y}`, mx, my: my + 30 });
+  }
+  return { width: w, height: h, center, globalRadius, skills: [...skills.values()], territories, markers, shadows };
+}
+```
+
+`apps/desktop/src/renderer/skills/data.ts`:
+
+```ts
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { buildSkillGraph, type SkillNode, type SkillSummary } from '@desk/client';
+import { call } from '../bridge';
+import { describeError } from '../components/Toast';
+import { useGlobal } from '../state/global';
+
+export type SkillRef = { scope: 'global' | 'project'; projectId?: string; name: string };
+
+export const skillKey = (r: SkillRef) => (r.scope === 'global' ? `global:${r.name}` : `project:${r.projectId}:${r.name}`);
+
+export function parseSkillKey(key: string): SkillRef | null {
+  const parts = key.split(':');
+  if (parts[0] === 'global' && parts.length === 2 && parts[1]) return { scope: 'global', name: parts[1] };
+  if (parts[0] === 'project' && parts.length === 3 && parts[1] && parts[2]) return { scope: 'project', projectId: parts[1], name: parts[2] };
+  return null;
+}
+
+/** The IPC scope argument: project skills name their project; global ones don't. */
+export const scopeArg = (r: SkillRef): { projectId?: string } => (r.scope === 'project' && r.projectId ? { projectId: r.projectId } : {});
+
+type Lists = { global: SkillSummary[]; projects: Record<string, SkillSummary[]> };
+
+/** Global and per-project skills, joined with live thread usage from the overview. Refetches on focus and every 30 s. */
+export function useSkills(): { status: 'loading' | 'ready' | 'error'; error: string | null; nodes: SkillNode[]; refresh(): Promise<void> } {
+  const overview = useGlobal((g) => g.overview);
+  const [lists, setLists] = useState<Lists | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const projectIds = overview.map((p) => p.project.id).join(',');
+
+  const refresh = useCallback(async () => {
+    try {
+      const ids = projectIds ? projectIds.split(',') : [];
+      const [global, ...perProject] = await Promise.all([call('skills.list', {}), ...ids.map((id) => call('skills.list', { projectId: id }).catch(() => [] as SkillSummary[]))]);
+      setLists({ global, projects: Object.fromEntries(ids.map((id, i) => [id, perProject[i] ?? []])) });
+      setError(null);
+    } catch (err) {
+      setError(describeError(err).message);
+    }
+  }, [projectIds]);
+
+  useEffect(() => {
+    void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener('focus', onFocus);
+    const t = setInterval(() => void refresh(), 30_000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(t);
+    };
+  }, [refresh]);
+
+  const nodes = useMemo(
+    () =>
+      lists
+        ? buildSkillGraph({
+            global: lists.global,
+            projects: overview.map((p) => ({ id: p.project.id, name: p.project.name, skills: lists.projects[p.project.id] ?? [] })),
+            threads: overview.flatMap((p) => p.threads.map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: p.project.id, skills: t.skills }))),
+          })
+        : [],
+    [lists, overview],
+  );
+  return { status: lists ? 'ready' : error ? 'error' : 'loading', error, nodes, refresh };
+}
+
+/** `user` → you, `agent:<id>` → the agent's title when known. */
+export function whoLabel(origin: string | null, titles: Map<string, string>): string {
+  if (!origin) return 'Unknown';
+  if (origin === 'user') return 'You';
+  if (origin.startsWith('agent:')) return titles.get(origin.slice(6)) ?? 'Desk';
+  return origin;
+}
+```
+
+`apps/desktop/src/renderer/skills/SkillsMapView.tsx`:
+
+```tsx
+import type { SkillNode } from '@desk/client';
+import type { AgentStatus } from '@desk/protocol';
+import { MapCanvas } from '../map/MapCanvas';
+import { href } from '../router';
+import { layoutSkillsMap, type MapTone } from './skillsMap';
+import '../map/map.css';
+
+const TERRITORY: Record<MapTone, { fill: string; stroke: string; text: string }> = {
+  running: { fill: '#E3E8F5', stroke: '#C9D3EC', text: '#1F45A8' },
+  waiting: { fill: '#F3E6CF', stroke: '#E6D3AF', text: '#7A4500' },
+  idle: { fill: '#E6E1D7', stroke: '#D6CFC1', text: '#4A4740' },
+};
+const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: number }>> = {
+  running: { stroke: '#2F5BD3', width: 2.5 },
+  waiting: { stroke: '#A15C00', width: 2, dash: '4 4' },
+  queued: { stroke: '#A15C00', width: 2, dash: '4 4' },
+};
+
+/** Global skills in the middle, project skills inside their project, live threads linked to the skills they use. */
+export function SkillsMapView(o: { nodes: SkillNode[]; projects: Array<{ id: string; name: string; tone: MapTone }>; selected: string | null; onSelect(key: string): void }) {
+  return (
+    <MapCanvas label="Skill map">
+      {({ width, height }) => {
+        const l = layoutSkillsMap({ nodes: o.nodes, projects: o.projects, width, height });
+        const byKey = new Map(o.nodes.map((n) => [n.key, n]));
+        return (
+          <>
+            <svg width={width} height={height} aria-hidden="true" className="skills-svg">
+              {l.globalRadius ? <circle cx={l.center.x} cy={l.center.y} r={l.globalRadius} fill="none" stroke="#D3CCBE" strokeDasharray="3 6" /> : null}
+              {l.territories.map((t) => (
+                <circle key={t.projectId} cx={t.x} cy={t.y} r={t.r} fill={TERRITORY[t.tone].fill} stroke={TERRITORY[t.tone].stroke} />
+              ))}
+              {l.shadows.map((s) => (
+                <path key={s.toKey} d={s.d} fill="none" stroke="#A15C00" strokeWidth="1.5" strokeDasharray="5 5" />
+              ))}
+              {l.markers.flatMap((m) =>
+                m.to.map((p, i) => {
+                  const line = LINE[m.status] ?? { stroke: '#8A857B', width: 2 };
+                  return <path key={`${m.threadId}-${i}`} d={`M${m.x} ${m.y} L ${p.x} ${p.y}`} stroke={line.stroke} strokeWidth={line.width} strokeDasharray={line.dash} />;
+                }),
+              )}
+            </svg>
+            {l.territories.map((t) => (
+              <span key={t.projectId} className="skills-territory-label" style={{ left: t.x, top: t.y - t.r - 22, color: TERRITORY[t.tone].text }}>
+                {t.name}
+                {t.count ? null : <span className="muted small"> · no project skills</span>}
+              </span>
+            ))}
+            {l.globalRadius || o.nodes.some((n) => n.scope === 'global') ? (
+              <span className="skills-global-label" style={{ left: l.center.x, top: l.center.y + l.globalRadius + 48 }}>
+                GLOBAL
+              </span>
+            ) : null}
+            {l.shadows.slice(0, 1).map((s) => (
+              <span key={s.toKey} className="skills-shadow-label" style={{ left: s.mx, top: s.my - 40 }}>
+                shadowed by
+              </span>
+            ))}
+            {l.skills.map((s) => {
+              const n = byKey.get(s.key)!;
+              const shadowed = n.scope === 'global' && n.shadowedIn.length > 0;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  className={`skill-node ${n.scope}${shadowed ? ' shadowed' : ''}${n.error ? ' broken' : ''}${o.selected === s.key ? ' selected' : ''}`}
+                  style={{ left: s.x, top: s.y, width: s.r * 2, height: s.r * 2 }}
+                  aria-label={`${n.name}, ${n.scope === 'global' ? 'global' : `${n.projectName ?? 'project'} project skill`}, version ${n.version}${shadowed ? ', shadowed' : ''}${n.usedBy.length ? `, used by ${n.usedBy.length}` : ''}`}
+                  aria-pressed={o.selected === s.key}
+                  onClick={() => o.onSelect(s.key)}
+                >
+                  <span className="skill-node-name">{n.name}</span>
+                  <span className="skill-node-v">v{n.version}</span>
+                </button>
+              );
+            })}
+            {l.markers.map((m) => (
+              <a key={m.threadId} className={`skill-marker status-${m.status}`} style={{ left: m.x, top: m.y }} href={href({ name: 'project', id: m.projectId, tab: 'threads', threadId: m.threadId })}>
+                <span className="skill-marker-dot" aria-hidden="true" />
+                {m.title}
+              </a>
+            ))}
+          </>
+        );
+      }}
+    </MapCanvas>
+  );
+}
+```
+
+`apps/desktop/src/renderer/skills/SkillList.tsx`:
+
+```tsx
+import type { SkillNode } from '@desk/client';
+
+/** The list alternative to the map: global skills, then each project's own. */
+export function SkillList(o: { nodes: SkillNode[]; projectNames: Map<string, string>; selected: string | null; onSelect(key: string): void }) {
+  const groups: Array<{ title: string; nodes: SkillNode[] }> = [{ title: 'Global', nodes: o.nodes.filter((n) => n.scope === 'global') }];
+  for (const [id, name] of o.projectNames) {
+    const own = o.nodes.filter((n) => n.scope === 'project' && n.projectId === id);
+    if (own.length) groups.push({ title: name, nodes: own });
+  }
+  return (
+    <div className="skill-list">
+      {groups.map((g) => (
+        <section key={g.title} aria-label={`${g.title} skills`}>
+          <h2 className="skill-list-title">{g.title}</h2>
+          {g.nodes.length ? (
+            <ul>
+              {g.nodes
+                .slice()
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((n) => (
+                  <li key={n.key}>
+                    <button type="button" className={`skill-row${o.selected === n.key ? ' current' : ''}`} aria-pressed={o.selected === n.key} onClick={() => o.onSelect(n.key)}>
+                      <span className="mono skill-row-name">{n.name}</span>
+                      <span className="muted small grow">{n.error ? `Broken: ${n.error}` : n.description}</span>
+                      {n.shadows ? <span className="chip chip-wait">shadows global</span> : null}
+                      {n.shadowedIn.length ? <span className="chip chip-idle">shadowed in {n.shadowedIn.length}</span> : null}
+                      {n.usedBy.length ? <span className="chip chip-run">in use · {n.usedBy.length}</span> : null}
+                      <span className="mono small muted">v{n.version}</span>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p className="muted small">No global skills yet.</p>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/skills/SkillPanel.tsx`:
+
+```tsx
+import { useEffect, useMemo, useState } from 'react';
+import type { SkillDetail, SkillHistoryEntry, SkillNode } from '@desk/client';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { EmptyState } from '../components/EmptyState';
+import { FileViewer } from '../components/FileViewer';
+import { SafeMarkdown } from '../components/SafeMarkdown';
+import { describeError, toast, toastError } from '../components/Toast';
+import { ago, bytes } from '../format';
+import { href } from '../router';
+import { useNow } from '../state/now';
+import { scopeArg, whoLabel, type SkillRef } from './data';
+import { diffFiles, diffLines, withContext } from './diff';
+
+type Tab = 'overview' | 'instructions' | 'files' | 'history';
+
+function Compare({ skill, history }: { skill: SkillRef; history: SkillHistoryEntry[] }) {
+  const versions = history.map((h) => h.version);
+  const [from, setFrom] = useState(versions.at(-2) ?? versions[0] ?? 1);
+  const [to, setTo] = useState(versions.at(-1) ?? 1);
+  const [pair, setPair] = useState<[SkillDetail, SkillDetail] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setPair(null);
+    Promise.all([call('skills.version', { ...scopeArg(skill), name: skill.name, version: from }), call('skills.version', { ...scopeArg(skill), name: skill.name, version: to })])
+      .then(([a, b]) => live && (setPair([a, b]), setError(null)))
+      .catch((err) => live && setError(describeError(err).message));
+    return () => {
+      live = false;
+    };
+  }, [skill.scope, skill.projectId, skill.name, from, to]);
+  const lines = useMemo(() => (pair ? withContext(diffLines(`${pair[0].description}\n\n${pair[0].instructions}`, `${pair[1].description}\n\n${pair[1].instructions}`)) : []), [pair]);
+  const files = useMemo(() => (pair ? diffFiles(pair[0].files, pair[1].files).filter((f) => f.change !== 'same') : []), [pair]);
+  return (
+    <div className="skill-compare">
+      <div className="skill-compare-bar">
+        <label>
+          Compare{' '}
+          <select className="select" aria-label="From version" value={from} onChange={(e) => setFrom(Number(e.target.value))}>
+            {versions.map((v) => (
+              <option key={v} value={v}>
+                v{v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          with{' '}
+          <select className="select" aria-label="To version" value={to} onChange={(e) => setTo(Number(e.target.value))}>
+            {versions.map((v) => (
+              <option key={v} value={v}>
+                v{v}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {error ? <p className="field-error">{error}</p> : null}
+      {pair ? (
+        <>
+          {lines.length ? (
+            <pre className="diff-patch" aria-label={`Changes from v${from} to v${to}`}>
+              {lines.map((l, i) =>
+                l === null ? (
+                  <span key={i} className="diff-hunk">
+                    {'…\n'}
+                  </span>
+                ) : (
+                  <span key={i} className={l.kind === 'add' ? 'diff-line-add' : l.kind === 'del' ? 'diff-line-del' : undefined}>
+                    {l.kind === 'add' ? '+ ' : l.kind === 'del' ? '- ' : '  '}
+                    {l.text}
+                    {'\n'}
+                  </span>
+                ),
+              )}
+            </pre>
+          ) : (
+            <p className="muted small">The instructions are the same.</p>
+          )}
+          {files.length ? (
+            <ul className="skill-file-changes">
+              {files.map((f) => (
+                <li key={f.path}>
+                  <span className={`chip ${f.change === 'added' ? 'chip-run' : f.change === 'removed' ? 'chip-fail' : 'chip-idle'}`}>{f.change}</span> <span className="mono">{f.path}</span>
+                  {f.change === 'changed' ? <span className="muted small"> {bytes(f.before!)} → {bytes(f.after!)}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : error ? null : (
+        <p className="muted small">Loading…</p>
+      )}
+    </div>
+  );
+}
+
+/** One skill in full: overview, instructions, files and history (compare any two versions, restore), with edit, delete and Desk. */
+export function SkillPanel(o: {
+  skill: SkillRef;
+  node: SkillNode | undefined;
+  projectNames: Map<string, string>;
+  threadTitles: Map<string, string>;
+  version: number;
+  onEdit(detail: SkillDetail): void;
+  onAskDesk(): void;
+  onChanged(): void;
+  onClose(): void;
+}) {
+  const { skill } = o;
+  const now = useNow();
+  const [tab, setTab] = useState<Tab>('overview');
+  const [detail, setDetail] = useState<SkillDetail | null>(null);
+  const [history, setHistory] = useState<SkillHistoryEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [file, setFile] = useState<{ path: string; data: Uint8Array } | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: 'delete' } | { kind: 'restore'; version: number } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    setError(null);
+    Promise.all([call('skills.get', { ...scopeArg(skill), name: skill.name }), call('skills.history', { ...scopeArg(skill), name: skill.name })])
+      .then(([d, h]) => live && (setDetail(d), setHistory(h)))
+      .catch((err) => live && setError(describeError(err).message));
+    return () => {
+      live = false;
+    };
+  }, [skill.scope, skill.projectId, skill.name, o.version, reload]);
+  useEffect(() => {
+    setTab('overview');
+    setFile(null);
+  }, [skill.scope, skill.projectId, skill.name]);
+
+  const openFile = async (path: string) => {
+    try {
+      setFile({ path, data: await call('skills.file', { ...scopeArg(skill), name: skill.name, path }) });
+    } catch (err) {
+      toastError(err);
+    }
+  };
+  const act = async (what: string, fn: () => Promise<unknown>, done: string) => {
+    setConfirm(null);
+    setBusy(what);
+    try {
+      await fn();
+      toast({ tone: 'info', message: done });
+      o.onChanged();
+      setReload((r) => r + 1);
+      return true;
+    } catch (err) {
+      toastError(err);
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const node = o.node;
+  const current = history.find((h) => h.current);
+  const scopeLabel = skill.scope === 'global' ? 'Global' : (o.projectNames.get(skill.projectId!) ?? 'Project');
+  return (
+    <article className="card skill-panel" aria-label={`Skill ${skill.name}`}>
+      <div className="skill-panel-head">
+        <h2 className="mono">{skill.name}</h2>
+        <span className={`skill-scope ${skill.scope}`}>{scopeLabel}</span>
+        <button type="button" className="icon-btn" aria-label="Close" onClick={o.onClose}>
+          ✕
+        </button>
+      </div>
+      {error ? (
+        <EmptyState title="Couldn't load this skill">{error}</EmptyState>
+      ) : !detail ? (
+        <p className="muted">Loading…</p>
+      ) : (
+        <>
+          <p className="skill-desc">{detail.description}</p>
+          {detail.error ? (
+            <p className="field-error" role="alert">
+              SKILL.md has a problem, so agents can't use this skill until it's fixed: {detail.error}
+            </p>
+          ) : null}
+          <div className="tabs" role="tablist" aria-label="Skill">
+            {(['overview', 'instructions', 'files', 'history'] as Tab[]).map((t) => (
+              <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+                {t === 'overview' ? 'Overview' : t === 'instructions' ? 'Instructions' : t === 'files' ? `Files · ${detail.files.length}` : `History · ${history.length}`}
+              </button>
+            ))}
+          </div>
+          <div className="skill-tab" role="tabpanel">
+            {tab === 'overview' ? (
+              <>
+                {node?.shadows ? (
+                  <p className="shadow-note">
+                    {scopeLabel} has its own {skill.name}, so agents there use this one instead of the global skill.
+                  </p>
+                ) : null}
+                {node?.shadowedIn.length ? (
+                  <p className="shadow-note">
+                    {node.shadowedIn.map((id) => o.projectNames.get(id) ?? id).join(', ')} {node.shadowedIn.length === 1 ? 'has' : 'have'} its own {skill.name}, so agents there use that one. Everywhere
+                    else they use this.
+                  </p>
+                ) : null}
+                {current ? (
+                  <div className="skill-change">
+                    <strong className="small">
+                      {whoLabel(current.origin, o.threadTitles)} · v{current.version}
+                      {current.ts ? ` · ${ago(current.ts, now)} ago` : ''}
+                    </strong>
+                    <span className="small">{current.change_note || 'No change note.'}</span>
+                  </div>
+                ) : null}
+                <div className="skill-versions" role="group" aria-label="Versions">
+                  {history
+                    .slice()
+                    .reverse()
+                    .map((h) => (
+                      <button key={h.version} type="button" className={h.current ? 'on' : undefined} aria-pressed={h.current} onClick={() => setTab('history')}>
+                        v{h.version}
+                      </button>
+                    ))}
+                </div>
+                <div>
+                  <span className="label">Used by</span>
+                  {node?.usedBy.length ? (
+                    <ul className="skill-used">
+                      {node.usedBy.map((u) => (
+                        <li key={u.threadId}>
+                          <span className={`status-dot status-dot-${u.status}`} aria-hidden="true" />
+                          <a href={href({ name: 'project', id: u.projectId, tab: 'threads', threadId: u.threadId })}>{u.title ?? 'Thread'}</a>
+                          <span className="muted small"> · {u.status} · {o.projectNames.get(u.projectId) ?? ''}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted small">Not in use right now.</p>
+                  )}
+                </div>
+              </>
+            ) : tab === 'instructions' ? (
+              <SafeMarkdown text={detail.instructions} />
+            ) : tab === 'files' ? (
+              <div className="skill-files">
+                <ul className="files-list">
+                  {detail.files.map((f) => (
+                    <li key={f.path}>
+                      <button type="button" className={`files-entry${file?.path === f.path ? ' current' : ''}`} onClick={() => void openFile(f.path)}>
+                        <span className="grow mono">{f.path}</span>
+                        <span className="muted small">{bytes(f.size)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {file ? <FileViewer path={file.path} data={file.data} /> : <p className="muted small">Pick a file to view it.</p>}
+              </div>
+            ) : (
+              <>
+                <ol className="skill-history" reversed>
+                  {history
+                    .slice()
+                    .reverse()
+                    .map((h) => (
+                      <li key={h.version}>
+                        <span className="mono">v{h.version}</span>
+                        <span className="grow">
+                          <span className="small">
+                            <strong>{whoLabel(h.origin, o.threadTitles)}</strong>
+                            {h.ts ? ` · ${ago(h.ts, now)} ago` : ''}
+                          </span>
+                          <span className="small muted">{h.change_note || h.description}</span>
+                        </span>
+                        {h.current ? (
+                          <span className="chip chip-done">current</span>
+                        ) : (
+                          <Button size="sm" pending={busy === `restore-${h.version}`} onClick={() => setConfirm({ kind: 'restore', version: h.version })}>
+                            Restore
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                </ol>
+                {history.length > 1 ? <Compare skill={skill} history={history} /> : null}
+              </>
+            )}
+          </div>
+          <div className="skill-actions">
+            <Button variant="primary" onClick={() => o.onEdit(detail)}>
+              Edit
+            </Button>
+            <Button onClick={o.onAskDesk}>Refine with Desk</Button>
+            <span className="grow" />
+            <Button variant="ghost" pending={busy === 'delete'} onClick={() => setConfirm({ kind: 'delete' })}>
+              Delete
+            </Button>
+          </div>
+        </>
+      )}
+      {confirm?.kind === 'restore' ? (
+        <ConfirmDialog
+          title={`Restore v${confirm.version}?`}
+          confirmLabel="Restore"
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void act(`restore-${confirm.version}`, () => call('skills.restore', { ...scopeArg(skill), name: skill.name, version: confirm.version }), `Restored v${confirm.version} as a new version.`)}
+        >
+          It comes back as the newest version. Nothing in the history is lost.
+        </ConfirmDialog>
+      ) : null}
+      {confirm?.kind === 'delete' ? (
+        <ConfirmDialog
+          title={`Delete ${skill.name}?`}
+          confirmLabel="Delete"
+          danger
+          onCancel={() => setConfirm(null)}
+          onConfirm={() =>
+            void act('delete', () => call('skills.remove', { ...scopeArg(skill), name: skill.name }), `Deleted ${skill.name}.`).then((ok) => ok && o.onClose())
+          }
+        >
+          Agents stop using it. Its past versions stay in the skill's history on disk.
+        </ConfirmDialog>
+      ) : null}
+    </article>
+  );
+}
+```
+
+`apps/desktop/src/renderer/skills/SkillEditor.tsx`:
+
+```tsx
+import { useRef, useState } from 'react';
+import type { SkillDetail } from '@desk/client';
+import { SkillName } from '@desk/protocol';
+import { call, DeskCallError } from '../bridge';
+import { Button } from '../components/Button';
+import { Field } from '../components/Field';
+import { Sheet } from '../components/Sheet';
+import { toastError } from '../components/Toast';
+import { fileToBase64, MAX_UPLOAD, textToBase64 } from '../files';
+import { bytes } from '../format';
+import { scopeArg, type SkillRef } from './data';
+
+type NewFile = { path: string; content: string | File };
+
+/** Create a skill, or refine one by hand: description, instructions (SKILL.md), files to add or remove, and a change note. */
+export function SkillEditor(o: { skill?: { ref: SkillRef; detail: SkillDetail }; projects: Array<{ id: string; name: string }>; defaultProjectId?: string; onSaved(ref: SkillRef): void; onClose(): void }) {
+  const editing = o.skill;
+  const [name, setName] = useState(editing?.ref.name ?? '');
+  const [scope, setScope] = useState<string>(editing ? (editing.ref.scope === 'global' ? 'global' : editing.ref.projectId!) : (o.defaultProjectId ?? 'global'));
+  const [description, setDescription] = useState(editing?.detail.description ?? '');
+  const [instructions, setInstructions] = useState(editing?.detail.instructions ?? '');
+  const [remove, setRemove] = useState<Set<string>>(new Set());
+  const [added, setAdded] = useState<NewFile[]>([]);
+  const [folder, setFolder] = useState('scripts/');
+  const [textPath, setTextPath] = useState('');
+  const [textBody, setTextBody] = useState('');
+  const [note, setNote] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState(false);
+  const pickRef = useRef<HTMLInputElement>(null);
+  const existing = (editing?.detail.files ?? []).filter((f) => f.path !== 'SKILL.md');
+
+  const addUploads = (files: FileList | null) => {
+    const prefix = folder.trim().replace(/^\/+/, '');
+    const next: NewFile[] = [];
+    for (const f of Array.from(files ?? [])) {
+      if (f.size > MAX_UPLOAD) {
+        toastError(new Error(`${f.name} is larger than 25 MB.`));
+        continue;
+      }
+      next.push({ path: `${prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix}${f.name}`, content: f });
+    }
+    setAdded((a) => [...a.filter((x) => !next.some((n) => n.path === x.path)), ...next]);
+    if (pickRef.current) pickRef.current.value = '';
+  };
+
+  const save = async () => {
+    const e: Record<string, string> = {};
+    const parsedName = SkillName.safeParse(name.trim());
+    if (!editing && !parsedName.success) e.name = parsedName.error.issues[0]?.message ?? 'Invalid name';
+    if (!description.trim()) e.description = 'Say in one line what the skill is for; Desk uses it to pick skills.';
+    if (!instructions.trim()) e.instructions = 'Write the instructions agents follow.';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    const ref: SkillRef = editing ? editing.ref : scope === 'global' ? { scope: 'global', name: name.trim() } : { scope: 'project', projectId: scope, name: name.trim() };
+    setPending(true);
+    try {
+      const files = await Promise.all(added.map(async (f) => ({ path: f.path, content_base64: typeof f.content === 'string' ? await textToBase64(f.content) : await fileToBase64(f.content) })));
+      await call('skills.save', {
+        ...scopeArg(ref),
+        name: ref.name,
+        skill: {
+          ...(!editing || description.trim() !== editing.detail.description ? { description: description.trim() } : {}),
+          ...(!editing || instructions !== editing.detail.instructions ? { instructions } : {}),
+          files,
+          remove_files: [...remove],
+          ...(note.trim() ? { change_note: note.trim() } : {}),
+        },
+      });
+      o.onSaved(ref);
+    } catch (err) {
+      if (err instanceof DeskCallError && err.status === 400) setErrors({ form: err.message });
+      else toastError(err);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Sheet
+      title={editing ? `Edit ${editing.ref.name}` : 'New skill'}
+      width={720}
+      onClose={o.onClose}
+      footer={
+        <>
+          <Button onClick={o.onClose}>Cancel</Button>
+          <Button variant="primary" pending={pending} onClick={() => void save()}>
+            {editing ? 'Save new version' : 'Create skill'}
+          </Button>
+        </>
+      }
+    >
+      {editing ? null : (
+        <div className="skill-editor-row">
+          <Field id="skill-name" label="Name" error={errors.name ?? null} hint="Lowercase words joined by hyphens, like weekly-report.">
+            <input id="skill-name" className="input mono" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field id="skill-scope" label="Scope">
+            <select id="skill-scope" className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="global">Global (every project)</option>
+              {o.projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} only
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+      <Field id="skill-description" label="Description" error={errors.description ?? null}>
+        <input id="skill-description" className="input" maxLength={1024} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </Field>
+      <Field id="skill-instructions" label="Instructions (SKILL.md)" error={errors.instructions ?? null} hint="Markdown. Scripts in the skill run with skill_run, in the sandbox.">
+        <textarea id="skill-instructions" className="textarea mono" rows={12} value={instructions} onChange={(e) => setInstructions(e.target.value)} />
+      </Field>
+      <div className="field">
+        <span className="label">Files</span>
+        {existing.length || added.length ? (
+          <ul className="skill-files-edit">
+            {existing.map((f) => (
+              <li key={f.path} className={remove.has(f.path) ? 'removing' : undefined}>
+                <span className="mono grow">{f.path}</span>
+                <span className="muted small">{bytes(f.size)}</span>
+                <label className="small">
+                  <input
+                    type="checkbox"
+                    checked={remove.has(f.path)}
+                    onChange={(e) =>
+                      setRemove((r) => {
+                        const n = new Set(r);
+                        if (e.target.checked) n.add(f.path);
+                        else n.delete(f.path);
+                        return n;
+                      })
+                    }
+                  />{' '}
+                  Remove
+                </label>
+              </li>
+            ))}
+            {added.map((f) => (
+              <li key={f.path} className="adding">
+                <span className="mono grow">{f.path}</span>
+                <span className="muted small">{typeof f.content === 'string' ? 'new text file' : bytes(f.content.size)}</span>
+                <Button size="sm" variant="ghost" aria-label={`Don't add ${f.path}`} onClick={() => setAdded((a) => a.filter((x) => x.path !== f.path))}>
+                  ✕
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="field-hint">No files besides SKILL.md.</p>
+        )}
+        <div className="skill-add-files">
+          <input className="input mono" aria-label="Folder for uploads" value={folder} onChange={(e) => setFolder(e.target.value)} />
+          <Button size="sm" onClick={() => pickRef.current?.click()}>
+            Upload files…
+          </Button>
+          <input ref={pickRef} type="file" multiple hidden data-testid="skill-upload" onChange={(e) => addUploads(e.target.files)} />
+        </div>
+        <details className="skill-new-text">
+          <summary>New text file</summary>
+          <div className="skill-add-files">
+            <input className="input mono" aria-label="New file path" placeholder="scripts/check.py" value={textPath} onChange={(e) => setTextPath(e.target.value)} />
+            <Button
+              size="sm"
+              disabled={!textPath.trim()}
+              onClick={() => {
+                const path = textPath.trim().replace(/^\/+/, '');
+                setAdded((a) => [...a.filter((x) => x.path !== path), { path, content: textBody }]);
+                setTextPath('');
+                setTextBody('');
+              }}
+            >
+              Add file
+            </Button>
+          </div>
+          <textarea className="textarea mono" aria-label="New file content" rows={6} value={textBody} onChange={(e) => setTextBody(e.target.value)} />
+        </details>
+      </div>
+      <Field id="skill-note" label="Change note (optional)" hint="Shown in the history next to this version.">
+        <input id="skill-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
+      </Field>
+      {errors.form ? (
+        <p className="field-error" role="alert">
+          {errors.form}
+        </p>
+      ) : null}
+    </Sheet>
+  );
+}
+```
+
+`apps/desktop/src/renderer/skills/AskDesk.tsx`:
+
+```tsx
+import { useState } from 'react';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { Field } from '../components/Field';
+import { Sheet } from '../components/Sheet';
+import { toast, toastError } from '../components/Toast';
+import { navigate } from '../router';
+
+/** Sends Desk a message about a skill: build a new one, or refine a named one. Global skills need a project whose Desk does the work. */
+export function AskDesk(o: { skillName?: string; projects: Array<{ id: string; name: string }>; defaultProjectId?: string; onClose(): void }) {
+  const [projectId, setProjectId] = useState(o.defaultProjectId ?? o.projects[0]?.id ?? '');
+  const [text, setText] = useState(o.skillName ? `Refine the skill "${o.skillName}": ` : 'Build a new skill that ');
+  const [pending, setPending] = useState(false);
+  const send = async () => {
+    setPending(true);
+    try {
+      await call('projects.send', { id: projectId, text: text.trim() });
+      toast({ tone: 'info', message: 'Sent to Desk.' });
+      o.onClose();
+      navigate({ name: 'project', id: projectId, tab: 'conversation' });
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Sheet
+      title={o.skillName ? `Refine ${o.skillName} with Desk` : 'Ask Desk for a new skill'}
+      onClose={o.onClose}
+      footer={
+        <>
+          <Button onClick={o.onClose}>Cancel</Button>
+          <Button variant="primary" pending={pending} disabled={!projectId || text.trim().length < 12} onClick={() => void send()}>
+            Send to Desk
+          </Button>
+        </>
+      }
+    >
+      {o.projects.length ? (
+        <>
+          <Field id="ask-project" label="Which project's Desk" hint="Desk has a thread draft and test it, then installs it.">
+            <select id="ask-project" className="select" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              {o.projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field id="ask-text" label="Message">
+            <textarea id="ask-text" className="textarea" rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+          </Field>
+        </>
+      ) : (
+        <p>Create a project first; Desk works on skills from inside a project.</p>
+      )}
+    </Sheet>
+  );
+}
+```
+
+`apps/desktop/src/renderer/skills/SkillsScreen.tsx`:
+
+```tsx
+import { useMemo, useState } from 'react';
+import type { SkillDetail } from '@desk/client';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { EmptyState } from '../components/EmptyState';
+import { Field } from '../components/Field';
+import { Sheet } from '../components/Sheet';
+import { toast, toastError } from '../components/Toast';
+import { projectTone } from '../map/OrbitMap';
+import { replaceRoute } from '../router';
+import { useGlobal } from '../state/global';
+import { AskDesk } from './AskDesk';
+import { parseSkillKey, skillKey, useSkills, type SkillRef } from './data';
+import { SkillEditor } from './SkillEditor';
+import { SkillList } from './SkillList';
+import { SkillPanel } from './SkillPanel';
+import { SkillsMapView } from './SkillsMapView';
+import './skills.css';
+
+type View = 'map' | 'list';
+type Filter = 'all' | 'used' | 'shadowed';
+
+function useView(): [View, (v: View) => void] {
+  const [v, setV] = useState<View>(() => {
+    try {
+      return localStorage.getItem('desk.skillsView') === 'list' ? 'list' : 'map';
+    } catch {
+      return 'map';
+    }
+  });
+  return [
+    v,
+    (next) => {
+      setV(next);
+      try {
+        localStorage.setItem('desk.skillsView', next);
+      } catch {
+        // A convenience only.
+      }
+    },
+  ];
+}
+
+function ImportSheet(o: { path: string; projects: Array<{ id: string; name: string }>; onDone(ref: SkillRef): void; onClose(): void }) {
+  const [scope, setScope] = useState('global');
+  const [name, setName] = useState('');
+  const [pending, setPending] = useState(false);
+  const run = async () => {
+    setPending(true);
+    try {
+      const projectId = scope === 'global' ? undefined : scope;
+      const r = await call('skills.import', { ...(projectId ? { projectId } : {}), path: o.path, ...(name.trim() ? { name: name.trim() } : {}) });
+      const imported = r.dir.split('/').filter(Boolean).pop() ?? name.trim();
+      toast({ tone: 'info', message: `Imported ${imported}.` });
+      o.onDone(projectId ? { scope: 'project', projectId, name: imported } : { scope: 'global', name: imported });
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Sheet
+      title="Import a skill"
+      onClose={o.onClose}
+      footer={
+        <>
+          <Button onClick={o.onClose}>Cancel</Button>
+          <Button variant="primary" pending={pending} onClick={() => void run()}>
+            Import
+          </Button>
+        </>
+      }
+    >
+      <p className="small">
+        From <span className="mono">{o.path}</span>. The folder needs a SKILL.md. It's copied in; the original stays where it is.
+      </p>
+      <Field id="import-scope" label="Scope">
+        <select id="import-scope" className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
+          <option value="global">Global (every project)</option>
+          {o.projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} only
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field id="import-name" label="Name (optional)" hint="Defaults to the folder's name.">
+        <input id="import-name" className="input mono" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+    </Sheet>
+  );
+}
+
+/** Every skill Desk and its threads can use: a map (or list) with global, project and shadowed skills, and what's in use now. */
+export function SkillsScreen({ skill }: { skill?: string }) {
+  const overview = useGlobal((g) => g.overview);
+  const data = useSkills();
+  const [view, setView] = useView();
+  const [filter, setFilter] = useState<Filter>('all');
+  const [editor, setEditor] = useState<{ skill?: { ref: SkillRef; detail: SkillDetail } } | null>(null);
+  const [ask, setAsk] = useState<{ name?: string; projectId?: string } | null>(null);
+  const [importPath, setImportPath] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
+
+  const projects = useMemo(() => overview.map((p) => ({ id: p.project.id, name: p.project.name, tone: projectTone(p) })), [overview]);
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
+  const threadTitles = useMemo(() => new Map(overview.flatMap((p) => p.threads.map((t) => [t.id, t.title ?? 'Thread'] as const))), [overview]);
+  const counts = { all: data.nodes.length, used: data.nodes.filter((n) => n.usedBy.length).length, shadowed: data.nodes.filter((n) => n.shadows || n.shadowedIn.length).length };
+  const shown = useMemo(
+    () => data.nodes.filter((n) => filter === 'all' || (filter === 'used' ? n.usedBy.length > 0 : n.shadows || n.shadowedIn.length > 0)),
+    [data.nodes, filter],
+  );
+  const ref = skill ? parseSkillKey(skill) : null;
+  const node = skill ? data.nodes.find((n) => n.key === skill) : undefined;
+  const select = (key: string | null) => replaceRoute({ name: 'skills', ...(key ? { skill: key } : {}) });
+  const changed = () => {
+    setVersion((v) => v + 1);
+    void data.refresh();
+  };
+  const startImport = async () => {
+    try {
+      const path = await call('app.pickFolder', { purpose: 'skill-import' });
+      if (path) setImportPath(path);
+    } catch (err) {
+      toastError(err);
+    }
+  };
+
+  return (
+    <div className={`skills${ref ? ' with-panel' : ''}`}>
+      <div className="skills-main">
+        <div className="skills-head">
+          <h1 className="title">Skill map</h1>
+          <p className="muted">Global skills sit in the middle; project skills live inside their project. Lines show the threads using a skill right now.</p>
+          <div className="skills-controls">
+            <div className="segmented" role="group" aria-label="View">
+              <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>
+                Map
+              </button>
+              <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>
+                List
+              </button>
+            </div>
+            <div className="chips" role="group" aria-label="Show">
+              {(
+                [
+                  ['all', 'All'],
+                  ['used', 'In use now'],
+                  ['shadowed', 'Shadowed'],
+                ] as Array<[Filter, string]>
+              ).map(([f, label]) => (
+                <button key={f} type="button" className="filter-chip" aria-pressed={filter === f} onClick={() => setFilter(f)}>
+                  {label} · {counts[f]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {data.status === 'loading' ? (
+          <p className="muted skills-body">Loading…</p>
+        ) : data.status === 'error' ? (
+          <EmptyState title="Couldn't load skills">{data.error}</EmptyState>
+        ) : !data.nodes.length ? (
+          <div className="skills-body">
+            <EmptyState title="No skills yet">Skills are instructions and scripts Desk and its threads reuse. Import one, write one, or ask Desk to build one.</EmptyState>
+          </div>
+        ) : view === 'map' ? (
+          <div className="skills-body map">
+            <SkillsMapView nodes={shown} projects={projects} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
+          </div>
+        ) : (
+          <div className="skills-body">
+            <SkillList nodes={shown} projectNames={projectNames} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
+          </div>
+        )}
+        <div className="skills-foot">
+          {view === 'map' ? (
+            <div className="skills-legend" aria-hidden="true">
+              <span>
+                <span className="lg-dot global" />
+                Global skill
+              </span>
+              <span>
+                <span className="lg-dot project" />
+                Project skill
+              </span>
+              <span>
+                <span className="lg-dot shadowed" />
+                Shadowed
+              </span>
+              <span>
+                <span className="lg-line run" />
+                Used by a running thread
+              </span>
+              <span>
+                <span className="lg-line wait" />
+                Waiting
+              </span>
+              <span>Size = how often it's used</span>
+            </div>
+          ) : (
+            <span />
+          )}
+          <span className="grow" />
+          <Button onClick={() => void startImport()}>Import from ~/.claude/skills</Button>
+          <Button onClick={() => setEditor({})}>New skill</Button>
+          <Button variant="primary" onClick={() => setAsk({})}>
+            + Ask Desk for a new skill
+          </Button>
+        </div>
+      </div>
+      {ref ? (
+        <SkillPanel
+          skill={ref}
+          node={node}
+          projectNames={projectNames}
+          threadTitles={threadTitles}
+          version={version + (node?.version ?? 0)}
+          onEdit={(detail) => setEditor({ skill: { ref, detail } })}
+          onAskDesk={() => setAsk({ name: ref.name, ...(ref.projectId ? { projectId: ref.projectId } : node?.usedBy[0] ? { projectId: node.usedBy[0].projectId } : {}) })}
+          onChanged={changed}
+          onClose={() => select(null)}
+        />
+      ) : null}
+      {editor ? (
+        <SkillEditor
+          {...(editor.skill ? { skill: editor.skill } : {})}
+          projects={projects}
+          onClose={() => setEditor(null)}
+          onSaved={(saved) => {
+            setEditor(null);
+            toast({ tone: 'info', message: `Saved ${saved.name}.` });
+            changed();
+            select(skillKey(saved));
+          }}
+        />
+      ) : null}
+      {ask ? <AskDesk {...(ask.name ? { skillName: ask.name } : {})} projects={projects} {...(ask.projectId ? { defaultProjectId: ask.projectId } : {})} onClose={() => setAsk(null)} /> : null}
+      {importPath ? (
+        <ImportSheet
+          path={importPath}
+          projects={projects}
+          onClose={() => setImportPath(null)}
+          onDone={(r) => {
+            setImportPath(null);
+            changed();
+            select(skillKey(r));
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/skills/skills.css`:
+
+```css
+.skills {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 0 16px 0 0;
+}
+.skills.with-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(400px, 460px);
+}
+.skills-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.skills-head {
+  padding: 22px 32px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skills-head .title {
+  font-size: 36px;
+}
+.skills-head p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.skills-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.chips {
+  display: flex;
+  gap: 6px;
+}
+.filter-chip {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #cfc9bd;
+  border-radius: 13px;
+  background: #f7f5f0;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-chip[aria-pressed='true'] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+.skills-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 32px;
+}
+.skills-body.map {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+.skills-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.skills-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 24px 18px 32px;
+}
+.skills-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  color: var(--text);
+}
+.skills-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lg-dot {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 6px;
+}
+.lg-dot.global {
+  background: var(--ink);
+}
+.lg-dot.project {
+  border: 2px solid var(--run-text);
+  background: #fff;
+}
+.lg-dot.shadowed {
+  border: 1.5px dashed var(--muted);
+}
+.lg-line {
+  width: 20px;
+  height: 2.5px;
+  background: var(--run);
+}
+.lg-line.wait {
+  height: 0;
+  border-top: 2px dashed var(--wait);
+  background: none;
+}
+.skills-territory-label {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.skills-global-label {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: #6e6a62;
+}
+.skills-shadow-label {
+  position: absolute;
+  transform: translateX(-50%);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12px;
+  color: var(--wait-text);
+}
+.skill-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #f7f5f0;
+  cursor: pointer;
+  overflow: hidden;
+}
+.skill-node.project {
+  border: 2px solid var(--run-text);
+  background: #fff;
+  color: var(--ink);
+}
+.skill-node.shadowed {
+  border: 1.5px dashed var(--muted);
+  background: var(--ground);
+  color: var(--text);
+}
+.skill-node.broken {
+  border: 2px solid var(--accent);
+}
+.skill-node.selected {
+  box-shadow: 0 0 0 5px var(--ground), 0 0 0 8px var(--accent);
+}
+.skill-node-name {
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.skill-node-v {
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+.skill-marker {
+  position: absolute;
+  transform: translate(-7px, -7px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--run-text);
+}
+.skill-marker-dot {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--run);
+  box-shadow: 0 0 0 4px rgba(47, 91, 211, 0.2);
+}
+.skill-marker.status-waiting,
+.skill-marker.status-queued {
+  color: var(--wait-text);
+}
+.skill-marker.status-waiting .skill-marker-dot,
+.skill-marker.status-queued .skill-marker-dot {
+  border: 2.5px solid var(--wait);
+  background: #fff;
+  box-shadow: none;
+}
+.skill-list section {
+  margin-bottom: 18px;
+}
+.skill-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skill-list-title {
+  margin: 0 0 8px;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 500;
+}
+.skill-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.skill-row.current {
+  border-color: var(--ink);
+}
+.skill-row-name {
+  min-width: 160px;
+  font-size: 13px;
+}
+.skill-panel {
+  margin: 16px 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skill-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-panel-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+.skill-scope {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.skill-scope.global {
+  background: var(--ink);
+  color: #fff;
+}
+.skill-scope.project {
+  border: 1.5px solid var(--run-text);
+  background: var(--run-pastel);
+  color: var(--run-text);
+}
+.skill-desc {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.skill-panel .tabs {
+  padding: 0;
+}
+.skill-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 120px;
+}
+.shadow-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--wait-pastel);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #5c3400;
+}
+.skill-change {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f4f1ea;
+}
+.skill-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skill-versions button {
+  width: 40px;
+  height: 30px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.skill-versions button.on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+.skill-used {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-used li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.skill-files {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.skill-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skill-history li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 8px;
+}
+.skill-history li .grow {
+  display: flex;
+  flex-direction: column;
+}
+.skill-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skill-compare-bar {
+  display: flex;
+  gap: 12px;
+  font-size: 12.5px;
+}
+.skill-file-changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.skill-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--rule-soft);
+}
+.skill-editor-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.skill-files-edit {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-files-edit li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #fbfaf7;
+  font-size: 12.5px;
+}
+.skill-files-edit li.removing .mono {
+  text-decoration: line-through;
+  color: var(--text-min);
+}
+.skill-files-edit li.adding {
+  background: #e6f2eb;
+}
+.skill-add-files {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.skill-add-files .input {
+  flex: 1;
+}
+.skill-new-text summary {
+  margin-top: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+```
+
+Other changes:
+- The `.diff-*` rules move from `threads.css` to a "Diffs" block in `tokens.css`; they are shared with the skill compare view.
+- `App.tsx` routes `skills` to `<SkillsScreen skill={route.skill} />`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): skills — skill map and list with shadows and live usage, detail (instructions, files, history with change notes, compare, restore), editor with uploads, import, delete, Ask Desk
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

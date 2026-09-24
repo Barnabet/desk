@@ -13,6 +13,7 @@ import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
 import { SettingsScreen } from './settings/SettingsScreen';
+import { SkillsScreen } from './skills/SkillsScreen';
 import { ThreadsScreen } from './threads/ThreadsScreen';
 import { TrayPopover } from './tray/TrayPopover';
 import { startGlobalSync } from './state/global';
@@ -25,7 +26,7 @@ function Screen({ route }: { route: Route }) {
     case 'attention':
       return <AttentionScreen {...(route.item ? { itemId: route.item } : {})} />;
     case 'skills':
-      return <Pending title="Skills" />;
+      return <SkillsScreen {...(route.skill ? { skill: route.skill } : {})} />;
     case 'system':
       return <Pending title="System" />;
     case 'project':

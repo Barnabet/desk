@@ -481,32 +481,6 @@
   color: var(--accent);
   text-align: right;
 }
-.diff-patch {
-  margin: 0;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid var(--rule);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  overflow: auto;
-}
-.diff-line-add {
-  display: block;
-  background: #e6f2eb;
-}
-.diff-line-del {
-  display: block;
-  background: #f8e4dd;
-}
-.diff-hunk {
-  color: var(--run-text);
-}
-.diff-meta {
-  color: var(--text-min);
-  font-weight: 600;
-}
 .files-tab {
   flex-direction: row;
   align-items: flex-start;
