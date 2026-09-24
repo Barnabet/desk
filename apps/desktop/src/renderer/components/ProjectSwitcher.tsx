@@ -13,11 +13,20 @@ export function switcherList(projects: ProjectSummary[], query: string, seen: Re
     .sort((a, b) => Number(b.attention_count > 0) - Number(a.attention_count > 0) || Number(unreadIn(b, seen)) - Number(unreadIn(a, seen)) || b.project.updated_at.localeCompare(a.project.updated_at));
 }
 
-/** The ⌘P project switcher in the title bar. */
+/** How long the list stays open after the pointer leaves it (moving from the arrow into the list). */
+const HOVER_CLOSE_MS = 250;
+
+/**
+ * The project switcher in the title bar: "Projects ▾" with no project, or just the ▾ next to the project's name.
+ * Hovering the trigger opens it (it closes when the pointer leaves); clicking or ⌘P opens it with the search focused.
+ */
 export function ProjectSwitcher({ currentId }: { currentId: string | null }) {
   const overview = useGlobal((g) => g.overview);
   const seen = useSeen();
   const [open, setOpen] = useState(false);
+  /** Opened by hovering (closes on leave) rather than by click or ⌘P (closes on outside click or Escape). */
+  const [byHover, setByHover] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -30,6 +39,7 @@ export function ProjectSwitcher({ currentId }: { currentId: string | null }) {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
+        setByHover(false);
         setOpen((o) => !o);
       }
     };
@@ -40,7 +50,7 @@ export function ProjectSwitcher({ currentId }: { currentId: string | null }) {
     if (!open) return;
     setQuery('');
     setActive(0);
-    inputRef.current?.focus();
+    if (!byHover) inputRef.current?.focus();
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -48,6 +58,19 @@ export function ProjectSwitcher({ currentId }: { currentId: string | null }) {
     return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
   useEffect(() => setActive(0), [query]);
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  const hoverOpen = () => {
+    clearTimeout(closeTimer.current);
+    if (!open) {
+      setByHover(true);
+      setOpen(true);
+    }
+  };
+  const hoverLeave = () => {
+    if (!byHover) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
+  };
 
   const go = (p: ProjectSummary | undefined) => {
     setOpen(false);
@@ -72,8 +95,26 @@ export function ProjectSwitcher({ currentId }: { currentId: string | null }) {
   const optId = (i: number) => `${listId}-${i}`;
 
   return (
-    <div className="switcher" ref={rootRef}>
-      <button type="button" className="switcher-btn" aria-label="Switch project (⌘P)" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+    <div className="switcher" ref={rootRef} onMouseLeave={hoverLeave} onMouseEnter={() => open && clearTimeout(closeTimer.current)}>
+      <button
+        type="button"
+        className="switcher-btn"
+        aria-label="Switch project (⌘P)"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onMouseEnter={hoverOpen}
+        onClick={() => {
+          clearTimeout(closeTimer.current);
+          if (open && byHover) {
+            // A click on a list opened by hovering keeps it open and moves focus into the search.
+            setByHover(false);
+            inputRef.current?.focus();
+            return;
+          }
+          setByHover(false);
+          setOpen((o) => !o);
+        }}
+      >
         {currentId ? null : <span>Projects</span>}
         <span aria-hidden="true">▾</span>
         {othersUnread ? <span className="unread-dot" aria-label="Another project has news" /> : null}

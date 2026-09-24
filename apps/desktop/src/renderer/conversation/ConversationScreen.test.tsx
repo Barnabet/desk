@@ -7,7 +7,7 @@ import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
 import { installBridge } from '../test/bridge';
-import { ConversationScreen } from './ConversationScreen';
+import { CHAT_PAGE, ConversationScreen } from './ConversationScreen';
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -85,5 +85,29 @@ describe('ConversationScreen', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'projects.send').map((c) => c.input)).toEqual([{ id: 'p', text: 'Use these notes' }]));
     await waitFor(() => expect(box.value).toBe(''));
+  });
+
+  it('renders a long conversation from the newest messages at once, and older ones on demand', async () => {
+    const long = [events[0]!, ...Array.from({ length: 150 }, (_, i) => ev(i + 2, 'message.user', { text: `Message ${i + 1}` }, { agent: 'd' }))];
+    const bridge = installBridge({
+      'projects.get': () => overview(),
+      'broker.watch': () => {
+        bridge.emit('desk:events', long);
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    globalStore.set({ ...initialGlobalState(), connection: { status: 'live' } });
+    startSessionRouting();
+    render(<ConversationScreen projectId="p" />);
+    await screen.findByText('Message 150');
+    const chat = screen.getByRole('region', { name: 'Conversation with Desk' });
+    expect(chat.querySelectorAll('.chat-item')).toHaveLength(CHAT_PAGE);
+    expect(screen.queryByText('Message 1')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `Show earlier messages (${150 - CHAT_PAGE})` }));
+    expect(chat.querySelectorAll('.chat-item')).toHaveLength(2 * CHAT_PAGE);
+    fireEvent.click(screen.getByRole('button', { name: /Show earlier messages/ }));
+    expect(screen.getByText('Message 1')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Show earlier messages/ })).toBeNull();
   });
 });

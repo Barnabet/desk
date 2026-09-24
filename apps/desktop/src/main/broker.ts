@@ -218,10 +218,15 @@ export class Broker {
     watches.set(projectId, w);
     try {
       let after = afterSeq;
+      // The backfill goes out one page per message, so the window applies (and renders) it at once.
       while (after < this.lastSeq) {
-        const page = await client.projects.events(projectId, { after, limit: 1000 });
+        const page = await client.projects.events(projectId, { after, limit: 5000 });
         if (watches.get(projectId) !== w) return;
-        for (const e of page.events) this.deliver(senderId, w, e);
+        const batch = page.events.filter((e) => e.id > w.cursor);
+        if (batch.length) {
+          w.cursor = batch.at(-1)!.id;
+          this.d.send(senderId, 'desk:events', batch);
+        }
         if (!page.events.length) break;
         after = page.next_after;
       }

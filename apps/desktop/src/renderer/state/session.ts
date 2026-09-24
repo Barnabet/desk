@@ -46,6 +46,9 @@ class ProjectSession {
   private queue: StoredEvent[] = [];
   private scheduled = false;
   private started = false;
+  /** Set once the backfill has arrived: until then events only queue, so the history renders once, not event by event. */
+  private synced = false;
+  private base: Pick<SessionState, 'project' | 'chat' | 'timeline'> | null = null;
 
   constructor(
     readonly projectId: string,
@@ -73,18 +76,26 @@ class ProjectSession {
     try {
       const overview = await call('projects.get', { id: this.projectId });
       const deskId = overview.desk?.id ?? '';
-      this.store.set((s) => ({ ...s, status: 'ready', error: null, project: projectFromOverview(overview), chat: emptyChat(deskId), timeline: emptyTimeline(deskId) }));
-      this.flush();
+      this.base = { project: projectFromOverview(overview), chat: emptyChat(deskId), timeline: emptyTimeline(deskId) };
       await call('broker.watch', { projectId: this.projectId, afterSeq: 0 });
+      // The backfill (pushed before watch resolves) and the overview become visible in a single update.
+      const base = this.base;
+      this.synced = true;
+      this.store.set((s) => this.apply({ ...s, ...base, status: 'ready', error: null }));
     } catch (err) {
       this.started = false;
+      this.synced = false;
       const missing = err instanceof DeskCallError && err.status === 404;
       this.store.set((s) => ({ ...s, status: missing ? 'missing' : 'error', error: err instanceof Error ? err.message : String(err) }));
     }
   }
 
   enqueue(e: StoredEvent): void {
-    this.queue.push(e);
+    this.enqueueMany([e]);
+  }
+
+  enqueueMany(events: StoredEvent[]): void {
+    for (const e of events) this.queue.push(e);
     if (this.scheduled) return;
     this.scheduled = true;
     queueMicrotask(() => {
@@ -95,27 +106,30 @@ class ProjectSession {
 
   /** Applies queued events in one store update (a backfill arrives as one burst). */
   private flush(): void {
-    if (this.store.get().status !== 'ready' || !this.queue.length) return;
+    if (!this.synced || this.store.get().status !== 'ready' || !this.queue.length) return;
+    this.store.set((s) => this.apply(s));
+  }
+
+  /** Folds the queued events into a state. */
+  private apply(s: SessionState): SessionState {
     const batch = this.queue;
     this.queue = [];
-    this.store.set((s) => {
-      let { project, chat, timeline, streams } = s;
-      const fresh: StoredEvent[] = [];
-      let last = s.events.at(-1)?.id ?? 0;
-      for (const e of batch) {
-        if (e.id <= last) continue;
-        last = e.id;
-        fresh.push(e);
-        if (project) project = reduceProject(project, e);
-        chat = reduceChat(chat, e);
-        timeline = reduceTimeline(timeline, e);
-        if ((e.type === 'assistant.message' || e.type === 'run.finished') && e.agent_id && streams[e.agent_id]?.runId === e.payload.run_id) {
-          const { [e.agent_id]: _done, ...rest } = streams;
-          streams = rest;
-        }
+    let { project, chat, timeline, streams } = s;
+    const fresh: StoredEvent[] = [];
+    let last = s.events.at(-1)?.id ?? 0;
+    for (const e of batch) {
+      if (e.id <= last) continue;
+      last = e.id;
+      fresh.push(e);
+      if (project) project = reduceProject(project, e);
+      chat = reduceChat(chat, e);
+      timeline = reduceTimeline(timeline, e);
+      if ((e.type === 'assistant.message' || e.type === 'run.finished') && e.agent_id && streams[e.agent_id]?.runId === e.payload.run_id) {
+        const { [e.agent_id]: _done, ...rest } = streams;
+        streams = rest;
       }
-      return fresh.length ? { ...s, project, chat, timeline, streams, events: s.events.concat(fresh) } : s;
-    });
+    }
+    return fresh.length ? { ...s, project, chat, timeline, streams, events: s.events.concat(fresh) } : s;
   }
 
   onDelta(e: EphemeralEvent): void {
@@ -135,9 +149,11 @@ let stopRouting: (() => void) | null = null;
 export function startSessionRouting(): () => void {
   if (stopRouting) return stopRouting;
   const offEvent = onPush<StoredEvent>('desk:event', (e) => sessions.get(e.project_id)?.enqueue(e));
+  const offBatch = onPush<StoredEvent[]>('desk:events', (batch) => batch[0] && sessions.get(batch[0].project_id)?.enqueueMany(batch));
   const offDelta = onPush<EphemeralEvent>('desk:ephemeral', (e) => sessions.get(e.project_id)?.onDelta(e));
   stopRouting = () => {
     offEvent();
+    offBatch();
     offDelta();
     stopRouting = null;
   };

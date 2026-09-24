@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { call } from '../bridge';
 import { EmptyState } from '../components/EmptyState';
 import { toastError } from '../components/Toast';
@@ -16,6 +16,12 @@ import { PlanPanel } from './PlanPanel';
 import { ServicesCard } from './ServicesCard';
 import { useMediaQuery } from '../state/media';
 import './conversation.css';
+
+/** Chat items rendered at first; scrolling up renders this many more (long conversations stay fast). */
+export const CHAT_PAGE = 60;
+
+/** Unchanged chat items keep their identity across events, so only new or updated ones re-render. */
+const ChatRow = memo(ChatItemView);
 
 function useDraft(projectId: string): [string, (v: string | ((d: string) => string)) => void] {
   const key = `desk.draft.${projectId}`;
@@ -53,6 +59,13 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pinned = useRef(true);
   const width = useWidth(rootRef);
+  const [shown, setShown] = useState(CHAT_PAGE);
+  /** Scroll position to keep while older items are rendered above it. */
+  const anchor = useRef<{ height: number; top: number } | null>(null);
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
+  const answerRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const onAnswer = useCallback((t: string) => void answerRef.current(t), []);
+  const onOwnWords = useCallback(() => textareaRef.current?.focus(), []);
 
   const attentionIds = useMemo(() => new Set(attention.filter((i) => i.project_id === projectId).map((i) => i.id)), [attention, projectId]);
   const threads = s.project?.threads;
@@ -68,6 +81,20 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
     const el = listRef.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [s.chat.items, pending]);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el || !anchor.current) return;
+    el.scrollTop = el.scrollHeight - anchor.current.height + anchor.current.top;
+    anchor.current = null;
+  }, [shown]);
+  useEffect(() => {
+    if (!jumpTo) return;
+    const el = document.getElementById(chatDomId(jumpTo));
+    setJumpTo(null);
+    el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    el?.classList.add('flash');
+    setTimeout(() => el?.classList.remove('flash'), 1200);
+  }, [jumpTo]);
 
   if (s.status === 'loading') return <div className="page muted">Loading…</div>;
   if (s.status === 'missing')
@@ -99,12 +126,20 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
       setAnswering(null);
     }
   };
+  answerRef.current = answer;
+  const items = s.chat.items;
+  const start = Math.max(0, items.length - shown);
+  const showEarlier = () => {
+    const el = listRef.current;
+    if (el) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
+    setShown((n) => n + CHAT_PAGE);
+  };
   const onStation = (st: { eventId: number }) => {
-    const target = s.chat.items.find((i) => chatEventId(i) >= st.eventId);
-    const el = target ? document.getElementById(chatDomId(target.id)) : null;
-    el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-    el?.classList.add('flash');
-    setTimeout(() => el?.classList.remove('flash'), 1200);
+    const index = items.findIndex((i) => chatEventId(i) >= st.eventId);
+    if (index < 0) return;
+    pinned.current = false;
+    if (index < start) setShown(items.length - index + 5);
+    setJumpTo(items[index]!.id);
   };
 
   return (
@@ -129,21 +164,20 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
             onScroll={(e) => {
               const el = e.currentTarget;
               pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              if (el.scrollTop < 400 && start > 0 && !anchor.current) showEarlier();
             }}
           >
-            {s.chat.items.length === 0 && !pending.length ? (
+            {start > 0 ? (
+              <button type="button" className="btn btn-ghost btn-sm chat-earlier" onClick={showEarlier}>
+                Show earlier messages ({start})
+              </button>
+            ) : null}
+            {items.length === 0 && !pending.length ? (
               <EmptyState title="Brief Desk">Say what you want done. Desk plans it, splits it into threads, and reports back.</EmptyState>
             ) : null}
-            {s.chat.items.map((item) => (
+            {(start ? items.slice(start) : items).map((item) => (
               <div key={item.id} id={chatDomId(item.id)} className="chat-item">
-                <ChatItemView
-                  item={item}
-                  projectId={projectId}
-                  attentionIds={attentionIds}
-                  answering={answering}
-                  onAnswer={(t) => void answer(t)}
-                  onOwnWords={() => textareaRef.current?.focus()}
-                />
+                <ChatRow item={item} projectId={projectId} attentionIds={attentionIds} answering={answering} onAnswer={onAnswer} onOwnWords={onOwnWords} />
               </div>
             ))}
             {pending.map((t) => (

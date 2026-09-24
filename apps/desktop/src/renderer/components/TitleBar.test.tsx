@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@desk/protocol';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
+import { resetLastProject } from '../state/lastProject';
 import { markSeen, resetSeen } from '../state/unread';
 import { installBridge } from '../test/bridge';
 import { TitleBar } from './TitleBar';
 
 afterEach(cleanup);
-beforeEach(() => installBridge());
+beforeEach(() => {
+  installBridge();
+  resetLastProject();
+});
 
 const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
 
@@ -63,5 +67,34 @@ describe('TitleBar', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     expect(window.location.hash).toBe('#/p/a/conversation');
     expect(screen.queryByRole('dialog', { name: 'Switch project' })).toBeNull();
+  });
+
+  it('keeps the last project in the bar elsewhere (not selected), and opens the list by hovering', async () => {
+    const summary = (id: string, name: string) => ({ project: { id, name, goal: '', updated_at: '' }, desk_status: 'idle' as const, threads: [], latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 });
+    globalStore.set({ ...initialGlobalState(), overview: [summary('a', 'anyfight'), summary('b', 'P1')] });
+    const { rerender } = render(<TitleBar route={{ name: 'map' }} />);
+    // No project yet: "Projects", and hovering it opens the list.
+    const trigger = screen.getByRole('button', { name: 'Switch project (⌘P)' });
+    expect(trigger.textContent).toContain('Projects');
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByRole('dialog', { name: 'Switch project' })).toBeTruthy();
+    fireEvent.mouseLeave(trigger.parentElement!);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Switch project' })).toBeNull());
+
+    rerender(<TitleBar route={{ name: 'project', id: 'a', tab: 'threads' }} />);
+    rerender(<TitleBar route={{ name: 'skills' }} />);
+    const name = screen.getByRole('link', { name: 'anyfight' });
+    expect(name.getAttribute('href')).toBe('#/p/a/conversation');
+    expect(name.getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Skills' }).getAttribute('aria-current')).toBe('page');
+    const arrow = screen.getByRole('button', { name: 'Switch project (⌘P)' });
+    expect(arrow.textContent).not.toContain('Projects');
+    fireEvent.mouseEnter(name);
+    expect(screen.queryByRole('dialog', { name: 'Switch project' })).toBeNull();
+    fireEvent.mouseEnter(arrow);
+    const pop = screen.getByRole('dialog', { name: 'Switch project' });
+    fireEvent.mouseEnter(pop);
+    fireEvent.click(within(pop).getByRole('option', { name: /P1/ }));
+    expect(window.location.hash).toBe('#/p/b/conversation');
   });
 });

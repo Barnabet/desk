@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { href, type Route } from '../router';
 import { useGlobal } from '../state/global';
+import { rememberProject, useLastProject } from '../state/lastProject';
 import { ProjectSwitcher } from './ProjectSwitcher';
 
 function daemonLabel(status: string, proxy: string): { label: string; tone: '' | 'ok' | 'warn' | 'bad' } {
@@ -24,7 +26,13 @@ export function TitleBar({ route }: { route: Route }) {
   const proxy = useGlobal((s) => s.system.proxy);
   const overview = useGlobal((s) => s.overview);
   const projectId = route.name === 'project' ? route.id : null;
-  const project = projectId ? overview.find((p) => p.project.id === projectId) : undefined;
+  const last = useLastProject();
+  useEffect(() => {
+    if (projectId) rememberProject(projectId);
+  }, [projectId]);
+  // Inside a project, that project; elsewhere, the one the user was last in (while it is still open).
+  const shownId = projectId ?? last;
+  const project = shownId ? overview.find((p) => p.project.id === shownId) : undefined;
   const d = daemonLabel(status, proxy);
   const mac = window.desk?.platform === 'darwin';
   return (
@@ -34,7 +42,7 @@ export function TitleBar({ route }: { route: Route }) {
           Map
         </a>
         {project ? (
-          <a href={href({ name: 'project', id: project.project.id, tab: 'conversation' })} aria-current="page">
+          <a href={href({ name: 'project', id: project.project.id, tab: 'conversation' })} aria-current={projectId ? 'page' : undefined} className="place-project">
             {project.project.name}
           </a>
         ) : null}

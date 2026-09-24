@@ -87,8 +87,9 @@ describe('Broker', () => {
     const other = runtime.createProject({ name: 'Other', goal: 'g' });
     await broker!.start();
     await broker!.watch(9, p, 0);
-    const backfilled = sent.filter(([id, ch]) => id === 9 && ch === 'desk:event').map(([, , e]) => (e as StoredEvent).type);
+    const backfilled = sent.filter(([id, ch]) => id === 9 && ch === 'desk:events').flatMap(([, , batch]) => (batch as StoredEvent[]).map((e) => e.type));
     expect(backfilled).toEqual(['project.created', 'agent.created']);
+    expect(sent.filter(([id, ch]) => id === 9 && ch === 'desk:events')).toHaveLength(1);
     const [live] = store.append({ project_id: p, agent_id: null, type: 'message.user', payload: { text: 'hi' } });
     stream().onEvent(live as StoredEvent);
     stream().onEvent(live as StoredEvent);
@@ -96,7 +97,7 @@ describe('Broker', () => {
     stream().onEvent(elsewhere as StoredEvent);
     stream().onEphemeral?.({ type: 'assistant.delta', project_id: p, agent_id: 'd', payload: { run_id: 'r', text: 'Hel' } });
     const forwarded = sent.filter(([id]) => id === 9).map(([, ch, e]) => (ch === 'desk:event' ? (e as StoredEvent).id : ch));
-    expect(forwarded).toEqual([...forwarded.slice(0, 2), live!.id, 'desk:ephemeral']);
+    expect(forwarded).toEqual(['desk:events', live!.id, 'desk:ephemeral']);
     broker!.dropSender(9);
     const [later] = store.append({ project_id: p, agent_id: null, type: 'message.user', payload: { text: 'again' } });
     stream().onEvent(later as StoredEvent);
