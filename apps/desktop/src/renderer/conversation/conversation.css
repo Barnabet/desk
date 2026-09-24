@@ -295,12 +295,21 @@
 .conv-intro .services-head h2 {
   font-size: 17px;
 }
-.conv-intro h1 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 24px;
-  font-weight: 500;
-  line-height: 1.15;
+/* Desk's What's up, at the top of the left column. */
+.whats-up {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+.conv-intro .whats-up-text p {
+  margin: 0 0 6px;
+  font-size: 16px;
+  line-height: 1.38;
+}
+.conv-intro .whats-up-text p:last-child {
+  margin-bottom: 0;
 }
 .conv-intro p {
   margin: 0;

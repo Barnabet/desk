@@ -90,7 +90,8 @@ export function reduceChat(prev: ChatState, e: StoredEvent): ChatState {
     case 'tool.result':
       return mine ? { ...s, items: resolveToolCall(s.items, e.payload.tool_call_id, e.payload.status, e.payload.content) } : s;
     case 'message.agent':
-      return mine
+      // The runtime's reminders to Desk are for Desk alone.
+      return mine && e.payload.kind !== 'reminder'
         ? { ...s, items: [...s.items, { kind: 'agent', id, ts: e.ts, fromAgentId: e.payload.from_agent_id, fromLabel: e.payload.from_label, messageKind: e.payload.kind, text: e.payload.text }] }
         : s;
     case 'report':

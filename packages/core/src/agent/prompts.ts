@@ -1,6 +1,7 @@
 import type { Db } from '../db/open';
 import { formatPlan, getPlan } from '../coordination/plan';
 import { formatServiceLine, formatThreadLine, servicePlace } from '../coordination/render';
+import { latestWhatsUp } from '../coordination/whatsup';
 import { formatArtifactLine, listArtifacts } from '../library/library';
 import { memoryDigest } from '../memory/memory';
 import type { SkillStore } from '../skills/store';
@@ -117,6 +118,14 @@ function skillsSections({ agent, project, skills, skillNote }: PromptContext): s
   return out;
 }
 
+/** Desk's current What's up and how old it is. */
+function whatsUpLine(w: { text: string; ts: string } | null, now = Date.now()): string {
+  if (!w) return '(not written yet — write it with update_whats_up)';
+  const min = Math.round((now - Date.parse(w.ts)) / 60_000);
+  const age = min < 1 ? 'just now' : min < 90 ? `${min} min ago` : `${Math.round(min / 60)} h ago`;
+  return `${w.text}\n(written ${age})`;
+}
+
 export function deskSystemPrompt(ctx: PromptContext): string {
   const { db, agent, project, libraryDir } = ctx;
   const s = project.settings;
@@ -143,6 +152,7 @@ export function deskSystemPrompt(ctx: PromptContext): string {
         '8. Services — when the user needs something running to try the work (a backend, a frontend dev server), start it as a project service with service_start: in the workspace of the thread that built it (thread_id) to try a branch, or in a writable project source (source_id) for the project\'s own tools and apps over its real data; threads can start services too. Services keep running after the thread finishes and show in the user\'s Services panel with their URL; tell the user the URL. Check the Services section below: restart or fix a service that exited unexpectedly (service_logs shows why), and stop services that are no longer needed.',
         '9. Do things, don\'t delegate them to the user — never give the user shell commands to run. Threads can operate the project directly: sources marked writable are the user\'s real folders (tools, data), and services can run there (service_start source_id), e.g. start the project\'s local app and queue work into it. Only hand something to the user when it truly needs them (a decision, a review, credentials, a destructive command). If a source is read-only and the work needs it, ask the user once whether agents may write there (they turn it on in Settings → Sources).',
         '10. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
+        "11. What's up — keep the project's What's up current with update_whats_up. It is the first thing the user reads in the project: 1–3 short sentences saying what is happening now, what comes next, and anything waiting on the user. Rewrite it whenever that changes: after you dispatch, redirect or stop threads, when a thread reports, and before you wait (wait_for_threads, ask_user) or end your turn.",
       ].join('\n'),
     ),
     '',
@@ -162,6 +172,8 @@ export function deskSystemPrompt(ctx: PromptContext): string {
     sourcesSection(db, project.id),
     '',
     section('Plan', formatPlan(getPlan(db, project.id)?.items ?? [])),
+    '',
+    section("What's up", whatsUpLine(latestWhatsUp(db, agent.id))),
     '',
     section('Threads', threads.map(formatThreadLine).join('\n')),
     '',

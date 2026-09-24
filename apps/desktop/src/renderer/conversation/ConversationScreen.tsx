@@ -14,6 +14,7 @@ import { LineDiagram } from './LineDiagram';
 import { lineGeometry } from './lineGeometry';
 import { PlanPanel } from './PlanPanel';
 import { ServicesCard } from './ServicesCard';
+import { WhatsUp } from './WhatsUp';
 import { useMediaQuery } from '../state/media';
 import './conversation.css';
 
@@ -113,8 +114,6 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
     );
 
   const project = s.project;
-  const live = project.threads.filter((t) => !t.archived_at);
-  const count = (st: string) => live.filter((t) => t.status === st).length;
   const answer = async (text: string) => {
     setAnswering(text);
     try {
@@ -147,10 +146,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
       <LineDiagram g={geometry} project={project} now={now} onStation={onStation} />
       <div className={`conv-body${planOpen ? ' plan-open' : ''}`}>
         <div className="conv-intro">
-          <h1>{project.project.name}</h1>
-          <p className="muted">
-            Desk and {plural(live.length, 'thread')}. {count('running')} running, {count('waiting')} waiting, {count('done')} done.
-          </p>
+          <WhatsUp project={project} now={now} />
           <button type="button" className="btn btn-secondary btn-sm plan-toggle" aria-expanded={planOpen} onClick={() => setPlanOpen((v) => !v)}>
             Plan
             {project.services.some((x) => x.status === 'running') ? ` · ${plural(project.services.filter((x) => x.status === 'running').length, 'service')}` : ''}

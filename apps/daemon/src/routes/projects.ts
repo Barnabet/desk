@@ -6,6 +6,7 @@ import {
   getPlan,
   getProject,
   lastProjectSeq,
+  latestWhatsUp,
   listApprovals,
   listProjects,
   listServices,
@@ -39,14 +40,16 @@ export function requireProject(db: Db, id: string) {
 
 export function projectOverview(db: Db, id: string) {
   const project = requireProject(db, id);
+  const desk = getDeskAgent(db, id) ?? null;
   return {
     project,
-    desk: getDeskAgent(db, id) ?? null,
+    desk,
     sources: listSources(db, id),
     plan: getPlan(db, id) ?? null,
     threads: listThreads(db, id).filter((t) => !t.archived_at),
     approvals: listApprovals(db, id, 'pending'),
     services: listServices(db, id),
+    whats_up: desk ? latestWhatsUp(db, desk.id) : null,
     last_seq: lastProjectSeq(db, id),
   };
 }

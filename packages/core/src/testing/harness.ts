@@ -77,5 +77,5 @@ export async function seedThread(
 
 /** A Runtime wired to the harness (fake model, temp data dir, no backoff sleeps, sandbox off). */
 export function newRuntime(h: Harness, extra: Partial<RuntimeOptions> = {}): Runtime {
-  return new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep, sandboxAvailable: false, ...extra });
+  return new Runtime({ store: h.store, adapter: h.adapter, models: h.models, dataDir: h.dir, retry: noSleep, sandboxAvailable: false, whatsUpReminder: false, ...extra });
 }

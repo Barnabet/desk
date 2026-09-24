@@ -1,5 +1,5 @@
 import { clip, summarizeToolArgs, type PlanItem, type StoredEvent } from '@desk/protocol';
-import type { AgentRow, ApprovalRow, ProjectOverview, ProjectRow, ServiceRow, SourceRow } from '../types';
+import type { AgentRow, ApprovalRow, ProjectOverview, ProjectRow, ServiceRow, SourceRow, WhatsUp } from '../types';
 
 /** A thread (or Desk) with live details that are not columns: current tool activity, status reason, fallback model. */
 export type ThreadView = AgentRow & {
@@ -20,6 +20,8 @@ export type ProjectState = {
   approvals: ApprovalRow[];
   /** Project services, sorted by name. */
   services: ServiceRow[];
+  /** Desk's current What's up, if it has written one. */
+  whatsUp?: WhatsUp | null;
   lastSeq: number;
 };
 
@@ -34,6 +36,7 @@ export function projectFromOverview(o: ProjectOverview): ProjectState {
     threads: o.threads.map(view),
     approvals: o.approvals,
     services: o.services ?? [],
+    whatsUp: o.whats_up ?? null,
     lastSeq: o.last_seq,
   };
 }
@@ -129,6 +132,8 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
       return touch((a) => ({ ...a, activity: null }));
     case 'plan.updated':
       return { ...s, plan: e.payload.items };
+    case 'whats_up.updated':
+      return { ...s, whatsUp: { text: e.payload.text, ts: e.ts } };
     case 'approval.requested':
       return {
         ...s,

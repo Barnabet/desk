@@ -18,8 +18,13 @@ export type ProjectOverview = {
   approvals: ApprovalRow[];
   /** Project services (older daemons omit it). */
   services?: ServiceRow[];
+  /** Desk's current What's up (older daemons omit it). */
+  whats_up?: WhatsUp | null;
   last_seq: number;
 };
+
+/** Desk's short account of the project for the user, and when it wrote it. */
+export type WhatsUp = { text: string; ts: string };
 
 /** Paged event lists (chat, transcript, events). */
 export type EventPage = { events: StoredEvent[]; next_after: number };

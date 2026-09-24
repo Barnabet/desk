@@ -42,7 +42,7 @@ Pass `next_after` as the next `after` to continue.
 |---|---|---|---|
 | GET | `/v1/projects` | `?all=1` includes archived | |
 | POST | `/v1/projects` | `CreateProjectRequest { name, goal?, instructions?, settings?, sources?[{path,label?}] }` | 201 with the overview. Creates the Desk agent |
-| GET | `/v1/projects/:id` | | Overview: project, desk, sources, plan, threads, pending approvals, `last_seq` (the stream cursor to resume from) |
+| GET | `/v1/projects/:id` | | Overview: project, desk, sources, plan, threads, pending approvals, services, `whats_up` (`{ text, ts }` or `null`: Desk's latest What's up), `last_seq` (the stream cursor to resume from) |
 | PATCH | `/v1/projects/:id` | `UpdateProjectRequest { name?, goal?, instructions?, settings? }` | `settings` is a partial patch |
 | POST | `/v1/projects/:id/archive` | | Stops every agent and hides the project |
 | POST | `/v1/projects/:id/sources` | `{ path, label?, agent_write? }` | Detects `git` vs `folder`. `agent_write` (default `true`): Desk and its threads may write there (sandboxed) and run services there. 201 |
@@ -213,7 +213,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 |---|---|
 | Projects | `project.created`, `project.updated`, `project.archived`, `source.added`, `source.updated`, `source.removed` |
 | Agents | `agent.created`, `agent.status_changed`, `agent.result`, `agent.revision`, `agent.model_switched`, `agent.skills_changed`, `agent.archived` |
-| Coordination | `plan.updated`, `report`, `question.asked` |
+| Coordination | `plan.updated`, `report`, `question.asked`, `whats_up.updated` (Desk's What's up, written with `update_whats_up`; when Desk ends a turn after changing things without rewriting it, the runtime sends Desk a `message.agent` of kind `reminder`, which clients do not show) |
 | Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result`, `context.compacted`, `usage` |
 | Approvals | `approval.requested`, `approval.resolved` |
 | Services | `service.started`, `service.url`, `service.exited`, `service.stopped` (reason `requested`, `restart`, `thread_archived`, `project_archived`, `daemon_shutdown` or `daemon_restart`) |

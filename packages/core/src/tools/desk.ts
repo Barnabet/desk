@@ -205,6 +205,17 @@ export const updateSettingsTool = defineTool({
   },
 });
 
+export const updateWhatsUpTool = defineTool({
+  name: 'update_whats_up',
+  description:
+    "Replace the project's What's up, the first thing the user reads in the project: 1–3 short sentences saying what is happening now, what comes next, and anything waiting on the user. Keep it current: update it after you dispatch, redirect or stop threads, when a thread reports, and before you wait or end your turn.",
+  input: z.object({ text: z.string().trim().min(1).max(600) }),
+  async execute({ text }, ctx) {
+    emit(ctx, { project_id: ctx.projectId, agent_id: ctx.agentId, type: 'whats_up.updated', payload: { text } });
+    return "What's up updated.";
+  },
+});
+
 export const deskCoordinationTools: Tool[] = [
   spawnThreadTool,
   messageThreadTool,
@@ -218,4 +229,5 @@ export const deskCoordinationTools: Tool[] = [
   resolveApprovalTool,
   reportTool,
   updateSettingsTool,
+  updateWhatsUpTool,
 ];

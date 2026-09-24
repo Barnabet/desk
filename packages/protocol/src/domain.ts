@@ -65,6 +65,8 @@ export const AgentMessageKind = z.enum([
   'cancelled',
   'approval',
   'stalled',
+  /** From the runtime to Desk itself: a nudge (e.g. to update What's up); never shown in the chat. */
+  'reminder',
 ]);
 export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 

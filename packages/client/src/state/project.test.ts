@@ -16,6 +16,15 @@ const overview: ProjectOverview = {
 const fold = (events: Parameters<typeof reduceProject>[1][]) => events.reduce(reduceProject, projectFromOverview(overview));
 
 describe('reduceProject', () => {
+  it("takes What's up from the overview, then from Desk's updates", () => {
+    expect(fold([]).whatsUp).toBeNull();
+    const s = [ev(3, 'whats_up.updated', { text: 'Two threads on the relaunch.' }, { agent: 'd', ts: '2026-09-25T10:00:00Z' })].reduce(
+      reduceProject,
+      projectFromOverview({ ...overview, whats_up: { text: 'Scoping.', ts: '2026-09-25T09:00:00Z' } }),
+    );
+    expect(s.whatsUp).toEqual({ text: 'Two threads on the relaunch.', ts: '2026-09-25T10:00:00Z' });
+  });
+
   it('tracks threads from creation through activity, approval, revision, fallback and archive', () => {
     const s = fold([
       ev(3, 'agent.created', { role: 'thread', model: 'm', reasoning_effort: 'high', title: 'Emails', brief: 'b', workspace_path: '/w/t', parent_id: 'd', skills: ['brand-voice'] }, { agent: 't' }),

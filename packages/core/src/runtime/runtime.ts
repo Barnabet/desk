@@ -48,6 +48,7 @@ import { detectSandbox } from '../tools/sandbox';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
+import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler } from './scheduler';
 import { toolsForRole } from './toolsets';
 
@@ -71,6 +72,8 @@ export type RuntimeOptions = {
   onError?: (err: unknown, context: string) => void;
   /** Desk-managed runtimes of catalog skills (PATH for scripts, removal with the skill). */
   skillEnv?: SkillEnvProvider;
+  /** Remind Desk to update What's up when it ends a turn after changing things (default on; the test harness turns it off). */
+  whatsUpReminder?: boolean;
 };
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
@@ -987,7 +990,21 @@ export class Runtime {
     if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
     this.notifyParent(agent);
     if (agent.status === 'cancelled') return;
+    this.remindWhatsUp(agent);
     if (hasPendingInbox(this.o.store, agentId)) this.wake(this.requireAgent(agentId));
+  }
+
+  /** Desk ended its turn after changing things without rewriting What's up: remind it once (it runs again to do so). */
+  private remindWhatsUp(agent: AgentRow): void {
+    if (agent.role !== 'desk' || agent.status !== 'idle' || this.o.whatsUpReminder === false) return;
+    const fin = lastEvent(this.o.store.db, agent.id, 'run.finished');
+    if (fin?.type !== 'run.finished' || fin.payload.reason !== 'no_tool_calls' || !whatsUpStale(this.o.store, agent.id)) return;
+    this.o.store.append({
+      project_id: agent.project_id,
+      agent_id: agent.id,
+      type: 'message.agent',
+      payload: { from_agent_id: agent.id, from_label: REMINDER_LABEL, kind: 'reminder', text: WHATS_UP_REMINDER },
+    });
   }
 
   /** Tells a thread's Desk about the outcome of its latest run. */

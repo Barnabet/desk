@@ -93,6 +93,8 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({ scope: SkillScope, name: SkillName, state: z.enum(['preparing', 'ready', 'failed', 'removed']), reason: z.string().nullable() }),
   ),
   event('plan.updated', z.object({ items: z.array(PlanItem) })),
+  /** Desk's short account of the project for the user: what is happening now, what is next, what waits on them. */
+  event('whats_up.updated', z.object({ text: z.string().min(1) })),
   event(
     'report',
     z.object({ headline: z.string().min(1), progress: z.string(), needs_you: z.array(z.string()), results: z.array(z.string()) }),
