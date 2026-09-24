@@ -4916,3 +4916,370 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 6: ⌘K palette — places, projects, threads, skills, library titles, and memory search
+
+**Files:**
+- Create: `apps/desktop/src/renderer/palette.test.ts`, `apps/desktop/src/renderer/components/CommandPalette.test.tsx`, `apps/desktop/src/renderer/palette.ts`, `apps/desktop/src/renderer/components/CommandPalette.tsx`
+- Modify: `apps/desktop/src/renderer/theme/tokens.css`, `apps/desktop/src/renderer/App.tsx`
+
+**Interfaces:**
+
+- Consumes: the global overview (projects and threads); on each opening, `skills.list` (global and per project) and `library.list` (per project); with three or more characters, `memory.list` with `?q=` (debounced 250 ms, up to eight projects and two hits each); `href` and `navigate`.
+- Produces:
+
+```ts
+// renderer/palette.ts
+export type PaletteGroup = 'Go to' | 'Projects' | 'Threads' | 'Skills' | 'Library' | 'Memory';
+export type PaletteItem = { id: string; group: PaletteGroup; title: string; detail?: string; keywords?: string; route: string };
+export function score(item: PaletteItem, query: string): number;       // 3 prefix, 2 word start, 1 anywhere, 0 none
+export function rankPalette(items: PaletteItem[], query: string): PaletteItem[];
+// components/CommandPalette.tsx — mounted once in the main window; ⌘K toggles; ↑↓ ⏎ esc
+export function CommandPalette(): JSX.Element | null;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/palette.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { rankPalette, score, type PaletteItem } from './palette';
+
+const item = (group: PaletteItem['group'], title: string, detail?: string): PaletteItem => ({ id: `${group}:${title}`, group, title, route: '#/', ...(detail ? { detail } : {}) });
+
+describe('palette ranking', () => {
+  it('scores prefixes over word starts over substrings', () => {
+    expect(score(item('Projects', 'Onboarding revamp'), 'onb')).toBe(3);
+    expect(score(item('Projects', 'Onboarding revamp'), 'rev')).toBe(2);
+    expect(score(item('Skills', 'email-sequence'), 'seq')).toBe(2);
+    expect(score(item('Projects', 'Onboarding revamp'), 'vamp')).toBe(1);
+    expect(score(item('Projects', 'Tax', 'file by April'), 'april')).toBe(1);
+    expect(score(item('Projects', 'Tax'), 'zzz')).toBe(0);
+  });
+
+  it('orders by group then score, and shows only places and projects without a query', () => {
+    const items = [item('Threads', 'Welcome emails'), item('Projects', 'Email launch'), item('Go to', 'Map'), item('Skills', 'email-sequence'), item('Memory', 'We email on Tuesdays')];
+    expect(rankPalette(items, '').map((i) => i.title)).toEqual(['Map', 'Email launch']);
+    expect(rankPalette(items, 'email').map((i) => i.title)).toEqual(['Email launch', 'Welcome emails', 'email-sequence', 'We email on Tuesdays']);
+  });
+});
+```
+
+`apps/desktop/src/renderer/components/CommandPalette.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProjectSummary } from '@desk/protocol';
+import { initialGlobalState } from '../../shared/state';
+import { globalStore } from '../state/global';
+import { installBridge } from '../test/bridge';
+import { CommandPalette } from './CommandPalette';
+
+afterEach(cleanup);
+beforeEach(() => {
+  window.location.hash = '#/map';
+  globalStore.set({
+    ...initialGlobalState(),
+    overview: [
+      {
+        project: { id: 'p1', name: 'Onboarding revamp', goal: 'Relaunch onboarding', updated_at: 't' },
+        desk_status: 'idle',
+        threads: [{ id: 't1', title: 'Welcome emails', status: 'running', reason: null, activity: null, model: 'm', git_branch: null, skills: [], review_round: 0, created_at: 't', updated_at: 't' }],
+        latest_report: null,
+        plan_progress: { done: 0, total: 0 },
+        attention_count: 0,
+      } as unknown as ProjectSummary,
+    ],
+  });
+});
+
+function setup() {
+  return installBridge({
+    'skills.list': ({ projectId }: { projectId?: string }) =>
+      projectId ? [{ name: 'brand-voice', scope: 'project', description: 'House tone', dir: '', version: 1 }] : [{ name: 'email-sequence', scope: 'global', description: 'Sequences', dir: '', version: 2 }],
+    'library.list': () => [{ id: 'a', project_id: 'p1', path: 'emails/welcome.md', title: 'Welcome email draft', kind: 'report', origin: 'user', description: '', created_at: 't' }],
+    'memory.list': ({ q }: { q: string }) => (q.includes('email') ? [{ id: 'm1', project_id: 'p1', kind: 'decision', content: 'Send emails on Tuesdays', source: 'user', supersedes: null, superseded_by: null, created_at: 't' }] : []),
+  });
+}
+
+describe('CommandPalette', () => {
+  it('opens with ⌘K and jumps to threads, skills, files and memory search', async () => {
+    const bridge = setup();
+    render(<CommandPalette />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const dialog = screen.getByRole('dialog', { name: 'Search Desk' });
+    expect(within(dialog).getAllByRole('option').map((o) => o.textContent)).toContain('Onboarding revampRelaunch onboarding');
+    const box = within(dialog).getByRole('combobox');
+    fireEvent.change(box, { target: { value: 'email' } });
+    await waitFor(() => expect(within(dialog).getByText('Send emails on Tuesdays')).toBeTruthy());
+    const titles = within(dialog).getAllByRole('option').map((o) => o.querySelector('.palette-title')?.textContent);
+    expect(titles).toEqual(['Welcome emails', 'email-sequence', 'Welcome email draft', 'Send emails on Tuesdays']);
+    expect(bridge.calls.find((c) => c.channel === 'memory.list')?.input).toEqual({ projectId: 'p1', q: 'email' });
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(window.location.hash).toBe('#/p/p1/library?file=emails%2Fwelcome.md');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'brand' } });
+    await waitFor(() => expect(screen.getByText('brand-voice')).toBeTruthy());
+    fireEvent.click(screen.getByText('brand-voice'));
+    expect(window.location.hash).toBe('#/skills/project%3Ap1%3Abrand-voice');
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/palette.test.ts apps/desktop/src/renderer/components/CommandPalette.test.tsx`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/palette.ts`:
+
+```ts
+export type PaletteGroup = 'Go to' | 'Projects' | 'Threads' | 'Skills' | 'Library' | 'Memory';
+export type PaletteItem = { id: string; group: PaletteGroup; title: string; detail?: string; keywords?: string; route: string };
+
+export const GROUP_ORDER: PaletteGroup[] = ['Go to', 'Projects', 'Threads', 'Skills', 'Library', 'Memory'];
+const PER_GROUP = 6;
+
+/** 3 for a prefix of the title, 2 for a word start in the title, 1 anywhere in title/detail/keywords, 0 for no match. */
+export function score(item: PaletteItem, query: string): number {
+  const q = query.trim().toLowerCase();
+  if (!q) return 1;
+  const title = item.title.toLowerCase();
+  if (title.startsWith(q)) return 3;
+  if (new RegExp(`(^|[\\s\\-_/.·])${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(title)) return 2;
+  return `${title} ${item.detail ?? ''} ${item.keywords ?? ''}`.toLowerCase().includes(q) ? 1 : 0;
+}
+
+/**
+ * Matches in group order, best first within a group, at most six per group. Memory results come from the
+ * server's search, so they are kept as given. With no query only "Go to" and projects show.
+ */
+export function rankPalette(items: PaletteItem[], query: string): PaletteItem[] {
+  const q = query.trim();
+  const out: PaletteItem[] = [];
+  for (const g of GROUP_ORDER) {
+    if (!q && g !== 'Go to' && g !== 'Projects') continue;
+    const inGroup = items.filter((i) => i.group === g);
+    const ranked = g === 'Memory' ? inGroup : inGroup.map((i) => ({ i, s: score(i, q) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.i.title.localeCompare(b.i.title)).map((x) => x.i);
+    out.push(...ranked.slice(0, PER_GROUP));
+  }
+  return out;
+}
+```
+
+`apps/desktop/src/renderer/components/CommandPalette.tsx`:
+
+```tsx
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import type { SkillSummary } from '@desk/client';
+import { clip, type ArtifactKind } from '@desk/protocol';
+import { call } from '../bridge';
+import { GROUP_ORDER, rankPalette, type PaletteItem } from '../palette';
+import { href, navigate } from '../router';
+import { useGlobal } from '../state/global';
+
+type Loaded = { skills: Array<{ key: string; name: string; scope: string; description: string; project: string | null }>; library: Array<{ projectId: string; project: string; path: string; title: string; kind: ArtifactKind }> };
+const MAX_MEMORY_PROJECTS = 8;
+
+const GO: PaletteItem[] = [
+  { id: 'go:map', group: 'Go to', title: 'Map', detail: 'All projects', route: href({ name: 'map' }) },
+  { id: 'go:attention', group: 'Go to', title: 'Needs you', detail: 'Approvals, questions and hand-offs', keywords: 'attention approvals', route: href({ name: 'attention' }) },
+  { id: 'go:skills', group: 'Go to', title: 'Skills', route: href({ name: 'skills' }) },
+  { id: 'go:system', group: 'Go to', title: 'System', detail: 'deskd, models, usage', keywords: 'settings daemon endpoint', route: href({ name: 'system' }) },
+  { id: 'go:new', group: 'Go to', title: 'New project', keywords: 'create', route: href({ name: 'map', newProject: true }) },
+];
+
+/** ⌘K: jump to a place, project, thread, skill or library file, or search every project's memory. */
+export function CommandPalette() {
+  const overview = useGlobal((g) => g.overview);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [memory, setMemory] = useState<PaletteItem[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActive(0);
+    setMemory([]);
+    inputRef.current?.focus();
+    let live = true;
+    const projects = overview.map((p) => ({ id: p.project.id, name: p.project.name }));
+    void Promise.all([
+      call('skills.list', {}).catch(() => [] as SkillSummary[]),
+      Promise.all(projects.map((p) => call('skills.list', { projectId: p.id }).catch(() => [] as SkillSummary[]))),
+      Promise.all(projects.map((p) => call('library.list', { projectId: p.id }).catch(() => []))),
+    ]).then(([global, perProject, libraries]) => {
+      if (!live) return;
+      const skills: Loaded['skills'] = global.map((s) => ({ key: `global:${s.name}`, name: s.name, scope: 'global', description: s.description, project: null }));
+      perProject.forEach((list, i) => {
+        for (const s of list) if (s.scope === 'project') skills.push({ key: `project:${projects[i]!.id}:${s.name}`, name: s.name, scope: 'project', description: s.description, project: projects[i]!.name });
+      });
+      const library = libraries.flatMap((list, i) => list.map((a) => ({ projectId: projects[i]!.id, project: projects[i]!.name, path: a.path, title: a.title, kind: a.kind })));
+      setLoaded({ skills, library });
+    });
+    return () => {
+      live = false;
+    };
+    // Loaded once per opening; the overview at that moment is enough.
+  }, [open]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 3) {
+      setMemory([]);
+      return;
+    }
+    let live = true;
+    const t = setTimeout(() => {
+      const projects = overview.slice(0, MAX_MEMORY_PROJECTS);
+      void Promise.all(projects.map((p) => call('memory.list', { projectId: p.project.id, q }).catch(() => []))).then((results) => {
+        if (!live) return;
+        setMemory(
+          results.flatMap((rows, i) =>
+            rows.slice(0, 2).map((m) => ({
+              id: `memory:${m.id}`,
+              group: 'Memory' as const,
+              title: clip(m.content, 90),
+              detail: `${projects[i]!.project.name} · ${m.kind}`,
+              route: href({ name: 'project', id: projects[i]!.project.id, tab: 'memory', q }),
+            })),
+          ),
+        );
+      });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [open, query, overview]);
+
+  const items = useMemo(() => {
+    const all: PaletteItem[] = [...GO];
+    for (const p of overview) {
+      all.push({ id: `project:${p.project.id}`, group: 'Projects', title: p.project.name, detail: p.project.goal, route: href({ name: 'project', id: p.project.id, tab: 'conversation' }) });
+      for (const t of p.threads)
+        all.push({ id: `thread:${t.id}`, group: 'Threads', title: t.title ?? 'Untitled thread', detail: `${p.project.name} · ${t.status}`, route: href({ name: 'project', id: p.project.id, tab: 'threads', threadId: t.id }) });
+    }
+    for (const s of loaded?.skills ?? []) all.push({ id: `skill:${s.key}`, group: 'Skills', title: s.name, detail: `${s.project ?? 'Global'} · ${s.description}`, route: href({ name: 'skills', skill: s.key }) });
+    for (const a of loaded?.library ?? [])
+      all.push({ id: `lib:${a.projectId}:${a.path}`, group: 'Library', title: a.title, detail: `${a.project} · ${a.path}`, keywords: a.kind, route: href({ name: 'project', id: a.projectId, tab: 'library', file: a.path }) });
+    return [...all, ...memory];
+  }, [overview, loaded, memory]);
+  const shown = useMemo(() => rankPalette(items, query), [items, query]);
+  useEffect(() => setActive(0), [query]);
+
+  if (!open) return null;
+  const go = (i: PaletteItem | undefined) => {
+    if (!i) return;
+    setOpen(false);
+    navigate(i.route);
+  };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((a) => Math.min(shown.length - 1, a + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((a) => Math.max(0, a - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      go(shown[active]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  const optId = (i: number) => `${listId}-${i}`;
+  let index = -1;
+  return (
+    <div className="palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
+      <div className="palette card" role="dialog" aria-modal="true" aria-label="Search Desk">
+        <input
+          ref={inputRef}
+          type="text"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls={listId}
+          aria-activedescendant={shown.length ? optId(active) : undefined}
+          aria-label="Search projects, threads, skills, files and memory"
+          placeholder="Search projects, threads, skills, files and memory"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onKey}
+        />
+        <ul id={listId} role="listbox" aria-label="Results">
+          {GROUP_ORDER.map((g) => {
+            const inGroup = shown.filter((i) => i.group === g);
+            if (!inGroup.length) return null;
+            return [
+              <li key={`h-${g}`} role="presentation" className="palette-group">
+                {g}
+              </li>,
+              ...inGroup.map((i) => {
+                index += 1;
+                const n = index;
+                return (
+                  <li key={i.id} id={optId(n)} role="option" aria-selected={n === active} onMouseEnter={() => setActive(n)} onClick={() => go(i)}>
+                    <span className="palette-title">{i.title}</span>
+                    {i.detail ? <span className="palette-detail">{i.detail}</span> : null}
+                  </li>
+                );
+              }),
+            ];
+          })}
+          {!shown.length ? (
+            <li role="presentation" className="palette-empty">
+              {query.trim().length >= 3 ? 'Nothing found.' : 'Keep typing…'}
+            </li>
+          ) : null}
+        </ul>
+        <div className="palette-foot muted small">↑↓ move · ⏎ open · esc close{query.trim().length >= 3 ? ' · memory is searched in every project' : ''}</div>
+      </div>
+    </div>
+  );
+}
+```
+
+Other changes:
+- `tokens.css` gains the "⌘K palette" block: backdrop, card, input, grouped listbox and footer.
+- `App.tsx` renders `<CommandPalette />` next to the `Toaster` in the main window. It is not in onboarding or the tray popover.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): ⌘K palette over places, projects, threads, skills and library titles, with memory search across projects
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

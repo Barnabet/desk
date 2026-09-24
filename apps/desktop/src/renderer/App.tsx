@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { onPush } from './bridge';
+import { CommandPalette } from './components/CommandPalette';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { ProjectNav } from './components/ProjectNav';
 import { TitleBar } from './components/TitleBar';
@@ -66,6 +67,7 @@ export function App() {
         <Screen route={route} />
         <ConnectionOverlay />
       </main>
+      <CommandPalette />
       <Toaster />
     </div>
   );

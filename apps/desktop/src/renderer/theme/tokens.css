@@ -883,3 +883,75 @@ pre {
 .usage-table td:first-child {
   text-align: left;
 }
+
+/* ⌘K palette */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: rgba(28, 27, 24, 0.18);
+}
+.palette {
+  width: min(640px, 92vw);
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.palette input {
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 16px;
+  outline: none;
+}
+.palette ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 56vh;
+  overflow-y: auto;
+}
+.palette li[role='option'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.palette li[aria-selected='true'] {
+  background: var(--run-pastel);
+}
+.palette-group {
+  padding: 8px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-min);
+}
+.palette-title {
+  font-size: 13.5px;
+}
+.palette-detail {
+  font-size: 12px;
+  color: var(--text-min);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-empty {
+  padding: 14px;
+  color: var(--text-min);
+  font-size: 13px;
+}
+.palette-foot {
+  padding: 4px 12px;
+}
