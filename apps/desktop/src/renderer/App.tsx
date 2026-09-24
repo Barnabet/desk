@@ -7,6 +7,7 @@ import { Toaster } from './components/Toast';
 import { navigate, useRoute, type Route } from './router';
 import { AttentionScreen } from './attention/AttentionScreen';
 import { ConversationScreen } from './conversation/ConversationScreen';
+import { LibraryScreen } from './knowledge/LibraryScreen';
 import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
@@ -27,6 +28,7 @@ function Screen({ route }: { route: Route }) {
       return <Pending title="System" />;
     case 'project':
       if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} />;
+      if (route.tab === 'library') return <LibraryScreen key={route.id} projectId={route.id} {...(route.file ? { file: route.file } : {})} />;
       if (route.tab === 'threads') return <ThreadsScreen key={route.id} projectId={route.id} {...(route.threadId ? { threadId: route.threadId } : {})} />;
       return <Pending title={route.tab[0]!.toUpperCase() + route.tab.slice(1)} />;
     default:

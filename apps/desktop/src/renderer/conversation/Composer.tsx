@@ -2,15 +2,7 @@ import { useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { toastError } from '../components/Toast';
-
-const MAX_UPLOAD = 25 * 1024 * 1024;
-
-export async function fileToBase64(file: Blob): Promise<string> {
-  const buf = new Uint8Array(await file.arrayBuffer());
-  let s = '';
-  for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-  return btoa(s);
-}
+import { fileToBase64, MAX_UPLOAD } from '../files';
 
 /** Message Desk: ⏎ sends, ⇧⏎ adds a line; attachments go to the Library and are referenced in the message. */
 export function Composer(o: { projectId: string; draft: string; setDraft(v: string | ((d: string) => string)): void; textareaRef: RefObject<HTMLTextAreaElement | null>; onSent(text: string): void }) {

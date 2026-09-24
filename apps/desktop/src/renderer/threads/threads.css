@@ -543,22 +543,11 @@
 .files-entry.current {
   background: #fff;
 }
-.files-viewer {
+.files-pane {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid var(--rule);
-}
-.files-viewer-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
 }
 .drafts {
   list-style: none;

@@ -1,0 +1,123 @@
+.knowledge-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.knowledge-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.knowledge-search {
+  height: 30px;
+  min-width: 240px;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+.library {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  padding: 24px 32px;
+  box-sizing: border-box;
+}
+.library.with-preview {
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 44%);
+}
+.library.dragging {
+  outline: 2px dashed var(--run);
+  outline-offset: -10px;
+  background: var(--run-pastel);
+}
+.library-main {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.library-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.library-card {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(28, 27, 24, 0.06);
+}
+.library-card.current {
+  border-color: var(--ink);
+}
+.library-glyph {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.library-glyph.kind-report {
+  background: var(--accent);
+}
+.library-glyph.kind-data {
+  background: var(--run);
+}
+.library-glyph.kind-code {
+  background: var(--ok);
+}
+.library-title {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.25;
+}
+.library-path {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.drop-hint {
+  margin: 0;
+}
+.library-preview {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.library-meta h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+}
+.library-meta p {
+  margin: 4px 0 0;
+}

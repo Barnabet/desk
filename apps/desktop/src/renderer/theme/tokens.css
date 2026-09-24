@@ -799,3 +799,30 @@ pre {
   color: var(--text);
   border-top: 1px solid var(--rule-soft);
 }
+
+/* File viewer (threads, library, skills) */
+.file-viewer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--rule);
+}
+.file-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.file-image {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  align-self: flex-start;
+  border-radius: 6px;
+  background: repeating-conic-gradient(#f4f1ea 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+}

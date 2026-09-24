@@ -1,34 +1,18 @@
 import { useEffect, useState } from 'react';
 import type { WorkspaceEntry } from '@desk/protocol';
 import { call, DeskCallError } from '../../bridge';
-import { Button } from '../../components/Button';
-import { CodeBlock } from '../../components/CodeBlock';
 import { EmptyState } from '../../components/EmptyState';
-import { SafeMarkdown } from '../../components/SafeMarkdown';
+import { FileViewer } from '../../components/FileViewer';
 import { describeError, toastError } from '../../components/Toast';
 import { bytes } from '../../format';
 
-const MAX_TEXT = 1024 * 1024;
-
-/** Decodes bytes as UTF-8 text, or returns null for binary content. */
-export function asText(data: Uint8Array): string | null {
-  if (data.length > MAX_TEXT) return null;
-  if (data.subarray(0, 8000).includes(0)) return null;
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(data);
-  } catch {
-    return null;
-  }
-}
-
 type Listing = { status: 'loading' } | { status: 'ready'; entries: WorkspaceEntry[] } | { status: 'gone' } | { status: 'error'; message: string };
-type Open = { path: string; data: Uint8Array; text: string | null } | null;
+type Open = { path: string; data: Uint8Array } | null;
 
 /** Browses the thread's workspace and shows one file at a time. */
 export function FilesTab({ threadId, dir, onDir, version }: { threadId: string; dir: string; onDir(path: string): void; version: string }) {
   const [list, setList] = useState<Listing>({ status: 'loading' });
   const [open, setOpen] = useState<Open>(null);
-  const [raw, setRaw] = useState(false);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,23 +34,13 @@ export function FilesTab({ threadId, dir, onDir, version }: { threadId: string; 
     setLoadingFile(path);
     try {
       const data = await call('threads.file', { id: threadId, path });
-      setOpen({ path, data, text: asText(data) });
-      setRaw(false);
+      setOpen({ path, data });
     } catch (err) {
       toastError(err);
     } finally {
       setLoadingFile(null);
     }
   };
-  const save = async () => {
-    if (!open) return;
-    try {
-      await call('app.saveFile', { name: open.path.split('/').pop() ?? 'file', data: new Uint8Array(open.data) });
-    } catch (err) {
-      toastError(err);
-    }
-  };
-
   if (list.status === 'gone') return <EmptyState title="The workspace is gone">It was removed when this thread was archived. Published files are still in the Library.</EmptyState>;
   if (list.status === 'error') return <EmptyState title="Couldn't list the workspace">{list.message}</EmptyState>;
   const crumbs = dir ? dir.split('/') : [];
@@ -109,29 +83,9 @@ export function FilesTab({ threadId, dir, onDir, version }: { threadId: string; 
           <p className="muted">This folder is empty.</p>
         )}
       </div>
-      <div className="files-viewer">
+      <div className="files-pane">
         {open ? (
-          <>
-            <div className="files-viewer-bar">
-              <span className="mono grow">{open.path}</span>
-              <span className="muted small">{bytes(open.data.length)}</span>
-              {open.text !== null && /\.md$/i.test(open.path) ? (
-                <Button size="sm" variant="ghost" onClick={() => setRaw((r) => !r)}>
-                  {raw ? 'Rendered' : 'Raw'}
-                </Button>
-              ) : null}
-              <Button size="sm" onClick={() => void save()}>
-                Save a copy…
-              </Button>
-            </div>
-            {open.text === null ? (
-              <p className="muted">This file isn't text, so it can't be shown here. Save a copy to open it.</p>
-            ) : /\.md$/i.test(open.path) && !raw ? (
-              <SafeMarkdown text={open.text} />
-            ) : (
-              <CodeBlock code={open.text} language={open.path.split('.').pop() ?? ''} />
-            )}
-          </>
+          <FileViewer path={open.path} data={open.data} />
         ) : (
           <p className="muted">Pick a file to view it.</p>
         )}
