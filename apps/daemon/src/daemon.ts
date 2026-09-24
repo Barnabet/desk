@@ -45,6 +45,8 @@ export type DaemonOptions = {
   dataDir: string;
   port?: number;
   version?: string;
+  /** The bundle's build id (see scripts/bundle.mjs); null when running from source. */
+  build?: string | null;
   /** Fixed model access (tests); otherwise resolved from env, ~/.config/cliproxyapi.env, then config.json + Keychain. */
   modelConfig?: ModelConfig;
   /** Environment and home used to resolve model access (default process.env / os.homedir()). */
@@ -127,6 +129,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       models,
       token,
       version,
+      build: o.build ?? null,
       saveModels: (m) => saveModels(paths.models, m),
       health: () => ({ proxy: runtime.proxyState, uptime_s: Math.floor((Date.now() - startedAt) / 1000) }),
       config: {

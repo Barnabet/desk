@@ -16,6 +16,10 @@ export type DaemonStatus = {
   proxy: 'up' | 'down' | 'unknown' | null;
   mode: DaemonMode;
   bundledVersion: string;
+  /** The running daemon's build id: null from source, undefined from a daemon older than build ids. */
+  build: string | null | undefined;
+  /** The bundled deskd's build id (Resources/deskd/build-id); null in dev. */
+  bundledBuild: string | null;
   agent: 'installed' | 'missing' | 'unsupported';
 };
 
@@ -26,6 +30,7 @@ export type DaemonManagerOptions = {
   home: string;
   uid: number;
   bundledVersion: string;
+  bundledBuild: string | null;
   /** Packaged: the app's own binary (run with ELECTRON_RUN_AS_NODE) and the bundled deskd.mjs. */
   execPath: string;
   bundlePath: string;
@@ -48,6 +53,16 @@ export function compareVersions(a: string, b: string): number {
     if (d) return d;
   }
   return 0;
+}
+
+/**
+ * Whether a running daemon is older than the bundled one: a lower version, or the same version from another build
+ * (an app update that kept the version number). A daemon run from source (build null) or a newer one is left alone.
+ */
+export function isOutdated(health: Pick<HealthResponse, 'version' | 'build'>, bundled: { version: string; build: string | null }): boolean {
+  const cmp = compareVersions(health.version, bundled.version);
+  if (cmp !== 0) return cmp < 0;
+  return !!bundled.build && health.build !== null && health.build !== bundled.build;
 }
 
 async function defaultFetchHealth(port: number): Promise<HealthResponse> {
@@ -92,6 +107,8 @@ export class DaemonManager {
       proxy: p?.health.proxy ?? null,
       mode: this.o.mode,
       bundledVersion: this.o.bundledVersion,
+      build: p ? p.health.build : null,
+      bundledBuild: this.o.bundledBuild,
       agent: this.launchd ? (existsSync(plistPath(this.o.home)) ? 'installed' : 'missing') : 'unsupported',
     };
   }
@@ -152,13 +169,14 @@ export class DaemonManager {
     return this.waitHealthy(before.running ? before.pid : null);
   }
 
-  /** Packaged builds: when the installed agent runs an older daemon than the bundled one, reinstall it. */
+  /** Packaged builds: when the installed agent runs an older daemon (or another build) than the bundled one, reinstall it. */
   async ensureCurrent(): Promise<boolean> {
     if (!this.launchd || !existsSync(plistPath(this.o.home))) return false;
-    const s = await this.status();
-    if (!s.running || !s.version || compareVersions(s.version, this.o.bundledVersion) >= 0) return false;
+    const p = await this.probe();
+    const bundled = { version: this.o.bundledVersion, build: this.o.bundledBuild };
+    if (!p || !isOutdated(p.health, bundled)) return false;
     await this.installAgent();
-    await this.waitHealthy(null, (v) => compareVersions(v, this.o.bundledVersion) >= 0);
+    await this.waitHealthy(null, (h) => !isOutdated(h, bundled));
     return true;
   }
 
@@ -199,12 +217,12 @@ export class DaemonManager {
     if (r.code !== 0 && !ignoreFailure) throw new UserFacingError('launchd_failed', `launchctl ${args[0]} failed: ${r.stderr.trim() || `exit ${r.code}`}`);
   }
 
-  /** Waits for a healthy daemon (a new pid when restarting, a new enough version when refreshing). */
-  private async waitHealthy(previousPid: number | null, versionOk: (v: string) => boolean = () => true): Promise<DaemonStatus> {
+  /** Waits for a healthy daemon (a new pid when restarting, the bundled build when refreshing). */
+  private async waitHealthy(previousPid: number | null, current: (h: HealthResponse) => boolean = () => true): Promise<DaemonStatus> {
     const deadline = Date.now() + (this.o.startTimeoutMs ?? 10_000);
     for (;;) {
       const p = await this.probe();
-      if (p && p.pid !== previousPid && versionOk(p.health.version)) return this.status();
+      if (p && p.pid !== previousPid && current(p.health)) return this.status();
       if (Date.now() > deadline) throw new UserFacingError('daemon_start_timeout', 'Desk did not start within 10 seconds. Check the logs, then retry.');
       await this.sleep(250);
     }

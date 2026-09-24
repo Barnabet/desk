@@ -16,6 +16,7 @@ function manager(o: Partial<DaemonManagerOptions> = {}) {
   const up = (pid = 42) => writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ port: 1234, token: 't', pid, version: '1.0.0' }));
   const down = () => rmSync(join(dataDir, 'daemon.json'), { force: true });
   let version = '1.0.0';
+  let build: string | null | undefined = 'b2';
   const m = new DaemonManager({
     dataDir,
     mode: 'dev',
@@ -23,6 +24,7 @@ function manager(o: Partial<DaemonManagerOptions> = {}) {
     home: join(dir, 'home'),
     uid: 501,
     bundledVersion: '1.0.0',
+    bundledBuild: 'b2',
     execPath: '/Applications/Desk.app/Contents/MacOS/Desk',
     bundlePath: '/Applications/Desk.app/Contents/Resources/deskd/deskd.mjs',
     repoRoot: '/repo',
@@ -32,6 +34,7 @@ function manager(o: Partial<DaemonManagerOptions> = {}) {
       if (args[0] === 'bootstrap' || args[0] === 'kickstart') {
         up(args[0] === 'kickstart' ? 43 : 42);
         version = '1.0.0';
+        build = 'b2';
       }
       if (args[0] === 'bootout') down();
       return { code: 0, stdout: '', stderr: '' };
@@ -44,12 +47,12 @@ function manager(o: Partial<DaemonManagerOptions> = {}) {
       calls.push(['kill', String(pid)]);
       down();
     },
-    fetchHealth: async () => ({ version, protocol_version: 1, proxy: 'up', uptime_s: 5 }),
+    fetchHealth: async () => ({ version, protocol_version: 1, proxy: 'up', uptime_s: 5, build }),
     sleep: async () => {},
     startTimeoutMs: 200,
     ...o,
   });
-  return { m, calls, up, down, dataDir, setVersion: (v: string) => void (version = v) };
+  return { m, calls, up, down, dataDir, setVersion: (v: string) => void (version = v), setBuild: (b: string | null | undefined) => void (build = b) };
 }
 
 describe('launchd plist', () => {
@@ -98,6 +101,26 @@ describe('DaemonManager', () => {
     expect(await m.ensureCurrent()).toBe(false);
     expect(calls).toEqual([]);
     expect(await manager().m.ensureCurrent()).toBe(false);
+  });
+
+  it('refreshes a daemon from another build of the same version, but not one run from source or a newer one', async () => {
+    const { m, calls, setVersion, setBuild } = manager({ mode: 'packaged' });
+    await m.installAgent();
+    for (const [v, b, refreshed] of [
+      ['1.0.0', 'b1', true], // an app update that kept 1.0.0
+      ['1.0.0', undefined, true], // a daemon from before build ids
+      ['1.0.0', null, false], // `desk up --install` from the repo
+      ['1.1.0', 'b9', false], // newer than the app: never downgraded
+      ['1.0.0', 'b2', false],
+    ] as const) {
+      setVersion(v);
+      setBuild(b);
+      calls.length = 0;
+      expect(await m.ensureCurrent(), `${v} ${b}`).toBe(refreshed);
+      expect(calls.length > 0).toBe(refreshed);
+    }
+    setBuild('b1');
+    expect(await m.status()).toMatchObject({ build: 'b1', bundledBuild: 'b2' });
   });
 
   it('restarts with kickstart and stops with bootout', async () => {

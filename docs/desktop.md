@@ -20,7 +20,7 @@ The desktop app (`apps/desktop`) is an Electron + React client for `deskd`. It u
    4. **The Map.**
 
 The packaged daemon is `Desk.app/Contents/Resources/deskd/deskd.mjs`, run by the app's own binary with `ELECTRON_RUN_AS_NODE=1`. It ships with its migrations and the N-API `better-sqlite3` prebuild, so it needs no separate Node install.
-- When a newer app finds an older daemon, it rewrites the LaunchAgent and restarts the daemon.
+- When a newer app finds an older daemon, it rewrites the LaunchAgent and restarts the daemon. "Older" means a lower version, or the same version from another build: `bundle.mjs` writes `deskd/build-id` (a hash of the code and migrations) and `/v1/health` reports it. A daemon run from source (`build: null`) and a newer one are left alone.
 - **System → Repair LaunchAgent** does the same on demand.
 
 The CLI's `desk up --install` uses the same LaunchAgent label, so there is only ever one deskd.

@@ -70,6 +70,8 @@ export const HealthResponse = z.object({
   protocol_version: z.number().int(),
   proxy: z.enum(['up', 'down', 'unknown']).optional(),
   uptime_s: z.number().int().min(0).optional(),
+  /** The bundled deskd's content hash (`build-id` next to deskd.mjs); null when running from source. Absent before 1.0 builds had one. */
+  build: z.string().nullable().optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 

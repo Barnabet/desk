@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { onPush } from './bridge';
 import { CommandPalette } from './components/CommandPalette';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { ProjectNav } from './components/ProjectNav';
 import { TitleBar } from './components/TitleBar';
@@ -19,6 +20,12 @@ import { ThreadsScreen } from './threads/ThreadsScreen';
 import { TrayPopover } from './tray/TrayPopover';
 import { startGlobalSync } from './state/global';
 import { startSessionRouting } from './state/session';
+
+/** Which screen a route shows: a crashed screen resets when this changes, not on in-screen navigation. */
+export function screenKey(route: Route): string {
+  if (route.name === 'project') return `project/${route.id}/${route.tab}`;
+  return route.name === 'catalog' ? 'skills' : route.name;
+}
 
 function Screen({ route }: { route: Route }) {
   switch (route.name) {
@@ -44,6 +51,14 @@ function Screen({ route }: { route: Route }) {
 }
 
 export function App() {
+  return (
+    <ErrorBoundary scope="whole">
+      <Shell />
+    </ErrorBoundary>
+  );
+}
+
+function Shell() {
   const route = useRoute();
   useEffect(() => startGlobalSync(), []);
   useEffect(() => startSessionRouting(), []);
@@ -66,7 +81,9 @@ export function App() {
       <TitleBar route={route} />
       {route.name === 'project' ? <ProjectNav projectId={route.id} tab={route.tab} /> : null}
       <main className="screen">
-        <Screen route={route} />
+        <ErrorBoundary key={screenKey(route)}>
+          <Screen route={route} />
+        </ErrorBoundary>
         <ConnectionOverlay />
       </main>
       <CommandPalette />

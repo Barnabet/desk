@@ -18,7 +18,7 @@ beforeEach(() => {
   });
 });
 
-const status = { running: true, version: '1.0.0', pid: 42, uptime_s: 3700, proxy: 'down', mode: 'packaged', bundledVersion: '1.0.0', agent: 'installed' };
+const status = { running: true, version: '1.0.0', pid: 42, uptime_s: 3700, proxy: 'down', mode: 'packaged', bundledVersion: '1.0.0', build: 'b1', bundledBuild: 'b1', agent: 'installed' };
 const model = (id: string): ModelInfo => ({ id, family: 'claude', context_window: 200000, max_output_tokens: 32000, reasoning_efforts: ['low', 'medium', 'high'], default_reasoning_effort: null, concurrency: 4 });
 
 function setup(extra: Record<string, (input: any) => unknown> = {}) {

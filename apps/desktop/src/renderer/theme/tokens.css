@@ -412,6 +412,31 @@ pre {
   font-size: 22px;
   color: var(--ink);
 }
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+}
+.error-boundary-whole {
+  min-height: 100vh;
+  justify-content: center;
+}
+.error-boundary-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.error-boundary-detail {
+  max-width: min(720px, 100%);
+  margin: 0;
+  padding: 12px 16px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
 .overlay {
   position: absolute;
   inset: 0;

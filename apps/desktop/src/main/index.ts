@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdirSync, openSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -39,6 +39,7 @@ async function start(): Promise<void> {
     home: homedir(),
     uid: process.getuid?.() ?? 0,
     bundledVersion: app.getVersion(),
+    bundledBuild: app.isPackaged ? readBuildId(join(process.resourcesPath, 'deskd', 'build-id')) : null,
     execPath: process.execPath,
     bundlePath: join(process.resourcesPath, 'deskd', 'deskd.mjs'),
     repoRoot: resolve(__dirname, '..', '..', '..'),
@@ -227,4 +228,9 @@ async function offerMoveToApplications(): Promise<void> {
       // Declined or not possible (an existing copy is running): carry on from here.
     }
   }
+}
+
+/** The bundled deskd's build id (written by apps/daemon/scripts/bundle.mjs), if present. */
+function readBuildId(file: string): string | null {
+  return existsSync(file) ? readFileSync(file, 'utf8').trim() || null : null;
 }

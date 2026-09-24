@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { macKeychain } from '@desk/core';
@@ -13,6 +13,10 @@ const log = createLogger(daemonPaths(dataDir).logFile);
 /** The packaged app ships uv next to deskd for Python skill runtimes; DESK_UV still wins. */
 const bundledUv = process.env.DESK_BUNDLED === '1' && !process.env.DESK_UV ? fileURLToPath(new URL('./bin/uv', import.meta.url)) : null;
 
+/** The bundle's content hash, written by scripts/bundle.mjs; the app restarts a daemon whose build differs from its own. */
+const buildFile = fileURLToPath(new URL('./build-id', import.meta.url));
+const build = process.env.DESK_BUNDLED === '1' && existsSync(buildFile) ? readFileSync(buildFile, 'utf8').trim() : null;
+
 process.on('uncaughtException', (err) => log.error('uncaught exception', err));
 process.on('unhandledRejection', (err) => log.error('unhandled rejection', err));
 
@@ -21,6 +25,7 @@ try {
     dataDir,
     port: values.port ? Number(values.port) : DEFAULT_PORT,
     log,
+    build,
     ...(process.env.DESK_BUNDLED === '1'
       ? { migrationsDir: fileURLToPath(new URL('./drizzle', import.meta.url)), catalog: { builtinRoot: fileURLToPath(new URL('./catalog/skills', import.meta.url)) } }
       : {}),

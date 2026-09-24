@@ -35,6 +35,8 @@ export type AppDeps = {
   skillRuntimes?: SkillRuntimes;
   token: string;
   version: string;
+  /** The bundle's build id, or null when running from source. */
+  build?: string | null;
   /** Persists the model registry after PUT /models. */
   saveModels?: (models: ModelInfo[]) => void;
   /** Extra health fields (proxy state, uptime). */
@@ -50,7 +52,7 @@ export function createApp(deps: AppDeps): Hono {
   app.onError((err, c) => errorResponse(c, err));
   app.notFound((c) => c.json({ error: { code: 'not_found', message: `No route for ${c.req.method} ${c.req.path}` } }, 404));
 
-  app.get('/v1/health', (c) => c.json({ version: deps.version, protocol_version: PROTOCOL_VERSION, ...(deps.health?.() ?? {}) }));
+  app.get('/v1/health', (c) => c.json({ version: deps.version, protocol_version: PROTOCOL_VERSION, build: deps.build ?? null, ...(deps.health?.() ?? {}) }));
   app.use('/v1/*', bearerAuth(deps.token));
   app.route('/v1', projectRoutes(deps));
   app.route('/v1', agentRoutes(deps));

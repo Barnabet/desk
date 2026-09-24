@@ -78,6 +78,8 @@ function DaemonSection() {
           </dl>
           {s.running && s.version && s.mode === 'packaged' && s.version !== s.bundledVersion ? (
             <p className="field-hint">This deskd is v{s.version}; the app bundles v{s.bundledVersion}. Repair installs the bundled one.</p>
+          ) : s.running && s.mode === 'packaged' && s.bundledBuild && s.build !== null && s.build !== s.bundledBuild ? (
+            <p className="field-hint">This deskd is from a different build than the app. Repair installs the bundled one.</p>
           ) : null}
           <div className="actions">
             {s.running ? (

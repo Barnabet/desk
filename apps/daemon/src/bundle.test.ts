@@ -14,6 +14,8 @@ describe('bundled daemon', () => {
     const dist = join(appDir, 'dist');
     expect(existsSync(join(dist, 'deskd.mjs'))).toBe(true);
     expect(existsSync(join(dist, 'drizzle'))).toBe(true);
+    const build = readFileSync(join(dist, 'build-id'), 'utf8');
+    expect(build).toMatch(/^[0-9a-f]{16}$/);
     expect(existsSync(join(dist, 'node_modules', 'better-sqlite3', 'prebuilds'))).toBe(true);
 
     const dataDir = await mkdtemp(join(tmpdir(), 'desk-bundle-'));
@@ -27,7 +29,7 @@ describe('bundled daemon', () => {
       for (let i = 0; i < 100 && !existsSync(infoFile); i++) await new Promise((r) => setTimeout(r, 100));
       const info = JSON.parse(readFileSync(infoFile, 'utf8')) as { port: number };
       const health = await (await fetch(`http://127.0.0.1:${info.port}/v1/health`)).json();
-      expect(health).toMatchObject({ protocol_version: 1 });
+      expect(health).toMatchObject({ protocol_version: 1, build });
     } finally {
       child.kill('SIGTERM');
       await new Promise((r) => child.once('exit', r));

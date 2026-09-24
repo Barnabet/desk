@@ -41,7 +41,7 @@ describe('auth', () => {
   it('serves health without auth and rejects missing or wrong tokens', async () => {
     const { app } = await setup();
     const health = await app.request('/v1/health');
-    expect(await health.json()).toMatchObject({ version: '1.0.0', protocol_version: 1 });
+    expect(await health.json()).toMatchObject({ version: '1.0.0', protocol_version: 1, build: null });
     expect((await app.request('/v1/projects')).status).toBe(401);
     expect((await app.request('/v1/projects', { headers: { authorization: 'Bearer nope' } })).status).toBe(401);
   });

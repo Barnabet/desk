@@ -31,7 +31,7 @@ Pass `next_after` as the next `after` to continue.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/v1/health` | Unauthenticated. `{ version, protocol_version, proxy: up\|down\|unknown, uptime_s }` |
+| GET | `/v1/health` | Unauthenticated. `{ version, protocol_version, build, proxy: up\|down\|unknown, uptime_s }`. `build` is the bundled deskd's build id, or `null` when running from source |
 | GET | `/v1/usage` | `?since=YYYY-MM-DD`. `{ rows: [{ project_id, model, prompt_tokens, completion_tokens }], totals }` across projects |
 | GET | `/v1/models` | The model registry (`ModelInfo[]`: id, family, context_window, max_output_tokens, reasoning_efforts, default_reasoning_effort, concurrency). `reasoning_efforts` lists the levels the model accepts (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`); an empty list means Desk never sends a level. `default_reasoning_effort` is `null` (the endpoint's default) or one of those levels |
 | PUT | `/v1/models` | Replace the registry (`ModelInfo[]`, validated). The registry is persisted to `models.json` |
