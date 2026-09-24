@@ -1,6 +1,10 @@
 import type {
   AddSourceRequest,
   AttentionResponse,
+  CatalogInstallRequest,
+  CatalogInstallResult,
+  CatalogItem,
+  CatalogReview,
   CreateProjectRequest,
   DaemonConfig,
   DaemonConfigPatch,
@@ -212,6 +216,12 @@ export class DeskClient {
     import: (s: SkillScopeRef, req: SkillImportRequest) => this.post<SkillSaveResult>(`${this.skillBase(s)}/import`, req),
     version: (s: SkillScopeRef, name: string, v: number) => this.get<SkillDetail>(`${this.skillBase(s)}/${enc(name)}/versions/${v}`),
     versionFile: (s: SkillScopeRef, name: string, v: number, path: string) => this.raw(`${this.skillBase(s)}/${enc(name)}/versions/${v}/files/${encPath(path)}`),
+  };
+
+  catalog = {
+    list: () => this.get<CatalogItem[]>('/catalog'),
+    prepare: (id: string) => this.request<CatalogReview>('POST', `/catalog/${enc(id)}/prepare`),
+    install: (id: string, req: CatalogInstallRequest = {}) => this.post<CatalogInstallResult>(`/catalog/${enc(id)}/install`, req),
   };
 
   models = {

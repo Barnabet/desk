@@ -26,10 +26,15 @@ const BLOCK = 512;
  * under `prefix` (a path relative to that root; '' for everything), with paths relative to the prefix.
  *
  * The whole archive is refused if any entry has an absolute path or a `..` segment. Under the prefix, links, devices
- * and FIFOs are refused, as is anything over the caps. Entries outside the prefix are skipped without being kept.
+ * and FIFOs are refused, as is anything over the caps. Entries outside the prefix are skipped without being kept, except
+ * regular files at the archive root whose names match `rootFiles` (the repository's LICENSE, for skills in subfolders).
  */
-export async function extractSubtree(input: AsyncIterable<Uint8Array>, prefix: string, caps: Partial<ExtractCaps> = {}): Promise<ExtractedFile[]> {
-  const c = { ...DEFAULT_CAPS, ...caps };
+export async function extractSubtree(
+  input: AsyncIterable<Uint8Array>,
+  prefix: string,
+  opts: { caps?: Partial<ExtractCaps>; rootFiles?: RegExp } = {},
+): Promise<{ files: ExtractedFile[]; rootFiles: ExtractedFile[] }> {
+  const c = { ...DEFAULT_CAPS, ...opts.caps };
   const cleanPrefix = prefix.replace(/^\/+|\/+$/g, '');
   const gunzip = createGunzip();
   const feed = (async () => {
@@ -46,7 +51,7 @@ export async function extractSubtree(input: AsyncIterable<Uint8Array>, prefix: s
     }
   })();
 
-  const parser = new TarReader(cleanPrefix, c, c.maxDownload * INFLATE_FACTOR);
+  const parser = new TarReader(cleanPrefix, c, c.maxDownload * INFLATE_FACTOR, opts.rootFiles ?? null);
   try {
     for await (const chunk of gunzip) parser.push(chunk as Buffer);
   } catch (err) {
@@ -56,19 +61,20 @@ export async function extractSubtree(input: AsyncIterable<Uint8Array>, prefix: s
     await feed;
   }
   parser.finish();
-  return parser.files;
+  return { files: parser.files, rootFiles: parser.rootFiles };
 }
 
 type Header = { name: string; size: number; type: string; mode: number; linkname: string };
 
 class TarReader {
   readonly files: ExtractedFile[] = [];
+  readonly rootFiles: ExtractedFile[] = [];
   private buf: Buffer = Buffer.alloc(0);
   private inflated = 0;
   private total = 0;
   private ended = false;
   /** Current entry data: bytes still to consume, padding after it, and where they go. */
-  private data: { remaining: number; padding: number; sink: Buffer[] | null; header: Header; kind: 'file' | 'pax' | 'longname' } | null = null;
+  private data: { remaining: number; padding: number; sink: Buffer[] | null; header: Header; kind: 'file' | 'root' | 'pax' | 'longname' } | null = null;
   private pax: Record<string, string> = {};
   private longName: string | null = null;
 
@@ -76,6 +82,7 @@ class TarReader {
     private readonly prefix: string,
     private readonly caps: ExtractCaps,
     private readonly maxInflated: number,
+    private readonly rootPattern: RegExp | null,
   ) {}
 
   push(chunk: Buffer): void {
@@ -155,6 +162,9 @@ class TarReader {
       this.total += size;
       if (this.total > this.caps.maxBytes) throw new ValidationError(`The skill is larger than ${mb(this.caps.maxBytes)}`);
       sink = [];
+    } else if (rel === null && isFile && this.rootPattern && segments.length === 2 && this.rootPattern.test(segments[1]!) && size <= 256 * 1024) {
+      this.data = { remaining: size, padding: realPadding, sink: [], header: { ...header, name: segments[1]! }, kind: 'root' };
+      return;
     }
     this.data = { remaining: size, padding: realPadding, sink, header: { ...header, name: rel ?? name }, kind: 'file' };
   }
@@ -168,7 +178,7 @@ class TarReader {
       if (d.sink) this.longName = Buffer.concat(d.sink).toString('utf8').replace(/\0.*$/s, '');
       return;
     }
-    if (d.sink) this.files.push({ path: d.header.name, content: Buffer.concat(d.sink), mode: d.header.mode });
+    if (d.sink) (d.kind === 'root' ? this.rootFiles : this.files).push({ path: d.header.name, content: Buffer.concat(d.sink), mode: d.header.mode });
   }
 
   /** The path relative to the prefix (after the archive's root directory), or null when outside it. */

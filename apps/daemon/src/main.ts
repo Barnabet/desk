@@ -18,7 +18,9 @@ try {
     dataDir,
     port: values.port ? Number(values.port) : DEFAULT_PORT,
     log,
-    ...(process.env.DESK_BUNDLED === '1' ? { migrationsDir: fileURLToPath(new URL('./drizzle', import.meta.url)) } : {}),
+    ...(process.env.DESK_BUNDLED === '1'
+      ? { migrationsDir: fileURLToPath(new URL('./drizzle', import.meta.url)), catalog: { builtinRoot: fileURLToPath(new URL('./catalog/skills', import.meta.url)) } }
+      : {}),
     ...(process.platform === 'darwin' ? { keychain: macKeychain(), notify: macNotify } : {}),
   });
   let stopping = false;

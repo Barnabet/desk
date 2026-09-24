@@ -7,9 +7,10 @@ import {
   type ModelEndpointTestResult,
   type ModelInfo,
 } from '@desk/protocol';
-import type { EventStore, ModelRegistry, Runtime } from '@desk/core';
+import type { CatalogService, EventStore, ModelRegistry, Runtime } from '@desk/core';
 import { bearerAuth, errorResponse } from './http';
 import { agentRoutes } from './routes/agents';
+import { catalogRoutes } from './routes/catalog';
 import { configRoutes } from './routes/config';
 import { knowledgeRoutes } from './routes/knowledge';
 import { projectRoutes } from './routes/projects';
@@ -28,6 +29,8 @@ export type AppDeps = {
   runtime: Runtime;
   store: EventStore;
   models: ModelRegistry;
+  /** The skill catalog; routes answer 501 without it. */
+  catalog?: CatalogService;
   token: string;
   version: string;
   /** Persists the model registry after PUT /models. */
@@ -52,6 +55,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/v1', knowledgeRoutes(deps));
   app.route('/v1', uiRoutes(deps));
   app.route('/v1', skillRoutes(deps));
+  app.route('/v1', catalogRoutes(deps));
   app.route('/v1', systemRoutes(deps));
   app.route('/v1', configRoutes(deps));
   return app;

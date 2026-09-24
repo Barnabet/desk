@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
+  CatalogService,
   createSwitchableAdapter,
   EventStore,
   ModelRegistry,
@@ -10,9 +12,11 @@ import {
   resolveModelEndpoint,
   Runtime,
   testModelEndpoint,
+  type CatalogFetch,
   type Keychain,
   type ModelConfig,
 } from '@desk/core';
+import type { CatalogFile } from '@desk/protocol';
 import { createApp } from './app';
 import { loadDaemonFile, saveDaemonFile } from './config-file';
 import { startNotifier, type Notification } from './notifier';
@@ -41,6 +45,8 @@ export type DaemonOptions = {
   notify?: (n: Notification) => void;
   /** Drizzle migrations folder (the bundle ships its own copy). */
   migrationsDir?: string;
+  /** Skill catalog: first-party skills folder, archive host and fetch (tests point these at fixtures). */
+  catalog?: { builtinRoot?: string; archiveBase?: string; fetch?: CatalogFetch; file?: CatalogFile };
   sandboxAvailable?: boolean;
   stallIntervalMs?: number;
   now?: () => number;
@@ -75,6 +81,15 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       ...(o.sandboxAvailable !== undefined ? { sandboxAvailable: o.sandboxAvailable } : {}),
       onError: (err, ctx) => log.error(`runtime error (${ctx})`, err),
     });
+    const catalog = new CatalogService({
+      runtime,
+      store,
+      dataDir: o.dataDir,
+      builtinRoot: o.catalog?.builtinRoot ?? fileURLToPath(new URL('../../../catalog/skills', import.meta.url)),
+      ...(o.catalog?.archiveBase ? { archiveBase: o.catalog.archiveBase } : {}),
+      ...(o.catalog?.fetch ? { fetch: o.catalog.fetch } : {}),
+      ...(o.catalog?.file ? { catalog: o.catalog.file } : {}),
+    });
     const token = randomBytes(32).toString('hex');
     const version = o.version ?? DAEMON_VERSION;
     const startedAt = Date.now();
@@ -82,6 +97,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
     const app = createApp({
       runtime,
       store,
+      catalog,
       models,
       token,
       version,

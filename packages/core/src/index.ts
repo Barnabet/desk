@@ -85,3 +85,7 @@ export { formatThreadLine, formatThreadSummary, renderTranscript } from './coord
 export { createWorkspace, removeWorkspace, threadBranchName } from './workspaces/workspaces';
 export { SkillStore, parseSkillMd, serializeSkillMd, type SkillDetail, type SkillSummary, type SkillSaveInput } from './skills/store';
 export { skillUseTools, skillAuthoringTools, renderSkill } from './tools/skills';
+export { CatalogService, catalogMarker, httpFetch, loadCatalog, type CatalogFetch, type CatalogRuntimes, type CatalogServiceOptions, type SkillRef } from './catalog/service';
+export { extractSubtree, DEFAULT_CAPS, type ExtractCaps, type ExtractedFile } from './catalog/tar';
+export { readTree, treeDigest } from './catalog/digest';
+export { isScript, scanSkill } from './catalog/review';

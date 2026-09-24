@@ -101,11 +101,23 @@ Global skills live under `/v1/skills`, project skills under `/v1/projects/:id/sk
 | GET | `/:name/files/<path>` | | Raw file; escaping paths return 400 |
 | PUT | `/:name` | `SkillWriteRequest { description?, instructions?, files?[{path, content_base64}], remove_files?, change_note? }` | Creates the skill (201) or refines it (200). The previous version goes to history. A `SKILL.md` may be sent as a file |
 | DELETE | `/:name` | | The last version stays in history |
-| GET | `/:name/history` | | `[{ version, description, current, change_note, origin, ts }]`. `origin` is `user` or `agent:<id>`; `origin` and `ts` are null for versions with no `skill.saved` record |
+| GET | `/:name/history` | | `[{ version, description, current, change_note, origin, ts }]`. `origin` is `user`, `agent:<id>` or `catalog:<id>@<sha>`; `origin` and `ts` are null for versions with no `skill.saved` record |
 | POST | `/:name/restore` | `{ version }` | Restores that version as the newest one |
 | POST | `/import` | `{ path, name? }` | Copies a local skill directory (e.g. `~/.claude/skills/x`). The name defaults to the frontmatter `name`. 201 |
 
 Skill names match `^[a-z0-9]+(-[a-z0-9]+)*$` (≤ 64 chars); descriptions are ≤ 1024 chars. Size limits: at most 2 MB per file, 200 files and 10 MB per skill. Symlinks are skipped on install.
+
+## Skill catalog
+
+Reviewed skills pinned to a commit and a content digest, installed only at the user's request. The design is in `docs/superpowers/specs/2026-09-24-skill-catalog-design.md`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/v1/catalog` | | `CatalogItem[]`: the entry (`id`, `title`, `category`, `summary`, `license`, `homepage`, `source`, `digest`, `files`, `bytes`, `runtime`, `caveats`) plus `installs[]`. Each install is `{ scope, project_id, state, sha, runtime, runtime_reason }`, where `state` is `installed`, `update_available`, `modified` (edited after install) or `name_taken` (a same-named skill that isn't from the catalog). Scopes with nothing of that name are omitted |
+| POST | `/v1/catalog/:id/prepare` | | Downloads the pinned archive (GitHub codeload) or reads the builtin skill, verifies the digest, and stages it. Returns `CatalogReview { entry, source_url, files[{path, size, script}], skill_md, license_text, warnings[{file, line, kind, excerpt}] }`. A digest mismatch is a 400 and nothing is staged |
+| POST | `/v1/catalog/:id/install` | `{ scope?: 'global'\|'project', project_id?, replace_modified? }` | Installs through the skill store with origin `catalog:<id>@<sha>`, and returns `{ skill, state, runtime }` (201). A 409 means `name_taken`, or `modified` without `replace_modified: true` |
+
+Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never runs), `pipe-to-shell`, `base64-blob`, `invisible-unicode`, `paste-site` and `memory-write`. The limits are the skill store's: 50 MB download, 10 MB, 200 files, 2 MB per file, and no links or special files.
 
 ## Desktop app endpoints
 

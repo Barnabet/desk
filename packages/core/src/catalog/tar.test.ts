@@ -5,7 +5,7 @@ import { extractSubtree } from './tar';
 
 const root = 'skills-0123456789012345678901234567890123456789';
 const ok = (entries: Parameters<typeof makeTarball>[1]) => makeTarball(root, entries);
-const extract = (buf: Buffer, prefix: string, caps = {}) => extractSubtree(chunked(buf, 700), prefix, caps);
+const extract = async (buf: Buffer, prefix: string, caps = {}) => (await extractSubtree(chunked(buf, 700), prefix, { caps })).files;
 const paths = (files: Array<{ path: string }>) => files.map((f) => f.path).sort();
 
 describe('extractSubtree', () => {
@@ -38,6 +38,16 @@ describe('extractSubtree', () => {
       '',
     );
     expect(paths(files)).toEqual(['SKILL.md', long, `gnu/${'g'.repeat(110)}.md`].sort());
+  });
+
+  it('keeps matching files from the archive root alongside the subtree', async () => {
+    const out = await extractSubtree(
+      chunked(ok([{ name: 'LICENSE', content: 'MIT License' }, { name: 'README.md', content: 'r' }, { name: 's/SKILL.md', content: 'x' }, { name: 's/LICENSE', content: 'inner' }])),
+      's',
+      { rootFiles: /^(LICEN[CS]E|COPYING)(\.\w+)?$/i },
+    );
+    expect(out.rootFiles.map((f) => [f.path, f.content.toString()])).toEqual([['LICENSE', 'MIT License']]);
+    expect(paths(out.files)).toEqual(['LICENSE', 'SKILL.md']);
   });
 
   it('refuses links and special files under the prefix', async () => {
