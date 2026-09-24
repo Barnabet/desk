@@ -8728,3 +8728,34 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+## Self-review
+
+Coverage against spec §7, items 1–4, and the shell:
+
+| Spec item | Where |
+|---|---|
+| Map: territories, Desk nodes, orbiting threads, needs-you pins, sun | Task 2 (`OrbitMap`, `layout.ts`) |
+| Map: inspector with report headline, plan waypoints, threads, needs-you and Open conversation | Task 2 (`TerritoryInspector`) |
+| Map: List view | Task 2 (`ProjectList` and the view toggle) |
+| Map: new project sheet (name, goal, instructions, folder-picker sources) | Plan 9 `ProjectForm`, opened by Task 2's button. **Optional settings in the sheet move to Plan 11**, which builds the settings form and reuses it here as "More options". |
+| Map: archive a project from Settings | Plan 11 (Settings) |
+| Conversation: line diagram; stations link to chat, trains and signals link to threads | Task 3 |
+| Conversation: chat with streaming, thread feed, report cards, question cards, notices | Task 3 (`ChatItems`) |
+| Conversation: composer with send, attach to Library and "Turn this into a skill" | Task 3 (`Composer`) |
+| Conversation: plan route panel with the merge note | Task 3 (`PlanPanel`) |
+| Threads: roster cards with status, reason, activity, elapsed, model, branch, skills and round | Task 4 (`ThreadRoster`) |
+| Threads: route with numbered stops synced to the transcript | Task 4 (`route.ts`, `RouteView`, `Transcript`) |
+| Threads: Narrative and Every-step depths, with denied, interrupted and compaction | Task 4 |
+| Threads: steering, Stop, Archive (branch kept), "Turn into a skill" | Task 4 (`ThreadDetail`) |
+| Threads: Result, Diff, Files, Skill drafts, Usage tabs | Task 4 (`tabs/*`) |
+| Attention: rack with four bays | Task 5 |
+| Attention: approval inspector with arguments (pretty and raw), who, project, branch, workdir, reason, last words, note and approve/deny | Task 5 (`Inspector`, and `policyReason` from Task 8) |
+| Attention: answer in place; open or dismiss | Task 5 |
+| Attention: J/K, ⌘⏎, ⌘⌫, E; a 409 shows "Already decided by …" | Task 5 |
+| Shell: ⌘P switcher and unread dots | Tasks 1 and 6 |
+| Shell: toasts for write errors | Plan 9, used throughout |
+| Shell: ⌘K palette | Plan 11 |
+| Menu-bar popover | Task 7 |
+| E2E for §7 items 1–4 | Task 8 |
+
+Tasks 1–3 were written before execution. Tasks 4–8 were appended from the code that shipped. Task 8 records the later changes to `lineGeometry.ts`, and its listing is the final version.
