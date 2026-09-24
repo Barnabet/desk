@@ -112,6 +112,6 @@ export function reduceChat(prev: ChatState, e: StoredEvent): ChatState {
 
 /** Applies a streamed text chunk (ephemeral `assistant.delta`) for this agent. */
 export function applyChatDelta(s: ChatState, e: EphemeralEvent): ChatState {
-  if (e.agent_id !== s.agentId) return s;
+  if (e.type !== 'assistant.delta' || e.agent_id !== s.agentId) return s;
   return { ...s, items: appendDelta(s.items, e.payload.run_id, e.payload.text) };
 }

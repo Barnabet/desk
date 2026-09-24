@@ -79,6 +79,11 @@ export const EventBody = z.discriminatedUnion('type', [
     }),
   ),
   event('skill.deleted', z.object({ scope: SkillScope, name: SkillName, origin: z.string() })),
+  /** A catalog skill's Desk-managed runtime (Python/Node environment) changed state. */
+  event(
+    'skill.runtime_changed',
+    z.object({ scope: SkillScope, name: SkillName, state: z.enum(['preparing', 'ready', 'failed', 'removed']), reason: z.string().nullable() }),
+  ),
   event('plan.updated', z.object({ items: z.array(PlanItem) })),
   event(
     'report',
@@ -194,6 +199,13 @@ export const EphemeralEvent = z.discriminatedUnion('type', [
     project_id: z.string(),
     agent_id: z.string(),
     payload: z.object({ run_id: z.string(), text: z.string() }),
+  }),
+  /** Progress while a skill runtime is being set up (not stored). */
+  z.object({
+    type: z.literal('skill.runtime_progress'),
+    project_id: z.string(),
+    agent_id: z.null(),
+    payload: z.object({ scope: SkillScope, name: SkillName, step: z.string(), done: z.number().int().optional(), total: z.number().int().optional() }),
   }),
 ]);
 export type EphemeralEvent = z.infer<typeof EphemeralEvent>;

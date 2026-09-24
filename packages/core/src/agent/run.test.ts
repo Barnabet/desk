@@ -144,7 +144,7 @@ describe('runAgent', () => {
     h.store.subscribe((i) => i.kind === 'ephemeral' && deltas.push(i.event));
     say(agentId, projectId, 'go');
     await runAgent(deps(), agentId, new AbortController().signal);
-    expect(deltas.map((d) => d.payload.text).join('')).toBe('a fairly long streamed reply');
+    expect(deltas.map((d) => (d.type === 'assistant.delta' ? d.payload.text : '')).join('')).toBe('a fairly long streamed reply');
   });
 });
 

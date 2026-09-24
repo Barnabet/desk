@@ -36,7 +36,7 @@ describe('DeskStream against deskd', () => {
       afterSeq: 0,
       hello: { client: 'desktop', notifications: true },
       onEvent: (e) => events.push(e),
-      onEphemeral: (e) => deltas.push(e.payload.text),
+      onEphemeral: (e) => void (e.type === 'assistant.delta' && deltas.push(e.payload.text)),
       onStatus: (st) => statuses.push(st),
     });
     s.start();

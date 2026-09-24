@@ -34,7 +34,7 @@ describe('EventBody', () => {
 describe('EphemeralEvent', () => {
   it('parses assistant.delta', () => {
     const e = EphemeralEvent.parse({ type: 'assistant.delta', project_id: 'p', agent_id: 'a', payload: { run_id: 'r', text: 'he' } });
-    expect(e.payload.text).toBe('he');
+    expect(e.type === 'assistant.delta' && e.payload.text).toBe('he');
   });
 });
 

@@ -119,7 +119,7 @@ class ProjectSession {
   }
 
   onDelta(e: EphemeralEvent): void {
-    if (this.store.get().status !== 'ready') return;
+    if (e.type !== 'assistant.delta' || this.store.get().status !== 'ready') return;
     this.store.set((s) => {
       const prev = s.streams[e.agent_id];
       const text = prev?.runId === e.payload.run_id ? prev.text + e.payload.text : e.payload.text;

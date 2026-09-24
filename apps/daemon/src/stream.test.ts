@@ -68,7 +68,7 @@ describe('event stream', () => {
     expect(c.messages.filter((m) => m.kind === 'event').map((m) => m.kind === 'event' && m.event.type)).toEqual(['project.created', 'agent.created']);
     runtime.sendToDesk(projectId, 'hello');
     await c.waitFor((m) => m.kind === 'event' && m.event.type === 'run.finished');
-    const deltas = c.messages.flatMap((m) => (m.kind === 'ephemeral' ? [m.event.payload.text] : [])).join('');
+    const deltas = c.messages.flatMap((m) => (m.kind === 'ephemeral' && m.event.type === 'assistant.delta' ? [m.event.payload.text] : [])).join('');
     expect(deltas).toBe('streamed reply text');
     const ids = eventIds(c);
     expect(ids).toEqual([...ids].sort((a, b) => a - b));
