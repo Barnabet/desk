@@ -100,7 +100,7 @@ export class JobManager {
 export const bashBackgroundTool = defineTool({
   name: 'bash_background',
   description:
-    'Start a long-running shell command (dev server, watcher, long build) in your workspace without waiting. Returns a job id; read output with bash_output, stop with bash_kill.',
+    'Start a long-running shell command (watcher, long build, a server for your own tests) in your workspace without waiting; it stops when you finish. Returns a job id; read output with bash_output, stop with bash_kill. For something the user should keep using after you finish (a dev server), use service_start.',
   input: z.object({ command: z.string().min(1) }),
   gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command }, ctx) {

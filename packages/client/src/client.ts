@@ -44,6 +44,7 @@ import type {
   SkillHistoryEntry,
   SkillSaveResult,
   SkillSummary,
+  ServiceRow,
   SourceRow,
 } from './types';
 
@@ -177,6 +178,14 @@ export class DeskClient {
     diff: (id: string) => this.get<ThreadDiff>(`/threads/${enc(id)}/diff`),
     files: (id: string, path = '') => this.get<WorkspaceEntry[]>(`/threads/${enc(id)}/files${path ? `?path=${enc(path)}` : ''}`),
     file: (id: string, path: string) => this.raw(`/threads/${enc(id)}/files/raw/${encPath(path)}`),
+  };
+
+  services = {
+    list: (projectId: string) => this.get<ServiceRow[]>(`/projects/${enc(projectId)}/services`),
+    logs: (id: string, lines?: number) => this.get<{ text: string; truncated: boolean }>(`/services/${enc(id)}/logs${lines ? `?lines=${lines}` : ''}`),
+    start: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/start`),
+    stop: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/stop`),
+    restart: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/restart`),
   };
 
   approvals = {

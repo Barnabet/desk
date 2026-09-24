@@ -1,11 +1,11 @@
 import type { Db } from '../db/open';
 import { formatPlan, getPlan } from '../coordination/plan';
-import { formatThreadLine } from '../coordination/render';
+import { formatServiceLine, formatThreadLine } from '../coordination/render';
 import { formatArtifactLine, listArtifacts } from '../library/library';
 import { memoryDigest } from '../memory/memory';
 import type { SkillStore } from '../skills/store';
 import type { SkillScope } from '@desk/protocol';
-import { listApprovals, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
+import { listApprovals, listServices, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
 import { formatSkillLine, renderSkill } from '../tools/skills';
 
 export type PromptContext = {
@@ -137,7 +137,8 @@ export function deskSystemPrompt(ctx: PromptContext): string {
         '   - Refine: when the user corrects an approach, or a thread reports a skill problem or proposes an improved draft, update the skill (skill_write with a change_note). Keep instructions concise, concrete and tested.',
         '   - Catalog: the user can install reviewed skills from the Skills catalog in the Desk app (research, documents, writing, planning, code). If one would fit the work better than writing a new skill, suggest it to the user by name; you cannot install it yourself.',
         '   - Scope: global for general-purpose automations the user will want everywhere; project for project-specific ones. Tell the user when you create or change a skill.',
-        '8. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
+        '8. Services — when the user needs something running to try the work (a backend, a frontend dev server), start it as a project service with service_start in the workspace of the thread that built it (thread_id); threads can start services in their own workspace too. Services keep running after the thread finishes and show in the user\'s Services panel with their URL; tell the user the URL. Check the Services section below: restart or fix a service that exited unexpectedly (service_logs shows why), and stop services that are no longer needed.',
+        '9. When nothing can move until threads report, call wait_for_threads. When the request is fully handled, end your turn with a short plain answer to the user.',
       ].join('\n'),
     ),
     '',
@@ -159,6 +160,8 @@ export function deskSystemPrompt(ctx: PromptContext): string {
     section('Plan', formatPlan(getPlan(db, project.id)?.items ?? [])),
     '',
     section('Threads', threads.map(formatThreadLine).join('\n')),
+    '',
+    section('Services', listServices(db, project.id).map((s) => formatServiceLine(s, threads.find((t) => t.id === s.agent_id)?.title)).join('\n')),
     '',
     section(
       'Pending approvals',

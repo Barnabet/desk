@@ -76,6 +76,10 @@ export const handlers = {
   'threads.stop': (i, c) => c.client().threads.stop(i.id),
   'threads.archive': (i, c) => c.client().threads.archive(i.id),
   'threads.diff': (i, c) => c.client().threads.diff(i.id),
+  'services.logs': (i, c) => c.client().services.logs(i.id, i.lines),
+  'services.start': (i, c) => c.client().services.start(i.id),
+  'services.stop': (i, c) => c.client().services.stop(i.id),
+  'services.restart': (i, c) => c.client().services.restart(i.id),
   'threads.files': (i, c) => c.client().threads.files(i.id, i.path ?? ''),
   'threads.file': (i, c) => c.client().threads.file(i.id, i.path),
 

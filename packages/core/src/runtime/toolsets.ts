@@ -6,6 +6,7 @@ import { gitTools } from '../tools/git';
 import { jobTools } from '../tools/jobs';
 import { libraryTools } from '../tools/library';
 import { memoryTools } from '../tools/memory';
+import { serviceTools } from '../tools/services';
 import { skillAuthoringTools, skillUseTools } from '../tools/skills';
 import { threadCoordinationTools } from '../tools/thread';
 import type { Tool } from '../tools/types';
@@ -26,6 +27,7 @@ export function deskToolsFor(_agent: AgentRow): Tool[] {
     ...libraryTools,
     ...skillUseTools,
     ...skillAuthoringTools,
+    ...serviceTools,
     ...deskCoordinationTools,
   ];
 }
@@ -36,6 +38,7 @@ export function threadToolsFor(agent: AgentRow): Tool[] {
     ...fileTools,
     bashTool,
     ...jobTools,
+    ...serviceTools,
     ...webTools,
     ...memoryTools,
     ...libraryTools,

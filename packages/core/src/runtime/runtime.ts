@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { copyFile, realpath } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
-import { GLOBAL_PROJECT_ID, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type SkillScope } from '@desk/protocol';
+import { GLOBAL_PROJECT_ID, ServiceName, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type ServiceStopReason, type SkillScope } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { uniqueLibraryName } from '../library/library';
 import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
@@ -27,11 +27,19 @@ import {
   listActiveThreads,
   listAgents,
   listLiveAgents,
+  findService,
+  getService,
+  listRunningServices,
+  listServices,
   listSources,
   pendingApprovalsFor,
   type AgentRow,
   type ProjectRow,
+  type ServiceRow,
 } from '../state/queries';
+import { reapOrphan, ServiceProcesses, tailLog } from '../services/manager';
+import { resolveInside } from '../tools/paths';
+import { scrubbedEnv, withSkillEnv } from '../tools/bash';
 import { listAttention } from '../state/attention';
 import { JobManager } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
@@ -71,6 +79,8 @@ export class Runtime {
   readonly scheduler: Scheduler;
   readonly jobs = new JobManager();
   readonly services: RuntimeServices;
+  /** Project services' processes (long-lived, outlive their thread's runs). */
+  readonly serviceProcs: ServiceProcesses;
   readonly skills: SkillStore;
   private readonly proxy: ProxyGate | undefined;
   /** Threads stopped by their Desk: their cancellation is not reported back to it. */
@@ -110,7 +120,21 @@ export class Runtime {
       resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),
       updateSettings: (projectId, patch) => this.updateSettings(projectId, patch),
       skillEnv: (agentId, only) => this.skillEnv(agentId, only),
+      startService: (projectId, input) => this.startService(projectId, input),
+      stopService: (serviceId, by) => this.stopService(serviceId, by),
+      restartService: (serviceId, by) => this.restartService(serviceId, by),
+      serviceLogs: (serviceId, lines) => this.serviceLogs(serviceId, lines),
     };
+    this.serviceProcs = new ServiceProcesses({
+      onUrl: (serviceId, url) => {
+        const s = getService(o.store.db, serviceId);
+        if (s?.status === 'running') o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.url', payload: { service_id: serviceId, url } });
+      },
+      onExit: (serviceId, code, signal) => {
+        const s = getService(o.store.db, serviceId);
+        if (s?.status === 'running') o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.exited', payload: { service_id: serviceId, code, signal } });
+      },
+    });
     this.scheduler = new Scheduler({
       modelConcurrency: (model) => o.models.get(model).concurrency,
       projectConcurrency: (projectId) =>
@@ -290,6 +314,7 @@ export class Runtime {
     for (const agent of listAgents(this.o.store.db, projectId)) {
       if (!TERMINAL.has(agent.status) || this.scheduler.isActive(agent.id)) this.stopAgent(agent.id, { by: agent.id, reason: 'Project archived' });
     }
+    this.stopServicesOf(projectId, 'project_archived').catch((err) => this.reportError(err, `stopping services of ${projectId}`));
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
   }
 
@@ -365,6 +390,7 @@ export class Runtime {
     const t = this.requireAgent(threadId);
     if (t.role !== 'thread') throw new ValidationError('Only threads can be archived');
     if (!TERMINAL.has(t.status)) throw new ConflictError(`Thread ${threadId} is ${t.status}; stop it before archiving`);
+    await this.stopServicesOf(t.project_id, 'thread_archived', t.id);
     if (t.workspace_path) {
       const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
       await removeWorkspace({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
@@ -555,6 +581,100 @@ export class Runtime {
 
   // ── messaging & control ──────────────────────────────────────────────
 
+  // ── services ─────────────────────────────────────────────────────
+
+  serviceLogFile(projectId: string, serviceId: string): string {
+    return join(this.projectDir(projectId), 'services', `${serviceId}.log`);
+  }
+
+  /**
+   * Starts a project service in a thread's workspace, sandboxed like the thread's own shell tools. A name that is
+   * already running is stopped first and started again under the same id.
+   */
+  async startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId: string; by: string }): Promise<ServiceRow> {
+    this.requireOpenProject(projectId);
+    const name = ServiceName.safeParse(input.name);
+    if (!name.success) throw new ValidationError(`Invalid service name "${input.name}": ${name.error.issues[0]?.message ?? 'invalid'}`);
+    const command = input.command.trim();
+    if (!command) throw new ValidationError('A service needs a command');
+    const thread = this.serviceWorkspaceOwner(projectId, input.threadId);
+    const workspace = realpathSync(thread.workspace_path!);
+    const cwd = await resolveInside(input.cwd ?? '.', [workspace], workspace).catch(() => {
+      throw new ValidationError(`cwd must be a directory inside the thread's workspace: ${input.cwd}`);
+    });
+    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new ValidationError(`cwd must be a directory inside the thread's workspace: ${input.cwd}`);
+
+    const existing = findService(this.o.store.db, projectId, name.data);
+    if (existing?.status === 'running') await this.stopServiceRun(existing, input.by, 'restart');
+    const serviceId = existing?.id ?? `svc_${newId()}`;
+    const env = withSkillEnv(scrubbedEnv(workspace), this.skillEnv(thread.id));
+    const sandbox = { enabled: await this.sandboxAvailable(), writable: thread.git_common_dir ? [workspace, thread.git_common_dir] : [workspace] };
+    const relCwd = cwd === workspace ? '.' : cwd.slice(workspace.length + 1);
+    const pid = this.serviceProcs.start(serviceId, {
+      command,
+      cwd,
+      env,
+      sandbox,
+      logFile: this.serviceLogFile(projectId, serviceId),
+      header: `── started ${new Date().toISOString()} · ${relCwd === '.' ? '' : `${relCwd} · `}${command} ──`,
+    });
+    this.o.store.append({
+      project_id: projectId,
+      agent_id: null,
+      type: 'service.started',
+      payload: { service_id: serviceId, name: name.data, command, cwd: relCwd, workspace_agent_id: thread.id, pid, by: input.by },
+    });
+    return getService(this.o.store.db, serviceId)!;
+  }
+
+  /** Stops a running service (a stopped or exited one is returned unchanged). */
+  async stopService(serviceId: string, by: string): Promise<ServiceRow> {
+    const s = this.requireService(serviceId);
+    if (s.status === 'running') await this.stopServiceRun(s, by, 'requested');
+    return getService(this.o.store.db, serviceId)!;
+  }
+
+  /** Runs a service's recorded command again in its recorded workspace (stopping the current run first). */
+  async restartService(serviceId: string, by: string): Promise<ServiceRow> {
+    const s = this.requireService(serviceId);
+    return this.startService(s.project_id, { name: s.name, command: s.command, cwd: s.cwd, threadId: s.agent_id, by });
+  }
+
+  serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean } {
+    const s = this.requireService(serviceId);
+    return tailLog(this.serviceLogFile(s.project_id, s.id), Math.max(1, Math.min(lines, 2000)));
+  }
+
+  /** Records the stop at once (the UI updates), then waits for the process group to close so its port is free. */
+  private stopServiceRun(s: ServiceRow, by: string, reason: ServiceStopReason): Promise<void> {
+    this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.stopped', payload: { service_id: s.id, by, reason } });
+    return this.serviceProcs.stop(s.id);
+  }
+
+  /** Stops the running services of a project, or only those in one thread's workspace. */
+  private stopServicesOf(projectId: string, reason: ServiceStopReason, threadId?: string): Promise<void> {
+    const running = listServices(this.o.store.db, projectId).filter((s) => s.status === 'running' && (!threadId || s.agent_id === threadId));
+    return Promise.all(running.map((s) => this.stopServiceRun(s, 'system', reason))).then(() => undefined);
+  }
+
+  private reportError(err: unknown, context: string): void {
+    (this.o.onError ?? ((e, c) => console.error(`[desk] ${c}:`, e)))(err, context);
+  }
+
+  private requireService(serviceId: string): ServiceRow {
+    const s = getService(this.o.store.db, serviceId);
+    if (!s) throw new NotFoundError(`Unknown service: ${serviceId}`);
+    return s;
+  }
+
+  private serviceWorkspaceOwner(projectId: string, threadId: string): AgentRow {
+    const t = getAgent(this.o.store.db, threadId);
+    if (!t || t.project_id !== projectId || t.role !== 'thread') throw new ValidationError(`Unknown thread in this project: ${threadId}`);
+    if (t.archived_at) throw new ConflictError(`Thread ${threadId} is archived; its workspace is gone`);
+    if (!t.workspace_path || !existsSync(t.workspace_path)) throw new ConflictError(`Thread ${threadId} has no workspace`);
+    return t;
+  }
+
   sendMessage(agentId: string, text: string): void {
     const agent = this.requireAgent(agentId);
     this.o.store.append({ project_id: agent.project_id, agent_id: agentId, type: 'message.user', payload: { text } });
@@ -644,12 +764,15 @@ export class Runtime {
     return this.scheduler.whenIdle();
   }
 
-  /** Stops scheduling, interrupts running agents resumably and kills background jobs. */
+  /** Stops scheduling, interrupts running agents resumably, kills background jobs and stops services. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.scheduler.stopAll(SHUTDOWN_REASON);
     this.jobs.killEverything();
-    await this.scheduler.whenIdle();
+    for (const s of listRunningServices(this.o.store.db)) {
+      this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.stopped', payload: { service_id: s.id, by: 'system', reason: 'daemon_shutdown' } });
+    }
+    await Promise.all([this.serviceProcs.stopAll(), this.scheduler.whenIdle()]);
     this.proxy?.close();
   }
 
@@ -658,6 +781,12 @@ export class Runtime {
    * agents left queued or with undelivered messages. Returns the rescheduled agent ids.
    */
   recover(): string[] {
+    // Services still marked running were cut off by an unclean exit: reap an orphan still holding its port, mark stopped.
+    for (const s of listRunningServices(this.o.store.db)) {
+      if (this.serviceProcs.isRunning(s.id)) continue;
+      reapOrphan(s.pid, s.command);
+      this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.stopped', payload: { service_id: s.id, by: 'system', reason: 'daemon_restart' } });
+    }
     const repairedByProject = new Map<string, number>();
     for (const agent of listLiveAgents(this.o.store.db, ['running'])) {
       this.repairCrashedRun(agent);

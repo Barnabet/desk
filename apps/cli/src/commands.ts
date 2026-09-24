@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import type { CatalogItem, CatalogReview, StreamServerMessage } from '@desk/protocol';
+import type { ServiceRow } from '@desk/client';
 import { runChat } from './chat';
 import { ApiError, clientFromDataDir, DeskClient, platformDataDir, readDaemonInfo } from './client';
 import { createRenderer } from './format';
@@ -326,6 +327,27 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         : 'No threads',
     );
   });
+  const serviceLine = (x: ServiceRow) =>
+    `${x.name}  ${x.status === 'running' ? `running${x.url ? ` ${x.url}` : ''}` : x.status === 'exited' ? `exited (${x.exit_signal ?? x.exit_code})` : `stopped (${x.stop_reason})`}  ${x.command}`;
+  program.command('services <project>').description('List the project\'s services').action(async (ref: string) => {
+    const c = client();
+    const p = await resolveProject(c, ref);
+    const all = await c.services.list(p.id);
+    say(all.length ? all.map(serviceLine).join('\n') : 'No services');
+  });
+  program
+    .command('service <action> <project> <name>')
+    .description('logs | start | stop | restart a project service')
+    .option('-n, --lines <n>', 'log lines', '80')
+    .action(async (action: string, ref: string, name: string, opts: { lines: string }) => {
+      const c = client();
+      const p = await resolveProject(c, ref);
+      const svc = (await c.services.list(p.id)).find((x) => x.name === name);
+      if (!svc) throw new Error(`No service named "${name}" in ${p.name}`);
+      if (action === 'logs') return say((await c.services.logs(svc.id, Number(opts.lines) || 80)).text || '(no output)');
+      if (action === 'start' || action === 'stop' || action === 'restart') return say(serviceLine(await c.services[action](svc.id)));
+      throw new Error(`Unknown action "${action}": use logs, start, stop or restart`);
+    });
   program
     .command('tail <thread>')
     .option('-f, --follow', 'keep streaming')

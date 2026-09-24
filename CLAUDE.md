@@ -47,6 +47,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `db/`: the drizzle schema and migrations.
   - `state/attention.ts`, `state/overview.ts`: what needs the user, and the cross-project summary (desktop app).
   - `workspaces/inspect.ts`: thread diff and confined workspace browsing.
+  - `services/manager.ts`: project services' processes (spawn, capped logs, loopback URL detection, orphan reaping); `tools/services.ts` holds the agent tools.
   - `catalog/`: the skill catalog. `catalog.json` holds the 20 pinned entries; `service.ts` fetches, verifies, stages and installs them; `runtimes.ts` builds Desk-managed environments (uv Python, npm lock, node shim, compat shims); `tar.ts`, `digest.ts`, `review.ts`; `curation.ts` holds helpers for `scripts/catalog.ts`.
   - `model/endpoint.ts`, `model/switchable.ts`: endpoint resolution (env → file → Keychain) and a runtime-configurable adapter.
   - `testing/`: the harness, exported as `@desk/core/testing`.
@@ -86,7 +87,8 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - Crash recovery never re-executes a tool call whose outcome is unknown; it records `interrupted` instead.
 - An agent with pending approvals is never scheduled.
 - Graceful shutdown leaves agents `queued`, not `cancelled`.
-- Shell tools (`bash`, `bash_background`, `bash_readonly`, `skill_run`) never run unsandboxed without approval.
+- Shell tools (`bash`, `bash_background`, `bash_readonly`, `skill_run`, `service_start`) never run unsandboxed without approval.
+- Project services run only in thread workspaces (sandboxed, no secrets), outlive their thread, and are stopped on archive and shutdown; their output goes to log files, never to events.
 - Threads cannot modify installed skills. They submit drafts, which Desk installs with `skill_write from_dir`.
 - Only the user installs catalog skills; every install is checked against its pinned digest, and `<data>/runtimes` is read-only to agents. Installers get a minimal environment (no secrets), npm install scripts never run, and `` !`cmd` `` blocks in skills are never executed.
 - Desk never merges branches.

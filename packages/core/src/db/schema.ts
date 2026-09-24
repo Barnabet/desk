@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 // Type-only import: erased at runtime, so drizzle-kit can still load this file standalone.
 import type { PlanItem, ProjectSettings, ReasoningEffort } from '@desk/protocol';
 
@@ -138,6 +138,30 @@ export const plans = sqliteTable('plans', {
   items: text('items', { mode: 'json' }).$type<PlanItem[]>().notNull(),
   updated_at: text('updated_at').notNull(),
 });
+
+/** Project services: long-lived processes in thread workspaces (one row per name, updated per run). */
+export const services = sqliteTable(
+  'services',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    name: text('name').notNull(),
+    command: text('command').notNull(),
+    cwd: text('cwd').notNull(),
+    /** The thread whose workspace the service runs in. */
+    agent_id: text('agent_id').notNull(),
+    status: text('status', { enum: ['running', 'exited', 'stopped'] }).notNull(),
+    pid: integer('pid'),
+    exit_code: integer('exit_code'),
+    exit_signal: text('exit_signal'),
+    stop_reason: text('stop_reason', { enum: ['requested', 'restart', 'thread_archived', 'project_archived', 'daemon_shutdown', 'daemon_restart'] }),
+    url: text('url'),
+    started_by: text('started_by').notNull(),
+    started_at: text('started_at').notNull(),
+    ended_at: text('ended_at'),
+  },
+  (t) => [uniqueIndex('services_project_name_idx').on(t.project_id, t.name)],
+);
 
 /** Attention items the user dismissed (report needs_you, stalled and failed threads). */
 export const attentionDismissals = sqliteTable('attention_dismissals', {

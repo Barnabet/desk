@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type FakeReply, type Script } from '@desk/fake-model';
-import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '@desk/core/testing';
+import { createHarness, FAKE_MODEL, newRuntime, seedThread, type Harness } from '@desk/core/testing';
 import { createApp } from './app';
 
 let h: Harness;
@@ -189,5 +189,26 @@ describe('memory, library, usage, events, models', () => {
     expect((await api('PUT', '/models', next)).status).toBe(200);
     expect((saved() as Array<{ id: string }>).map((m) => m.id)).toContain('extra');
     expect((await api('PUT', '/models', [{ id: 'broken' }])).status).toBe(400);
+  });
+});
+
+describe('services', () => {
+  it('lists services in the overview, tails logs, and lets the user stop, start and restart them', async () => {
+    const { api, runtime } = await setup();
+    const { project } = await newProject(api);
+    const { agentId } = await seedThread(h.store, h.dir, { projectId: project.id });
+    const cmd = `node -e "console.log('ready on http://127.0.0.1:6123'); setInterval(() => {}, 1000)"`;
+    const started = await runtime.startService(project.id, { name: 'api', command: cmd, threadId: agentId, by: 'agent:x' });
+    try {
+      for (let i = 0; i < 100 && !(await api('GET', `/projects/${project.id}/services`)).body[0]?.url; i++) await new Promise((r) => setTimeout(r, 25));
+      expect((await api('GET', `/projects/${project.id}`)).body.services).toMatchObject([{ id: started.id, name: 'api', status: 'running', url: 'http://127.0.0.1:6123' }]);
+      expect((await api('GET', `/services/${started.id}/logs?lines=5`)).body.text).toContain('ready on http://127.0.0.1:6123');
+      expect((await api('POST', `/services/${started.id}/stop`)).body).toMatchObject({ status: 'stopped', stop_reason: 'requested' });
+      expect((await api('POST', `/services/${started.id}/start`)).body).toMatchObject({ status: 'running', started_by: 'user' });
+      expect((await api('POST', `/services/${started.id}/restart`)).body).toMatchObject({ status: 'running' });
+      expect((await api('GET', '/services/nope/logs')).status).toBe(404);
+    } finally {
+      await runtime.shutdown();
+    }
   });
 });

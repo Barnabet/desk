@@ -9,6 +9,9 @@ import {
   PlanItem,
   ReasoningEffort,
   RunFinishReason,
+  ServiceActor,
+  ServiceName,
+  ServiceStopReason,
   SkillName,
   SkillScope,
   SourceKind,
@@ -167,6 +170,25 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({ level: z.enum(['info', 'warning', 'error']), code: z.string(), message: z.string() }),
   ),
   event('attention.dismissed', z.object({ item_id: z.string().min(1) })),
+  /** A project service (long-lived process in a thread's workspace) started; a new run of an existing name keeps its id. */
+  event(
+    'service.started',
+    z.object({
+      service_id: z.string(),
+      name: ServiceName,
+      command: z.string().min(1),
+      /** Relative to the workspace ('.' = its root). */
+      cwd: z.string(),
+      workspace_agent_id: z.string(),
+      pid: z.number().int().nullable(),
+      by: ServiceActor,
+    }),
+  ),
+  /** The first loopback URL printed by the current run. */
+  event('service.url', z.object({ service_id: z.string(), url: z.string().url() })),
+  /** The process ended on its own. */
+  event('service.exited', z.object({ service_id: z.string(), code: z.number().int().nullable(), signal: z.string().nullable() })),
+  event('service.stopped', z.object({ service_id: z.string(), by: ServiceActor, reason: ServiceStopReason })),
   event(
     'context.compacted',
     z.object({

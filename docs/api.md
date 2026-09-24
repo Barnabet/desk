@@ -66,6 +66,18 @@ Pass `next_after` as the next `after` to continue.
 | `review_rounds` | 2 | Maximum send-backs per thread |
 | `policy` | see README | Ordered `PolicyRule[]`; the first match wins |
 
+## Services
+
+Project services are long-lived processes (dev servers, APIs, workers) that Desk or a thread starts with `service_start` in a thread's workspace. They run sandboxed, keep running after the thread finishes, and stop when the user or an agent stops them, when their thread or project is archived, or when deskd shuts down. A service row: `{ id, project_id, name, command, cwd, agent_id (the workspace's thread), status: running|exited|stopped, pid, exit_code, exit_signal, stop_reason, url, started_by, started_at, ended_at }`. `url` is the first loopback URL the current run printed.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/v1/projects/:id/services` | `ServiceRow[]`, by name. The project overview carries them too (`services`) |
+| GET | `/v1/services/:id/logs` | `?lines=` (default 200, max 2000). `{ text, truncated }`: the log tail, ANSI stripped. Logs are capped at 2 MB per service |
+| POST | `/v1/services/:id/start` | Runs the recorded command again. 409 when its thread is archived |
+| POST | `/v1/services/:id/restart` | Stops the current run, then starts it again |
+| POST | `/v1/services/:id/stop` | |
+
 ## Threads and approvals
 
 | Method | Path | Notes |
@@ -203,6 +215,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 | Coordination | `plan.updated`, `report`, `question.asked` |
 | Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result`, `context.compacted`, `usage` |
 | Approvals | `approval.requested`, `approval.resolved` |
+| Services | `service.started`, `service.url`, `service.exited`, `service.stopped` (reason `requested`, `restart`, `thread_archived`, `project_archived`, `daemon_shutdown` or `daemon_restart`) |
 | Knowledge | `memory.written`, `memory.deleted`, `artifact.published`, `skill.saved`, `skill.deleted` |
 | System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, …; `attention.dismissed` |
 

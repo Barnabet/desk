@@ -21,13 +21,17 @@ export {
   listApprovals,
   listLiveAgents,
   listProjects,
+  listServices,
   listSources,
   listThreads,
+  getService,
+  findService,
   pendingApprovalsFor,
   type AgentRow,
   type ApprovalRow,
   type ApprovalStatus,
   type ProjectRow,
+  type ServiceRow,
   type SourceRow,
   type UsageRow,
 } from './state/queries';
@@ -51,6 +55,9 @@ export { bashTool, scrubbedEnv, withSkillEnv } from './tools/bash';
 export { completeTool } from './tools/thread';
 export { buildSandboxProfile, detectSandbox, NO_SANDBOX, shellInvocation, type SandboxSpec } from './tools/sandbox';
 export { bashBackgroundTool, bashKillTool, bashOutputTool, JobManager, jobTools, type JobSnapshot, type JobStatus } from './tools/jobs';
+export { serviceTools, SERVICE_START_WAIT_MS } from './tools/services';
+export { detectLoopbackUrl, ServiceProcesses, stripAnsi, tailLog } from './services/manager';
+export { formatServiceLine } from './coordination/render';
 export {
   braveProvider,
   createWebSearchTool,

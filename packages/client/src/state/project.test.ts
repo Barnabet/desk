@@ -60,4 +60,22 @@ describe('reduceProject', () => {
     expect(s.desk?.status).toBe('running');
     expect(reduceProject(s, ev(2, 'project.updated', { goal: 'stale' }))).toBe(s);
   });
+
+  it('tracks services through start, URL, exit, restart and stop, sorted by name', () => {
+    const start = (id: number, sid: string, name: string, by = 'user') =>
+      ev(id, 'service.started', { service_id: sid, name, command: 'npm run dev', cwd: '.', workspace_agent_id: 't', pid: 100 + id, by });
+    const s = fold([
+      start(3, 's1', 'web'),
+      ev(4, 'service.url', { service_id: 's1', url: 'http://localhost:5173' }),
+      start(5, 's2', 'api', 'agent:d'),
+      ev(6, 'service.exited', { service_id: 's2', code: 1, signal: null }),
+    ]);
+    expect(s.services.map((x) => [x.name, x.status, x.url, x.exit_code])).toEqual([
+      ['api', 'exited', null, 1],
+      ['web', 'running', 'http://localhost:5173', null],
+    ]);
+    const s2 = [start(7, 's2', 'api'), ev(8, 'service.stopped', { service_id: 's1', by: 'user', reason: 'requested' })].reduce(reduceProject, s);
+    expect(s2.services.find((x) => x.name === 'api')).toMatchObject({ status: 'running', exit_code: null, pid: 107, started_by: 'user' });
+    expect(s2.services.find((x) => x.name === 'web')).toMatchObject({ status: 'stopped', stop_reason: 'requested', url: 'http://localhost:5173' });
+  });
 });

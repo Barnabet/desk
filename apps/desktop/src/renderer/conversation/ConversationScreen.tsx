@@ -13,6 +13,7 @@ import { Composer } from './Composer';
 import { LineDiagram } from './LineDiagram';
 import { lineGeometry } from './lineGeometry';
 import { PlanPanel } from './PlanPanel';
+import { ServicesCard } from './ServicesCard';
 import './conversation.css';
 
 function useDraft(projectId: string): [string, (v: string | ((d: string) => string)) => void] {
@@ -114,6 +115,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
           </p>
           <button type="button" className="btn btn-secondary btn-sm plan-toggle" aria-expanded={planOpen} onClick={() => setPlanOpen((v) => !v)}>
             Plan
+            {project.services.some((x) => x.status === 'running') ? ` · ${plural(project.services.filter((x) => x.status === 'running').length, 'service')}` : ''}
           </button>
         </div>
         <section className="conv-chat" aria-label="Conversation with Desk">
@@ -151,7 +153,10 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
           </div>
           <Composer projectId={projectId} draft={draft} setDraft={setDraft} textareaRef={textareaRef} onSent={(t) => setPending((p) => [...p, t])} />
         </section>
-        <PlanPanel project={project} proxyDown={proxy === 'down'} />
+        <div className="conv-side">
+          <PlanPanel project={project} proxyDown={proxy === 'down'} />
+          <ServicesCard project={project} />
+        </div>
       </div>
     </div>
   );

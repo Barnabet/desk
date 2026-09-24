@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { call, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
 import { SEED_MODELS } from '@desk/core';
-import { FAKE_MODEL } from '@desk/core/testing';
+import { FAKE_MODEL, seedThread } from '@desk/core/testing';
 import { daemonPaths, startDaemon, type RunningDaemon } from '@desk/daemon';
 import { runCli } from './commands';
 import { plistFor } from './launchd';
@@ -79,6 +79,19 @@ describe('desk CLI', () => {
     await cli('say', 'Mem', 'hi', '--no-wait');
     await daemon.runtime.whenIdle();
     expect((await cli('usage', 'Mem')).out).toMatch(/claude-opus-5-5\s+\d+\s+\d+/);
+  });
+
+  it('lists services and stops, starts and tails one', async () => {
+    const id = /Created project (\S+)/.exec((await cli('project', 'new', 'Web', '--goal', 'g')).out)![1]!;
+    expect((await cli('services', 'Web')).out).toContain('No services');
+    const { agentId } = await seedThread(daemon.store, dir, { projectId: id });
+    await daemon.runtime.startService(id, { name: 'web', command: `node -e "console.log('up'); setInterval(() => {}, 1000)"`, threadId: agentId, by: 'user' });
+    expect((await cli('services', 'Web')).out).toMatch(/^web {2}running/);
+    expect((await cli('service', 'stop', 'Web', 'web')).out).toContain('web  stopped (requested)');
+    expect((await cli('service', 'start', 'Web', 'web')).out).toContain('web  running');
+    for (let i = 0; i < 100 && !(await cli('service', 'logs', 'Web', 'web')).out.includes('up'); i++) await new Promise((r) => setTimeout(r, 25));
+    expect((await cli('service', 'logs', 'Web', 'web')).out).toContain('up');
+    expect((await cli('service', 'stop', 'Web', 'nope')).code).toBe(1);
   });
 
   it('reports status', async () => {

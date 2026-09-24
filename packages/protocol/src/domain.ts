@@ -16,6 +16,15 @@ export const ToolCall = z.object({ id: z.string(), name: z.string(), arguments: 
 export type ToolCall = z.infer<typeof ToolCall>;
 
 /** Reasoning effort levels, lowest first (what `reasoning_effort` may carry on a chat completion). */
+/** A project service's name: lowercase, digits and dashes (`backend`, `web-2`). */
+export const ServiceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, 'Use lowercase letters, digits and dashes (max 32)');
+export const ServiceStatus = z.enum(['running', 'exited', 'stopped']);
+export type ServiceStatus = z.infer<typeof ServiceStatus>;
+export const ServiceStopReason = z.enum(['requested', 'restart', 'thread_archived', 'project_archived', 'daemon_shutdown', 'daemon_restart']);
+export type ServiceStopReason = z.infer<typeof ServiceStopReason>;
+/** Who acted on a service: the user or an agent (`agent:<id>`); `system` for shutdown and recovery. */
+export const ServiceActor = z.string().regex(/^(user|system|agent:.+)$/);
+
 export const ReasoningEffort = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 export type ReasoningEffort = z.infer<typeof ReasoningEffort>;
 export const REASONING_EFFORTS = ReasoningEffort.options;

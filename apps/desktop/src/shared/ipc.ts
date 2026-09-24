@@ -53,6 +53,10 @@ export const channels = {
   'threads.stop': z.object({ id }),
   'threads.archive': z.object({ id }),
   'threads.diff': z.object({ id }),
+  'services.logs': z.object({ id, lines: z.number().int().min(1).max(2000).optional() }),
+  'services.start': z.object({ id }),
+  'services.stop': z.object({ id }),
+  'services.restart': z.object({ id }),
   'threads.files': z.object({ id, path: z.string().max(4096).optional() }),
   'threads.file': z.object({ id, path: relPath }),
 

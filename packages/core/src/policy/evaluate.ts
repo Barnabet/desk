@@ -8,7 +8,7 @@ export type PolicyDecision = {
   reason: string;
 };
 
-const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly', 'skill_run']);
+const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly', 'skill_run', 'service_start']);
 
 export function globToRegExp(glob: string): RegExp {
   const body = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
@@ -52,7 +52,8 @@ export function evaluatePolicy(
     subject = {};
   }
 
-  const rule = rules.find((r) => ruleMatches(r, tool.name, subject));
+  const names = [tool.name, ...(tool.gate.alsoMatches ?? [])];
+  const rule = rules.find((r) => names.some((n) => ruleMatches(r, n, subject)));
   if (rule) {
     return {
       action: rule.action,

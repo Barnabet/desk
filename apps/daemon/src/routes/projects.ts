@@ -8,6 +8,7 @@ import {
   lastProjectSeq,
   listApprovals,
   listProjects,
+  listServices,
   listSources,
   listThreads,
   NotFoundError,
@@ -45,6 +46,7 @@ export function projectOverview(db: Db, id: string) {
     plan: getPlan(db, id) ?? null,
     threads: listThreads(db, id).filter((t) => !t.archived_at),
     approvals: listApprovals(db, id, 'pending'),
+    services: listServices(db, id),
     last_seq: lastProjectSeq(db, id),
   };
 }

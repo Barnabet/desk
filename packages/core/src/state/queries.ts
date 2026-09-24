@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, max, sql } from 'drizzle-orm';
 import { resolveSettings, type EventOf, type EventType, type StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
-import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
+import { agents, approvals, events, projects, services, sources, usageTotals } from '../db/schema';
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type AgentRow = typeof agents.$inferSelect;
@@ -9,6 +9,7 @@ export type UsageRow = typeof usageTotals.$inferSelect;
 export type ApprovalRow = typeof approvals.$inferSelect;
 export type SourceRow = typeof sources.$inferSelect;
 export type ApprovalStatus = ApprovalRow['status'];
+export type ServiceRow = typeof services.$inferSelect;
 
 /** Stored settings with defaults filled in, so projects saved before a setting existed read it as its default. */
 const withSettings = (row: ProjectRow): ProjectRow => ({ ...row, settings: resolveSettings(row.settings) });
@@ -52,6 +53,17 @@ export const listThreads = (db: Db, projectId: string, status?: AgentRow['status
 
 export const listSources = (db: Db, projectId: string): SourceRow[] =>
   db.select().from(sources).where(eq(sources.project_id, projectId)).orderBy(asc(sources.created_at), asc(sources.id)).all();
+
+export const listServices = (db: Db, projectId: string): ServiceRow[] =>
+  db.select().from(services).where(eq(services.project_id, projectId)).orderBy(asc(services.name)).all();
+
+export const getService = (db: Db, id: string): ServiceRow | undefined => db.select().from(services).where(eq(services.id, id)).get();
+
+export const findService = (db: Db, projectId: string, name: string): ServiceRow | undefined =>
+  db.select().from(services).where(and(eq(services.project_id, projectId), eq(services.name, name))).get();
+
+/** Services still marked running (across projects): for shutdown and crash recovery. */
+export const listRunningServices = (db: Db): ServiceRow[] => db.select().from(services).where(eq(services.status, 'running')).all();
 
 export const getSource = (db: Db, id: string): SourceRow | undefined => db.select().from(sources).where(eq(sources.id, id)).get();
 

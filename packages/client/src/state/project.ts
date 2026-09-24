@@ -1,5 +1,5 @@
 import { clip, summarizeToolArgs, type PlanItem, type StoredEvent } from '@desk/protocol';
-import type { AgentRow, ApprovalRow, ProjectOverview, ProjectRow, SourceRow } from '../types';
+import type { AgentRow, ApprovalRow, ProjectOverview, ProjectRow, ServiceRow, SourceRow } from '../types';
 
 /** A thread (or Desk) with live details that are not columns: current tool activity, status reason, fallback model. */
 export type ThreadView = AgentRow & {
@@ -18,6 +18,8 @@ export type ProjectState = {
   threads: ThreadView[];
   /** Pending approvals only. */
   approvals: ApprovalRow[];
+  /** Project services, sorted by name. */
+  services: ServiceRow[];
   lastSeq: number;
 };
 
@@ -31,11 +33,20 @@ export function projectFromOverview(o: ProjectOverview): ProjectState {
     plan: o.plan?.items ?? [],
     threads: o.threads.map(view),
     approvals: o.approvals,
+    services: o.services ?? [],
     lastSeq: o.last_seq,
   };
 }
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
+
+function updateService(s: ProjectState, id: string, fn: (x: ServiceRow) => ServiceRow): ProjectState {
+  const i = s.services.findIndex((x) => x.id === id);
+  if (i < 0) return s;
+  const services = s.services.slice();
+  services[i] = fn(services[i]!);
+  return { ...s, services };
+}
 
 function updateAgent(s: ProjectState, id: string | null, fn: (a: ThreadView) => ThreadView): ProjectState {
   if (!id) return s;
@@ -141,6 +152,20 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
       };
     case 'approval.resolved':
       return { ...s, approvals: s.approvals.filter((a) => a.id !== e.payload.approval_id) };
+    case 'service.started': {
+      const p = e.payload;
+      const run = { command: p.command, cwd: p.cwd, agent_id: p.workspace_agent_id, status: 'running' as const, pid: p.pid, exit_code: null, exit_signal: null, stop_reason: null, url: null, started_by: p.by, started_at: e.ts, ended_at: null };
+      const rest = s.services.filter((x) => x.id !== p.service_id);
+      const prior = s.services.find((x) => x.id === p.service_id);
+      const row: ServiceRow = { ...(prior ?? { id: p.service_id, project_id: e.project_id, name: p.name }), ...run };
+      return { ...s, services: [...rest, row].sort((a, b) => a.name.localeCompare(b.name)) };
+    }
+    case 'service.url':
+      return updateService(s, e.payload.service_id, (x) => ({ ...x, url: e.payload.url }));
+    case 'service.exited':
+      return updateService(s, e.payload.service_id, (x) => ({ ...x, status: 'exited', exit_code: e.payload.code, exit_signal: e.payload.signal, ended_at: e.ts }));
+    case 'service.stopped':
+      return updateService(s, e.payload.service_id, (x) => ({ ...x, status: 'stopped', stop_reason: e.payload.reason, ended_at: e.ts }));
     default:
       return s;
   }

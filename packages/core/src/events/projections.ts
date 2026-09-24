@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, approvals, artifacts, attentionDismissals, memory, plans, projects, sources, usageTotals } from '../db/schema';
+import { agents, approvals, artifacts, attentionDismissals, memory, plans, projects, services, sources, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -160,6 +160,27 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
           },
         })
         .run();
+      return;
+    case 'service.started': {
+      const p = ev.payload;
+      const run = { command: p.command, cwd: p.cwd, agent_id: p.workspace_agent_id, status: 'running' as const, pid: p.pid, exit_code: null, exit_signal: null, stop_reason: null, url: null, started_by: p.by, started_at: ev.ts, ended_at: null };
+      tx.insert(services)
+        .values({ id: p.service_id, project_id: ev.project_id, name: p.name, ...run })
+        .onConflictDoUpdate({ target: services.id, set: run })
+        .run();
+      return;
+    }
+    case 'service.url':
+      tx.update(services).set({ url: ev.payload.url }).where(eq(services.id, ev.payload.service_id)).run();
+      return;
+    case 'service.exited':
+      tx.update(services)
+        .set({ status: 'exited', exit_code: ev.payload.code, exit_signal: ev.payload.signal, ended_at: ev.ts })
+        .where(eq(services.id, ev.payload.service_id))
+        .run();
+      return;
+    case 'service.stopped':
+      tx.update(services).set({ status: 'stopped', stop_reason: ev.payload.reason, ended_at: ev.ts }).where(eq(services.id, ev.payload.service_id)).run();
       return;
     case 'attention.dismissed':
       tx.insert(attentionDismissals).values({ item_id: ev.payload.item_id, project_id: ev.project_id, dismissed_at: ev.ts }).onConflictDoNothing().run();

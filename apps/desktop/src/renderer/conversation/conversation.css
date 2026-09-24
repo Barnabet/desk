@@ -588,7 +588,14 @@
   align-items: center;
   gap: 10px;
 }
+.conv-side {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .plan-panel {
+  flex: 1 1 auto;
   margin-top: 16px;
   margin-bottom: 0;
   min-height: 0;
@@ -733,6 +740,108 @@
   font-size: 12.5px;
 }
 
+/* Services: under the plan, natural height up to 40% of the column. */
+.services-card {
+  flex: 0 1 auto;
+  max-height: 40%;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.services-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.services-head h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 500;
+}
+.services-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.service {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+}
+.service-dot {
+  align-self: start;
+  margin-top: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.service-run .service-dot {
+  background: var(--run);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 20%, transparent);
+}
+.service-fail .service-dot {
+  background: var(--accent);
+}
+.service-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.service-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.service-port {
+  margin-left: 6px;
+  color: var(--muted);
+}
+.service-sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.service-fail .service-sub {
+  color: var(--accent);
+}
+.service-actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-left: -10px;
+}
+.service-command {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.service-log {
+  margin: 0;
+  height: min(60vh, 560px);
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1279px) {
   .conv-body {
     grid-template-columns: minmax(0, 1fr);
@@ -749,10 +858,10 @@
   .plan-toggle {
     display: inline-flex;
   }
-  .plan-panel {
+  .conv-side {
     display: none;
   }
-  .plan-open .plan-panel {
+  .plan-open .conv-side {
     display: flex;
     position: absolute;
     right: 24px;

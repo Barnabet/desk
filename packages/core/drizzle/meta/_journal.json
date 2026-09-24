@@ -15,6 +15,13 @@
       "when": 1790271112197,
       "tag": "0001_reasoning_effort",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790275991773,
+      "tag": "0002_services",
+      "breakpoints": true
     }
   ]
 }

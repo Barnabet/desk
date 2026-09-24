@@ -1,7 +1,7 @@
-import type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, SkillDetail, SkillSummary, SourceRow, UsageRow } from '@desk/core';
+import type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, ServiceRow, SkillDetail, SkillSummary, SourceRow, UsageRow } from '@desk/core';
 import type { StoredEvent } from '@desk/protocol';
 
-export type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, SkillDetail, SkillSummary, SourceRow, UsageRow };
+export type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, ServiceRow, SkillDetail, SkillSummary, SourceRow, UsageRow };
 
 /** Contents of `<dataDir>/daemon.json`. */
 export type DaemonInfo = { port: number; token: string; pid: number; version: string; started_at?: string };
@@ -16,6 +16,8 @@ export type ProjectOverview = {
   plan: PlanRow | null;
   threads: AgentRow[];
   approvals: ApprovalRow[];
+  /** Project services (older daemons omit it). */
+  services?: ServiceRow[];
   last_seq: number;
 };
 

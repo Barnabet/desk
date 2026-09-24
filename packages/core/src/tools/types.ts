@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, ReasoningEffort, SkillScope, ToolResultStatus } from '@desk/protocol';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
+import type { ServiceRow } from '../state/queries';
 import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
 
@@ -50,6 +51,11 @@ export interface RuntimeServices {
    * agent whose runtime is ready. `blocked` explains why `only`'s runtime cannot be used yet.
    */
   skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null };
+  /** Starts (or restarts, under an existing name) a project service in a thread's workspace. `by` = `user` or `agent:<id>`. */
+  startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId: string; by: string }): Promise<ServiceRow>;
+  stopService(serviceId: string, by: string): Promise<ServiceRow>;
+  restartService(serviceId: string, by: string): Promise<ServiceRow>;
+  serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean };
 }
 
 export type ToolYield = { status: AgentStatus; reason?: string };
@@ -66,6 +72,8 @@ export type ToolGate<I = any> = {
   subject: (input: I, gctx: GateContext) => PolicySubject;
   /** Decision when no rule matches: `ask` for outward-facing tools, `auto` for sandboxed shell. */
   unmatched: 'ask' | 'auto';
+  /** Rules written for these tools apply too (a new tool inherits saved policies, e.g. service_start ← bash_background). */
+  alsoMatches?: string[];
 };
 
 export type Tool<I = any> = {
