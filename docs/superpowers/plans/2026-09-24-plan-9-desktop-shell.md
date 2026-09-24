@@ -1467,7 +1467,7 @@ export class DaemonManager {
 - [ ] **Step 1: Write the failing test** — `apps/desktop/src/main/daemon.test.ts`:
 
 ```ts
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1481,6 +1481,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 function manager(o: Partial<DaemonManagerOptions> = {}) {
   const calls: string[][] = [];
   const dataDir = join(dir, 'data');
+  mkdirSync(dataDir, { recursive: true });
   const up = (pid = 42) => writeFileSync(join(dataDir, 'daemon.json'), JSON.stringify({ port: 1234, token: 't', pid, version: '1.0.0' }));
   const down = () => rmSync(join(dataDir, 'daemon.json'), { force: true });
   let version = '1.0.0';
