@@ -9,6 +9,7 @@ import { MapScreen } from './screens/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
 import { startGlobalSync } from './state/global';
+import { startSessionRouting } from './state/session';
 
 function Screen({ route }: { route: Route }) {
   switch (route.name) {
@@ -30,6 +31,7 @@ function Screen({ route }: { route: Route }) {
 export function App() {
   const route = useRoute();
   useEffect(() => startGlobalSync(), []);
+  useEffect(() => startSessionRouting(), []);
   useEffect(() => onPush<string>('desk:navigate', (r) => navigate(r)), []);
   useEffect(() => {
     if (!isOnboarded() && route.name !== 'onboarding') navigate({ name: 'onboarding' });
