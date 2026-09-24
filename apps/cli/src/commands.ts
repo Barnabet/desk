@@ -3,13 +3,20 @@ import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
-import type { StreamServerMessage } from '@desk/protocol';
+import type { CatalogItem, CatalogReview, StreamServerMessage } from '@desk/protocol';
 import { runChat } from './chat';
 import { ApiError, clientFromDataDir, DeskClient, platformDataDir, readDaemonInfo } from './client';
 import { createRenderer } from './format';
 import { install, isInstalled, plistFor, uninstall } from './launchd';
 
-export type CliIO = { out(s: string): void; err(s: string): void; dataDir?: string; env?: NodeJS.ProcessEnv };
+export type CliIO = {
+  out(s: string): void;
+  err(s: string): void;
+  dataDir?: string;
+  env?: NodeJS.ProcessEnv;
+  /** Asks a yes/no question on a terminal; absent when there is none (then --yes is required). */
+  confirm?(question: string): Promise<boolean>;
+};
 
 type Project = { id: string; name: string; goal: string; settings: Record<string, unknown>; archived_at: string | null };
 
@@ -19,6 +26,47 @@ const FIELDS = new Set(['name', 'goal', 'instructions']);
 
 const repoRoot = () => fileURLToPath(new URL('../../..', import.meta.url));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const CATEGORY_TITLES: Array<[CatalogItem['category'], string]> = [
+  ['research', 'Research'],
+  ['documents', 'Documents & data'],
+  ['writing', 'Writing & diagrams'],
+  ['planning', 'Planning'],
+  ['code', 'Code'],
+];
+const CATALOG_STATE: Record<CatalogItem['installs'][number]['state'], string> = {
+  installed: 'installed',
+  update_available: 'update available',
+  modified: 'installed, edited since',
+  name_taken: 'name taken by another skill',
+  not_installed: 'not installed',
+};
+const RUNTIME_STATE = { none: '', preparing: 'setting up', ready: 'ready', failed: 'setup failed' } as const;
+
+function runtimeWords(e: CatalogReview['entry']): string {
+  const parts = [e.runtime.python ? `Python ${e.runtime.python.version}` : null, e.runtime.node ? 'Node' : null, e.runtime.extras?.includes('playwright-chromium') ? 'Chromium' : null].filter(Boolean);
+  return parts.length ? parts.join(' + ') : 'nothing';
+}
+
+const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
+/** A catalog review as text: source and pin, licence, what Desk sets up, caveats, warnings and every file. */
+export function renderReview(r: CatalogReview): string {
+  const e = r.entry;
+  const packages = [...(e.runtime.python?.packages ?? []), ...(e.runtime.node?.lock ?? []).filter((l) => l.path === `node_modules/${l.name}`).map((l) => `${l.name}@${l.version}`)];
+  const lines = [
+    `${e.title} (${e.id}) — ${e.license}`,
+    e.summary,
+    '',
+    `Source:   ${r.source_url ?? 'Desk (first-party, shipped with the app)'}`,
+    `Pinned:   ${r.files.length} files, ${kb(e.bytes)}, ${e.digest.slice(0, 19)}…`,
+    `Sets up:  ${runtimeWords(e)}${packages.length ? ` (${packages.join(', ')})` : ''}`,
+  ];
+  if (e.caveats.length) lines.push('', 'Good to know:', ...e.caveats.map((c) => `  - ${c}`));
+  if (r.warnings.length) lines.push('', `Worth a look (${r.warnings.length}):`, ...r.warnings.map((w) => `  - ${w.file}:${w.line}  ${w.kind}  ${w.excerpt}`));
+  lines.push('', 'Files:', ...r.files.map((f) => `  ${f.path}  ${kb(f.size)}${f.script ? '  script' : ''}`));
+  return lines.join('\n');
+}
 
 export function defaultDataDir(env: NodeJS.ProcessEnv = process.env): string {
   return platformDataDir(env);
@@ -395,6 +443,67 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     const r = await c.post(`${await skillsBase(c, opts.project)}/${name}/restore`, { version: Number(version) });
     say(`Restored ${name} v${version} as v${r.version}`);
   });
+  // ── catalog ────────────────────────────────────────────────────────
+  const catalogState = (item: CatalogItem, projectNames: Map<string, string>) => {
+    const global = item.installs.find((i) => i.scope === 'global');
+    const words: string[] = [];
+    if (global) words.push(CATALOG_STATE[global.state] + (global.runtime === 'none' || global.state === 'name_taken' ? '' : ` · ${RUNTIME_STATE[global.runtime]}`));
+    const inProjects = item.installs.filter((i) => i.scope === 'project' && i.state !== 'name_taken').map((i) => projectNames.get(i.project_id!) ?? i.project_id!);
+    if (inProjects.length) words.push(`in ${inProjects.join(', ')}`);
+    return words.join('; ');
+  };
+  const catalogCmd = program
+    .command('catalog')
+    .description('Browse and install skills from the catalog')
+    .action(async () => {
+      const c = client();
+      const [items, projects] = await Promise.all([c.catalog.list(), c.get<Project[]>('/projects')]);
+      const names = new Map(projects.map((p) => [p.id, p.name]));
+      const lines: string[] = [];
+      for (const [category, title] of CATEGORY_TITLES) {
+        const inBay = items.filter((i) => i.category === category);
+        if (!inBay.length) continue;
+        lines.push(title);
+        for (const i of inBay) {
+          const state = catalogState(i, names);
+          lines.push(`  ${i.id.padEnd(32)} ${i.summary.length > 72 ? `${i.summary.slice(0, 71)}…` : i.summary}${state ? `  [${state}]` : ''}`);
+        }
+        lines.push('');
+      }
+      say(`${lines.join('\n').trimEnd()}\n\nReview one with: desk catalog show <id>`);
+    });
+  catalogCmd
+    .command('show <id>')
+    .description('Fetch a catalog skill at its pinned version and print what to review before installing')
+    .action(async (id: string) => {
+      say(renderReview(await client().catalog.prepare(id)));
+    });
+  catalogCmd
+    .command('install <id>')
+    .description('Install a catalog skill (global unless --project is given), after showing its review')
+    .option('-p, --project <project>')
+    .option('-y, --yes', 'install without asking')
+    .option('--replace', 'replace local edits to a catalog skill')
+    .action(async (id: string, opts: { project?: string; yes?: boolean; replace?: boolean }) => {
+      const c = client();
+      const project = opts.project ? await resolveProject(c, opts.project) : null;
+      const review = await c.catalog.prepare(id);
+      say(renderReview(review));
+      if (!opts.yes) {
+        if (!io.confirm) throw new Error('Pass --yes to install without a prompt.');
+        if (!(await io.confirm(`Install ${id} ${project ? `in ${project.name}` : 'for every project'}?`))) {
+          say('Not installed.');
+          return;
+        }
+      }
+      const r = await c.catalog.install(id, { scope: project ? 'project' : 'global', ...(project ? { project_id: project.id } : {}), ...(opts.replace ? { replace_modified: true } : {}) });
+      const where = project ? `in ${project.name}` : 'globally';
+      say(
+        `Installed ${r.skill.name} ${where} (v${r.skill.version}).` +
+          (r.runtime === 'preparing' ? ` Desk is setting up ${runtimeWords(review.entry)}; see progress with: desk catalog` : r.runtime === 'failed' ? ' Its runtime setup failed; see: desk catalog' : ''),
+      );
+    });
+
   program.command('usage <project>').action(async (ref: string) => {
     const c = client();
     const p = await resolveProject(c, ref);

@@ -72,6 +72,8 @@ export const CatalogEntry = z.object({
   digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   files: z.number().int().min(1),
   bytes: z.number().int().min(1),
+  /** How many of the files are scripts (shown on the card; the review lists them). */
+  scripts: z.number().int().min(0).default(0),
   runtime: CatalogRuntime.default({}),
   /** Command run by `catalog:check` inside the sandbox, from the skill directory. */
   smoke: z.array(z.string()).optional(),

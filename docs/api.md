@@ -115,11 +115,13 @@ Reviewed skills pinned to a commit and a content digest, installed only at the u
 |---|---|---|---|
 | GET | `/v1/catalog` | | `CatalogItem[]`: the entry (`id`, `title`, `category`, `summary`, `license`, `homepage`, `source`, `digest`, `files`, `bytes`, `runtime`, `caveats`) plus `installs[]`. Each install is `{ scope, project_id, state, sha, runtime, runtime_reason }`, where `state` is `installed`, `update_available`, `modified` (edited after install) or `name_taken` (a same-named skill that isn't from the catalog). Scopes with nothing of that name are omitted |
 | POST | `/v1/catalog/:id/prepare` | | Downloads the pinned archive (GitHub codeload) or reads the builtin skill, verifies the digest, and stages it. Returns `CatalogReview { entry, source_url, files[{path, size, script}], skill_md, license_text, warnings[{file, line, kind, excerpt}] }`. A digest mismatch is a 400 and nothing is staged |
+| GET | `/v1/catalog/:id/files/<path>` | | Raw bytes of one staged file, so the user can read it before installing. The skill is staged again if needed; paths outside the skill are refused |
 | POST | `/v1/catalog/:id/install` | `{ scope?: 'global'\|'project', project_id?, replace_modified? }` | Installs through the skill store with origin `catalog:<id>@<sha>`, and returns `{ skill, state, runtime }` (201). A 409 means `name_taken`, or `modified` without `replace_modified: true` |
 
 **Runtimes.** Entries with `runtime.python`, `runtime.node` or `runtime.extras` get a Desk-managed environment under `<data>/runtimes/<scope>/<project|_global>/<name>`, built in the background after install.
 - Python comes from uv, with prebuilt wheels only and exact pins.
 - Node packages come from the lock, checked against their integrity hashes; install scripts never run.
+- The environment's `bin/` also has stand-ins for `uv run`, `uv pip install`, `pip install`, `npm install` and `npx <bin>`, which run from the environment or report that the packages are already installed. Once the runtime is ready, `skill_read` and `skill_activate` show a `Runtime:` line naming the pinned packages.
 - State is stored as `skill.runtime_changed { scope, name, state: preparing|ready|failed|removed, reason }`, and progress streams as the ephemeral `skill.runtime_progress { scope, name, step, done?, total? }` (`agent_id: null`).
 - `skill_run` refuses a skill whose runtime is `preparing` or `failed`. When the runtime is ready, `bash` and `skill_run` put its `bin` directories first on PATH.
 

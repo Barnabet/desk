@@ -36,6 +36,7 @@ const entryFor = (sha: string, files: typeof v1): CatalogEntry => ({
   digest: treeDigest(files),
   files: files.length,
   bytes: 100,
+  scripts: 1,
   runtime: {},
   caveats: [],
 });
@@ -180,6 +181,18 @@ describe('CatalogService', () => {
 
     bodies.set(raw('skills/paper-lookup/scripts/lookup.py'), Buffer.from('print("tampered")\n'));
     await expect(c.prepare('paper-lookup')).rejects.toThrow(/does not match the catalog/);
+  });
+
+  it('serves staged files for review, confined to the skill, restaging after an install', async () => {
+    const c = service([entryFor(SHA1, v1)]);
+    await c.prepare('paper-lookup');
+    expect((await c.file('paper-lookup', 'scripts/lookup.py')).toString()).toBe('print("v1")\n');
+    await expect(c.file('paper-lookup', '../../../etc/passwd')).rejects.toThrow(/inside the skill/);
+    await expect(c.file('paper-lookup', 'nope.txt')).rejects.toThrow(/has no file nope\.txt/);
+    await c.install('paper-lookup');
+    fetched = [];
+    expect((await c.file('paper-lookup', 'SKILL.md')).toString()).toContain('name: paper-lookup');
+    expect(fetched).toEqual([url(SHA1)]);
   });
 
   it('reports unknown entries as not found', async () => {

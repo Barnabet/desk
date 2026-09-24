@@ -60,6 +60,7 @@ const entry = (runtime: CatalogEntry['runtime']): CatalogEntry => ({
   digest: `sha256:${'0'.repeat(64)}`,
   files: 1,
   bytes: 1,
+  scripts: 0,
   runtime,
   caveats: [],
 });

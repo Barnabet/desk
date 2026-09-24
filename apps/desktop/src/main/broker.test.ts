@@ -103,6 +103,20 @@ describe('Broker', () => {
     expect(sent.filter(([id]) => id === 9)).toHaveLength(forwarded.length);
   });
 
+  it('tracks skill runtime progress for every window and bumps a counter when a runtime changes state', async () => {
+    const { stream, store } = await setup();
+    await broker!.start();
+    stream().onEphemeral?.({ type: 'skill.runtime_progress', project_id: '_global', agent_id: null, payload: { scope: 'global', name: 'paper-lookup', step: 'Installing 1 Python package' } });
+    stream().onEphemeral?.({ type: 'skill.runtime_progress', project_id: 'p1', agent_id: null, payload: { scope: 'project', name: 'pretty-mermaid', step: 'Installing elkjs', done: 3, total: 16 } });
+    expect(broker!.snapshot().runtimes.progress).toEqual({
+      'global:paper-lookup': { step: 'Installing 1 Python package' },
+      'project:p1:pretty-mermaid': { step: 'Installing elkjs', done: 3, total: 16 },
+    });
+    const [ready] = store.append({ project_id: '_global', agent_id: null, type: 'skill.runtime_changed', payload: { scope: 'global', name: 'paper-lookup', state: 'ready', reason: null } });
+    stream().onEvent(ready as StoredEvent);
+    expect(broker!.snapshot().runtimes).toEqual({ progress: { 'project:p1:pretty-mermaid': { step: 'Installing elkjs', done: 3, total: 16 } }, seq: 1 });
+  });
+
   it('goes offline without daemon.json, polls, and reconnects when it appears', async () => {
     let available = false;
     const { runtime } = await setup();

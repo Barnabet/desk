@@ -10,7 +10,14 @@ export type GlobalState = {
   overview: ProjectSummary[];
   attention: AttentionItem[];
   system: SystemState;
+  /** Skill runtimes being set up (keyed like the Skills route: global:<name> or project:<id>:<name>), and a counter bumped whenever one changes state. */
+  runtimes: { progress: Record<string, RuntimeProgress>; seq: number };
 };
+
+export type RuntimeProgress = { step: string; done?: number; total?: number };
+
+/** The key the Skills screen uses for a skill. */
+export const runtimeKey = (scope: 'global' | 'project', projectId: string | null | undefined, name: string) => (scope === 'global' ? `global:${name}` : `project:${projectId}:${name}`);
 
 export const initialGlobalState = (): GlobalState => ({
   connection: { status: 'starting' },
@@ -18,4 +25,5 @@ export const initialGlobalState = (): GlobalState => ({
   overview: [],
   attention: [],
   system: { proxy: 'unknown', notices: [], lastSeq: 0 },
+  runtimes: { progress: {}, seq: 0 },
 });

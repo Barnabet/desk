@@ -12,6 +12,11 @@ export function catalogRoutes({ catalog, skillRuntimes }: AppDeps): Hono {
   };
   r.get('/catalog', (c) => c.json(need().list()));
   r.post('/catalog/:id/prepare', async (c) => c.json(await need().prepare(c.req.param('id'))));
+  r.get('/catalog/:id/files/*', async (c) => {
+    const marker = `/catalog/${c.req.param('id')}/files/`;
+    const rel = decodeURIComponent(c.req.path.slice(c.req.path.indexOf(marker) + marker.length));
+    return c.body(new Uint8Array(await need().file(c.req.param('id'), rel)), 200, { 'content-type': 'application/octet-stream' });
+  });
   r.post('/catalog/:id/install', async (c) => {
     const req = await body(c, CatalogInstallRequest);
     return c.json(await need().install(c.req.param('id'), req), 201);

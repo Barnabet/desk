@@ -1,18 +1,23 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { SkillSummary } from '@desk/client';
-import { clip, type ArtifactKind } from '@desk/protocol';
+import { clip, type ArtifactKind, type CatalogItem } from '@desk/protocol';
 import { call } from '../bridge';
 import { GROUP_ORDER, rankPalette, type PaletteItem } from '../palette';
 import { href, navigate } from '../router';
 import { useGlobal } from '../state/global';
 
-type Loaded = { skills: Array<{ key: string; name: string; scope: string; description: string; project: string | null }>; library: Array<{ projectId: string; project: string; path: string; title: string; kind: ArtifactKind }> };
+type Loaded = {
+  skills: Array<{ key: string; name: string; scope: string; description: string; project: string | null }>;
+  library: Array<{ projectId: string; project: string; path: string; title: string; kind: ArtifactKind }>;
+  catalog: CatalogItem[];
+};
 const MAX_MEMORY_PROJECTS = 8;
 
 const GO: PaletteItem[] = [
   { id: 'go:map', group: 'Go to', title: 'Map', detail: 'All projects', route: href({ name: 'map' }) },
   { id: 'go:attention', group: 'Go to', title: 'Needs you', detail: 'Approvals, questions and hand-offs', keywords: 'attention approvals', route: href({ name: 'attention' }) },
   { id: 'go:skills', group: 'Go to', title: 'Skills', route: href({ name: 'skills' }) },
+  { id: 'go:catalog', group: 'Go to', title: 'Skill catalog', detail: 'Install reviewed skills', keywords: 'install add', route: href({ name: 'catalog' }) },
   { id: 'go:system', group: 'Go to', title: 'System', detail: 'deskd, models, usage', keywords: 'settings daemon endpoint', route: href({ name: 'system' }) },
   { id: 'go:new', group: 'Go to', title: 'New project', keywords: 'create', route: href({ name: 'map', newProject: true }) },
 ];
@@ -51,14 +56,15 @@ export function CommandPalette() {
       call('skills.list', {}).catch(() => [] as SkillSummary[]),
       Promise.all(projects.map((p) => call('skills.list', { projectId: p.id }).catch(() => [] as SkillSummary[]))),
       Promise.all(projects.map((p) => call('library.list', { projectId: p.id }).catch(() => []))),
-    ]).then(([global, perProject, libraries]) => {
+      call('catalog.list', {}).catch(() => [] as CatalogItem[]),
+    ]).then(([global, perProject, libraries, catalog]) => {
       if (!live) return;
       const skills: Loaded['skills'] = global.map((s) => ({ key: `global:${s.name}`, name: s.name, scope: 'global', description: s.description, project: null }));
       perProject.forEach((list, i) => {
         for (const s of list) if (s.scope === 'project') skills.push({ key: `project:${projects[i]!.id}:${s.name}`, name: s.name, scope: 'project', description: s.description, project: projects[i]!.name });
       });
       const library = libraries.flatMap((list, i) => list.map((a) => ({ projectId: projects[i]!.id, project: projects[i]!.name, path: a.path, title: a.title, kind: a.kind })));
-      setLoaded({ skills, library });
+      setLoaded({ skills, library, catalog });
     });
     return () => {
       live = false;
@@ -104,6 +110,12 @@ export function CommandPalette() {
         all.push({ id: `thread:${t.id}`, group: 'Threads', title: t.title ?? 'Untitled thread', detail: `${p.project.name} · ${t.status}`, route: href({ name: 'project', id: p.project.id, tab: 'threads', threadId: t.id }) });
     }
     for (const s of loaded?.skills ?? []) all.push({ id: `skill:${s.key}`, group: 'Skills', title: s.name, detail: `${s.project ?? 'Global'} · ${s.description}`, route: href({ name: 'skills', skill: s.key }) });
+    for (const c of loaded?.catalog ?? []) {
+      const global = c.installs.find((i) => i.scope === 'global');
+      if (global?.state === 'installed' || global?.state === 'name_taken') continue;
+      const verb = global?.state === 'update_available' ? 'Update' : 'Install';
+      all.push({ id: `catalog:${c.id}`, group: 'Catalog', title: `${verb} ${c.title}`, detail: c.summary, keywords: `${c.id} ${c.category}`, route: href({ name: 'catalog', review: c.id }) });
+    }
     for (const a of loaded?.library ?? [])
       all.push({ id: `lib:${a.projectId}:${a.path}`, group: 'Library', title: a.title, detail: `${a.project} · ${a.path}`, keywords: a.kind, route: href({ name: 'project', id: a.projectId, tab: 'library', file: a.path }) });
     return [...all, ...memory];

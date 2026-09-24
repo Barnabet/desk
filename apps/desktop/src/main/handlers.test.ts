@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DaemonNotRunning, DeskClient } from '@desk/client';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { CatalogService, SkillRuntimes, treeDigest } from '@desk/core';
 import { createHarness, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
 import { channels } from '../shared/ipc';
@@ -14,10 +17,25 @@ afterEach(async () => {
   await h?.cleanup();
 });
 
-async function setup(overrides: Partial<HandlerContext> = {}) {
+/** A catalog with one builtin skill written into the harness directory. */
+function builtinCatalog(runtime: ReturnType<typeof newRuntime>) {
+  const md = Buffer.from('---\nname: pre-mortem\ndescription: Imagine the plan failed.\n---\n\nList the risks.\n');
+  mkdirSync(join(h.dir, 'builtin', 'pre-mortem'), { recursive: true });
+  writeFileSync(join(h.dir, 'builtin', 'pre-mortem', 'SKILL.md'), md);
+  const skillRuntimes = new SkillRuntimes({ dataDir: h.dir, store: h.store, uv: null, nodeExec: process.execPath, exists: () => true });
+  const entry = {
+    id: 'pre-mortem', title: 'Pre-mortem', category: 'planning' as const, summary: 'Imagine the plan failed.', license: 'MIT', homepage: 'https://example.com',
+    source: { type: 'builtin' as const, path: 'pre-mortem' }, digest: treeDigest([{ path: 'SKILL.md', content: md }]), files: 1, bytes: md.length, scripts: 0, runtime: {}, caveats: [],
+  };
+  const catalog = new CatalogService({ runtime, store: h.store, dataDir: h.dir, builtinRoot: join(h.dir, 'builtin'), runtimes: skillRuntimes, catalog: { version: 1, updated: '2026-09-24', entries: [entry] } });
+  return { catalog, skillRuntimes };
+}
+
+async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = false) {
   h = await createHarness();
   const runtime = newRuntime(h);
-  server = await startServer({ app: createApp({ runtime, store: h.store, models: h.models, token: 't', version: '1.0.0' }), store: h.store, token: 't', port: 0 });
+  const extra = withCatalog ? builtinCatalog(runtime) : {};
+  server = await startServer({ app: createApp({ runtime, store: h.store, models: h.models, token: 't', version: '1.0.0', ...extra }), store: h.store, token: 't', port: 0 });
   const client = new DeskClient({ baseUrl: `http://127.0.0.1:${server.port}`, token: 't' });
   const opened: string[] = [];
   const watched: Array<[number, string, number]> = [];
@@ -53,6 +71,21 @@ describe('IPC dispatch', () => {
     const list = await dispatch('projects.list', {}, ctx);
     expect(list.ok && (list.value as Array<{ name: string }>).map((p) => p.name)).toEqual(['Launch']);
     expect(await dispatch('broker.watch', { projectId: 'p1', afterSeq: 3 }, ctx)).toEqual({ ok: true, value: { ok: true } });
+  });
+
+  it('browses, reviews and installs catalog skills, and reports runtimes', async () => {
+    const { ctx, runtime } = await setup({}, true);
+    const projectId = runtime.createProject({ name: 'Launch', goal: 'g' });
+    expect(await dispatch('catalog.list', {}, ctx)).toMatchObject({ ok: true, value: [{ id: 'pre-mortem', installs: [] }] });
+    expect(await dispatch('catalog.prepare', { id: 'pre-mortem' }, ctx)).toMatchObject({ ok: true, value: { source_url: null, files: [{ path: 'SKILL.md' }] } });
+    const file = await dispatch('catalog.file', { id: 'pre-mortem', path: 'SKILL.md' }, ctx);
+    expect(file.ok && new TextDecoder().decode(file.value as Uint8Array)).toContain('List the risks.');
+    expect(await dispatch('catalog.install', { id: 'pre-mortem', projectId }, ctx)).toMatchObject({ ok: true, value: { skill: { scope: 'project', project_id: projectId }, state: 'installed' } });
+    expect(await dispatch('catalog.install', { id: 'pre-mortem' }, ctx)).toMatchObject({ ok: true, value: { skill: { scope: 'global' } } });
+    expect(await dispatch('system.runtimes', {}, ctx)).toEqual({ ok: true, value: { bytes: 0, envs: [] } });
+    expect(await dispatch('system.runtimesCleanup', {}, ctx)).toEqual({ ok: true, value: { removed: 0, bytes: 0 } });
+    expect(await dispatch('skills.runtimeRetry', { name: 'pre-mortem' }, ctx)).toMatchObject({ ok: true, value: { state: 'none' } });
+    expect(await dispatch('catalog.prepare', { id: '../etc' }, ctx)).toMatchObject({ ok: false });
   });
 
   it('rejects unknown channels and invalid payloads', async () => {

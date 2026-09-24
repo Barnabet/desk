@@ -454,3 +454,327 @@
   cursor: pointer;
   font-size: 12.5px;
 }
+
+/* Catalog */
+.catalog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding-bottom: 24px;
+}
+.catalog-bay-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.catalog-bay-head h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 21px;
+}
+.catalog-cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  box-shadow: none;
+  min-width: 0;
+}
+.catalog-card:hover {
+  box-shadow: var(--card-shadow);
+}
+.catalog-card-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.catalog-card-title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.catalog-card-summary {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.catalog-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.catalog-chips .chip,
+.catalog-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.catalog-runtime {
+  margin: 0;
+}
+.catalog-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.catalog-installed {
+  color: var(--ok);
+  text-decoration: none;
+}
+.catalog-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  min-width: 0;
+}
+.catalog-row-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.catalog-row-open .grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-row-title {
+  flex-shrink: 0;
+  width: 190px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.catalog-row-meta {
+  flex-shrink: 1;
+  max-width: 260px;
+}
+
+/* Runtime line */
+.runtime-line {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.runtime-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: var(--ok);
+}
+.runtime-line.preparing .runtime-dot {
+  background: var(--run);
+  animation: runtime-pulse 1.2s ease-in-out infinite;
+}
+.runtime-line.failed {
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+.runtime-line.failed .runtime-dot {
+  margin-top: 5px;
+  background: var(--accent);
+}
+@keyframes runtime-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runtime-line.preparing .runtime-dot {
+    animation: none;
+  }
+}
+
+/* Skill panel: installed from the catalog */
+.skill-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--ground);
+}
+.skill-catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.skill-catalog-row .grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-node.from-catalog::after {
+  content: '';
+  position: absolute;
+  top: 12%;
+  right: 12%;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--ground);
+}
+
+/* Review sheet */
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.review-summary {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.review-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 6px 12px;
+  font-size: 13px;
+}
+.review-facts div {
+  display: contents;
+}
+.review-facts dt {
+  color: var(--text-min);
+}
+.review-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review-license {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ground);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+.review-caveats {
+  margin: 0;
+  padding: 8px 12px 8px 28px;
+  border-radius: 8px;
+  background: var(--run-pastel);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.review-warnings {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--wait-pastel);
+}
+.review-warnings h3 {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  color: var(--wait-text);
+}
+.review-warnings p {
+  margin: 0 0 6px;
+}
+.review-warnings ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.review-excerpt {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-min);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-files {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
+  height: 380px;
+  flex-shrink: 0;
+}
+.review-files > * {
+  min-height: 0;
+  overflow: auto;
+}
+.review-files .files-entry .chip,
+.review-files .files-entry .muted {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.review-viewer {
+  min-width: 0;
+}
+.review #review-scope {
+  max-width: 360px;
+}
+.review-done {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ground);
+}
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}

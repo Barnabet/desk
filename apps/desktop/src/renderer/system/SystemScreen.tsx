@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { UsageResponse } from '@desk/protocol';
+import type { RuntimesReport, UsageResponse } from '@desk/protocol';
 import type { ChannelOutput } from '../../main/handlers';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EndpointPanel } from '../components/EndpointPanel';
-import { describeError, toastError } from '../components/Toast';
-import { clock, duration } from '../format';
+import { describeError, toast, toastError } from '../components/Toast';
+import { bytes, clock, duration, plural } from '../format';
 import { href } from '../router';
 import { useGlobal } from '../state/global';
 import { tokens } from '../threads/tabs/UsageTab';
@@ -269,6 +269,48 @@ function NotificationsSection() {
   );
 }
 
+/** Skill environments Desk set up for catalog skills: their total size, and removing the ones no skill uses. */
+function RuntimesFacts() {
+  const [report, setReport] = useState<RuntimesReport | null>(null);
+  const [pending, setPending] = useState(false);
+  const load = () =>
+    call('system.runtimes', {})
+      .then(setReport)
+      .catch(() => setReport(null));
+  useEffect(() => void load(), []);
+  if (!report) return null;
+  const orphans = report.envs.filter((e) => e.orphan);
+  const orphanBytes = orphans.reduce((n, e) => n + e.bytes, 0);
+  const cleanup = async () => {
+    setPending(true);
+    try {
+      const r = await call('system.runtimesCleanup', {});
+      toast({ tone: 'info', message: `Removed ${plural(r.removed, 'unused environment')} (${bytes(r.bytes)}).` });
+      await load();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <div>
+      <dt>Skill environments</dt>
+      <dd>
+        {report.envs.length ? `${bytes(report.bytes)} for ${plural(report.envs.length, 'skill')}` : 'None yet'}
+        {orphans.length ? (
+          <>
+            {' · '}
+            <Button size="sm" pending={pending} onClick={() => void cleanup()}>
+              Clean up unused ({bytes(orphanBytes)})
+            </Button>
+          </>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
 function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   useEffect(() => {
@@ -284,6 +326,7 @@ function AboutSection() {
           <dt>Data directory</dt>
           <dd className="mono">{info?.dataDir ?? '…'}</dd>
         </div>
+        <RuntimesFacts />
         <div>
           <dt>App</dt>
           <dd>

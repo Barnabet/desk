@@ -46,6 +46,7 @@ const entry = (digest = treeDigest(files)): CatalogEntry => ({
   digest,
   files: 2,
   bytes: 120,
+  scripts: 0,
   runtime: {},
   caveats: [],
 });
@@ -71,12 +72,12 @@ async function setup(entries: CatalogEntry[]) {
     });
     return { status: res.status, body: (await res.json()) as any };
   };
-  return { api, runtime, host };
+  return { api, app, runtime, host };
 }
 
 describe('catalog API', () => {
   it('lists, prepares (retrying a 429), installs and reports the state', async () => {
-    const { api, host } = await setup([entry()]);
+    const { api, app, host } = await setup([entry()]);
     expect((await api('GET', '/catalog')).body).toMatchObject([{ id: 'fact-checker', installs: [] }]);
 
     const review = await api('POST', '/catalog/fact-checker/prepare');
@@ -84,6 +85,8 @@ describe('catalog API', () => {
     expect(review.body.files.map((f: { path: string }) => f.path)).toEqual(['SKILL.md', 'references/method.md']);
     expect(host.hits).toEqual([`/daymade/claude-code-skills/tar.gz/${SHA}`, `/daymade/claude-code-skills/tar.gz/${SHA}`]);
 
+    const file = await app.request('/v1/catalog/fact-checker/files/references/method.md', { headers: { authorization: 'Bearer t' } });
+    expect([file.status, await file.text()]).toEqual([200, '# Method\n']);
     const installed = await api('POST', '/catalog/fact-checker/install', {});
     expect(installed).toMatchObject({ status: 201, body: { skill: { name: 'fact-checker', scope: 'global', version: 1 }, state: 'installed' } });
     expect((await api('GET', '/catalog')).body[0].installs).toEqual([

@@ -17,7 +17,13 @@ const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: 
 };
 
 /** Global skills in the middle, project skills inside their project, live threads linked to the skills they use. */
-export function SkillsMapView(o: { nodes: SkillNode[]; projects: Array<{ id: string; name: string; tone: MapTone }>; selected: string | null; onSelect(key: string): void }) {
+export function SkillsMapView(o: {
+  nodes: SkillNode[];
+  projects: Array<{ id: string; name: string; tone: MapTone }>;
+  catalogKeys?: Set<string>;
+  selected: string | null;
+  onSelect(key: string): void;
+}) {
   return (
     <MapCanvas label="Skill map">
       {({ width, height }) => {
@@ -59,13 +65,14 @@ export function SkillsMapView(o: { nodes: SkillNode[]; projects: Array<{ id: str
             {l.skills.map((s) => {
               const n = byKey.get(s.key)!;
               const shadowed = n.scope === 'global' && n.shadowedIn.length > 0;
+              const cat = o.catalogKeys?.has(s.key) ?? false;
               return (
                 <button
                   key={s.key}
                   type="button"
-                  className={`skill-node ${n.scope}${shadowed ? ' shadowed' : ''}${n.error ? ' broken' : ''}${o.selected === s.key ? ' selected' : ''}`}
+                  className={`skill-node ${n.scope}${shadowed ? ' shadowed' : ''}${n.error ? ' broken' : ''}${cat ? ' from-catalog' : ''}${o.selected === s.key ? ' selected' : ''}`}
                   style={{ left: s.x, top: s.y, width: s.r * 2, height: s.r * 2 }}
-                  aria-label={`${n.name}, ${n.scope === 'global' ? 'global' : `${n.projectName ?? 'project'} project skill`}, version ${n.version}${shadowed ? ', shadowed' : ''}${n.usedBy.length ? `, used by ${n.usedBy.length}` : ''}`}
+                  aria-label={`${n.name}, ${n.scope === 'global' ? 'global' : `${n.projectName ?? 'project'} project skill`}, version ${n.version}${shadowed ? ', shadowed' : ''}${cat ? ', from the catalog' : ''}${n.usedBy.length ? `, used by ${n.usedBy.length}` : ''}`}
                   aria-pressed={o.selected === s.key}
                   onClick={() => o.onSelect(s.key)}
                 >

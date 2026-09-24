@@ -1,7 +1,7 @@
-export type PaletteGroup = 'Go to' | 'Projects' | 'Threads' | 'Skills' | 'Library' | 'Memory';
+export type PaletteGroup = 'Go to' | 'Projects' | 'Threads' | 'Skills' | 'Catalog' | 'Library' | 'Memory';
 export type PaletteItem = { id: string; group: PaletteGroup; title: string; detail?: string; keywords?: string; route: string };
 
-export const GROUP_ORDER: PaletteGroup[] = ['Go to', 'Projects', 'Threads', 'Skills', 'Library', 'Memory'];
+export const GROUP_ORDER: PaletteGroup[] = ['Go to', 'Projects', 'Threads', 'Skills', 'Catalog', 'Library', 'Memory'];
 const PER_GROUP = 6;
 
 /** 3 for a prefix of the title, 2 for a word start in the title, 1 anywhere in title/detail/keywords, 0 for no match. */

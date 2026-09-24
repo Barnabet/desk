@@ -9,6 +9,8 @@ export type Route =
   | { name: 'map'; newProject?: boolean }
   | { name: 'attention'; item?: string }
   | { name: 'skills'; skill?: string }
+  /** The skill catalog, optionally with one entry's review open. */
+  | { name: 'catalog'; review?: string }
   | { name: 'system' }
   | { name: 'project'; id: string; tab: ProjectTab; threadId?: string; file?: string; q?: string };
 
@@ -28,6 +30,7 @@ export function parseRoute(hash: string): Route {
       return item ? { name: 'attention', item } : { name: 'attention' };
     }
     case 'skills':
+      if (parts[1] === 'catalog') return parts[2] ? { name: 'catalog', review: parts[2] } : { name: 'catalog' };
       return parts[1] ? { name: 'skills', skill: parts[1] } : { name: 'skills' };
     case 'system':
       return { name: 'system' };
@@ -58,6 +61,8 @@ export function href(r: Route): string {
       return r.item ? `#/attention?item=${enc(r.item)}` : '#/attention';
     case 'skills':
       return r.skill ? `#/skills/${enc(r.skill)}` : '#/skills';
+    case 'catalog':
+      return r.review ? `#/skills/catalog/${enc(r.review)}` : '#/skills/catalog';
     case 'system':
       return '#/system';
     case 'project':

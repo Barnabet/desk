@@ -68,5 +68,9 @@ export function whoLabel(origin: string | null, titles: Map<string, string>): st
   if (!origin) return 'Unknown';
   if (origin === 'user') return 'You';
   if (origin.startsWith('agent:')) return titles.get(origin.slice(6)) ?? 'Desk';
+  if (origin.startsWith('catalog:')) {
+    const marker = origin.slice(origin.lastIndexOf('@') + 1);
+    return /^[0-9a-f]{40}$/.test(marker) ? `Catalog · ${marker.slice(0, 7)}` : 'Catalog';
+  }
   return origin;
 }

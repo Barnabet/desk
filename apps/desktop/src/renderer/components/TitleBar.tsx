@@ -39,7 +39,7 @@ export function TitleBar({ route }: { route: Route }) {
           </a>
         ) : null}
         <ProjectSwitcher currentId={project ? project.project.id : null} />
-        <a href={href({ name: 'skills' })} aria-current={route.name === 'skills' ? 'page' : undefined}>
+        <a href={href({ name: 'skills' })} aria-current={route.name === 'skills' || route.name === 'catalog' ? 'page' : undefined}>
           Skills
         </a>
         <a href={href({ name: 'system' })} aria-current={route.name === 'system' ? 'page' : undefined}>

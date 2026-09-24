@@ -23,6 +23,7 @@ import {
   EventStore,
   extractSubtree,
   httpFetch,
+  isScript,
   ModelRegistry,
   openDb,
   parseSkillMd,
@@ -83,6 +84,7 @@ async function pin(): Promise<void> {
       e.digest = treeDigest(files);
       e.files = files.length;
       e.bytes = files.reduce((n, f) => n + f.content.length, 0);
+      e.scripts = files.filter((f) => isScript(f.path, f.mode, f.content)).length;
       console.log(`pinned ${e.id}: ${e.source.type === 'github' ? `${e.source.repo}@${e.source.sha.slice(0, 7)}${e.source.files ? ' (files mode)' : ''}` : 'builtin'} · ${e.files} files · ${e.bytes} bytes`);
     } catch (err) {
       console.error(`FAILED ${e.id}: ${(err as Error).message}`);

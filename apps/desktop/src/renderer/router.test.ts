@@ -11,6 +11,8 @@ describe('router', () => {
       { name: 'attention', item: 'approval:a/1' },
       { name: 'skills' },
       { name: 'skills', skill: 'brand-voice' },
+      { name: 'catalog' },
+      { name: 'catalog', review: 'paper-lookup' },
       { name: 'system' },
       { name: 'tray' },
       { name: 'project', id: 'p1', tab: 'conversation' },

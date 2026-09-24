@@ -108,4 +108,24 @@ describe('SystemScreen', () => {
     fireEvent.click(within(data).getByRole('button', { name: 'Reveal logs' }));
     await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'app.revealLogs')).toBe(true));
   });
+
+  it('reports skill environments and cleans up the unused ones', async () => {
+    let envs = [
+      { scope: 'global', project_id: null, name: 'paper-lookup', bytes: 60 * 1024 * 1024, orphan: false },
+      { scope: 'global', project_id: null, name: 'old-skill', bytes: 40 * 1024 * 1024, orphan: true },
+    ];
+    const bridge = setup({
+      'system.runtimes': () => ({ bytes: envs.reduce((n, e) => n + e.bytes, 0), envs }),
+      'system.runtimesCleanup': () => {
+        envs = envs.filter((e) => !e.orphan);
+        return { removed: 1, bytes: 40 * 1024 * 1024 };
+      },
+    });
+    const data = screen.getByRole('region', { name: 'Data' });
+    expect(await within(data).findByText(/100\.0 MB for 2 skills/)).toBeTruthy();
+    fireEvent.click(within(data).getByRole('button', { name: 'Clean up unused (40.0 MB)' }));
+    expect(await within(data).findByText(/60\.0 MB for 1 skill$/)).toBeTruthy();
+    expect(within(data).queryByRole('button', { name: /Clean up/ })).toBeNull();
+    expect(bridge.calls.filter((c) => c.channel === 'system.runtimesCleanup')).toHaveLength(1);
+  });
 });

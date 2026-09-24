@@ -223,6 +223,8 @@ export class DeskClient {
   catalog = {
     list: () => this.get<CatalogItem[]>('/catalog'),
     prepare: (id: string) => this.request<CatalogReview>('POST', `/catalog/${enc(id)}/prepare`),
+    /** One file of an entry as staged for review. */
+    file: (id: string, path: string) => this.raw(`/catalog/${enc(id)}/files/${encPath(path)}`),
     install: (id: string, req: CatalogInstallRequest = {}) => this.post<CatalogInstallResult>(`/catalog/${enc(id)}/install`, req),
     /** Rebuilds a catalog skill's runtime (after a failure). */
     retryRuntime: (s: SkillScopeRef, name: string) => this.request<{ state: RuntimeState; reason: string | null }>('POST', `${this.skillBase(s)}/${enc(name)}/runtime/retry`),

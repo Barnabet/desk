@@ -2308,3 +2308,61 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
+
+### Task 5 (listing): Desktop catalog, review sheet, runtime line, ⌘K, System → Data; CLI
+
+**Files:**
+- Create:
+  - `apps/desktop/src/renderer/skills/catalog/{data.ts, CatalogView.tsx, ReviewSheet.tsx, RuntimeLine.tsx, Catalog.test.tsx}`
+  - `apps/desktop/src/renderer/test/catalog.ts`
+  - `apps/desktop/e2e/catalog.e2e.test.ts`
+  - `apps/cli/src/catalog.test.ts`
+- Modify:
+  - Desktop main and shared: `shared/ipc.ts`, `main/handlers.ts` (+ test), `shared/state.ts`, `main/broker.ts` (+ test)
+  - Desktop renderer: `router.ts` (+ test), `App.tsx`, `TitleBar.tsx`, `skills/{SkillsScreen, SkillPanel, SkillList, SkillsMapView, data}.tsx`, `skills.css`, `palette.ts`, `components/CommandPalette.tsx` (+ test), `system/SystemScreen.tsx` (+ test), `format.ts`
+  - Core and daemon: `packages/core/src/catalog/service.ts` (+ test, `file()`), `apps/daemon/src/routes/catalog.ts` (+ test), `apps/daemon/src/daemon.ts` (+ test)
+  - Client and protocol: `packages/client/src/client.ts`, `packages/protocol/src/catalog.ts` (`scripts` count)
+  - Tooling and CLI: `packages/core/scripts/catalog.ts`, `apps/cli/src/{commands,main}.ts`
+  - Docs: `docs/api.md`
+
+**Interfaces:**
+- **IPC:**
+  - `catalog.list`, `catalog.prepare {id}`, `catalog.file {id, path}`
+  - `catalog.install {id, projectId?, replaceModified?}`
+  - `skills.runtimeRetry {projectId?, name}`
+  - `system.runtimes`, `system.runtimesCleanup`
+- **API:** `GET /v1/catalog/:id/files/<path>` returns a staged file as raw bytes (`CatalogService.file(id, path)`, confined to the staging directory, restaged on demand). The client calls it with `catalog.file(id, path)`.
+- **Global state:** `runtimes: { progress: Record<key, {step, done?, total?}>, seq }`. The broker fills it from `skill.runtime_progress` and clears a key on `skill.runtime_changed`, which also bumps `seq`. `runtimeKey(scope, projectId, name)` matches the Skills route keys.
+- **Routes:** `{ name: 'catalog', review?: id }` maps to `#/skills/catalog[/<id>]`.
+- **Catalog entries** gain `scripts` (a count computed by `catalog:pin`).
+- **CLI:** `CliIO.confirm?(question)`, `renderReview(review)`, and the commands `desk catalog`, `desk catalog show <id>` and `desk catalog install <id> [-p] [-y] [--replace]`.
+
+- [ ] **Step 1: IPC and API.** Write the channels and handlers. The handler test installs a builtin skill through the real daemon.
+  - **Bug found by the e2e run:** `startDaemon` didn't pass `skillRuntimes` to `createApp`, so `/system/runtimes` returned 501. The route tests built the app directly and missed it. `daemon.test.ts` now checks both `/catalog` (20 entries) and `/system/runtimes`.
+- [ ] **Step 2: Runtime progress in global state.** Main forwards ephemeral events only for watched projects, and runtime progress arrives on `_global`, so the broker keeps runtime progress in the global state pushed to every window.
+- [ ] **Step 3: Renderer.**
+  - **Catalog view:** Map | List | Catalog in the Skills header. The five bays hold cards with source, licence and script chips, runtime words, an action (Install, ✓ Installed, Update, "Modified · review", Name taken) and project installs ("In Tax"). A Cards | Compact switch sits in the controls row.
+  - **Review sheet** (route-driven):
+    - source link to the commit, licence text, what Desk sets up, the pin and digest
+    - caveats, and a "Worth a look" band whose entries open the file at their line
+    - the file list with scripts marked, viewed through `FileViewer`
+    - the scope select, and replace-confirmation for local edits
+    - after Install, the result and live runtime progress, then Open skill
+  - **Installed skills:** "From catalog" appears in the panel (source, licence, runtime line with Retry, "Update available"), as a list-row chip, as a map-node dot with ", from the catalog" in its accessible label, and as history origin `Catalog · <sha7>`.
+  - **Elsewhere:** ⌘K has a "Catalog" group ("Install …" / "Update …" for entries not installed globally) and "Skill catalog" under Go to. System → Data shows skill environments and "Clean up unused".
+- [ ] **Step 4: CLI.** Without a terminal, `install` requires `--yes`; `main.ts` asks y/N on a TTY.
+- [ ] **Step 5: Tests.**
+  - Component tests: cards and states, the Compact layout, review (source, licence, warnings, files, scope, install, live progress, Ready, Open skill), the modified and name-taken paths, and panel Retry and Update.
+  - Palette, System, broker and CLI tests.
+  - The e2e test covers browse (20 cards), review, install with a uv stand-in, Ready, the panel, the map and System. Offline, it uses the real catalog's builtin skill.
+- [ ] **Step 6: Gates, visual check** (`DESK_E2E_SHOTS`: catalog, review, installed and panel screens), **then commit.**
+
+```bash
+pnpm typecheck && pnpm test && pnpm test:e2e
+git add -A apps packages docs
+git commit -m "feat(desktop,cli): skill catalog — bays and cards, review sheet with files and warnings, live runtime progress, From catalog chips, ⌘K and System → Data; desk catalog commands
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---

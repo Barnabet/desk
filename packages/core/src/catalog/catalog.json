@@ -58,7 +58,8 @@
       ],
       "caveats": [
         "Some sources rate-limit anonymous requests; the skill explains which optional API keys raise the limits."
-      ]
+      ],
+      "scripts": 5
     },
     {
       "id": "citation-management",
@@ -121,8 +122,9 @@
         "--help"
       ],
       "caveats": [
-        "Google Scholar search is often blocked by rate limits; OpenAlex and PubMed work without keys."
-      ]
+        "Google Scholar search is not set up: it needs the scholarly scraper and is often blocked. OpenAlex, PubMed and Crossref work without keys."
+      ],
+      "scripts": 8
     },
     {
       "id": "deep-research",
@@ -141,7 +143,8 @@
       "files": 15,
       "bytes": 82841,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 0
     },
     {
       "id": "fact-checker",
@@ -160,7 +163,8 @@
       "files": 2,
       "bytes": 14009,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 0
     },
     {
       "id": "defuddle",
@@ -353,7 +357,8 @@
       ],
       "caveats": [
         "Fetching pages needs network access."
-      ]
+      ],
+      "scripts": 0
     },
     {
       "id": "markitdown",
@@ -399,7 +404,8 @@
       ],
       "caveats": [
         "Audio transcription, OCR and Azure Document Intelligence are not set up."
-      ]
+      ],
+      "scripts": 3
     },
     {
       "id": "exploratory-data-analysis",
@@ -452,7 +458,8 @@
         "scripts/tabular_profile.py",
         "--help"
       ],
-      "caveats": []
+      "caveats": [],
+      "scripts": 13
     },
     {
       "id": "excel-automation",
@@ -485,7 +492,8 @@
       ],
       "caveats": [
         "Controlling the Excel window with AppleScript needs Microsoft Excel and your approval to run osascript."
-      ]
+      ],
+      "scripts": 2
     },
     {
       "id": "frontend-slides",
@@ -518,7 +526,8 @@
       ],
       "caveats": [
         "PDF export (Playwright) and deploying to Vercel are not set up; decks are plain HTML files you can open anywhere."
-      ]
+      ],
+      "scripts": 4
     },
     {
       "id": "word-documents",
@@ -547,7 +556,8 @@
         "-c",
         "python3 scripts/docx_create.py --help >/dev/null && python3 scripts/docx_read.py --help >/dev/null && echo ok"
       ],
-      "caveats": []
+      "caveats": [],
+      "scripts": 5
     },
     {
       "id": "pdf-toolkit",
@@ -580,7 +590,8 @@
       ],
       "caveats": [
         "No OCR: scanned PDFs without a text layer cannot be read."
-      ]
+      ],
+      "scripts": 7
     },
     {
       "id": "humanizer",
@@ -599,7 +610,8 @@
       "files": 9,
       "bytes": 53963,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 1
     },
     {
       "id": "writing-clearly-and-concisely",
@@ -618,7 +630,8 @@
       "files": 8,
       "bytes": 177941,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 0
     },
     {
       "id": "pretty-mermaid",
@@ -815,7 +828,8 @@
         "node",
         "scripts/smoke-test.mjs"
       ],
-      "caveats": []
+      "caveats": [],
+      "scripts": 7
     },
     {
       "id": "summarize-meeting",
@@ -834,7 +848,8 @@
       "files": 1,
       "bytes": 2997,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 0
     },
     {
       "id": "pre-mortem",
@@ -853,7 +868,8 @@
       "files": 1,
       "bytes": 4082,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 0
     },
     {
       "id": "systematic-debugging",
@@ -877,7 +893,8 @@
         "-n",
         "find-polluter.sh"
       ],
-      "caveats": []
+      "caveats": [],
+      "scripts": 2
     },
     {
       "id": "verification-before-completion",
@@ -896,7 +913,8 @@
       "files": 1,
       "bytes": 3646,
       "runtime": {},
-      "caveats": []
+      "caveats": [],
+      "scripts": 0
     },
     {
       "id": "differential-review",
@@ -917,7 +935,8 @@
       "runtime": {},
       "caveats": [
         "Licensed CC BY-SA 4.0: if you share a changed version, it must keep that licence."
-      ]
+      ],
+      "scripts": 0
     },
     {
       "id": "webapp-testing",
@@ -953,7 +972,8 @@
       ],
       "caveats": [
         "Installing downloads a Chromium build of about 150 MB."
-      ]
+      ],
+      "scripts": 4
     }
   ]
 }

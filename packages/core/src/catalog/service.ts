@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import {
   CatalogFile,
   CatalogInstallRequest,
@@ -130,6 +130,17 @@ export class CatalogService {
     };
   }
 
+  /** One file of an entry as staged for review (staging it again if needed), so the user can read it before installing. */
+  async file(id: string, path: string): Promise<Buffer> {
+    const entry = this.entry(id);
+    let dir = this.stageDir(entry);
+    if (!existsSync(join(dir, SKILL_FILE))) dir = (await this.stage(entry)).dir;
+    const target = resolve(dir, path);
+    if (!target.startsWith(`${dir}${sep}`)) throw new ValidationError('The path must stay inside the skill');
+    if (!existsSync(target) || !lstatSync(target).isFile()) throw new NotFoundError(`${entry.id} has no file ${path}`);
+    return readFileSync(target);
+  }
+
   async install(id: string, request: CatalogInstallRequest = {}): Promise<CatalogInstallResult> {
     const entry = this.entry(id);
     const req = CatalogInstallRequest.parse(request);
@@ -218,6 +229,10 @@ export class CatalogService {
     return { files, rootFiles };
   }
 
+  private stageDir(entry: CatalogEntry): string {
+    return join(this.o.dataDir, 'catalog', 'staging', `${entry.id}@${catalogMarker(entry).slice(0, 12)}`);
+  }
+
   /** Fetches or reads the entry, checks the digest and the SKILL.md, and writes it to a fresh staging directory. */
   private async stage(entry: CatalogEntry): Promise<Staged> {
     let files: ExtractedFile[];
@@ -250,7 +265,7 @@ export class CatalogService {
     const repoLicense = own ? null : (rootFiles[0] ?? null);
     const licenseText = (own ?? repoLicense)?.content.toString('utf8') ?? null;
 
-    const dir = join(this.o.dataDir, 'catalog', 'staging', `${entry.id}@${catalogMarker(entry).slice(0, 12)}`);
+    const dir = this.stageDir(entry);
     rmSync(dir, { recursive: true, force: true });
     for (const f of [...files, ...(repoLicense ? [repoLicense] : [])]) {
       const target = join(dir, f.path);

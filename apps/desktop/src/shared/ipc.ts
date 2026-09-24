@@ -81,6 +81,12 @@ export const channels = {
   'skills.import': z.object({ ...scope, path: z.string().min(1).max(4096), name: name.optional() }),
   'skills.version': z.object({ ...scope, name, version }),
   'skills.versionFile': z.object({ ...scope, name, version, path: relPath }),
+  'skills.runtimeRetry': z.object({ ...scope, name }),
+
+  'catalog.list': none,
+  'catalog.prepare': z.object({ id: name }),
+  'catalog.file': z.object({ id: name, path: relPath }),
+  'catalog.install': z.object({ id: name, projectId: id.optional(), replaceModified: z.boolean().optional() }),
 
   'models.list': none,
   'models.replace': z.object({ models: ModelsPutRequest }),
@@ -94,6 +100,9 @@ export const channels = {
   'broker.snapshot': none,
   'broker.watch': z.object({ projectId: id, afterSeq: z.number().int().min(0) }),
   'broker.unwatch': z.object({ projectId: id }),
+
+  'system.runtimes': none,
+  'system.runtimesCleanup': none,
 
   'daemon.status': none,
   'daemon.start': none,

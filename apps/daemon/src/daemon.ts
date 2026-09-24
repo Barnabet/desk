@@ -123,6 +123,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       runtime,
       store,
       catalog,
+      skillRuntimes,
       models,
       token,
       version,

@@ -28,6 +28,8 @@ function Screen({ route }: { route: Route }) {
       return <AttentionScreen {...(route.item ? { itemId: route.item } : {})} />;
     case 'skills':
       return <SkillsScreen {...(route.skill ? { skill: route.skill } : {})} />;
+    case 'catalog':
+      return <SkillsScreen catalog {...(route.review ? { review: route.review } : {})} />;
     case 'system':
       return <SystemScreen />;
     case 'project':

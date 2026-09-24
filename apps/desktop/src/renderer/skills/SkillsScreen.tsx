@@ -7,9 +7,12 @@ import { Field } from '../components/Field';
 import { Sheet } from '../components/Sheet';
 import { toast, toastError } from '../components/Toast';
 import { projectTone } from '../map/OrbitMap';
-import { replaceRoute } from '../router';
+import { navigate, replaceRoute } from '../router';
 import { useGlobal } from '../state/global';
 import { AskDesk } from './AskDesk';
+import { CatalogView, LayoutSwitch, useCatalogLayout } from './catalog/CatalogView';
+import { catalogIndex, useCatalog } from './catalog/data';
+import { ReviewSheet } from './catalog/ReviewSheet';
 import { parseSkillKey, skillKey, useSkills, type SkillRef } from './data';
 import { SkillEditor } from './SkillEditor';
 import { SkillList } from './SkillList';
@@ -49,7 +52,11 @@ function ImportSheet(o: { path: string; projects: Array<{ id: string; name: stri
     setPending(true);
     try {
       const projectId = scope === 'global' ? undefined : scope;
-      const r = await call('skills.import', { ...(projectId ? { projectId } : {}), path: o.path, ...(name.trim() ? { name: name.trim() } : {}) });
+      const r = await call('skills.import', {
+        ...(projectId ? { projectId } : {}),
+        path: o.path,
+        ...(name.trim() ? { name: name.trim() } : {}),
+      });
       const imported = r.dir.split('/').filter(Boolean).pop() ?? name.trim();
       toast({ tone: 'info', message: `Imported ${imported}.` });
       o.onDone(projectId ? { scope: 'project', projectId, name: imported } : { scope: 'global', name: imported });
@@ -92,31 +99,50 @@ function ImportSheet(o: { path: string; projects: Array<{ id: string; name: stri
   );
 }
 
-/** Every skill Desk and its threads can use: a map (or list) with global, project and shadowed skills, and what's in use now. */
-export function SkillsScreen({ skill }: { skill?: string }) {
+/**
+ * Every skill Desk and its threads can use: a map (or list) with global, project and shadowed skills, and what's in
+ * use now; and the catalog of pinned skills to install, each reviewed first.
+ */
+export function SkillsScreen({ skill, catalog = false, review }: { skill?: string; catalog?: boolean; review?: string }) {
   const overview = useGlobal((g) => g.overview);
   const data = useSkills();
+  const cat = useCatalog();
+  const [layout, setLayout] = useCatalogLayout();
+  const fromCatalog = useMemo(() => catalogIndex(cat.items), [cat.items]);
+  const catalogKeys = useMemo(() => new Set(fromCatalog.keys()), [fromCatalog]);
   const [view, setView] = useView();
   const [filter, setFilter] = useState<Filter>('all');
-  const [editor, setEditor] = useState<{ skill?: { ref: SkillRef; detail: SkillDetail } } | null>(null);
+  const [editor, setEditor] = useState<{
+    skill?: { ref: SkillRef; detail: SkillDetail };
+  } | null>(null);
   const [ask, setAsk] = useState<{ name?: string; projectId?: string } | null>(null);
   const [importPath, setImportPath] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
 
-  const projects = useMemo(() => overview.map((p) => ({ id: p.project.id, name: p.project.name, tone: projectTone(p) })), [overview]);
+  const projects = useMemo(
+    () =>
+      overview.map((p) => ({
+        id: p.project.id,
+        name: p.project.name,
+        tone: projectTone(p),
+      })),
+    [overview],
+  );
   const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
   const threadTitles = useMemo(() => new Map(overview.flatMap((p) => p.threads.map((t) => [t.id, t.title ?? 'Thread'] as const))), [overview]);
-  const counts = { all: data.nodes.length, used: data.nodes.filter((n) => n.usedBy.length).length, shadowed: data.nodes.filter((n) => n.shadows || n.shadowedIn.length).length };
-  const shown = useMemo(
-    () => data.nodes.filter((n) => filter === 'all' || (filter === 'used' ? n.usedBy.length > 0 : n.shadows || n.shadowedIn.length > 0)),
-    [data.nodes, filter],
-  );
-  const ref = skill ? parseSkillKey(skill) : null;
+  const counts = {
+    all: data.nodes.length,
+    used: data.nodes.filter((n) => n.usedBy.length).length,
+    shadowed: data.nodes.filter((n) => n.shadows || n.shadowedIn.length).length,
+  };
+  const shown = useMemo(() => data.nodes.filter((n) => filter === 'all' || (filter === 'used' ? n.usedBy.length > 0 : n.shadows || n.shadowedIn.length > 0)), [data.nodes, filter]);
+  const ref = !catalog && skill ? parseSkillKey(skill) : null;
   const node = skill ? data.nodes.find((n) => n.key === skill) : undefined;
   const select = (key: string | null) => replaceRoute({ name: 'skills', ...(key ? { skill: key } : {}) });
   const changed = () => {
     setVersion((v) => v + 1);
     void data.refresh();
+    void cat.refresh();
   };
   const startImport = async () => {
     try {
@@ -131,33 +157,56 @@ export function SkillsScreen({ skill }: { skill?: string }) {
     <div className={`skills${ref ? ' with-panel' : ''}`}>
       <div className="skills-main">
         <div className="skills-head">
-          <h1 className="title">Skill map</h1>
-          <p className="muted">Global skills sit in the middle; project skills live inside their project. Lines show the threads using a skill right now.</p>
+          <h1 className="title">{catalog ? 'Skill catalog' : 'Skill map'}</h1>
+          <p className="muted">
+            {catalog
+              ? 'Skills worth having, pinned to an exact version and checked. Review one, install it, and Desk sets up what its scripts need.'
+              : 'Global skills sit in the middle; project skills live inside their project. Lines show the threads using a skill right now.'}
+          </p>
           <div className="skills-controls">
             <div className="segmented" role="group" aria-label="View">
-              <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>
+              <button type="button" aria-pressed={!catalog && view === 'map'} onClick={() => (setView('map'), catalog && navigate({ name: 'skills' }))}>
                 Map
               </button>
-              <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>
+              <button type="button" aria-pressed={!catalog && view === 'list'} onClick={() => (setView('list'), catalog && navigate({ name: 'skills' }))}>
                 List
               </button>
+              <button type="button" aria-pressed={catalog} onClick={() => !catalog && navigate({ name: 'catalog' })}>
+                Catalog
+              </button>
             </div>
-            <div className="chips" role="group" aria-label="Show">
-              {(
-                [
-                  ['all', 'All'],
-                  ['used', 'In use now'],
-                  ['shadowed', 'Shadowed'],
-                ] as Array<[Filter, string]>
-              ).map(([f, label]) => (
-                <button key={f} type="button" className="filter-chip" aria-pressed={filter === f} onClick={() => setFilter(f)}>
-                  {label} · {counts[f]}
-                </button>
-              ))}
-            </div>
+            {catalog ? (
+              <LayoutSwitch layout={layout} onChange={setLayout} />
+            ) : (
+              <div className="chips" role="group" aria-label="Show">
+                {(
+                  [
+                    ['all', 'All'],
+                    ['used', 'In use now'],
+                    ['shadowed', 'Shadowed'],
+                  ] as Array<[Filter, string]>
+                ).map(([f, label]) => (
+                  <button key={f} type="button" className="filter-chip" aria-pressed={filter === f} onClick={() => setFilter(f)}>
+                    {label} · {counts[f]}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-        {data.status === 'loading' ? (
+        {catalog ? (
+          cat.status === 'loading' ? (
+            <p className="muted skills-body">Loading…</p>
+          ) : cat.status === 'error' ? (
+            <div className="skills-body">
+              <EmptyState title="Couldn't load the catalog">{cat.error}</EmptyState>
+            </div>
+          ) : (
+            <div className="skills-body">
+              <CatalogView items={cat.items} layout={layout} projectNames={projectNames} onReview={(id) => replaceRoute({ name: 'catalog', review: id })} />
+            </div>
+          )
+        ) : data.status === 'loading' ? (
           <p className="muted skills-body">Loading…</p>
         ) : data.status === 'error' ? (
           <EmptyState title="Couldn't load skills">{data.error}</EmptyState>
@@ -167,15 +216,15 @@ export function SkillsScreen({ skill }: { skill?: string }) {
           </div>
         ) : view === 'map' ? (
           <div className="skills-body map">
-            <SkillsMapView nodes={shown} projects={projects} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
+            <SkillsMapView nodes={shown} projects={projects} catalogKeys={catalogKeys} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
           </div>
         ) : (
           <div className="skills-body">
-            <SkillList nodes={shown} projectNames={projectNames} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
+            <SkillList nodes={shown} projectNames={projectNames} catalogKeys={catalogKeys} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
           </div>
         )}
         <div className="skills-foot">
-          {view === 'map' ? (
+          {!catalog && view === 'map' ? (
             <div className="skills-legend" aria-hidden="true">
               <span>
                 <span className="lg-dot global" />
@@ -214,15 +263,22 @@ export function SkillsScreen({ skill }: { skill?: string }) {
         <SkillPanel
           skill={ref}
           node={node}
+          {...(skill && fromCatalog.get(skill) ? { catalog: fromCatalog.get(skill)! } : {})}
           projectNames={projectNames}
           threadTitles={threadTitles}
           version={version + (node?.version ?? 0)}
           onEdit={(detail) => setEditor({ skill: { ref, detail } })}
-          onAskDesk={() => setAsk({ name: ref.name, ...(ref.projectId ? { projectId: ref.projectId } : node?.usedBy[0] ? { projectId: node.usedBy[0].projectId } : {}) })}
+          onAskDesk={() =>
+            setAsk({
+              name: ref.name,
+              ...(ref.projectId ? { projectId: ref.projectId } : node?.usedBy[0] ? { projectId: node.usedBy[0].projectId } : {}),
+            })
+          }
           onChanged={changed}
           onClose={() => select(null)}
         />
       ) : null}
+      {catalog && review ? <ReviewSheet id={review} item={cat.items.find((i) => i.id === review)} projects={projects} onChanged={changed} onClose={() => replaceRoute({ name: 'catalog' })} /> : null}
       {editor ? (
         <SkillEditor
           {...(editor.skill ? { skill: editor.skill } : {})}

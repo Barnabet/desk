@@ -2,7 +2,7 @@ import { affectsAttention, affectsOverview, DaemonNotRunning, DeskStream, Protoc
 import { checkDaemon } from '@desk/client/node';
 import type { AttentionItem, EphemeralEvent, StoredEvent } from '@desk/protocol';
 import type { PushChannel } from '../shared/channels';
-import { initialGlobalState, type GlobalState } from '../shared/state';
+import { initialGlobalState, runtimeKey, type GlobalState } from '../shared/state';
 
 type StreamLike = { start(): void; close(): void };
 
@@ -159,6 +159,10 @@ export class Broker {
   private onEvent(e: StoredEvent): void {
     this.lastSeq = Math.max(this.lastSeq, e.id);
     if (e.type === 'system.notice') this.set({ system: reduceSystem(this.state.system, e) });
+    if (e.type === 'skill.runtime_changed') {
+      const { [runtimeKey(e.payload.scope, e.project_id, e.payload.name)]: _done, ...progress } = this.state.runtimes.progress;
+      this.set({ runtimes: { progress, seq: this.state.runtimes.seq + 1 } });
+    }
     if (affectsAttention(e) || affectsOverview(e)) this.scheduleRefresh();
     for (const [sender, watches] of this.watchers) {
       const w = watches.get(e.project_id);
@@ -169,6 +173,12 @@ export class Broker {
   }
 
   private onEphemeral(e: EphemeralEvent): void {
+    if (e.type === 'skill.runtime_progress') {
+      const { scope, name, step, done, total } = e.payload;
+      const progress = { ...this.state.runtimes.progress, [runtimeKey(scope, e.project_id, name)]: { step, ...(done !== undefined ? { done } : {}), ...(total !== undefined ? { total } : {}) } };
+      this.set({ runtimes: { ...this.state.runtimes, progress } });
+      return;
+    }
     for (const [sender, watches] of this.watchers) if (watches.has(e.project_id)) this.d.send(sender, 'desk:ephemeral', e);
   }
 

@@ -104,6 +104,17 @@ export const handlers = {
   'skills.import': (i, c) => c.client().skills.import(scope(i), { path: i.path, ...(i.name ? { name: i.name } : {}) }),
   'skills.version': (i, c) => c.client().skills.version(scope(i), i.name, i.version),
   'skills.versionFile': (i, c) => c.client().skills.versionFile(scope(i), i.name, i.version, i.path),
+  'skills.runtimeRetry': (i, c) => c.client().catalog.retryRuntime(scope(i), i.name),
+
+  'catalog.list': (_i, c) => c.client().catalog.list(),
+  'catalog.prepare': (i, c) => c.client().catalog.prepare(i.id),
+  'catalog.file': (i, c) => c.client().catalog.file(i.id, i.path),
+  'catalog.install': (i, c) =>
+    c.client().catalog.install(i.id, {
+      scope: i.projectId ? 'project' : 'global',
+      ...(i.projectId ? { project_id: i.projectId } : {}),
+      ...(i.replaceModified ? { replace_modified: true } : {}),
+    }),
 
   'models.list': (_i, c) => c.client().models.list(),
   'models.replace': (i, c) => c.client().models.replace(i.models),
@@ -123,6 +134,9 @@ export const handlers = {
     c.broker.unwatch(c.senderId, i.projectId);
     return ok;
   },
+
+  'system.runtimes': (_i, c) => c.client().catalog.runtimes(),
+  'system.runtimesCleanup': (_i, c) => c.client().catalog.cleanupRuntimes(),
 
   'daemon.status': (_i, c) => c.daemon.status(),
   'daemon.start': (_i, c) => c.daemon.start(),

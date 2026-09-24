@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SkillDetail, SkillHistoryEntry, SkillNode } from '@desk/client';
+import type { CatalogInstall, CatalogItem } from '@desk/protocol';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -8,9 +9,11 @@ import { FileViewer } from '../components/FileViewer';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { describeError, toast, toastError } from '../components/Toast';
 import { bytes, since } from '../format';
-import { href } from '../router';
+import { href, navigate } from '../router';
 import { useNow } from '../state/now';
 import { scopeArg, whoLabel, type SkillRef } from './data';
+import { runtimeWords, sourceLabel } from './catalog/data';
+import { RuntimeLine } from './catalog/RuntimeLine';
 import { diffFiles, diffLines, withContext } from './diff';
 
 type Tab = 'overview' | 'instructions' | 'files' | 'history';
@@ -101,6 +104,8 @@ function Compare({ skill, history }: { skill: SkillRef; history: SkillHistoryEnt
 export function SkillPanel(o: {
   skill: SkillRef;
   node: SkillNode | undefined;
+  /** Set when the skill was installed from the catalog. */
+  catalog?: { item: CatalogItem; install: CatalogInstall };
   projectNames: Map<string, string>;
   threadTitles: Map<string, string>;
   version: number;
@@ -178,6 +183,27 @@ export function SkillPanel(o: {
       ) : (
         <>
           <p className="skill-desc">{detail.description}</p>
+          {o.catalog ? (
+            <div className="skill-catalog">
+              <div className="skill-catalog-row">
+                <span className="chip chip-done">From catalog</span>
+                <span className="small muted grow">
+                  {sourceLabel(o.catalog.item)} · {o.catalog.item.license}
+                  {o.catalog.install.runtime === 'none' ? ` · ${runtimeWords(o.catalog.item)}` : ''}
+                </span>
+                {o.catalog.install.state === 'update_available' ? (
+                  <Button size="sm" variant="primary" onClick={() => navigate({ name: 'catalog', review: o.catalog!.item.id })}>
+                    Update available
+                  </Button>
+                ) : o.catalog.install.state === 'modified' ? (
+                  <span className="chip chip-wait" title="Edited since it was installed from the catalog">
+                    edited
+                  </span>
+                ) : null}
+              </div>
+              <RuntimeLine entry={o.catalog.item} install={o.catalog.install} onRetried={o.onChanged} />
+            </div>
+          ) : null}
           {detail.error ? (
             <p className="field-error" role="alert">
               SKILL.md has a problem, so agents can't use this skill until it's fixed: {detail.error}
