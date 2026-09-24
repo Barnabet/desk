@@ -71,6 +71,22 @@ importers:
         specifier: ^0.28.2
         version: 0.28.2
 
+  packages/client:
+    dependencies:
+      '@desk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@desk/core':
+        specifier: workspace:*
+        version: link:../core
+      '@desk/daemon':
+        specifier: workspace:*
+        version: link:../../apps/daemon
+      '@desk/fake-model':
+        specifier: workspace:*
+        version: link:../../test/fake-model
+
   packages/core:
     dependencies:
       '@desk/protocol':

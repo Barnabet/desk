@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHarness, newRuntime, type Harness } from '../testing';
 import { getDeskAgent } from './queries';
-import { listOverview, summarizeToolArgs } from './overview';
+import { listOverview } from './overview';
 
 let h: Harness;
 afterEach(async () => h?.cleanup());
@@ -54,15 +54,5 @@ describe('listOverview', () => {
     expect(listOverview(h.store.db)[0]!.threads).toEqual([]);
     runtime.archiveProject(p);
     expect(listOverview(h.store.db)).toEqual([]);
-  });
-});
-
-describe('summarizeToolArgs', () => {
-  it('uses the first string argument, collapsed and truncated', () => {
-    expect(summarizeToolArgs('{"path":"emails/04.md","content":"x"}')).toBe('emails/04.md');
-    expect(summarizeToolArgs('{"n":1}')).toBe('');
-    expect(summarizeToolArgs('not json')).toBe('not json');
-    expect(summarizeToolArgs(JSON.stringify({ command: 'a\n  b' }))).toBe('a b');
-    expect(summarizeToolArgs(JSON.stringify({ command: 'x'.repeat(200) }), 10)).toBe('xxxxxxxxx…');
   });
 });

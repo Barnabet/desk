@@ -32,7 +32,7 @@ export {
   type UsageRow,
 } from './state/queries';
 export { listAttention } from './state/attention';
-export { listOverview, summarizeToolArgs } from './state/overview';
+export { listOverview } from './state/overview';
 export { listWorkspace, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
 export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';

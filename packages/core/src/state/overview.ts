@@ -1,21 +1,8 @@
-import type { OverviewThread, ProjectSummary } from '@desk/protocol';
+import { summarizeToolArgs, type OverviewThread, type ProjectSummary } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { getPlan } from '../coordination/plan';
 import { listAttention } from './attention';
 import { getDeskAgent, lastEvent, lastProjectEvent, listProjects, listThreads, type AgentRow } from './queries';
-
-/** A short, single-line rendering of a tool call's arguments: its first string value. */
-export function summarizeToolArgs(args: string, max = 80): string {
-  let text: string;
-  try {
-    const parsed = JSON.parse(args) as Record<string, unknown>;
-    text = String(Object.values(parsed).find((v) => typeof v === 'string') ?? '');
-  } catch {
-    text = args;
-  }
-  text = text.replace(/\s+/g, ' ').trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
 
 function activity(db: Db, agentId: string): string | null {
   const call = lastEvent(db, agentId, 'tool.call');
