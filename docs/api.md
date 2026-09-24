@@ -31,7 +31,8 @@ Pass `next_after` as the next `after` to continue.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/v1/health` | Unauthenticated. `{ version, protocol_version }` |
+| GET | `/v1/health` | Unauthenticated. `{ version, protocol_version, proxy: up\|down\|unknown, uptime_s }` |
+| GET | `/v1/usage` | `?since=YYYY-MM-DD`. `{ rows: [{ project_id, model, prompt_tokens, completion_tokens }], totals }` across projects |
 | GET | `/v1/models` | The model registry (`ModelInfo[]`: id, family, context_window, max_output_tokens, supports_reasoning_effort, concurrency) |
 | PUT | `/v1/models` | Replace the registry (`ModelInfo[]`, validated). The registry is persisted to `models.json` |
 
@@ -106,6 +107,41 @@ Global skills live under `/v1/skills`, project skills under `/v1/projects/:id/sk
 
 Skill names match `^[a-z0-9]+(-[a-z0-9]+)*$` (≤ 64 chars); descriptions are ≤ 1024 chars. Size limits: at most 2 MB per file, 200 files and 10 MB per skill. Symlinks are skipped on install.
 
+## Desktop app endpoints
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/v1/overview` | One `ProjectSummary` per open project: `project`, `desk_status`, `threads` (status, `reason`, current `activity` like `bash · python3 x.py`, model, `git_branch`, `skills`, `review_round`), `latest_report`, `plan_progress { done, total }` (dropped items excluded), `attention_count` |
+| GET | `/v1/attention` | `?project_id=`. `{ items: AttentionItem[], seq }`, oldest first |
+| POST | `/v1/attention/:id/dismiss` | Only `needs_you`, `stalled`, `failed` items (409 for `approval`/`question`, 404 if not currently listed). Appends `attention.dismissed` |
+| GET | `/v1/threads/:id/diff` | `{ base, branch, files: [{ path, status: added\|modified\|deleted, additions, deletions }], patch }` against the thread's base, including uncommitted and untracked files. 409 for non-git or archived threads |
+| GET | `/v1/threads/:id/files` | `?path=` a directory in the workspace. `[{ name, path, type: file\|dir, size }]`, directories first, `.git` hidden |
+| GET | `/v1/threads/:id/files/raw/<path>` | Raw file. 403 if the path (or a symlink) leads outside the workspace, 404 if missing, 409 once archived |
+| GET | `/v1/skills/:name/versions/:v` | A skill as it was at version `v` (same shape as the skill detail). Also under `/v1/projects/:id/skills/…`, resolving project then global |
+| GET | `/v1/skills/:name/versions/:v/files/<path>` | Raw file of that version |
+
+**Attention items** are derived, not stored: `{ id, kind, project_id, project_name, agent_id, title, detail, created_at, ref }`.
+
+| kind | id | Present while | ref |
+|---|---|---|---|
+| `approval` | `approval:<approval_id>` | pending and not delegated to Desk | `approval_id`, `thread_id` |
+| `question` | `question:<event_id>` | it is the project's latest `question.asked` and no `message.user` followed | `event_id`, `options` |
+| `needs_you` | `report:<event_id>:<i>` | it is in the project's latest `report`, not dismissed | `event_id` |
+| `stalled` | `stalled:<thread>:<event_id>` | the thread is running/waiting, its latest `stalled` notice has no thread activity after it, not dismissed | `thread_id`, `event_id` |
+| `failed` | `failed:<thread>` | the thread is `failed`, not archived, not dismissed | `thread_id` |
+
+## Configuration
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/v1/config` | | `{ notifications: auto\|off }` |
+| PATCH | `/v1/config` | `{ notifications? }` | Saved to `<dataDir>/config.json` |
+| GET | `/v1/config/model-endpoint` | | `{ configured, source: env\|file\|keychain\|null, base_url }`. Never includes the key |
+| PUT | `/v1/config/model-endpoint` | `{ base_url, api_key }` | Write-only. Stores the key in the macOS Keychain (`security -i`, stdin) and `base_url` in `config.json`, then reconfigures the model adapter without a restart. 501 without a Keychain. Keys are printable ASCII without spaces, quotes or backslashes |
+| POST | `/v1/config/model-endpoint/test` | optional `{ base_url, api_key }` | Tests the candidate (or current) endpoint by listing models: `{ ok, models?, error? }`. Errors are scrubbed of the key |
+
+Model access resolves in this order: `DESK_OPENAI_BASE_URL`/`DESK_OPENAI_API_KEY`, then `~/.config/cliproxyapi.env`, then `config.json`'s `base_url` with the Keychain key. Without any of them the daemon starts anyway; model calls behave like a proxy outage (agents pause) until an endpoint is set.
+
 ## Event stream (WebSocket)
 
 Connect to `ws://127.0.0.1:<port>/v1/stream?token=<token>`. A bad token closes the socket with code 4401.
@@ -114,6 +150,12 @@ The client sends:
 
 ```json
 { "subscribe": { "project_id": "<id>" | "*", "after_seq": 0 } }
+```
+
+It may also identify itself; a client that shows its own notifications silences the daemon's notifier while connected:
+
+```json
+{ "hello": { "client": "desktop", "notifications": true } }
 ```
 
 The server sends:
@@ -135,6 +177,6 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 | Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result`, `context.compacted`, `usage` |
 | Approvals | `approval.requested`, `approval.resolved` |
 | Knowledge | `memory.written`, `memory.deleted`, `artifact.published`, `skill.saved`, `skill.deleted` |
-| System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, … |
+| System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, …; `attention.dismissed` |
 
 **Agent statuses:** `idle`, `queued`, `running`, `waiting` (on a reply, an approval or threads), `done`, `failed`, `cancelled`.

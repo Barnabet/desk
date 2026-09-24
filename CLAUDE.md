@@ -13,6 +13,7 @@ pnpm test         # all unit + integration tests; must pass before any commit
 pnpm typecheck    # tsc --noEmit; must pass before any commit
 pnpm test:live    # live smokes against the local model proxy (slow; DESK_LIVE=1)
 bin/desk …        # CLI (tsx loader, no build step)
+pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.mjs (+ migrations, better-sqlite3 prebuilds)
 ```
 
 There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly.
@@ -35,8 +36,11 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `policy/`, `skills/store.ts`, `memory/`, `library/`, `workspaces/`.
   - `events/`: the store and projections.
   - `db/`: the drizzle schema and migrations.
+  - `state/attention.ts`, `state/overview.ts`: what needs the user, and the cross-project summary (desktop app).
+  - `workspaces/inspect.ts`: thread diff and confined workspace browsing.
+  - `model/endpoint.ts`, `model/switchable.ts`: endpoint resolution (env → file → Keychain) and a runtime-configurable adapter.
   - `testing/`: the harness, exported as `@desk/core/testing`.
-- `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle.
+- `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle, `notifier.ts` (macOS notifications), `scripts/bundle.mjs`.
 - `apps/cli`: commander CLI over `DeskClient`.
 - `test/fake-model`: a scriptable OpenAI-compatible server. Every non-live test talks to it.
 
@@ -60,7 +64,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - Use Vitest with the harness (`createHarness`, `newRuntime`, `seedThread`) and fake-model scripts. Route by system prompt, or by the number of assistant messages in the request, rather than by call order when agents run concurrently.
   - Sandbox tests skip when `sandbox-exec` is unavailable.
   - Live tests are `*.live.test.ts`.
-- **Secrets.** The model API key comes from `DESK_OPENAI_*` or `~/.config/cliproxyapi.env`. It must never reach logs, events, `daemon.json`, API responses or tool environments; `scrubbedEnv` builds tool envs.
+- **Secrets.** The model API key comes from `DESK_OPENAI_*`, `~/.config/cliproxyapi.env`, or the macOS Keychain (written by `PUT /v1/config/model-endpoint` via `security -i` on stdin, never argv). It must never reach logs, events, `daemon.json`, `config.json`, API responses or tool environments; `scrubbedEnv` builds tool envs.
 - **Style.** Strict TS with `noUncheckedIndexedAccess`, ESM, and short doc comments on non-obvious exports. Match the surrounding code.
 
 ## Invariants worth protecting

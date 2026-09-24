@@ -76,7 +76,7 @@ These follow `CLAUDE.md`: zod bodies in `@desk/protocol/api.ts`, runtime methods
 - `GET /v1/threads/:id/diff` → `{ base, branch, files: [{ path, status, additions, deletions }], patch }`. It reuses the `review_diff` code path and returns 409 when the thread has no git worktree.
 - `GET /v1/threads/:id/files?path=` → `[{ name, path, type, size }]`, and `GET /v1/threads/:id/files/raw/<path>` returns the raw file. Both are confined to the workspace: a path that escapes it gets 403, and an archived thread (workspace removed) gets 409.
 - `GET /v1/skills/:name/versions/:v` (and the same under the project route) → the skill detail as it was at version v. `GET …/versions/:v/files/<path>` returns that version's raw file. Both read `.history/<name>/<v>/`, or the live directory for the current version.
-- `GET /v1/usage?since=<iso>` → `{ rows: [{ model, prompt_tokens, completion_tokens, cached_tokens }], totals }` across all projects.
+- `GET /v1/usage?since=<iso>` → `{ rows: [{ project_id, model, prompt_tokens, completion_tokens }], totals }` across all projects (the usage table does not track cached tokens).
 - `GET /v1/health` adds `proxy: 'up'|'down'|'unknown'` (taken from the last `proxy_*` notice) and `uptime_s`. It stays unauthenticated and includes nothing sensitive.
 
 ### 4.3 Model endpoint setup (secret-safe)
@@ -97,7 +97,7 @@ These follow `CLAUDE.md`: zod bodies in `@desk/protocol/api.ts`, runtime methods
 ### 4.5 Bundled daemon
 - `pnpm --filter @desk/daemon bundle` runs esbuild and produces `apps/daemon/dist/deskd.mjs`, with `better-sqlite3` marked external. Its N-API prebuild runs under both Node and Electron.
 - The app ships `resources/deskd/{deskd.mjs, node_modules/better-sqlite3/…}` and the drizzle migrations.
-- The app runs deskd with its own binary: `ELECTRON_RUN_AS_NODE=1 <App>/Contents/MacOS/Desk <resources>/deskd/deskd.mjs`. On macOS the LaunchAgent `com.desk.deskd` points there.
+- The app runs deskd with its own binary: `ELECTRON_RUN_AS_NODE=1 <App>/Contents/MacOS/Desk <resources>/deskd/deskd.mjs`. On macOS the LaunchAgent `dev.desk.deskd` (the label the CLI already uses) points there.
 - On launch the app compares the bundle version with the version the running daemon reports (from `daemon.json`). If they differ it rewrites the plist and runs `launchctl kickstart -k`.
 - Development mode keeps using the repo daemon (`desk up`).
 - On Windows the locator and starter are stubbed: a scheduled task at logon, not implemented.

@@ -27,6 +27,9 @@ Tell Desk where the model endpoint is, either way:
 
 - `~/.config/cliproxyapi.env` with `CLIPROXY_BASE_URL=http://127.0.0.1:8317` and `CLIPROXY_API_KEY=…`.
 - The environment variables `DESK_OPENAI_BASE_URL` and `DESK_OPENAI_API_KEY`, which take precedence.
+- Through the API: `PUT /v1/config/model-endpoint` stores the base URL in `config.json` and the key in the macOS Keychain. This is how the desktop app's onboarding does it. Env and file take precedence over the Keychain.
+
+Without any of these, deskd still starts: agents stay paused (as during a proxy outage) until an endpoint is configured.
 
 The key is only read by the daemon. It never appears in `daemon.json`, logs, API responses or tool environments.
 
@@ -115,6 +118,7 @@ desk.db                         SQLite (WAL): events + projections
 daemon.json                     { port, token, pid, version } — mode 0600, removed on stop
 daemon.lock                     single-instance lock (stale locks are taken over)
 models.json                     model registry (edit via PUT /v1/models)
+config.json                     daemon settings: model base_url, notifications (no secrets)
 logs/deskd.log
 skills/<name>/                  global skills (+ .history/)
 projects/<id>/library/          library files
@@ -149,6 +153,7 @@ The model registry sets each model's `context_window` (used for compaction) and 
 - **Rate limits:** jittered exponential backoff. When it is exhausted, the rest of the run uses the project's `fallback_model`, if one is set.
 - **Long conversations:** at 70% of the context window, or once on an overflow error, everything except the last 6 messages is summarised into a structured checkpoint. The original events stay in the log.
 - **Stalled threads:** a thread with no activity for 15 minutes is reported to Desk once.
+- **Notifications:** on macOS the daemon posts notifications for approvals, questions, reports that need you, and stalled or failed threads, unless a desktop client that shows its own notifications is connected or `notifications` is `off` (`PATCH /v1/config`).
 
 ## Development
 
