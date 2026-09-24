@@ -14,6 +14,7 @@ import { LineDiagram } from './LineDiagram';
 import { lineGeometry } from './lineGeometry';
 import { PlanPanel } from './PlanPanel';
 import { ServicesCard } from './ServicesCard';
+import { useMediaQuery } from '../state/media';
 import './conversation.css';
 
 function useDraft(projectId: string): [string, (v: string | ((d: string) => string)) => void] {
@@ -44,6 +45,8 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const [draft, setDraft] = useDraft(projectId);
   const [pending, setPending] = useState<string[]>([]);
   const [answering, setAnswering] = useState<string | null>(null);
+  // Services sit at the bottom of the left column; on narrow windows that column collapses, so they join the plan overlay.
+  const narrow = useMediaQuery('(max-width: 1279px)');
   const [planOpen, setPlanOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -117,6 +120,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
             Plan
             {project.services.some((x) => x.status === 'running') ? ` · ${plural(project.services.filter((x) => x.status === 'running').length, 'service')}` : ''}
           </button>
+          {narrow ? null : <ServicesCard project={project} />}
         </div>
         <section className="conv-chat" aria-label="Conversation with Desk">
           <div
@@ -155,7 +159,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
         </section>
         <div className="conv-side">
           <PlanPanel project={project} proxyDown={proxy === 'down'} />
-          <ServicesCard project={project} />
+          {narrow ? <ServicesCard project={project} /> : null}
         </div>
       </div>
     </div>

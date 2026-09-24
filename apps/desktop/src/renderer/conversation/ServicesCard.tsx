@@ -85,7 +85,7 @@ export function ServicesCard({ project }: { project: ProjectState }) {
                   {s.name}
                   {s.status === 'running' && port(s.url) ? <span className="service-port">{port(s.url)}</span> : null}
                 </span>
-                <span className="service-sub">
+                <span className="service-sub" title={`${state.text} · ${s.command}`}>
                   {state.text} · from {s.source_id ? (sourceLabels.get(s.source_id) ?? 'a removed folder') : (titles.get(s.agent_id) ?? 'an archived thread')}
                 </span>
               </div>

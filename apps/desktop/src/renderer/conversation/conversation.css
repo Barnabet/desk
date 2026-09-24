@@ -244,15 +244,25 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) 420px;
+  grid-template-columns: 220px minmax(0, 1fr) 420px;
   gap: 20px;
   padding: 0 24px 16px;
 }
 .conv-intro {
   padding-top: 18px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* Services at the bottom of the left column, level with the composer. */
+.conv-intro .services-card {
+  margin-top: auto;
+  max-height: 65%;
+  padding: 14px 14px 12px;
+}
+.conv-intro .services-head h2 {
+  font-size: 17px;
 }
 .conv-intro h1 {
   margin: 0;
