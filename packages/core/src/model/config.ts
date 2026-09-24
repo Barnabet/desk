@@ -26,17 +26,21 @@ export function normalizeBaseURL(url: string): string {
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
 }
 
-export function loadModelConfig(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): ModelConfig {
-  if (env.DESK_OPENAI_BASE_URL && env.DESK_OPENAI_API_KEY) {
-    return { baseURL: normalizeBaseURL(env.DESK_OPENAI_BASE_URL), apiKey: env.DESK_OPENAI_API_KEY };
-  }
+export function modelConfigFromEnv(env: NodeJS.ProcessEnv): ModelConfig | null {
+  if (env.DESK_OPENAI_BASE_URL && env.DESK_OPENAI_API_KEY) return { baseURL: normalizeBaseURL(env.DESK_OPENAI_BASE_URL), apiKey: env.DESK_OPENAI_API_KEY };
+  return null;
+}
+
+export function modelConfigFromFile(home: string): ModelConfig | null {
   const file = join(home, '.config', 'cliproxyapi.env');
-  if (existsSync(file)) {
-    const vars = parseEnvFile(readFileSync(file, 'utf8'));
-    if (vars.CLIPROXY_BASE_URL && vars.CLIPROXY_API_KEY) {
-      return { baseURL: normalizeBaseURL(vars.CLIPROXY_BASE_URL), apiKey: vars.CLIPROXY_API_KEY };
-    }
-  }
+  if (!existsSync(file)) return null;
+  const vars = parseEnvFile(readFileSync(file, 'utf8'));
+  return vars.CLIPROXY_BASE_URL && vars.CLIPROXY_API_KEY ? { baseURL: normalizeBaseURL(vars.CLIPROXY_BASE_URL), apiKey: vars.CLIPROXY_API_KEY } : null;
+}
+
+export function loadModelConfig(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): ModelConfig {
+  const config = modelConfigFromEnv(env) ?? modelConfigFromFile(home);
+  if (config) return config;
   throw new Error(
     'No model access configured: set DESK_OPENAI_BASE_URL and DESK_OPENAI_API_KEY, or create ~/.config/cliproxyapi.env with CLIPROXY_BASE_URL and CLIPROXY_API_KEY',
   );

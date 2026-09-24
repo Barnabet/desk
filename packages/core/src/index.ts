@@ -32,7 +32,9 @@ export {
 export { listAttention } from './state/attention';
 export { listOverview, summarizeToolArgs } from './state/overview';
 export { listWorkspace, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
-export { loadModelConfig, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
+export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
+export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
+export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';
 export { DEFAULT_MODEL_ID, ModelRegistry, SEED_MODELS } from './model/registry';
 export { classifyModelError, ModelError, type ModelErrorKind } from './model/errors';
 export { createModelAdapter } from './model/adapter';
