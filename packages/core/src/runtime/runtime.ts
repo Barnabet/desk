@@ -974,6 +974,7 @@ export class Runtime {
             jobs: this.jobs,
             services: this.services,
             readRoots: (x) => this.readRoots(x),
+            writeRoots: (x) => this.writeRoots(x),
           }),
       },
       agentId,

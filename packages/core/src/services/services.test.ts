@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { call, text, tools } from '@desk/fake-model';
 import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, resolveSettings, upgradePolicy, type StoredEvent } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
 import { deskSystemPrompt } from '../agent/prompts';
@@ -205,6 +206,20 @@ describe('project folders agents may write to', () => {
     expect(after.sandbox.writable).not.toContain(folder);
     await expect(writeFileTool.execute({ path: join(folder, 'x'), content: '' }, after)).rejects.toThrow(/outside the allowed directories/);
     expect(h.store.list({ projectId, types: ['source.updated'] })).toHaveLength(1);
+  });
+
+  it('are writable in an ordinary run, not only for approved calls', async () => {
+    h = await createHarness({ script: (req) => (req.messages.some((m) => m.role === 'tool') ? text('done') : tools(call('write_file', { path: join(folder, 'queue.json'), content: '[1]' }))) });
+    rt = newRuntime(h);
+    const projectId = rt.createProject({ name: 'App', goal: 'g' });
+    const folder = realpathSync(mkdtempSync(join(h.dir, 'src-')));
+    await rt.addSource(projectId, folder);
+    const { agentId } = await seedThread(h.store, h.dir, { projectId });
+    rt.sendMessage(agentId, 'write it');
+    await rt.whenIdle();
+    expect(readFileSync(join(folder, 'queue.json'), 'utf8')).toBe('[1]');
+    const result = h.store.list({ agentId, types: ['tool.result'] })[0]!;
+    expect(result.type === 'tool.result' && result.payload.status).toBe('ok');
   });
 
   it('can run services (started by Desk with source_id), which survive archiving any thread', async () => {
