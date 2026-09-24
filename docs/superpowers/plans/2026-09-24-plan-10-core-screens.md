@@ -3745,3 +3745,2239 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
+### Task 4: Threads — roster, route view, transcript, tabs
+
+**Files:**
+- Create: `apps/desktop/src/renderer/threads/route.test.ts`, `apps/desktop/src/renderer/threads/ThreadsScreen.test.tsx`, `apps/desktop/src/renderer/state/width.ts`, `apps/desktop/src/renderer/threads/route.ts`, `apps/desktop/src/renderer/threads/RouteView.tsx`, `apps/desktop/src/renderer/threads/Transcript.tsx`, `apps/desktop/src/renderer/threads/tabs/ResultTab.tsx`, `apps/desktop/src/renderer/threads/tabs/DiffTab.tsx`, `apps/desktop/src/renderer/threads/tabs/FilesTab.tsx`, `apps/desktop/src/renderer/threads/tabs/SkillDraftsTab.tsx`, `apps/desktop/src/renderer/threads/tabs/UsageTab.tsx`, `apps/desktop/src/renderer/threads/ThreadRoster.tsx`, `apps/desktop/src/renderer/threads/ThreadDetail.tsx`, `apps/desktop/src/renderer/threads/ThreadsScreen.tsx`, `apps/desktop/src/renderer/threads/threads.css`
+- Modify: `apps/desktop/src/renderer/conversation/ConversationScreen.tsx`, `apps/desktop/src/renderer/conversation/conversation.css`, `apps/desktop/src/renderer/map/map.css`, `apps/desktop/src/renderer/theme/tokens.css`, `apps/desktop/src/renderer/router.ts`, `apps/desktop/src/renderer/App.tsx`
+
+**Interfaces:**
+
+- Consumes: `useSession` and `useTranscript` (Task 1); `toolNames`, `ToolGroup` and `ToolStatus` (Task 3); `call` and `DeskCallError`; and the `threads.*`, `projects.send` and `app.saveFile` channels.
+- Produces:
+
+```ts
+// state/width.ts (moved out of ConversationScreen)
+export function useWidth(ref: RefObject<HTMLElement | null>, fallback?: number): number;
+// threads/route.ts
+export type StopKind = 'brief' | 'work' | 'detour' | 'result' | 'revision' | 'steer' | 'approval' | 'incoming';
+export type Stop = { n: number; kind: StopKind; from: string; to: string; entries: TranscriptEntry[]; tools: ToolCallView[]; live: boolean };
+export type NarrativeRow = { kind: 'stop'; stop: Stop } | { kind: 'compacted'; id: string; ts: string };
+export function narrate(entries: TranscriptEntry[]): NarrativeRow[];
+export function stopsOf(rows: NarrativeRow[]): Stop[];
+export function stopText(s: Stop, reviewRounds: number): { title: string; sub: string; quote?: string };
+export function routeLayout(stops: Stop[], width: number, running: boolean): RouteLayout;
+// router.ts
+export function replaceRoute(to: Route | string): void;   // no history entry; used by Attention selection
+// threads/ThreadsScreen.tsx
+export function ThreadsScreen(props: { projectId: string; threadId?: string }): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/threads/route.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { emptyTranscript, reduceTranscript } from '@desk/client';
+import { ev } from '@desk/client/testing';
+import { narrate, routeLayout, stopsOf, stopText } from './route';
+
+const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
+const a = { agent: 't' };
+
+function transcript() {
+  return [
+    ev(1, 'agent.created', { role: 'thread', model: 'opus', title: 'Emails', brief: 'Draft five emails', workspace_path: '/w', parent_id: 'd' }, { ...a, ts: at(18) }),
+    ev(2, 'agent.status_changed', { status: 'running' }, { ...a, ts: at(18) }),
+    ev(3, 'run.started', { run_id: 'r1', model: 'opus' }, { ...a, ts: at(19) }),
+    ev(4, 'assistant.message', { run_id: 'r1', content: 'Reading the brief.', tool_calls: [] }, { ...a, ts: at(19) }),
+    ev(5, 'tool.call', { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', arguments: '{"path":"a.md"}' }, { ...a, ts: at(20) }),
+    ev(6, 'tool.result', { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', status: 'ok', content: 'x' }, { ...a, ts: at(20) }),
+    ev(7, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'read_file', arguments: '{"path":"b.md"}' }, { ...a, ts: at(21) }),
+    ev(8, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'read_file', status: 'ok', content: 'y' }, { ...a, ts: at(21) }),
+    ev(9, 'agent.model_switched', { from: 'opus', to: 'fable', reason: 'rate', scope: 'run' }, { ...a, ts: at(31) }),
+    ev(10, 'context.compacted', { run_id: 'r1', checkpoint: 'earlier', up_to: 8, trigger: 'threshold' }, { ...a, ts: at(40) }),
+    ev(11, 'agent.result', { summary: 'Five drafts published', artifacts: ['emails/01.md'] }, { ...a, ts: at(52) }),
+    ev(12, 'agent.revision', { round: 1, feedback: 'Emails 3 and 4 read as salesy.' }, { ...a, ts: at(58) }),
+    ev(13, 'message.user', { text: 'Keep email 5 under 120 words.' }, { ...a, ts: at(62) }),
+    ev(14, 'tool.call', { run_id: 'r2', tool_call_id: 'c3', name: 'write_file', arguments: '{"path":"emails/04.md"}' }, { ...a, ts: at(63) }),
+  ].reduce(reduceTranscript, emptyTranscript('t')).entries;
+}
+
+describe('narrate', () => {
+  it('numbers stops, merges work, and keeps the compaction divider', () => {
+    const rows = narrate(transcript());
+    expect(rows.map((r) => (r.kind === 'stop' ? `${r.stop.n}:${r.stop.kind}` : 'compacted'))).toEqual([
+      '1:brief',
+      '2:work',
+      '3:detour',
+      'compacted',
+      '4:result',
+      '5:revision',
+      '6:steer',
+      '7:work',
+    ]);
+    const stops = stopsOf(rows);
+    expect(stops[1]!.tools.map((c) => c.name)).toEqual(['read_file', 'read_file']);
+    expect(stopText(stops[1]!, 2).sub).toMatch(/^read_file ×2 · /);
+    expect(stops[6]!.live).toBe(true);
+    expect(stopText(stops[6]!, 2).title).toBe('Using 1 tool');
+    expect(stopText(stops[4]!, 2)).toMatchObject({ title: 'Desk sent it back', quote: 'Emails 3 and 4 read as salesy.' });
+    expect(stopText(stops[2]!, 2).sub).toMatch(/^continued on fable/);
+  });
+});
+
+describe('routeLayout', () => {
+  it('snakes stops across rows and marks the live stretch after the last revision', () => {
+    const stops = stopsOf(narrate(transcript()));
+    const l = routeLayout(stops, 980, true);
+    expect(l.points).toHaveLength(7);
+    const rows = [...new Set(l.points.map((p) => p.row))];
+    expect(rows.length).toBeGreaterThan(1);
+    const row0 = l.points.filter((p) => p.row === 0 && p.stop.kind !== 'detour');
+    const row1 = l.points.filter((p) => p.row === 1);
+    expect(row0[1]!.x).toBeGreaterThan(row0[0]!.x);
+    if (row1.length > 1) expect(row1[1]!.x).toBeLessThan(row1[0]!.x);
+    expect(l.points.find((p) => p.stop.kind === 'detour')!.y).toBeLessThan(row0[0]!.y);
+    expect(l.pieces).toHaveLength(7);
+    expect(l.pieces.at(-1)!.live).toBe(true);
+    expect(l.pieces[0]!.live).toBe(false);
+    expect(l.now).not.toBeNull();
+    expect(l.tailPath).not.toBeNull();
+    for (const p of l.points) expect(p.x).toBeGreaterThan(0), expect(p.x).toBeLessThan(980);
+    expect(l.height).toBeGreaterThan(Math.max(...l.points.map((p) => p.y)));
+  });
+
+  it('has no now marker for a finished thread', () => {
+    const l = routeLayout(stopsOf(narrate(transcript())), 1400, false);
+    expect(l.now).toBeNull();
+    expect(l.tail).toEqual([]);
+    expect(l.pieces.every((p) => !p.live)).toBe(true);
+  });
+});
+```
+
+`apps/desktop/src/renderer/threads/ThreadsScreen.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProjectOverview } from '@desk/client';
+import type { StoredEvent } from '@desk/protocol';
+import { ev } from '@desk/client/testing';
+import { initialGlobalState } from '../../shared/state';
+import { globalStore } from '../state/global';
+import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
+import { installBridge } from '../test/bridge';
+import { ThreadsScreen } from './ThreadsScreen';
+
+afterEach(cleanup);
+beforeEach(() => {
+  resetSessions();
+  setReleaseDelay(0);
+  localStorage.clear();
+  globalStore.set({ ...initialGlobalState(), connection: { status: 'live' } });
+});
+
+const agent = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  project_id: 'p',
+  role: id === 'd' ? 'desk' : 'thread',
+  status: 'idle',
+  model: 'claude-opus-5-5',
+  title: id === 'd' ? 'Desk' : 'Welcome emails',
+  brief: null,
+  workspace_path: '/w',
+  parent_id: id === 'd' ? null : 'd',
+  inbox_cursor: 0,
+  review_round: 0,
+  result_summary: null,
+  result_artifacts: null,
+  active_skills: [],
+  git_source_id: null,
+  git_branch: null,
+  git_base: null,
+  git_common_dir: null,
+  archived_at: null,
+  created_at: '2026-09-24T10:18:00.000Z',
+  updated_at: 't',
+  ...extra,
+});
+
+const overview = (): ProjectOverview =>
+  ({
+    project: { id: 'p', name: 'Onboarding', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
+    desk: agent('d'),
+    sources: [],
+    plan: null,
+    threads: [],
+    approvals: [],
+    last_seq: 0,
+  }) as unknown as ProjectOverview;
+
+const t = { agent: 't' };
+const base: StoredEvent[] = [
+  ev(1, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Welcome emails', brief: 'Draft five emails.', workspace_path: '/w/t', parent_id: 'd', skills: ['brand-voice'] }, { ...t, ts: '2026-09-24T10:18:00.000Z' }),
+  ev(2, 'agent.status_changed', { status: 'running' }, t),
+  ev(3, 'tool.call', { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', arguments: '{"path":"brief.md"}' }, t),
+  ev(4, 'tool.result', { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', status: 'ok', content: 'the brief' }, t),
+  ev(5, 'usage', { run_id: 'r1', model: 'claude-opus-5-5', prompt_tokens: 1200, completion_tokens: 300, estimated: false }, t),
+];
+const finished: StoredEvent[] = [
+  ev(6, 'agent.result', { summary: 'Five drafts published', artifacts: ['emails/01.md'], skill_drafts: ['drafts/email-sequence'] }, t),
+  ev(7, 'agent.status_changed', { status: 'done' }, t),
+];
+
+function setup(events = base, extra: Record<string, (input: any) => unknown> = {}, threadId: string | null = 't') {
+  const bridge = installBridge({
+    'projects.get': () => overview(),
+    'broker.watch': () => {
+      for (const e of events) bridge.emit('desk:event', e);
+      return { ok: true };
+    },
+    'broker.unwatch': () => ({ ok: true }),
+    ...extra,
+  });
+  startSessionRouting();
+  render(<ThreadsScreen projectId="p" {...(threadId ? { threadId } : {})} />);
+  return bridge;
+}
+
+describe('ThreadsScreen', () => {
+  it('lists threads as cards', async () => {
+    setup([...base, ev(6, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'bash', arguments: '{"command":"wc -w emails/*.md"}' }, t)], {}, null);
+    await screen.findByRole('heading', { name: 'Threads' });
+    const card = await screen.findByRole('link', { name: /Welcome emails/ });
+    expect(card.getAttribute('href')).toBe('#/p/p/threads/t');
+    expect(card.textContent).toContain('bash');
+    expect(card.textContent).toContain('brand-voice');
+    expect(card.textContent).toContain('Running');
+  });
+
+  it('shows the route, the numbered transcript and steers', async () => {
+    const bridge = setup(base, { 'threads.send': () => ({ ok: true }) });
+    await screen.findByRole('heading', { name: 'Welcome emails', level: 1 });
+    expect(screen.getByRole('button', { name: /^Stop 1: Brief from Desk/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Stop 2: Used 1 tool/ })).toBeTruthy();
+    const tr = screen.getByRole('complementary', { name: 'Transcript' });
+    expect(within(tr).getByLabelText('Stop 1')).toBeTruthy();
+    fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
+    expect(within(tr).getByText('the brief')).toBeTruthy();
+    fireEvent.change(within(tr).getByLabelText('Steer this thread'), { target: { value: 'Keep it short' } });
+    fireEvent.click(within(tr).getByRole('button', { name: 'Steer' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'threads.send')?.input).toEqual({ id: 't', text: 'Keep it short' }));
+    expect(await within(tr).findByText('You · steering…')).toBeTruthy();
+    bridge.emit('desk:event', ev(8, 'message.user', { text: 'Keep it short' }, t));
+    await waitFor(() => expect(within(tr).queryByText('You · steering…')).toBeNull());
+  });
+
+  it('stops a running thread after confirming', async () => {
+    const bridge = setup(base, { 'threads.stop': () => ({ ok: true }) });
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop thread' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'threads.stop')).toBe(true));
+  });
+
+  it('archives a finished thread, asks Desk about drafts, and shows usage', async () => {
+    const bridge = setup([...base, ...finished], { 'threads.archive': () => ({ ok: true }), 'projects.send': () => ({ ok: true }) });
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive' }));
+    expect(screen.getByText(/Files it published stay in the Library/)).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Archive' }).at(-1)!);
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'threads.archive')).toBe(true));
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Result' }));
+    expect(within(screen.getByRole('tabpanel')).getByRole('link', { name: 'emails/01.md' }).getAttribute('href')).toBe('#/p/p/library?file=emails%2F01.md');
+    fireEvent.click(screen.getByRole('tab', { name: /Skill drafts/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Desk to review and install' }));
+    await waitFor(() => expect((bridge.calls.find((c) => c.channel === 'projects.send')?.input as { text: string }).text).toContain('drafts/email-sequence'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Usage' }));
+    expect(screen.getByRole('table').textContent).toContain('1,200');
+    fireEvent.click(screen.getByRole('button', { name: 'Turn into a skill' }));
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'projects.send')).toHaveLength(2));
+  });
+
+  it('explains scratch threads on Diff and browses Files', async () => {
+    setup(base, {
+      'threads.diff': () => {
+        throw { code: 'conflict', message: 'no worktree', status: 409 };
+      },
+      'threads.files': ({ path }: { path?: string }) => (path ? [{ name: 'a.md', path: 'emails/a.md', type: 'file', size: 5 }] : [{ name: 'emails', path: 'emails', type: 'dir', size: 0 }]),
+      'threads.file': () => new TextEncoder().encode('# Hi'),
+    });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Diff' }));
+    expect(await screen.findByText('No diff for this thread')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Files' }));
+    fireEvent.click(await screen.findByRole('button', { name: /emails/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /a\.md/ }));
+    expect(await screen.findByRole('heading', { name: 'Hi' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save a copy…' })).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/threads`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/state/width.ts`:
+
+```ts
+import { useLayoutEffect, useState, type RefObject } from 'react';
+
+/** The element's client width, kept current with a ResizeObserver (jsdom reports 0, so `fallback` stands in). */
+export function useWidth(ref: RefObject<HTMLElement | null>, fallback = 1200): number {
+  const [w, setW] = useState(fallback);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setW(el.clientWidth || fallback);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, fallback]);
+  return w;
+}
+```
+
+`apps/desktop/src/renderer/threads/route.ts`:
+
+```ts
+import type { ToolCallView, TranscriptEntry } from '@desk/client';
+import { clip } from '@desk/protocol';
+import { toolNames } from '../components/ToolGroup';
+import { clock } from '../format';
+
+export type StopKind = 'brief' | 'work' | 'detour' | 'result' | 'revision' | 'steer' | 'approval' | 'incoming';
+
+/** One numbered stop on a thread's route; the same number marks its transcript entries. */
+export type Stop = {
+  n: number;
+  kind: StopKind;
+  from: string;
+  to: string;
+  entries: TranscriptEntry[];
+  tools: ToolCallView[];
+  live: boolean;
+};
+
+export type NarrativeRow = { kind: 'stop'; stop: Stop } | { kind: 'compacted'; id: string; ts: string };
+
+const OWN: Partial<Record<TranscriptEntry['kind'], StopKind>> = {
+  brief: 'brief',
+  detour: 'detour',
+  result: 'result',
+  revision: 'revision',
+  steer: 'steer',
+  approval: 'approval',
+  incoming: 'incoming',
+};
+
+/**
+ * Groups transcript entries into numbered stops. Runs of assistant text and tool calls form one "work" stop;
+ * every other entry is its own stop. Status changes are not stops; compaction becomes a divider.
+ */
+export function narrate(entries: TranscriptEntry[]): NarrativeRow[] {
+  const rows: NarrativeRow[] = [];
+  let work: Stop | null = null;
+  let n = 0;
+  for (const e of entries) {
+    if (e.kind === 'status') continue;
+    if (e.kind === 'compacted') {
+      work = null;
+      rows.push({ kind: 'compacted', id: e.id, ts: e.ts });
+      continue;
+    }
+    const own = OWN[e.kind];
+    if (own) {
+      work = null;
+      rows.push({ kind: 'stop', stop: { n: ++n, kind: own, from: e.ts, to: e.ts, entries: [e], tools: [], live: e.kind === 'approval' && e.state === 'pending' } });
+      continue;
+    }
+    if (!work) {
+      work = { n: ++n, kind: 'work', from: e.ts, to: e.ts, entries: [], tools: [], live: false };
+      rows.push({ kind: 'stop', stop: work });
+    }
+    work.entries.push(e);
+    work.to = e.ts;
+    if (e.kind === 'tools') work.tools.push(...e.calls);
+    work.live = work.entries.some((x) => (x.kind === 'assistant' && x.streaming) || (x.kind === 'tools' && x.calls.some((c) => c.status === 'running')));
+  }
+  return rows;
+}
+
+export const stopsOf = (rows: NarrativeRow[]): Stop[] => rows.flatMap((r) => (r.kind === 'stop' ? [r.stop] : []));
+
+/** The stop's title and subtitle, as shown under it on the route and at the top of its transcript entry. */
+export function stopText(s: Stop, reviewRounds: number): { title: string; sub: string; quote?: string } {
+  const e = s.entries[0];
+  switch (e?.kind) {
+    case 'brief':
+      return { title: 'Brief from Desk', sub: clock(s.from) };
+    case 'detour':
+      return { title: 'Rate limited · a short detour', sub: `continued on ${e.to} · ${clock(s.from)}` };
+    case 'result':
+      return { title: 'Reported to Desk', sub: `${clip(e.summary, 60)} · ${clock(s.from)}` };
+    case 'revision':
+      return { title: 'Desk sent it back', sub: `round ${e.round} of ${reviewRounds} · ${clock(s.from)}`, quote: clip(e.feedback, 70) };
+    case 'steer':
+      return { title: `You steered · ${clock(s.from)}`, sub: '', quote: clip(e.text, 70) };
+    case 'approval':
+      return { title: e.state === 'pending' ? 'Waiting for your approval' : `Approval ${e.state}`, sub: `${e.tool} · ${clock(s.from)}` };
+    case 'incoming':
+      return { title: `${e.fromLabel} · ${e.messageKind}`, sub: clock(s.from), quote: clip(e.text, 70) };
+    default: {
+      const span = clock(s.from) === clock(s.to) ? clock(s.from) : `${clock(s.from)}–${clock(s.to)}`;
+      if (!s.tools.length) return { title: s.live ? 'Writing' : 'Wrote', sub: span };
+      const verb = s.live ? 'Using' : 'Used';
+      return { title: `${verb} ${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`, sub: `${clip(toolNames(s.tools), 60)} · ${span}` };
+    }
+  }
+}
+
+export type RoutePoint = { stop: Stop; x: number; y: number; r: number; row: number };
+export type RouteLayout = {
+  width: number;
+  height: number;
+  points: RoutePoint[];
+  /** Path pieces between consecutive points; `live` pieces follow the last revision of a running thread. */
+  pieces: Array<{ d: string; live: boolean }>;
+  now: { x: number; y: number } | null;
+  tail: Array<{ x: number; y: number }>;
+  tailPath: string | null;
+};
+
+const SPACING = 190;
+const ROW_GAP = 200;
+const MARGIN = 80;
+const TOP = 150;
+
+const RADIUS: Record<StopKind, number> = { brief: 28, work: 32, detour: 30, result: 28, revision: 28, steer: 24, approval: 24, incoming: 24 };
+
+/** Lays the stops out as a serpentine: left to right, a U-turn, then right to left, and so on. */
+export function routeLayout(stops: Stop[], width: number, running: boolean): RouteLayout {
+  const perRow = Math.max(2, Math.floor((width - MARGIN * 2) / SPACING) + 1);
+  const total = stops.length + (running ? 1 : 0);
+  const pos = (i: number) => {
+    const row = Math.floor(i / perRow);
+    const col = i % perRow;
+    const x = row % 2 === 0 ? MARGIN + col * SPACING : width - MARGIN - col * SPACING - ((width - MARGIN * 2) % SPACING);
+    return { row, x, y: TOP + row * ROW_GAP };
+  };
+  const points = stops.map((stop, i) => {
+    const p = pos(i);
+    return { stop, x: p.x, y: stop.kind === 'detour' ? p.y - 88 : p.y, r: RADIUS[stop.kind], row: p.row };
+  });
+  const nowP = running ? pos(stops.length) : null;
+  const now = nowP ? { x: nowP.x, y: nowP.y } : null;
+
+  const link = (a: { x: number; y: number; row: number }, b: { x: number; y: number; row: number }) => {
+    if (a.row === b.row) {
+      const mx = (a.x + b.x) / 2;
+      return `M${a.x} ${a.y} C${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`;
+    }
+    const dir = a.row % 2 === 0 ? 1 : -1;
+    const bulge = Math.max(a.x, b.x) * (dir > 0 ? 1 : 0) + Math.min(a.x, b.x) * (dir < 0 ? 1 : 0) + dir * 90;
+    return `M${a.x} ${a.y} C${bulge} ${a.y} ${bulge} ${b.y} ${b.x} ${b.y}`;
+  };
+  const lastRevision = stops.map((s) => s.kind).lastIndexOf('revision');
+  const chain: Array<{ x: number; y: number; row: number }> = [...points, ...(nowP ? [{ ...nowP }] : [])];
+  const pieces = chain.slice(1).map((b, i) => ({ d: link(chain[i]!, b), live: running && lastRevision >= 0 && i + 1 > lastRevision }));
+
+  const tail: Array<{ x: number; y: number }> = [];
+  let tailPath: string | null = null;
+  if (running) {
+    const t = pos(total);
+    tail.push({ x: t.x, y: t.y });
+    tailPath = link({ ...nowP!, row: nowP!.row }, t);
+  }
+  const rows = Math.floor(Math.max(0, total + (running ? 1 : 0) - 1) / perRow) + 1;
+  return { width, height: TOP + (rows - 1) * ROW_GAP + 110, points, pieces, now, tail, tailPath };
+}
+```
+
+`apps/desktop/src/renderer/threads/RouteView.tsx`:
+
+```tsx
+import { useRef } from 'react';
+import { useWidth } from '../state/width';
+import { routeLayout, stopText, type Stop, type StopKind } from './route';
+
+const INNER: Record<StopKind, (s: Stop) => string> = {
+  brief: () => 'Brief',
+  work: (s) => (s.tools.length ? String(s.tools.length) : '…'),
+  detour: () => 'detour',
+  result: () => 'Report',
+  revision: (s) => {
+    const e = s.entries[0];
+    return e?.kind === 'revision' ? `R${e.round}` : 'R';
+  },
+  steer: () => 'You',
+  approval: () => '!',
+  incoming: () => 'Desk',
+};
+
+/** A thread's route: numbered stops on a serpentine path, the live stretch in blue, and what comes next dashed. */
+export function RouteView(o: { stops: Stop[]; running: boolean; activity: string | null; reviewRounds: number; selected: number | null; onSelect(n: number): void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const width = useWidth(ref, 900);
+  const l = routeLayout(o.stops, Math.max(520, width), o.running);
+  return (
+    <div className="route" ref={ref}>
+      <div className="route-canvas" style={{ height: l.height }}>
+        <svg width={l.width} height={l.height} aria-hidden="true" className="route-svg">
+          {l.pieces.map((p, i) => (
+            <path key={i} d={p.d} fill="none" stroke={p.live ? '#2F5BD3' : '#1C1B18'} strokeWidth={p.live ? 2.5 : 2} />
+          ))}
+          {l.tailPath ? <path d={l.tailPath} fill="none" stroke="#8A857B" strokeWidth={2} strokeDasharray="4 5" /> : null}
+        </svg>
+        {l.points.map((p) => {
+          const t = stopText(p.stop, o.reviewRounds);
+          const above = p.stop.kind === 'detour';
+          const label = `Stop ${p.stop.n}: ${t.title}${t.sub ? `, ${t.sub}` : ''}`;
+          return (
+            <div key={p.stop.n}>
+              <button
+                type="button"
+                className={`route-stop route-stop-${p.stop.kind}${p.stop.live ? ' live' : ''}${o.selected === p.stop.n ? ' selected' : ''}`}
+                style={{ left: p.x, top: p.y, width: p.r * 2, height: p.r * 2 }}
+                aria-label={label}
+                aria-pressed={o.selected === p.stop.n}
+                onClick={() => o.onSelect(p.stop.n)}
+              >
+                <span aria-hidden="true">{INNER[p.stop.kind](p.stop)}</span>
+              </button>
+              <span className="route-num" aria-hidden="true" style={{ left: p.x + p.r * 0.8, top: p.y - p.r * 0.8 }}>
+                {p.stop.n}
+              </span>
+              <div className={`route-label${above ? ' above' : ''}`} style={{ left: p.x, top: above ? p.y - p.r - 6 : p.y + p.r + 6 }}>
+                <span className="route-label-title">{t.title}</span>
+                {t.sub ? <span className="route-label-sub">{t.sub}</span> : null}
+                {t.quote ? <span className="route-label-quote">“{t.quote}”</span> : null}
+              </div>
+            </div>
+          );
+        })}
+        {l.now ? (
+          <>
+            <span className="route-now" aria-hidden="true" style={{ left: l.now.x, top: l.now.y }} />
+            <div className="route-label" style={{ left: l.now.x, top: l.now.y + 20 }}>
+              <span className="route-label-title run">Now{o.activity ? ` · ${o.activity.split(' ')[0]}` : ''}</span>
+              {o.activity ? <span className="route-label-sub mono">{o.activity.split(' ').slice(1).join(' ')}</span> : null}
+            </div>
+          </>
+        ) : null}
+        {l.tail.map((t, i) => (
+          <div key={i}>
+            <span className="route-next" aria-hidden="true" style={{ left: t.x, top: t.y }} />
+            <div className="route-label" style={{ left: t.x, top: t.y + 18 }}>
+              <span className="route-label-sub">Next: report to Desk</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="route-legend">
+        <span>
+          <span className="route-legend-line" />
+          Route taken
+        </span>
+        <span>
+          <span className="route-legend-line live" />
+          Live since sent back
+        </span>
+        <span>
+          <span className="route-legend-line next" />
+          Next
+        </span>
+        <span>Detour = continued on the fallback model</span>
+        <strong>Numbers match the transcript</strong>
+      </div>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/Transcript.tsx`:
+
+```tsx
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { ToolCallView, TranscriptEntry } from '@desk/client';
+import { clip } from '@desk/protocol';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { CodeBlock } from '../components/CodeBlock';
+import { SafeMarkdown } from '../components/SafeMarkdown';
+import { toastError } from '../components/Toast';
+import { ToolGroup, ToolStatus } from '../components/ToolGroup';
+import { clock } from '../format';
+import { href } from '../router';
+import { stopText, type NarrativeRow, type Stop } from './route';
+
+export type Depth = 'narrative' | 'steps';
+
+const MAX_OUTPUT = 6000;
+
+function pretty(args: string): string {
+  try {
+    return JSON.stringify(JSON.parse(args), null, 2);
+  } catch {
+    return args;
+  }
+}
+
+function ToolCallFull({ c }: { c: ToolCallView }) {
+  const [all, setAll] = useState(false);
+  const out = c.content ?? '';
+  return (
+    <div className="tr-call">
+      <div className="tr-call-head">
+        <span className="mono grow">{c.name}</span>
+        <ToolStatus status={c.status} />
+      </div>
+      <CodeBlock code={pretty(c.arguments)} language="arguments" />
+      {out ? (
+        <>
+          <CodeBlock code={all || out.length <= MAX_OUTPUT ? out : `${out.slice(0, MAX_OUTPUT)}\n…`} language={c.status === 'ok' ? 'result' : c.status} />
+          {out.length > MAX_OUTPUT && !all ? (
+            <button type="button" className="link small" onClick={() => setAll(true)}>
+              Show all {out.length.toLocaleString()} characters
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** One entry at full detail (the Every-step depth). */
+function EntryFull({ e, projectId }: { e: TranscriptEntry; projectId: string }) {
+  switch (e.kind) {
+    case 'brief':
+      return (
+        <>
+          <span className="eyebrow">Brief from Desk · {clock(e.ts)}</span>
+          <SafeMarkdown text={e.text} />
+        </>
+      );
+    case 'status':
+      return (
+        <span className="muted small">
+          Status → {e.status}
+          {e.reason ? ` · ${e.reason}` : ''} · {clock(e.ts)}
+        </span>
+      );
+    case 'assistant':
+      return (
+        <>
+          <SafeMarkdown className="md-voice tr-voice" text={e.text} />
+          {e.interrupted ? <span className="muted small">Cut off by an error.</span> : null}
+        </>
+      );
+    case 'tools':
+      return (
+        <div className="tr-calls">
+          {e.calls.map((c) => (
+            <ToolCallFull key={c.id} c={c} />
+          ))}
+        </div>
+      );
+    case 'compacted':
+      return null;
+    default:
+      return <EntrySummary e={e} projectId={projectId} />;
+  }
+}
+
+/** The body shared by both depths for entries that are their own stop. */
+function EntrySummary({ e, projectId }: { e: TranscriptEntry; projectId: string }) {
+  switch (e.kind) {
+    case 'brief':
+      return <SafeMarkdown text={e.text} />;
+    case 'detour':
+      return (
+        <p className="tr-text">
+          Continued on <span className="mono">{e.to}</span> for the rest of the run. Nothing was lost.
+        </p>
+      );
+    case 'result':
+      return (
+        <>
+          <SafeMarkdown text={e.summary} />
+          {e.artifacts.length ? (
+            <div className="report-results">
+              {e.artifacts.map((a) => (
+                <a key={a} className="file-chip" href={href({ name: 'project', id: projectId, tab: 'library', file: a })}>
+                  {a}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </>
+      );
+    case 'revision':
+      return <SafeMarkdown text={e.feedback} />;
+    case 'steer':
+      return <p className="tr-text">{e.text}</p>;
+    case 'incoming':
+      return <SafeMarkdown text={e.text} />;
+    case 'approval':
+      return (
+        <div className="tr-approval">
+          <span className="mono small">
+            {e.tool} {clip(e.arguments, 120)}
+          </span>
+          <span className="small">{e.reason}</span>
+          {e.state === 'pending' ? (
+            <a href={href({ name: 'attention', item: `approval:${e.approvalId}` })}>Review in Attention</a>
+          ) : (
+            <span className="small muted">
+              {e.state === 'approved' ? 'Approved' : 'Denied'}
+              {e.resolvedBy ? ` by ${e.resolvedBy === 'user' ? 'you' : e.resolvedBy}` : ''}
+              {e.note ? ` · “${e.note}”` : ''}
+            </span>
+          )}
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+function StopBody({ s, projectId }: { s: Stop; projectId: string }) {
+  if (s.kind !== 'work') return <EntrySummary e={s.entries[0]!} projectId={projectId} />;
+  return (
+    <>
+      {s.entries.map((e) =>
+        e.kind === 'assistant' && e.text ? (
+          <SafeMarkdown key={e.id} className="md-voice tr-voice" text={e.text} />
+        ) : e.kind === 'tools' ? (
+          <ToolGroup key={e.id} calls={e.calls} defaultOpen={e.calls.some((c) => c.status === 'running')} />
+        ) : null,
+      )}
+    </>
+  );
+}
+
+export const stopDomId = (n: number) => `tr-stop-${n}`;
+
+/** The transcript aside: Narrative (numbered stops) or Every step, plus the steering composer. */
+export function Transcript(o: {
+  projectId: string;
+  threadId: string;
+  rows: NarrativeRow[];
+  entries: TranscriptEntry[];
+  reviewRounds: number;
+  selected: number | null;
+  onSelect(n: number): void;
+  depth: Depth;
+  onDepth(d: Depth): void;
+  actions: React.ReactNode;
+  canSteer: boolean;
+  steerHint: string;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const [steer, setSteer] = useState('');
+  const [sending, setSending] = useState(false);
+  const [pending, setPending] = useState<string[]>([]);
+  const stopOfEntry = new Map<string, number>();
+  for (const r of o.rows) if (r.kind === 'stop') r.stop.entries.forEach((e, i) => i === 0 && stopOfEntry.set(e.id, r.stop.n));
+  const inStop = new Map<string, number>();
+  for (const r of o.rows) if (r.kind === 'stop') for (const e of r.stop.entries) inStop.set(e.id, r.stop.n);
+
+  useEffect(() => {
+    if (!pending.length) return;
+    const steered = new Set(o.entries.flatMap((e) => (e.kind === 'steer' ? [e.text] : [])));
+    setPending((p) => p.filter((t) => !steered.has(t)));
+  }, [o.entries, pending.length]);
+  useEffect(() => {
+    const el = listRef.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [o.entries, o.depth]);
+  useEffect(() => {
+    if (o.selected === null) return;
+    document.getElementById(stopDomId(o.selected))?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [o.selected]);
+
+  const send = async () => {
+    const text = steer.trim();
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      await call('threads.send', { id: o.threadId, text });
+      setSteer('');
+      setPending((p) => [...p, text]);
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setSending(false);
+    }
+  };
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void send();
+    }
+  };
+
+  const numBadge = (n: number) => (
+    <span className="tr-num" aria-label={`Stop ${n}`}>
+      {n}
+    </span>
+  );
+
+  return (
+    <aside className="card transcript" aria-label="Transcript">
+      <div className="transcript-head">
+        <h2>Transcript</h2>
+        <div className="segmented" role="group" aria-label="Depth">
+          <button type="button" aria-pressed={o.depth === 'narrative'} onClick={() => o.onDepth('narrative')}>
+            Narrative
+          </button>
+          <button type="button" aria-pressed={o.depth === 'steps'} onClick={() => o.onDepth('steps')}>
+            Every step
+          </button>
+        </div>
+        {o.actions}
+      </div>
+      <div
+        className="transcript-list"
+        ref={listRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
+        {o.depth === 'narrative'
+          ? o.rows.map((r) =>
+              r.kind === 'compacted' ? (
+                <div key={r.id} className="chat-divider" role="separator">
+                  Earlier conversation summarised
+                </div>
+              ) : (
+                <div
+                  key={r.stop.n}
+                  id={stopDomId(r.stop.n)}
+                  className={`tr-entry${o.selected === r.stop.n ? ' selected' : ''}`}
+                  onClick={() => o.onSelect(r.stop.n)}
+                >
+                  {numBadge(r.stop.n)}
+                  <div className="tr-body">
+                    <span className="tr-title">
+                      {stopText(r.stop, o.reviewRounds).title}
+                      {r.stop.kind === 'work' || r.stop.kind === 'brief' || r.stop.kind === 'steer' ? null : ` · ${clock(r.stop.from)}`}
+                      {r.stop.kind === 'work' ? <span className="muted"> · {stopText(r.stop, o.reviewRounds).sub}</span> : null}
+                    </span>
+                    <StopBody s={r.stop} projectId={o.projectId} />
+                  </div>
+                </div>
+              ),
+            )
+          : o.entries.map((e) =>
+              e.kind === 'compacted' ? (
+                <div key={e.id} className="chat-divider" role="separator">
+                  Earlier conversation summarised
+                </div>
+              ) : (
+                <div
+                  key={e.id}
+                  id={stopOfEntry.has(e.id) ? stopDomId(stopOfEntry.get(e.id)!) : undefined}
+                  className={`tr-entry${inStop.get(e.id) !== undefined && inStop.get(e.id) === o.selected ? ' selected' : ''}`}
+                  onClick={() => inStop.has(e.id) && o.onSelect(inStop.get(e.id)!)}
+                >
+                  {stopOfEntry.has(e.id) ? numBadge(stopOfEntry.get(e.id)!) : <span className="tr-num tr-num-blank" aria-hidden="true" />}
+                  <div className="tr-body">
+                    <EntryFull e={e} projectId={o.projectId} />
+                  </div>
+                </div>
+              ),
+            )}
+        {pending.map((t) => (
+          <div key={t} className="tr-entry pending">
+            <span className="tr-num tr-num-blank" aria-hidden="true" />
+            <div className="tr-body">
+              <span className="tr-title">You · steering…</span>
+              <p className="tr-text">{t}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="steer">
+        <label htmlFor={`steer-${o.threadId}`}>Steer this thread</label>
+        <textarea
+          id={`steer-${o.threadId}`}
+          rows={2}
+          value={steer}
+          disabled={!o.canSteer}
+          onChange={(e) => setSteer(e.target.value)}
+          onKeyDown={onKey}
+          placeholder="Steer this thread. It reads this at its next step."
+        />
+        <div className="steer-bar">
+          <span className="grow muted small">{o.steerHint}</span>
+          <Button variant="primary" size="sm" pending={sending} disabled={!o.canSteer || !steer.trim()} onClick={() => void send()}>
+            Steer
+          </Button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/tabs/ResultTab.tsx`:
+
+```tsx
+import type { ThreadView } from '@desk/client';
+import { EmptyState } from '../../components/EmptyState';
+import { SafeMarkdown } from '../../components/SafeMarkdown';
+import { href } from '../../router';
+
+export function ResultTab({ projectId, thread }: { projectId: string; thread: ThreadView }) {
+  if (!thread.result_summary)
+    return <EmptyState title="No result yet">The thread reports here when it finishes. Desk reviews it and may send it back.</EmptyState>;
+  return (
+    <div className="tab-body result-tab">
+      <SafeMarkdown text={thread.result_summary} />
+      {thread.result_artifacts?.length ? (
+        <>
+          <h3>Artifacts</h3>
+          <div className="report-results">
+            {thread.result_artifacts.map((a) => (
+              <a key={a} className="file-chip" href={href({ name: 'project', id: projectId, tab: 'library', file: a })}>
+                {a}
+              </a>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/tabs/DiffTab.tsx`:
+
+```tsx
+import { useEffect, useState } from 'react';
+import type { ThreadDiff } from '@desk/protocol';
+import { call, DeskCallError } from '../../bridge';
+import { EmptyState } from '../../components/EmptyState';
+import { describeError } from '../../components/Toast';
+
+type State = { status: 'loading' } | { status: 'ready'; diff: ThreadDiff } | { status: 'none'; message: string } | { status: 'error'; message: string };
+
+const FILE_STATUS: Record<string, string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C' };
+
+/** The thread's branch against its base, with a colored patch. Scratch threads have no diff (409). */
+export function DiffTab({ threadId, version }: { threadId: string; version: string }) {
+  const [s, setS] = useState<State>({ status: 'loading' });
+  useEffect(() => {
+    let live = true;
+    call('threads.diff', { id: threadId })
+      .then((diff) => live && setS({ status: 'ready', diff }))
+      .catch((err) => {
+        if (!live) return;
+        if (err instanceof DeskCallError && err.status === 409) setS({ status: 'none', message: err.message });
+        else setS({ status: 'error', message: describeError(err).message });
+      });
+    return () => {
+      live = false;
+    };
+  }, [threadId, version]);
+
+  if (s.status === 'loading') return <p className="muted tab-body">Loading the diff…</p>;
+  if (s.status === 'none') return <EmptyState title="No diff for this thread">This thread works in a scratch workspace, not on a git branch. See Files instead.</EmptyState>;
+  if (s.status === 'error') return <EmptyState title="Couldn't load the diff">{s.message}</EmptyState>;
+  const d = s.diff;
+  return (
+    <div className="tab-body diff-tab">
+      <p className="small">
+        <span className="mono">{d.branch}</span> against <span className="mono">{d.base}</span> · {d.files.length} file{d.files.length === 1 ? '' : 's'} changed.
+        Desk never merges; merge the branch yourself when you're happy.
+      </p>
+      {d.files.length ? (
+        <table className="diff-files">
+          <tbody>
+            {d.files.map((f) => (
+              <tr key={f.path}>
+                <td className="mono diff-status" title={f.status}>
+                  {FILE_STATUS[f.status] ?? f.status}
+                </td>
+                <td className="mono grow">{f.path}</td>
+                <td className="mono diff-add">{f.additions === null ? 'bin' : `+${f.additions}`}</td>
+                <td className="mono diff-del">{f.deletions === null ? '' : `−${f.deletions}`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="muted">No changes yet.</p>
+      )}
+      {d.patch ? (
+        <pre className="diff-patch" aria-label="Patch">
+          {d.patch.split('\n').map((line, i) => (
+            <span
+              key={i}
+              className={
+                line.startsWith('+++') || line.startsWith('---') ? 'diff-meta' : line.startsWith('+') ? 'diff-line-add' : line.startsWith('-') ? 'diff-line-del' : line.startsWith('@@') ? 'diff-hunk' : line.startsWith('diff ') ? 'diff-meta' : undefined
+              }
+            >
+              {line}
+              {'\n'}
+            </span>
+          ))}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/tabs/FilesTab.tsx`:
+
+```tsx
+import { useEffect, useState } from 'react';
+import type { WorkspaceEntry } from '@desk/protocol';
+import { call, DeskCallError } from '../../bridge';
+import { Button } from '../../components/Button';
+import { CodeBlock } from '../../components/CodeBlock';
+import { EmptyState } from '../../components/EmptyState';
+import { SafeMarkdown } from '../../components/SafeMarkdown';
+import { describeError, toastError } from '../../components/Toast';
+import { bytes } from '../../format';
+
+const MAX_TEXT = 1024 * 1024;
+
+/** Decodes bytes as UTF-8 text, or returns null for binary content. */
+export function asText(data: Uint8Array): string | null {
+  if (data.length > MAX_TEXT) return null;
+  if (data.subarray(0, 8000).includes(0)) return null;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(data);
+  } catch {
+    return null;
+  }
+}
+
+type Listing = { status: 'loading' } | { status: 'ready'; entries: WorkspaceEntry[] } | { status: 'gone' } | { status: 'error'; message: string };
+type Open = { path: string; data: Uint8Array; text: string | null } | null;
+
+/** Browses the thread's workspace and shows one file at a time. */
+export function FilesTab({ threadId, dir, onDir, version }: { threadId: string; dir: string; onDir(path: string): void; version: string }) {
+  const [list, setList] = useState<Listing>({ status: 'loading' });
+  const [open, setOpen] = useState<Open>(null);
+  const [raw, setRaw] = useState(false);
+  const [loadingFile, setLoadingFile] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setList({ status: 'loading' });
+    call('threads.files', { id: threadId, ...(dir ? { path: dir } : {}) })
+      .then((entries) => live && setList({ status: 'ready', entries: [...entries].sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1)) }))
+      .catch((err) => {
+        if (!live) return;
+        if (err instanceof DeskCallError && err.status === 409) setList({ status: 'gone' });
+        else setList({ status: 'error', message: describeError(err).message });
+      });
+    return () => {
+      live = false;
+    };
+  }, [threadId, dir, version]);
+
+  const openFile = async (path: string) => {
+    setLoadingFile(path);
+    try {
+      const data = await call('threads.file', { id: threadId, path });
+      setOpen({ path, data, text: asText(data) });
+      setRaw(false);
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setLoadingFile(null);
+    }
+  };
+  const save = async () => {
+    if (!open) return;
+    try {
+      await call('app.saveFile', { name: open.path.split('/').pop() ?? 'file', data: new Uint8Array(open.data) });
+    } catch (err) {
+      toastError(err);
+    }
+  };
+
+  if (list.status === 'gone') return <EmptyState title="The workspace is gone">It was removed when this thread was archived. Published files are still in the Library.</EmptyState>;
+  if (list.status === 'error') return <EmptyState title="Couldn't list the workspace">{list.message}</EmptyState>;
+  const crumbs = dir ? dir.split('/') : [];
+  return (
+    <div className="tab-body files-tab">
+      <div className="files-browser">
+        <nav className="crumbs" aria-label="Folder">
+          <button type="button" className="link" onClick={() => onDir('')}>
+            workspace
+          </button>
+          {crumbs.map((c, i) => (
+            <span key={i}>
+              {' / '}
+              <button type="button" className="link" onClick={() => onDir(crumbs.slice(0, i + 1).join('/'))}>
+                {c}
+              </button>
+            </span>
+          ))}
+        </nav>
+        {list.status === 'loading' ? (
+          <p className="muted">Loading…</p>
+        ) : list.entries.length ? (
+          <ul className="files-list">
+            {list.entries.map((e) => (
+              <li key={e.path}>
+                <button
+                  type="button"
+                  className={`files-entry${open?.path === e.path ? ' current' : ''}`}
+                  aria-busy={loadingFile === e.path || undefined}
+                  onClick={() => (e.type === 'dir' ? onDir(e.path) : void openFile(e.path))}
+                >
+                  <span aria-hidden="true">{e.type === 'dir' ? '▸' : '·'}</span>
+                  <span className="grow mono">{e.name}</span>
+                  <span className="muted small">{e.type === 'dir' ? 'folder' : bytes(e.size)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted">This folder is empty.</p>
+        )}
+      </div>
+      <div className="files-viewer">
+        {open ? (
+          <>
+            <div className="files-viewer-bar">
+              <span className="mono grow">{open.path}</span>
+              <span className="muted small">{bytes(open.data.length)}</span>
+              {open.text !== null && /\.md$/i.test(open.path) ? (
+                <Button size="sm" variant="ghost" onClick={() => setRaw((r) => !r)}>
+                  {raw ? 'Rendered' : 'Raw'}
+                </Button>
+              ) : null}
+              <Button size="sm" onClick={() => void save()}>
+                Save a copy…
+              </Button>
+            </div>
+            {open.text === null ? (
+              <p className="muted">This file isn't text, so it can't be shown here. Save a copy to open it.</p>
+            ) : /\.md$/i.test(open.path) && !raw ? (
+              <SafeMarkdown text={open.text} />
+            ) : (
+              <CodeBlock code={open.text} language={open.path.split('.').pop() ?? ''} />
+            )}
+          </>
+        ) : (
+          <p className="muted">Pick a file to view it.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/tabs/SkillDraftsTab.tsx`:
+
+```tsx
+import { useState } from 'react';
+import { call } from '../../bridge';
+import { Button } from '../../components/Button';
+import { EmptyState } from '../../components/EmptyState';
+import { toast, toastError } from '../../components/Toast';
+
+/** Skill drafts the thread submitted with its result. Threads can't install skills; Desk reviews and installs them. */
+export function SkillDraftsTab(o: { projectId: string; threadTitle: string; drafts: string[]; onBrowse(dir: string): void }) {
+  const [asking, setAsking] = useState<string | null>(null);
+  if (!o.drafts.length)
+    return (
+      <EmptyState title="No skill drafts">
+        A thread can package what it learned as a skill draft (a folder with a SKILL.md). Drafts show up here for Desk to review and install.
+      </EmptyState>
+    );
+  const ask = async (dir: string) => {
+    setAsking(dir);
+    try {
+      await call('projects.send', { id: o.projectId, text: `Please review the skill draft at ${dir} from the thread "${o.threadTitle}" and install it if it's good.` });
+      toast({ tone: 'info', message: 'Asked Desk to review the draft.' });
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setAsking(null);
+    }
+  };
+  return (
+    <ul className="tab-body drafts">
+      {o.drafts.map((d) => (
+        <li key={d} className="draft">
+          <span className="mono grow">{d}</span>
+          <Button size="sm" variant="ghost" onClick={() => o.onBrowse(d)}>
+            View files
+          </Button>
+          <Button size="sm" variant="primary" pending={asking === d} onClick={() => void ask(d)}>
+            Ask Desk to review and install
+          </Button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/tabs/UsageTab.tsx`:
+
+```tsx
+import type { StoredEvent } from '@desk/protocol';
+import { EmptyState } from '../../components/EmptyState';
+
+export type ModelUsage = { model: string; prompt: number; completion: number; cached: number; estimated: boolean; runs: number };
+
+/** Sums `usage` events by model, in first-use order. */
+export function usageByModel(events: StoredEvent[], agentId: string): ModelUsage[] {
+  const by = new Map<string, ModelUsage>();
+  for (const e of events) {
+    if (e.type !== 'usage' || e.agent_id !== agentId) continue;
+    const u = by.get(e.payload.model) ?? { model: e.payload.model, prompt: 0, completion: 0, cached: 0, estimated: false, runs: 0 };
+    u.prompt += e.payload.prompt_tokens;
+    u.completion += e.payload.completion_tokens;
+    u.cached += e.payload.cached_tokens ?? 0;
+    u.estimated ||= e.payload.estimated;
+    u.runs += 1;
+    by.set(u.model, u);
+  }
+  return [...by.values()];
+}
+
+export const tokens = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+export function UsageTab({ usage }: { usage: ModelUsage[] }) {
+  if (!usage.length) return <EmptyState title="No usage yet">Token counts appear after the thread's first model call.</EmptyState>;
+  const total = usage.reduce((a, u) => ({ prompt: a.prompt + u.prompt, completion: a.completion + u.completion }), { prompt: 0, completion: 0 });
+  return (
+    <div className="tab-body">
+      <table className="usage-table">
+        <thead>
+          <tr>
+            <th scope="col">Model</th>
+            <th scope="col">Calls</th>
+            <th scope="col">Prompt</th>
+            <th scope="col">Cached</th>
+            <th scope="col">Completion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {usage.map((u) => (
+            <tr key={u.model}>
+              <td className="mono">{u.model}</td>
+              <td>{u.runs}</td>
+              <td>{u.prompt.toLocaleString()}</td>
+              <td>{u.cached.toLocaleString()}</td>
+              <td>{u.completion.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Total</th>
+            <td />
+            <td>{total.prompt.toLocaleString()}</td>
+            <td />
+            <td>{total.completion.toLocaleString()}</td>
+          </tr>
+        </tfoot>
+      </table>
+      {usage.some((u) => u.estimated) ? <p className="muted small">Some counts are estimates; the model endpoint didn't report usage for every call.</p> : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/ThreadRoster.tsx`:
+
+```tsx
+import { useState } from 'react';
+import type { ProjectState, ThreadView } from '@desk/client';
+import { EmptyState } from '../components/EmptyState';
+import { SkillBadge } from '../components/SkillBadge';
+import { StatusChip } from '../components/StatusChip';
+import { ago } from '../format';
+import { href } from '../router';
+import { useGlobal } from '../state/global';
+
+const ORDER: Record<string, number> = { waiting: 0, running: 1, queued: 2, idle: 3, failed: 4, done: 5, cancelled: 6 };
+
+export function ThreadCard({ projectId, t, reviewRounds, now, proxyDown }: { projectId: string; t: ThreadView; reviewRounds: number; now: number; proxyDown: boolean }) {
+  return (
+    <a className={`card thread-card${t.archived_at ? ' archived' : ''}`} href={href({ name: 'project', id: projectId, tab: 'threads', threadId: t.id })}>
+      <div className="thread-card-head">
+        <h2>{t.title ?? 'Untitled thread'}</h2>
+        <StatusChip status={t.status} reason={t.reason} proxyDown={proxyDown} />
+      </div>
+      {t.reason && t.status !== 'running' ? <span className="small muted">{t.reason}</span> : null}
+      {t.activity ? <span className="mono small thread-activity">{t.activity}</span> : null}
+      <dl className="thread-facts">
+        <div>
+          <dt>Elapsed</dt>
+          <dd>{ago(t.created_at, now)}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd className="mono">{t.model_override ?? t.model}</dd>
+        </div>
+        <div>
+          <dt>Workspace</dt>
+          <dd className="mono">{t.git_branch ?? 'scratch'}</dd>
+        </div>
+        {t.review_round ? (
+          <div>
+            <dt>Revision</dt>
+            <dd>
+              {t.review_round} of {reviewRounds}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {t.active_skills.length ? (
+        <div className="thread-skills">
+          {t.active_skills.map((s) => (
+            <SkillBadge key={s} name={s} />
+          ))}
+        </div>
+      ) : null}
+      {t.archived_at ? <span className="small muted">Archived</span> : null}
+    </a>
+  );
+}
+
+/** Every thread in the project as cards, busiest first. */
+export function ThreadRoster({ project, now }: { project: ProjectState; now: number }) {
+  const [showArchived, setShowArchived] = useState(false);
+  const proxyDown = useGlobal((g) => g.system.proxy) === 'down';
+  const all = project.threads;
+  const archived = all.filter((t) => t.archived_at).length;
+  const list = all
+    .filter((t) => showArchived || !t.archived_at)
+    .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || b.created_at.localeCompare(a.created_at));
+  return (
+    <div className="page roster">
+      <div className="roster-head">
+        <h1 className="title">Threads</h1>
+        <span className="muted">Desk dispatches threads; message Desk in the Conversation to start new work.</span>
+        <span className="grow" />
+        {archived ? (
+          <label className="small">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Show {archived} archived
+          </label>
+        ) : null}
+      </div>
+      {list.length ? (
+        <div className="roster-grid">
+          {list.map((t) => (
+            <ThreadCard key={t.id} projectId={project.project.id} t={t} reviewRounds={project.project.settings.review_rounds} now={now} proxyDown={proxyDown} />
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No threads yet" action={<a href={href({ name: 'project', id: project.project.id, tab: 'conversation' })}>Brief Desk</a>}>
+          Desk splits your brief into threads that work in parallel.
+        </EmptyState>
+      )}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/ThreadDetail.tsx`:
+
+```tsx
+import { useEffect, useMemo, useState } from 'react';
+import type { ThreadView } from '@desk/client';
+import { call } from '../bridge';
+import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { EmptyState } from '../components/EmptyState';
+import { SkillBadge } from '../components/SkillBadge';
+import { statusLabel } from '../components/StatusChip';
+import { toast, toastError } from '../components/Toast';
+import { clock, duration } from '../format';
+import { href } from '../router';
+import { useGlobal } from '../state/global';
+import { useNow } from '../state/now';
+import { useTranscript, type SessionState } from '../state/session';
+import { narrate, stopsOf } from './route';
+import { RouteView } from './RouteView';
+import { DiffTab } from './tabs/DiffTab';
+import { FilesTab } from './tabs/FilesTab';
+import { ResultTab } from './tabs/ResultTab';
+import { SkillDraftsTab } from './tabs/SkillDraftsTab';
+import { tokens, usageByModel, UsageTab } from './tabs/UsageTab';
+import { Transcript, type Depth } from './Transcript';
+
+type Tab = 'route' | 'result' | 'diff' | 'files' | 'drafts' | 'usage';
+const TABS: Array<[Tab, string]> = [
+  ['route', 'Route'],
+  ['result', 'Result'],
+  ['diff', 'Diff'],
+  ['files', 'Files'],
+  ['drafts', 'Skill drafts'],
+  ['usage', 'Usage'],
+];
+
+const LIVE = new Set(['running', 'waiting', 'queued']);
+const FINISHED = new Set(['done', 'failed', 'cancelled']);
+
+function useDepth(): [Depth, (d: Depth) => void] {
+  const [d, setD] = useState<Depth>(() => {
+    try {
+      return localStorage.getItem('desk.transcriptDepth') === 'steps' ? 'steps' : 'narrative';
+    } catch {
+      return 'narrative';
+    }
+  });
+  return [
+    d,
+    (v) => {
+      setD(v);
+      try {
+        localStorage.setItem('desk.transcriptDepth', v);
+      } catch {
+        // A convenience only.
+      }
+    },
+  ];
+}
+
+export function ThreadDetail({ s, thread }: { s: SessionState; thread: ThreadView }) {
+  const project = s.project!;
+  const projectId = project.project.id;
+  const now = useNow();
+  const proxyDown = useGlobal((g) => g.system.proxy) === 'down';
+  const transcript = useTranscript(s, projectId, thread.id);
+  const rows = useMemo(() => narrate(transcript.entries), [transcript.entries]);
+  const stops = useMemo(() => stopsOf(rows), [rows]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [tab, setTab] = useState<Tab>('route');
+  const [dir, setDir] = useState('');
+  const [depth, setDepth] = useDepth();
+  const [confirm, setConfirm] = useState<'stop' | 'archive' | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    setSelected(null);
+    setTab('route');
+    setDir('');
+  }, [thread.id]);
+
+  const threadEvents = useMemo(() => s.events.filter((e) => e.agent_id === thread.id), [s.events, thread.id]);
+  const drafts = useMemo(() => {
+    for (let i = threadEvents.length - 1; i >= 0; i--) {
+      const e = threadEvents[i]!;
+      if (e.type === 'agent.result') return e.payload.skill_drafts ?? [];
+    }
+    return [];
+  }, [threadEvents]);
+  const usage = useMemo(() => usageByModel(threadEvents, thread.id), [threadEvents, thread.id]);
+  const version = String(threadEvents.at(-1)?.id ?? 0);
+
+  const rounds = project.project.settings.review_rounds;
+  const label = statusLabel(thread.status, thread.reason, proxyDown);
+  const current = selected ?? stops.at(-1)?.n ?? null;
+  const archived = !!thread.archived_at;
+
+  const act = async (what: 'stop' | 'archive' | 'skill') => {
+    setConfirm(null);
+    setBusy(what);
+    try {
+      if (what === 'stop') await call('threads.stop', { id: thread.id });
+      else if (what === 'archive') await call('threads.archive', { id: thread.id });
+      else {
+        await call('projects.send', { id: projectId, text: `Turn what the thread "${thread.title ?? thread.id}" did into a reusable skill.` });
+        toast({ tone: 'info', message: 'Asked Desk to turn this thread into a skill.' });
+      }
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const actions = (
+    <>
+      {LIVE.has(thread.status) ? (
+        <Button size="sm" pending={busy === 'stop'} onClick={() => setConfirm('stop')}>
+          Stop
+        </Button>
+      ) : null}
+      {FINISHED.has(thread.status) && !archived ? (
+        <Button size="sm" pending={busy === 'archive'} onClick={() => setConfirm('archive')}>
+          Archive
+        </Button>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="thread-detail">
+      <div className="thread-main">
+        <div className="thread-head">
+          <a className="small" href={href({ name: 'project', id: projectId, tab: 'threads' })}>
+            ← All threads
+          </a>
+          <h1>{thread.title ?? 'Untitled thread'}</h1>
+          <p className="thread-status-line">
+            <span className={`tone-${label.tone}`}>{label.label}</span>
+            {thread.reason && thread.status !== 'running' ? ` · ${thread.reason}` : ''}
+            {thread.review_round ? ` · revision round ${thread.review_round} of ${rounds}` : ''} · <span className="mono">{thread.model_override ?? thread.model}</span> · started {clock(thread.created_at)} ·{' '}
+            {duration(now - Date.parse(thread.created_at))}
+            {usage.length ? <> · {usage.map((u) => `${u.model.replace(/^claude-/, '')} ${tokens(u.prompt + u.completion)}`).join(' · ')}</> : null}
+          </p>
+          <div className="thread-chips">
+            {thread.active_skills.map((sk) => (
+              <SkillBadge key={sk} name={sk} />
+            ))}
+            <span className="chip chip-idle">{thread.git_branch ? <span className="mono">{thread.git_branch}</span> : 'Scratch workspace'}</span>
+            {archived ? <span className="chip chip-idle">Archived</span> : null}
+            {thread.status === 'done' ? (
+              <Button size="sm" variant="ghost" pending={busy === 'skill'} onClick={() => void act('skill')}>
+                Turn into a skill
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div className="tabs" role="tablist" aria-label="Thread">
+          {TABS.map(([t, name]) => (
+            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+              {name}
+              {t === 'drafts' && drafts.length ? <span className="tab-count">{drafts.length}</span> : null}
+            </button>
+          ))}
+        </div>
+        <div className="thread-tab" role="tabpanel">
+          {tab === 'route' ? (
+            stops.length ? (
+              <RouteView stops={stops} running={thread.status === 'running'} activity={thread.activity} reviewRounds={rounds} selected={current} onSelect={setSelected} />
+            ) : (
+              <EmptyState title="Not started yet">The route draws itself as the thread works.</EmptyState>
+            )
+          ) : tab === 'result' ? (
+            <ResultTab projectId={projectId} thread={thread} />
+          ) : tab === 'diff' ? (
+            <DiffTab threadId={thread.id} version={version} />
+          ) : tab === 'files' ? (
+            <FilesTab threadId={thread.id} dir={dir} onDir={setDir} version={version} />
+          ) : tab === 'drafts' ? (
+            <SkillDraftsTab
+              projectId={projectId}
+              threadTitle={thread.title ?? thread.id}
+              drafts={drafts}
+              onBrowse={(d) => {
+                setDir(d);
+                setTab('files');
+              }}
+            />
+          ) : (
+            <UsageTab usage={usage} />
+          )}
+        </div>
+      </div>
+      <Transcript
+        projectId={projectId}
+        threadId={thread.id}
+        rows={rows}
+        entries={transcript.entries}
+        reviewRounds={rounds}
+        selected={current}
+        onSelect={setSelected}
+        depth={depth}
+        onDepth={setDepth}
+        actions={actions}
+        canSteer={!archived}
+        steerHint={archived ? 'This thread is archived.' : FINISHED.has(thread.status) ? 'The thread wakes up to read this. For new work, message Desk.' : 'For new work, message Desk.'}
+      />
+      {confirm === 'stop' ? (
+        <ConfirmDialog title="Stop this thread?" confirmLabel="Stop thread" danger onConfirm={() => void act('stop')} onCancel={() => setConfirm(null)}>
+          It stops at once, and pending approvals are denied. Its workspace and any branch are kept, and Desk is told.
+        </ConfirmDialog>
+      ) : null}
+      {confirm === 'archive' ? (
+        <ConfirmDialog title="Archive this thread?" confirmLabel="Archive" onConfirm={() => void act('archive')} onCancel={() => setConfirm(null)}>
+          {thread.git_branch ? (
+            <>
+              The workspace is removed. The branch <span className="mono">{thread.git_branch}</span> is kept, so you can still merge it.
+            </>
+          ) : (
+            'The scratch workspace is removed. Files it published stay in the Library.'
+          )}
+        </ConfirmDialog>
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/threads/ThreadsScreen.tsx`:
+
+```tsx
+import { EmptyState } from '../components/EmptyState';
+import { href } from '../router';
+import { useNow } from '../state/now';
+import { useSession } from '../state/session';
+import { ThreadDetail } from './ThreadDetail';
+import { ThreadRoster } from './ThreadRoster';
+import './threads.css';
+
+export function ThreadsScreen({ projectId, threadId }: { projectId: string; threadId?: string }) {
+  const s = useSession(projectId);
+  const now = useNow();
+  if (s.status === 'loading') return <div className="page muted">Loading…</div>;
+  if (s.status !== 'ready' || !s.project)
+    return (
+      <div className="page">
+        <EmptyState title={s.status === 'missing' ? "This project isn't here" : "Couldn't load this project"} action={<a href="#/map">Back to the map</a>}>
+          {s.error}
+        </EmptyState>
+      </div>
+    );
+  if (!threadId) return <ThreadRoster project={s.project} now={now} />;
+  const thread = s.project.threads.find((t) => t.id === threadId);
+  if (!thread)
+    return (
+      <div className="page">
+        <EmptyState title="This thread isn't here" action={<a href={href({ name: 'project', id: projectId, tab: 'threads' })}>All threads</a>}>
+          It may belong to another project.
+        </EmptyState>
+      </div>
+    );
+  return <ThreadDetail s={s} thread={thread} />;
+}
+```
+
+`apps/desktop/src/renderer/threads/threads.css`:
+
+```css
+.roster-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+.thread-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.thread-card:hover {
+  outline: 2px solid var(--run-ring);
+}
+.thread-card.archived {
+  opacity: 0.65;
+}
+.thread-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.thread-card-head h2 {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+.thread-activity {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--run-pastel);
+  color: var(--run-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+.thread-facts div {
+  display: flex;
+  flex-direction: column;
+}
+.thread-facts dt {
+  font-size: 11px;
+  color: var(--text-min);
+}
+.thread-facts dd {
+  margin: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.thread-detail {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 16px;
+  padding: 12px 16px 12px 0;
+}
+.thread-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.thread-head {
+  padding: 8px 32px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.thread-head h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+.thread-status-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-min);
+}
+.tone-run {
+  color: var(--run-text);
+  font-weight: 600;
+}
+.tone-wait {
+  color: var(--wait-text);
+  font-weight: 600;
+}
+.tone-fail {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tone-done,
+.tone-idle {
+  color: var(--ink);
+  font-weight: 600;
+}
+.thread-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--rule);
+}
+.tabs button {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-min);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tabs button[aria-selected='true'] {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+  font-weight: 500;
+}
+.tab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+}
+.thread-tab {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.tab-body {
+  padding: 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.result-tab h3 {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.route {
+  padding: 0 0 16px;
+}
+.route-canvas {
+  position: relative;
+}
+.route-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.route-stop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #f7f5f0;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.route-stop-work span {
+  font-size: 16px;
+  font-weight: 600;
+}
+.route-stop-brief,
+.route-stop-incoming {
+  border: 1.5px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+.route-stop-steer {
+  border: 2px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+.route-stop-detour {
+  background: var(--muted);
+  font-size: 10.5px;
+}
+.route-stop-approval {
+  background: var(--accent);
+  font-size: 16px;
+}
+.route-stop.live {
+  box-shadow: 0 0 0 4px rgba(47, 91, 211, 0.22);
+}
+.route-stop.selected {
+  box-shadow: 0 0 0 5px var(--ground), 0 0 0 8px var(--accent);
+}
+.route-num {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--ink);
+  border-radius: 9px;
+  background: #fff;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  pointer-events: none;
+}
+.route-label {
+  position: absolute;
+  width: 190px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  text-align: center;
+  pointer-events: none;
+}
+.route-label.above {
+  transform: translate(-50%, -100%);
+}
+.route-label-title {
+  font-size: 12px;
+  font-weight: 500;
+}
+.route-label-title.run {
+  color: var(--run-text);
+  font-weight: 600;
+}
+.route-label-sub {
+  font-size: 11.5px;
+  color: var(--text-min);
+}
+.route-label-quote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.route-now {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border-radius: 11px;
+  background: var(--run);
+  box-shadow: 0 0 0 7px rgba(47, 91, 211, 0.22), 0 0 0 16px rgba(47, 91, 211, 0.09);
+}
+.route-next {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  border: 1.5px dashed var(--muted);
+  border-radius: 13px;
+  background: var(--ground);
+}
+.route-legend {
+  margin: 8px 32px 0;
+  width: max-content;
+  max-width: calc(100% - 64px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  color: var(--text);
+}
+.route-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.route-legend strong {
+  font-weight: 500;
+}
+.route-legend-line {
+  width: 18px;
+  height: 2px;
+  background: var(--ink);
+}
+.route-legend-line.live {
+  height: 2.5px;
+  background: var(--run);
+}
+.route-legend-line.next {
+  background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px);
+}
+
+.transcript {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.transcript-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #ece8e0;
+}
+.transcript-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.transcript-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px;
+}
+.tr-entry {
+  flex-shrink: 0;
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+.tr-entry.selected {
+  background: #eef2fb;
+}
+.tr-entry.pending {
+  opacity: 0.6;
+}
+.tr-num {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--ink);
+  border-radius: 9px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.tr-num-blank {
+  border-color: transparent;
+}
+.tr-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.tr-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tr-text {
+  margin: 0;
+}
+.tr-voice {
+  font-size: 15px;
+}
+.tr-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tr-call {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tr-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.tr-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-tint);
+  border-radius: 6px;
+}
+.steer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid #ece8e0;
+  background: #fbfaf7;
+}
+.steer label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.steer textarea {
+  height: 56px;
+  box-sizing: border-box;
+  resize: none;
+  padding: 9px 11px;
+  border: 1px solid #cfc9bd;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+}
+.steer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diff-files {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.diff-files td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.diff-status {
+  width: 20px;
+  color: var(--text-min);
+}
+.diff-add {
+  color: var(--ok);
+  text-align: right;
+}
+.diff-del {
+  color: var(--accent);
+  text-align: right;
+}
+.diff-patch {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: auto;
+}
+.diff-line-add {
+  display: block;
+  background: #e6f2eb;
+}
+.diff-line-del {
+  display: block;
+  background: #f8e4dd;
+}
+.diff-hunk {
+  color: var(--run-text);
+}
+.diff-meta {
+  color: var(--text-min);
+  font-weight: 600;
+}
+.files-tab {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.files-browser {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.crumbs {
+  font-size: 12px;
+}
+.files-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.files-entry {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.files-entry:hover,
+.files-entry.current {
+  background: #fff;
+}
+.files-viewer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--rule);
+}
+.files-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.drafts {
+  list-style: none;
+  margin: 0;
+}
+.draft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--rule);
+}
+.usage-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.usage-table th,
+.usage-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  text-align: right;
+}
+.usage-table th:first-child,
+.usage-table td:first-child {
+  text-align: left;
+}
+
+@media (max-width: 1279px) {
+  .thread-detail {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+}
+```
+
+Other changes:
+- `ConversationScreen.tsx`: drop the local `useWidth` and import it from `../state/width`.
+- Move `.grow`, `.small`, `.sr-only`, `.live-dot` and `.segmented` out of `map.css` and `conversation.css` into a "Shared utilities" block at the end of `theme/tokens.css`.
+- `router.ts`: add `replaceRoute`, which calls `history.replaceState` and then dispatches a `hashchange` event.
+- `App.tsx`: route `tab === 'threads'` to `<ThreadsScreen key={route.id} projectId={route.id} threadId={route.threadId} />`, passing `threadId` only when it is set.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): threads — roster cards, serpentine route with numbered stops, synced transcript, steering, stop/archive, result/diff/files/drafts/usage tabs
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

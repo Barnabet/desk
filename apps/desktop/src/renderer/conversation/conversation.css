@@ -126,14 +126,6 @@
   color: var(--wait-text);
   font-weight: 600;
 }
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
 .line-signal {
   position: absolute;
   display: flex;
@@ -214,15 +206,6 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
-}
-.live-dot {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
-  border-radius: 4px;
-  background: var(--run);
-  box-shadow: 0 0 0 3px rgba(47, 91, 211, 0.3);
-  display: inline-block;
 }
 .line-legend {
   position: absolute;
@@ -336,9 +319,6 @@
   font-family: var(--font-serif);
   font-size: 17px;
   line-height: 1.38;
-}
-.small {
-  font-size: 12px;
 }
 .toolgroup {
   border: 1px solid var(--rule-soft);

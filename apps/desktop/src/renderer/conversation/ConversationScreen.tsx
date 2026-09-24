@@ -7,6 +7,7 @@ import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { useSession } from '../state/session';
 import { markSeen } from '../state/unread';
+import { useWidth } from '../state/width';
 import { ChatItemView, chatDomId, chatEventId } from './ChatItems';
 import { Composer } from './Composer';
 import { LineDiagram } from './LineDiagram';
@@ -32,21 +33,6 @@ function useDraft(projectId: string): [string, (v: string | ((d: string) => stri
     }
   }, [key, draft]);
   return [draft, setDraftState];
-}
-
-function useWidth(ref: React.RefObject<HTMLElement | null>, fallback = 1200): number {
-  const [w, setW] = useState(fallback);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => setW(el.clientWidth || fallback);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref, fallback]);
-  return w;
 }
 
 export function ConversationScreen({ projectId }: { projectId: string }) {

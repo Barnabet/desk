@@ -20,28 +20,6 @@
 .map-screen > .page {
   padding-top: 150px;
 }
-.segmented {
-  display: inline-flex;
-  width: max-content;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--nav);
-}
-.segmented button {
-  height: 26px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-min);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.segmented button[aria-pressed='true'] {
-  background: #fff;
-  color: var(--ink);
-  font-weight: 500;
-}
 .map-canvas {
   position: absolute;
   inset: 0;
@@ -404,9 +382,6 @@
   gap: 8px;
   font-size: 13px;
   text-decoration: none;
-}
-.grow {
-  flex: 1;
 }
 .status-dot {
   width: 9px;

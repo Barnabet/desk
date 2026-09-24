@@ -9,6 +9,7 @@ import { ConversationScreen } from './conversation/ConversationScreen';
 import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
+import { ThreadsScreen } from './threads/ThreadsScreen';
 import { startGlobalSync } from './state/global';
 import { startSessionRouting } from './state/session';
 
@@ -24,6 +25,7 @@ function Screen({ route }: { route: Route }) {
       return <Pending title="System" />;
     case 'project':
       if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} />;
+      if (route.tab === 'threads') return <ThreadsScreen key={route.id} projectId={route.id} {...(route.threadId ? { threadId: route.threadId } : {})} />;
       return <Pending title={route.tab[0]!.toUpperCase() + route.tab.slice(1)} />;
     default:
       return null;
