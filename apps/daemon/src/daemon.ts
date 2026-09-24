@@ -39,6 +39,8 @@ export type DaemonOptions = {
   keychain?: Keychain | null;
   /** Posts notifications (main.ts passes macNotify on macOS; tests leave it unset). */
   notify?: (n: Notification) => void;
+  /** Drizzle migrations folder (the bundle ships its own copy). */
+  migrationsDir?: string;
   sandboxAvailable?: boolean;
   stallIntervalMs?: number;
   now?: () => number;
@@ -53,7 +55,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
   mkdirSync(o.dataDir, { recursive: true });
   const releaseLock = acquireLock(paths.lock);
   try {
-    const { db, close } = openDb(paths.db);
+    const { db, close } = openDb(paths.db, o.migrationsDir ? { migrationsFolder: o.migrationsDir } : {});
     const store = new EventStore(db);
     const models = new ModelRegistry(loadModels(paths.models, (m) => log.error(m)));
     let file = loadDaemonFile(paths.config);

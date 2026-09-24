@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { macKeychain } from '@desk/core';
 import { startDaemon, DEFAULT_PORT } from './daemon';
@@ -17,6 +18,7 @@ try {
     dataDir,
     port: values.port ? Number(values.port) : DEFAULT_PORT,
     log,
+    ...(process.env.DESK_BUNDLED === '1' ? { migrationsDir: fileURLToPath(new URL('./drizzle', import.meta.url)) } : {}),
     ...(process.platform === 'darwin' ? { keychain: macKeychain(), notify: macNotify } : {}),
   });
   let stopping = false;

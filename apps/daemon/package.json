@@ -3,8 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "start": "node --import tsx src/main.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx src/main.ts",
+    "bundle": "node scripts/bundle.mjs"
+  },
   "dependencies": {
     "@desk/core": "workspace:*",
     "@desk/protocol": "workspace:*",
@@ -15,6 +20,7 @@
   },
   "devDependencies": {
     "@desk/fake-model": "workspace:*",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.2"
   }
 }
