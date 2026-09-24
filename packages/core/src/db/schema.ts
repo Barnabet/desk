@@ -1,6 +1,6 @@
 import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 // Type-only import: erased at runtime, so drizzle-kit can still load this file standalone.
-import type { PlanItem, ProjectSettings } from '@desk/protocol';
+import type { PlanItem, ProjectSettings, ReasoningEffort } from '@desk/protocol';
 
 export const events = sqliteTable(
   'events',
@@ -34,6 +34,8 @@ export const agents = sqliteTable(
     role: text('role', { enum: ['desk', 'thread'] }).notNull(),
     status: text('status', { enum: ['idle', 'queued', 'running', 'waiting', 'done', 'failed', 'cancelled'] }).notNull(),
     model: text('model').notNull(),
+    /** A reasoning level chosen for this agent (threads, at spawn); null follows the project setting. */
+    reasoning_effort: text('reasoning_effort').$type<ReasoningEffort>(),
     title: text('title'),
     brief: text('brief'),
     workspace_path: text('workspace_path'),

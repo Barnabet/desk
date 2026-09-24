@@ -21,7 +21,8 @@ export type CliIO = {
 type Project = { id: string; name: string; goal: string; settings: Record<string, unknown>; archived_at: string | null };
 
 const INT_SETTINGS = new Set(['max_concurrent_threads', 'review_rounds']);
-const SETTINGS = new Set(['check_in', 'autonomy', 'desk_model', 'thread_model', 'fallback_model', ...INT_SETTINGS]);
+const EFFORT_SETTINGS = new Set(['desk_reasoning_effort', 'thread_reasoning_effort']);
+const SETTINGS = new Set(['check_in', 'autonomy', 'desk_model', 'thread_model', 'fallback_model', ...EFFORT_SETTINGS, ...INT_SETTINGS]);
 const FIELDS = new Set(['name', 'goal', 'instructions']);
 
 const repoRoot = () => fileURLToPath(new URL('../../..', import.meta.url));
@@ -97,6 +98,8 @@ function parseAssignments(pairs: string[]): { fields: Record<string, string>; se
     if (FIELDS.has(key)) fields[key] = value;
     else if (INT_SETTINGS.has(key)) settings[key] = Number(value);
     else if (key === 'fallback_model') settings[key] = value === '' || value === 'none' ? null : value;
+    // `none` is a real level (no reasoning); `default` (or empty) goes back to the model's default.
+    else if (EFFORT_SETTINGS.has(key)) settings[key] = value === '' || value === 'default' ? null : value;
     else if (SETTINGS.has(key)) settings[key] = value;
     else throw new Error(`Unknown setting "${key}". Settable: ${[...FIELDS, ...SETTINGS].join(', ')}`);
   }
@@ -242,7 +245,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         `${o.project.name} (${o.project.id})${o.project.archived_at ? ' [archived]' : ''}`,
         `Goal: ${o.project.goal || '(none)'}`,
         ...(o.project.instructions ? [`Instructions: ${o.project.instructions}`] : []),
-        `Settings: check_in=${s.check_in} autonomy=${s.autonomy} desk_model=${s.desk_model} thread_model=${s.thread_model} max_concurrent_threads=${s.max_concurrent_threads} review_rounds=${s.review_rounds}`,
+        `Settings: check_in=${s.check_in} autonomy=${s.autonomy} desk_model=${s.desk_model} thread_model=${s.thread_model} desk_reasoning_effort=${s.desk_reasoning_effort ?? 'default'} thread_reasoning_effort=${s.thread_reasoning_effort ?? 'default'} max_concurrent_threads=${s.max_concurrent_threads} review_rounds=${s.review_rounds}`,
         `Desk: ${o.desk.status}`,
         `Sources:${o.sources.length ? '' : ' (none)'}`,
         ...o.sources.map((x: any) => `- ${x.id} ${x.label} (${x.kind}) ${x.path}`),

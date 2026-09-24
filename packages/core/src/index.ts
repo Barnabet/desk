@@ -37,7 +37,7 @@ export { listWorkspace, resolveWorkspaceFile, threadDiff } from './workspaces/in
 export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
 export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';
-export { DEFAULT_MODEL_ID, ModelRegistry, SEED_MODELS } from './model/registry';
+export { DEFAULT_MODEL_ID, effortFor, ModelRegistry, SEED_MODELS, STANDARD_EFFORTS } from './model/registry';
 export { classifyModelError, ModelError, type ModelErrorKind } from './model/errors';
 export { createModelAdapter } from './model/adapter';
 export { abortableSleep, withRetry, type RetryOptions } from './model/retry';

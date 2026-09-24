@@ -25,7 +25,10 @@ export function ThreadCard({ projectId, t, reviewRounds, now, proxyDown }: { pro
         </div>
         <div>
           <dt>Model</dt>
-          <dd className="mono">{t.model_override ?? t.model}</dd>
+          <dd className="mono">
+            {t.model_override ?? t.model}
+            {t.effort ? <span className="muted"> · {t.effort}</span> : null}
+          </dd>
         </div>
         <div>
           <dt>Workspace</dt>

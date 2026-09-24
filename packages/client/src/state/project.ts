@@ -2,7 +2,13 @@ import { clip, summarizeToolArgs, type PlanItem, type StoredEvent } from '@desk/
 import type { AgentRow, ApprovalRow, ProjectOverview, ProjectRow, SourceRow } from '../types';
 
 /** A thread (or Desk) with live details that are not columns: current tool activity, status reason, fallback model. */
-export type ThreadView = AgentRow & { activity: string | null; reason: string | null; model_override: string | null };
+export type ThreadView = AgentRow & {
+  activity: string | null;
+  reason: string | null;
+  model_override: string | null;
+  /** The reasoning level the latest run sent (its own, or the project's); null when none was sent. */
+  effort: string | null;
+};
 
 export type ProjectState = {
   project: ProjectRow;
@@ -15,7 +21,7 @@ export type ProjectState = {
   lastSeq: number;
 };
 
-const view = (a: AgentRow): ThreadView => ({ ...a, activity: null, reason: null, model_override: null });
+const view = (a: AgentRow): ThreadView => ({ ...a, activity: null, reason: null, model_override: null, effort: a.reasoning_effort ?? null });
 
 export function projectFromOverview(o: ProjectOverview): ProjectState {
   return {
@@ -65,6 +71,7 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
         role: e.payload.role,
         status: 'idle',
         model: e.payload.model,
+        reasoning_effort: e.payload.reasoning_effort ?? null,
         title: e.payload.title,
         brief: e.payload.brief,
         workspace_path: e.payload.workspace_path,
@@ -98,7 +105,7 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
     case 'agent.model_switched':
       return touch((a) => ({ ...a, model_override: e.payload.to }));
     case 'run.started':
-      return touch((a) => ({ ...a, model_override: null }));
+      return touch((a) => ({ ...a, model_override: null, effort: e.payload.reasoning_effort ?? null }));
     case 'agent.skills_changed':
       return touch((a) => ({ ...a, active_skills: e.payload.skills }));
     case 'agent.archived':

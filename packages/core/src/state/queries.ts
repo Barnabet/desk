@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, max, sql } from 'drizzle-orm';
-import type { EventOf, EventType, StoredEvent } from '@desk/protocol';
+import { resolveSettings, type EventOf, type EventType, type StoredEvent } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, sources, usageTotals } from '../db/schema';
 
@@ -10,8 +10,13 @@ export type ApprovalRow = typeof approvals.$inferSelect;
 export type SourceRow = typeof sources.$inferSelect;
 export type ApprovalStatus = ApprovalRow['status'];
 
-export const getProject = (db: Db, id: string): ProjectRow | undefined =>
-  db.select().from(projects).where(eq(projects.id, id)).get();
+/** Stored settings with defaults filled in, so projects saved before a setting existed read it as its default. */
+const withSettings = (row: ProjectRow): ProjectRow => ({ ...row, settings: resolveSettings(row.settings) });
+
+export const getProject = (db: Db, id: string): ProjectRow | undefined => {
+  const row = db.select().from(projects).where(eq(projects.id, id)).get();
+  return row ? withSettings(row) : undefined;
+};
 
 export const getAgent = (db: Db, id: string): AgentRow | undefined => db.select().from(agents).where(eq(agents.id, id)).get();
 
@@ -72,7 +77,8 @@ export const listProjects = (db: Db, opts: { includeArchived?: boolean } = {}): 
     .from(projects)
     .where(opts.includeArchived ? undefined : isNull(projects.archived_at))
     .orderBy(asc(projects.created_at), asc(projects.id))
-    .all();
+    .all()
+    .map(withSettings);
 
 /** Agents of non-archived projects, optionally filtered by status. */
 export const listLiveAgents = (db: Db, statuses?: AgentRow['status'][]): AgentRow[] =>

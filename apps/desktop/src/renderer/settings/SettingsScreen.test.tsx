@@ -29,7 +29,12 @@ const overview = () =>
     approvals: [],
     last_seq: 0,
   }) as unknown as ProjectOverview;
-const models = ['claude-opus-5-5', 'claude-fable-5-1', 'gpt-6-sol'].map((id) => ({ id, family: 'claude', context_window: 1, max_output_tokens: 1, supports_reasoning_effort: false, concurrency: 1 }));
+const levels: Record<string, { reasoning_efforts: string[]; default_reasoning_effort: string | null }> = {
+  'claude-opus-5-5': { reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_reasoning_effort: 'medium' },
+  'claude-fable-5-1': { reasoning_efforts: [], default_reasoning_effort: null },
+  'gpt-6-sol': { reasoning_efforts: ['low', 'high'], default_reasoning_effort: null },
+};
+const models = Object.entries(levels).map(([id, l]) => ({ id, family: 'claude', context_window: 1, max_output_tokens: 1, ...l, concurrency: 1 }));
 
 function setup(extra: Record<string, (input: any) => unknown> = {}, events: StoredEvent[] = []) {
   const bridge = installBridge({
@@ -64,11 +69,34 @@ describe('SettingsScreen', () => {
     await waitFor(() => expect((within(style).getByLabelText("Threads' model") as HTMLSelectElement).options.length).toBe(3));
     fireEvent.change(within(style).getByLabelText('Fallback when rate limited'), { target: { value: 'claude-fable-5-1' } });
     fireEvent.click(within(style).getByRole('button', { name: '6 threads at once' }));
+    // Reasoning levels follow the chosen model; a model change drops a level the new model does not take.
+    const deskEffort = within(style).getByLabelText("Desk's reasoning effort") as HTMLSelectElement;
+    expect([...deskEffort.options].map((o) => o.textContent)).toEqual(['Model default (medium)', 'low', 'medium', 'high', 'xhigh', 'max']);
+    fireEvent.change(within(style).getByLabelText("Threads' reasoning effort"), { target: { value: 'xhigh' } });
+    fireEvent.change(within(style).getByLabelText("Threads' model"), { target: { value: 'gpt-6-sol' } });
+    expect((within(style).getByLabelText("Threads' reasoning effort") as HTMLSelectElement).value).toBe('');
+    fireEvent.change(within(style).getByLabelText("Threads' model"), { target: { value: 'claude-fable-5-1' } });
+    expect((within(style).getByLabelText("Threads' reasoning effort") as HTMLSelectElement).disabled).toBe(true);
+    expect(style.textContent).toContain('claude-fable-5-1 takes no reasoning level');
+    fireEvent.change(within(style).getByLabelText("Threads' model"), { target: { value: 'claude-opus-5-5' } });
+    fireEvent.change(within(style).getByLabelText("Threads' reasoning effort"), { target: { value: 'xhigh' } });
     fireEvent.click(within(style).getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(updates(bridge)[1]).toEqual({
         id: 'p',
-        patch: { settings: { desk_model: 'claude-opus-5-5', thread_model: 'claude-opus-5-5', fallback_model: 'claude-fable-5-1', max_concurrent_threads: 6, check_in: 'detailed', autonomy: 'ask-before-dispatch', review_rounds: 2 } },
+        patch: {
+          settings: {
+            desk_model: 'claude-opus-5-5',
+            thread_model: 'claude-opus-5-5',
+            fallback_model: 'claude-fable-5-1',
+            desk_reasoning_effort: null,
+            thread_reasoning_effort: 'xhigh',
+            max_concurrent_threads: 6,
+            check_in: 'detailed',
+            autonomy: 'ask-before-dispatch',
+            review_rounds: 2,
+          },
+        },
       }),
     );
   });

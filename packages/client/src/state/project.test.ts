@@ -4,8 +4,8 @@ import type { ProjectOverview } from '../types';
 import { projectFromOverview, reduceProject } from './project';
 
 const overview: ProjectOverview = {
-  project: { id: 'p', name: 'Onboarding', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
-  desk: { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, archived_at: null, created_at: 't', updated_at: 't' },
+  project: { id: 'p', name: 'Onboarding', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, desk_reasoning_effort: null, thread_reasoning_effort: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
+  desk: { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', reasoning_effort: null, title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, archived_at: null, created_at: 't', updated_at: 't' },
   sources: [],
   plan: null,
   threads: [],
@@ -18,7 +18,7 @@ const fold = (events: Parameters<typeof reduceProject>[1][]) => events.reduce(re
 describe('reduceProject', () => {
   it('tracks threads from creation through activity, approval, revision, fallback and archive', () => {
     const s = fold([
-      ev(3, 'agent.created', { role: 'thread', model: 'm', title: 'Emails', brief: 'b', workspace_path: '/w/t', parent_id: 'd', skills: ['brand-voice'] }, { agent: 't' }),
+      ev(3, 'agent.created', { role: 'thread', model: 'm', reasoning_effort: 'high', title: 'Emails', brief: 'b', workspace_path: '/w/t', parent_id: 'd', skills: ['brand-voice'] }, { agent: 't' }),
       ev(4, 'agent.status_changed', { status: 'running' }, { agent: 't' }),
       ev(5, 'tool.call', { run_id: 'r', tool_call_id: 'c', name: 'write_file', arguments: '{"path":"emails/04.md","content":"…"}' }, { agent: 't' }),
       ev(6, 'approval.requested', { approval_id: 'a1', run_id: 'r', tool_call_id: 'c2', tool: 'bash', arguments: '{}', reason: 'rule 1', delegate_to_desk: false }, { agent: 't' }),
@@ -26,7 +26,7 @@ describe('reduceProject', () => {
       ev(8, 'agent.model_switched', { from: 'm', to: 'fallback', reason: 'rate limited', scope: 'run' }, { agent: 't' }),
     ]);
     expect(s.threads).toHaveLength(1);
-    expect(s.threads[0]).toMatchObject({ id: 't', status: 'waiting', reason: 'Waiting for approval', activity: 'write_file · emails/04.md', active_skills: ['brand-voice'], model_override: 'fallback' });
+    expect(s.threads[0]).toMatchObject({ id: 't', status: 'waiting', reason: 'Waiting for approval', activity: 'write_file · emails/04.md', active_skills: ['brand-voice'], model_override: 'fallback', reasoning_effort: 'high', effort: 'high' });
     expect(s.approvals.map((a) => a.id)).toEqual(['a1']);
     expect(s.lastSeq).toBe(8);
 
@@ -36,11 +36,11 @@ describe('reduceProject', () => {
       ev(11, 'agent.result', { summary: 'Five drafts', artifacts: ['emails/01.md'] }, { agent: 't' }),
       ev(12, 'agent.status_changed', { status: 'done' }, { agent: 't' }),
       ev(13, 'agent.revision', { round: 1, feedback: 'Less salesy' }, { agent: 't' }),
-      ev(14, 'run.started', { run_id: 'r2', model: 'm' }, { agent: 't' }),
+      ev(14, 'run.started', { run_id: 'r2', model: 'm', reasoning_effort: 'xhigh' }, { agent: 't' }),
       ev(15, 'agent.archived', {}, { agent: 't' }),
     ].reduce(reduceProject, s);
     expect(s2.approvals).toEqual([]);
-    expect(s2.threads[0]).toMatchObject({ activity: null, result_summary: 'Five drafts', review_round: 1, model_override: null, reason: null, status: 'done' });
+    expect(s2.threads[0]).toMatchObject({ activity: null, result_summary: 'Five drafts', review_round: 1, model_override: null, effort: 'xhigh', reason: null, status: 'done' });
     expect(s2.threads[0]!.archived_at).not.toBeNull();
   });
 

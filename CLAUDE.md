@@ -65,11 +65,10 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - State changes are events appended through `EventStore.append`. Projections in `events/projections.ts` update tables in the same transaction.
   - A new event means adding it to `protocol/src/events.ts`, then projecting it if it has table state.
   - Never write projection tables directly.
-- **Schema changes.** Edit `db/schema.ts`, then regenerate the single migration:
+- **Schema changes.** Edit `db/schema.ts`, then add an additive migration (the packaged app has live databases, so never squash or edit existing ones):
   ```sh
-  cd packages/core && rm -rf drizzle && npx drizzle-kit generate --name init
+  cd packages/core && npx drizzle-kit generate --name <what_changed>
   ```
-  Migrations stay squashed until the first external release.
 - **Tools.**
   - Define tools with `defineTool` (zod input); throwing returns an error result to the model.
   - Tools that touch the outside world declare a `gate` so the policy decides auto/allow/ask/deny.

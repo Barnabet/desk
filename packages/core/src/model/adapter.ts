@@ -36,7 +36,8 @@ export function createModelAdapter(config: ModelConfig, registry: ModelRegistry)
             stream: true,
             stream_options: { include_usage: true },
             ...(req.tools.length ? { tools: req.tools } : {}),
-            ...(req.reasoningEffort && info.supports_reasoning_effort ? { reasoning_effort: req.reasoningEffort } : {}),
+            // A level the registry does not list for this model is never sent (the endpoint would reject it).
+            ...(req.reasoningEffort && info.reasoning_efforts.includes(req.reasoningEffort) ? { reasoning_effort: req.reasoningEffort as never } : {}),
           },
           { signal },
         );

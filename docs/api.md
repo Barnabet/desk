@@ -33,7 +33,7 @@ Pass `next_after` as the next `after` to continue.
 |---|---|---|
 | GET | `/v1/health` | Unauthenticated. `{ version, protocol_version, proxy: up\|down\|unknown, uptime_s }` |
 | GET | `/v1/usage` | `?since=YYYY-MM-DD`. `{ rows: [{ project_id, model, prompt_tokens, completion_tokens }], totals }` across projects |
-| GET | `/v1/models` | The model registry (`ModelInfo[]`: id, family, context_window, max_output_tokens, supports_reasoning_effort, concurrency) |
+| GET | `/v1/models` | The model registry (`ModelInfo[]`: id, family, context_window, max_output_tokens, reasoning_efforts, default_reasoning_effort, concurrency). `reasoning_efforts` lists the levels the model accepts (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`); an empty list means Desk never sends a level. `default_reasoning_effort` is `null` (the endpoint's default) or one of those levels |
 | PUT | `/v1/models` | Replace the registry (`ModelInfo[]`, validated). The registry is persisted to `models.json` |
 
 ## Projects
@@ -59,6 +59,7 @@ Pass `next_after` as the next `after` to continue.
 |---|---|---|
 | `desk_model`, `thread_model` | `claude-opus-5-5` | |
 | `fallback_model` | `null` | Used for the rest of a run after sustained rate limiting |
+| `desk_reasoning_effort`, `thread_reasoning_effort` | `null` | A level the model takes (checked against the registry; 400 otherwise). `null` means the model's default. A thread's own level (`spawn_thread reasoning_effort`, stored on `agent.created`) overrides `thread_reasoning_effort`. When a call goes to a model that does not take the level (e.g. the fallback), that model's default is sent instead, or nothing. `run.started` records the level sent to the run's model |
 | `max_concurrent_threads` | 4 | |
 | `check_in` | `normal` | `minimal`, `normal` or `detailed` |
 | `autonomy` | `dispatch-freely` | Or `ask-before-dispatch` |

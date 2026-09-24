@@ -5,7 +5,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s
 
 /** One line per thread for rosters and list_threads. */
 export function formatThreadLine(t: AgentRow): string {
-  const parts = [`${t.id} "${t.title ?? 'untitled'}" [${t.status}]`, t.model];
+  const parts = [`${t.id} "${t.title ?? 'untitled'}" [${t.status}]`, t.reasoning_effort ? `${t.model} (${t.reasoning_effort} effort)` : t.model];
   if (t.git_branch) parts.push(`branch ${t.git_branch}`);
   if (t.review_round) parts.push(`review round ${t.review_round}`);
   if (t.result_summary) parts.push(`result: ${clip(t.result_summary.replace(/\s+/g, ' '), 160)}`);
@@ -16,7 +16,7 @@ export function formatThreadSummary(t: AgentRow, approvals: ApprovalRow[], lastT
   return [
     `Thread ${t.id} "${t.title ?? 'untitled'}"`,
     `Status: ${t.status}${t.archived_at ? ' (archived)' : ''}`,
-    `Model: ${t.model}`,
+    `Model: ${t.model}${t.reasoning_effort ? ` (reasoning effort ${t.reasoning_effort})` : ''}`,
     t.git_branch ? `Branch: ${t.git_branch} (base ${t.git_base?.slice(0, 10)})` : `Workspace: ${t.workspace_path}`,
     `Review round: ${t.review_round}`,
     `Brief: ${t.brief ?? ''}`,

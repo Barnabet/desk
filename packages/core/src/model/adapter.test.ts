@@ -7,7 +7,7 @@ import { ModelError } from './errors';
 import { ModelRegistry } from './registry';
 
 const registry = new ModelRegistry([
-  { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, supports_reasoning_effort: false, concurrency: 4 },
+  { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4 },
 ]);
 const req = { model: 'fake-model', messages: [{ role: 'user' as const, content: 'hi' }], tools: [] };
 
@@ -28,6 +28,19 @@ describe('model adapter', () => {
     expect(r.usage).toEqual({ prompt_tokens: 12, completion_tokens: 4, estimated: false });
     expect(fake.requests[0]).toMatchObject({ stream: true, stream_options: { include_usage: true } });
     expect(fake.requests[0]?.tools).toBeUndefined();
+  });
+
+  it('sends reasoning_effort only when the registry lists that level for the model', async () => {
+    fake = await startFakeModel(() => text('ok'));
+    const r = new ModelRegistry([
+      { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4 },
+      { id: 'thinker', family: 'gpt', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: ['low', 'xhigh'], default_reasoning_effort: null, concurrency: 4 },
+    ]);
+    const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 't' }, r);
+    await adapter.complete({ ...req, model: 'thinker', reasoningEffort: 'xhigh' });
+    await adapter.complete({ ...req, model: 'thinker', reasoningEffort: 'max' });
+    await adapter.complete({ ...req, reasoningEffort: 'low' });
+    expect(fake.requests.map((q) => (q as { reasoning_effort?: string }).reasoning_effort ?? null)).toEqual(['xhigh', null, null]);
   });
 
   it('assembles parallel streamed tool calls in index order', async () => {

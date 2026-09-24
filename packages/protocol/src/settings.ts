@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ReasoningEffort } from './domain';
 
 export const PolicyRule = z.object({
   tool: z.string().min(1),
@@ -35,6 +36,9 @@ const settingsFields = {
   desk_model: z.string().min(1),
   thread_model: z.string().min(1),
   fallback_model: z.string().min(1).nullable(),
+  /** Reasoning effort for Desk and for threads; null uses the model's default (see the model registry). */
+  desk_reasoning_effort: ReasoningEffort.nullable(),
+  thread_reasoning_effort: ReasoningEffort.nullable(),
   max_concurrent_threads: z.number().int().min(1).max(32),
   check_in: z.enum(['minimal', 'normal', 'detailed']),
   autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']),
@@ -46,6 +50,8 @@ export const ProjectSettings = z.object({
   desk_model: settingsFields.desk_model.default('claude-opus-5-5'),
   thread_model: settingsFields.thread_model.default('claude-opus-5-5'),
   fallback_model: settingsFields.fallback_model.default(null),
+  desk_reasoning_effort: settingsFields.desk_reasoning_effort.default(null),
+  thread_reasoning_effort: settingsFields.thread_reasoning_effort.default(null),
   max_concurrent_threads: settingsFields.max_concurrent_threads.default(4),
   check_in: settingsFields.check_in.default('normal'),
   autonomy: settingsFields.autonomy.default('dispatch-freely'),

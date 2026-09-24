@@ -15,14 +15,27 @@ export type ToolResultStatus = z.infer<typeof ToolResultStatus>;
 export const ToolCall = z.object({ id: z.string(), name: z.string(), arguments: z.string() });
 export type ToolCall = z.infer<typeof ToolCall>;
 
-export const ModelInfo = z.object({
-  id: z.string().min(1),
-  family: z.enum(['claude', 'gpt']),
-  context_window: z.number().int().positive(),
-  max_output_tokens: z.number().int().positive(),
-  supports_reasoning_effort: z.boolean(),
-  concurrency: z.number().int().min(1),
-});
+/** Reasoning effort levels, lowest first (what `reasoning_effort` may carry on a chat completion). */
+export const ReasoningEffort = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+export type ReasoningEffort = z.infer<typeof ReasoningEffort>;
+export const REASONING_EFFORTS = ReasoningEffort.options;
+
+export const ModelInfo = z
+  .object({
+    id: z.string().min(1),
+    family: z.enum(['claude', 'gpt']),
+    context_window: z.number().int().positive(),
+    max_output_tokens: z.number().int().positive(),
+    /** The levels the endpoint accepts for this model; empty when it takes no `reasoning_effort`. */
+    reasoning_efforts: z.array(ReasoningEffort).default([]),
+    /** Sent when neither the project nor the thread picks a level; null leaves it to the endpoint. */
+    default_reasoning_effort: ReasoningEffort.nullable().default(null),
+    concurrency: z.number().int().min(1),
+  })
+  .refine((m) => m.default_reasoning_effort === null || m.reasoning_efforts.includes(m.default_reasoning_effort), {
+    message: 'The default reasoning effort must be one of the model’s levels',
+    path: ['default_reasoning_effort'],
+  });
 export type ModelInfo = z.infer<typeof ModelInfo>;
 
 export const SourceKind = z.enum(['folder', 'git']);

@@ -47,6 +47,11 @@ describe('desk CLI', () => {
     const shown = (await cli('project', 'show', id)).out;
     expect(shown).toContain('Goal: Ship the launch');
     expect(shown).toContain('check_in=minimal');
+    expect((await cli('project', 'set', 'Launch', 'thread_reasoning_effort=high')).code).toBe(0);
+    expect((await cli('project', 'show', id)).out).toContain('thread_reasoning_effort=high');
+    expect((await cli('project', 'set', 'Launch', 'thread_reasoning_effort=max')).code).toBe(1);
+    expect((await cli('project', 'set', 'Launch', 'thread_reasoning_effort=default')).code).toBe(0);
+    expect((await cli('project', 'show', id)).out).toContain('thread_reasoning_effort=default');
     expect(shown).toMatch(/Sources:\n- \S+ desk-cli-/);
     expect((await cli('project', 'show', 'nope')).code).toBe(1);
   });

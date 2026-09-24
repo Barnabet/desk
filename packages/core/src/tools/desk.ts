@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PlanItemStatus, SkillName, type EventInput } from '@desk/protocol';
+import { PlanItemStatus, ReasoningEffort, SkillName, type EventInput } from '@desk/protocol';
 import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coordination/render';
 import { newId } from '../ids';
 import { getAgent, getApproval, getProject, lastEvent, listThreads, pendingApprovalsFor, type AgentRow } from '../state/queries';
@@ -23,18 +23,22 @@ export const spawnThreadTool = defineTool({
     brief: z.string().min(1),
     git_source_id: z.string().optional(),
     model: z.string().optional(),
+    reasoning_effort: ReasoningEffort.optional().describe(
+      "How hard the thread's model thinks: low for quick lookups and mechanical edits, high/xhigh/max for hard analysis, design or debugging. Omit to use the project's thread setting. Must be a level the model accepts.",
+    ),
     skills: z.array(SkillName).optional().describe('Skills to activate on the thread from the start (their instructions join its context)'),
   }),
-  async execute({ title, brief, git_source_id, model, skills = [] }, ctx) {
+  async execute({ title, brief, git_source_id, model, reasoning_effort, skills = [] }, ctx) {
     const id = await ctx.services.spawnThread(ctx.agentId, {
       title,
       brief,
       ...(git_source_id ? { gitSourceId: git_source_id } : {}),
       ...(model ? { model } : {}),
+      ...(reasoning_effort ? { reasoningEffort: reasoning_effort } : {}),
       ...(skills.length ? { skills } : {}),
     });
     const t = getAgent(ctx.services.store.db, id)!;
-    const extras = [t.model, ...(t.git_branch ? [`branch ${t.git_branch}`] : []), ...(skills.length ? [`skills: ${skills.join(', ')}`] : [])];
+    const extras = [t.reasoning_effort ? `${t.model}, ${t.reasoning_effort} effort` : t.model, ...(t.git_branch ? [`branch ${t.git_branch}`] : []), ...(skills.length ? [`skills: ${skills.join(', ')}`] : [])];
     return `Spawned thread ${id} "${title}" (${extras.join(', ')}).`;
   },
 });
@@ -183,13 +187,15 @@ export const reportTool = defineTool({
 export const updateSettingsTool = defineTool({
   name: 'update_settings',
   description:
-    'Change project settings when the user asks (check-in cadence, autonomy, models, concurrency, review rounds). Also record the preference in memory.',
+    'Change project settings when the user asks (check-in cadence, autonomy, models, reasoning effort, concurrency, review rounds). Also record the preference in memory.',
   input: z.object({
     check_in: z.enum(['minimal', 'normal', 'detailed']).optional(),
     autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']).optional(),
     desk_model: z.string().optional(),
     thread_model: z.string().optional(),
     fallback_model: z.string().nullable().optional(),
+    desk_reasoning_effort: ReasoningEffort.nullable().optional().describe('Your own reasoning level; null uses the model default'),
+    thread_reasoning_effort: ReasoningEffort.nullable().optional().describe("Threads' reasoning level; null uses the model default"),
     max_concurrent_threads: z.number().int().min(1).max(32).optional(),
     review_rounds: z.number().int().min(0).max(10).optional(),
   }),

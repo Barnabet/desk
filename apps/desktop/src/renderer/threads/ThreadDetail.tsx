@@ -134,7 +134,10 @@ export function ThreadDetail({ s, thread }: { s: SessionState; thread: ThreadVie
           <p className="thread-status-line">
             <span className={`tone-${label.tone}`}>{label.label}</span>
             {thread.reason && thread.status !== 'running' ? ` · ${thread.reason}` : ''}
-            {thread.review_round ? ` · revision round ${thread.review_round} of ${rounds}` : ''} · <span className="mono">{thread.model_override ?? thread.model}</span> · started {clock(thread.created_at)} ·{' '}
+            {thread.review_round ? ` · revision round ${thread.review_round} of ${rounds}` : ''} · <span className="mono">
+              {thread.model_override ?? thread.model}
+              {thread.effort ? ` (${thread.effort} effort)` : ''}
+            </span> · started {clock(thread.created_at)} ·{' '}
             {duration(now - Date.parse(thread.created_at))}
             {usage.length ? <> · {usage.map((u) => `${u.model.replace(/^claude-/, '')} ${tokens(u.prompt + u.completion)}`).join(' · ')}</> : null}
           </p>

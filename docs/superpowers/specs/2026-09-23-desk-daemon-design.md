@@ -534,8 +534,8 @@ To confirm early in implementation (spike tasks), without changing the design:
 - **WebSocket** uses `ws` attached to the Node HTTP server's `upgrade` event instead of `@hono/node-ws`.
 - **Desk can write files** (`write_file`/`edit_file`) — confined to its own scratch workspace `projects/<id>/desk/` — to draft combined documents before publishing. Its shell stays read-only.
 - **Skills moved into v1.0** (§8.4), at the user's request; they were planned for v1.1.
-- **Migrations are squashed** into a single `0000_init` until the first external release; there is no upgrade path from pre-1.0 databases.
+- **Migrations are squashed** into a single `0000_init` until the first external release; there is no upgrade path from pre-1.0 databases. After v1.0 shipped in the desktop app, schema changes are additive migrations on top of it (`0001_reasoning_effort`).
 - **Compaction** keeps the last 6 conversation *messages* (not turns) and renders the summarised part as plain text for the checkpoint call (no tool schemas needed); the checkpoint is merged into the next user message.
 - **Orphaned processes after a hard crash.** After `SIGKILL`, shell/background processes started by agents are not reaped or reattached; recovery records their tool calls as `interrupted`.
 - **Role prompts** live in `packages/core/src/agent/prompts.ts` (code) rather than `core/roles/*.md`.
-
+- **Reasoning effort is per level, not a boolean.** Each registry model lists the levels it accepts and an optional default; projects set a level for Desk and for threads, and `spawn_thread` can set one per thread. An unaccepted level is never sent: a call falls back to that model's default, or sends none. A legacy `models.json` with `supports_reasoning_effort` is upgraded on load.

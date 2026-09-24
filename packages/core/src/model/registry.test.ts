@@ -12,7 +12,7 @@ describe('ModelRegistry', () => {
   it('throws on unknown models and supports upsert', () => {
     const r = new ModelRegistry([]);
     expect(() => r.get('x')).toThrow(/Unknown model: x/);
-    r.upsert({ id: 'x', family: 'gpt', context_window: 1000, max_output_tokens: 100, supports_reasoning_effort: false, concurrency: 1 });
+    r.upsert({ id: 'x', family: 'gpt', context_window: 1000, max_output_tokens: 100, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 1 });
     expect(r.has('x')).toBe(true);
     expect(r.get('x').context_window).toBe(1000);
   });

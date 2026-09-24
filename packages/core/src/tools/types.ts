@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, SkillScope, ToolResultStatus } from '@desk/protocol';
+import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, ReasoningEffort, SkillScope, ToolResultStatus } from '@desk/protocol';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import type { JobManager } from './jobs';
@@ -41,7 +41,7 @@ export interface RuntimeServices {
     origin: string,
   ): Promise<{ id: string; path: string }>;
   sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void;
-  spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; skills?: string[] }): Promise<string>;
+  spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] }): Promise<string>;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string }): Promise<void>;
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void;

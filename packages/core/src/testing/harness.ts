@@ -17,7 +17,8 @@ export const FAKE_MODEL: ModelInfo = {
   family: 'claude',
   context_window: 100_000,
   max_output_tokens: 4096,
-  supports_reasoning_effort: false,
+  reasoning_efforts: ['low', 'medium', 'high'],
+  default_reasoning_effort: null,
   concurrency: 4,
 };
 

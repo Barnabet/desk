@@ -1,4 +1,4 @@
-import type { ToolCall } from '@desk/protocol';
+import type { ReasoningEffort, ToolCall } from '@desk/protocol';
 
 export type ChatToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
@@ -17,7 +17,7 @@ export type CompletionRequest = {
   model: string;
   messages: ChatMessage[];
   tools: ToolSpec[];
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type CompletionUsage = { prompt_tokens: number; completion_tokens: number; cached_tokens?: number; estimated: boolean };

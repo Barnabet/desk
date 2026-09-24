@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { copyFile, realpath } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
-import { GLOBAL_PROJECT_ID, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type SkillScope } from '@desk/protocol';
+import { GLOBAL_PROJECT_ID, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type SkillScope } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { uniqueLibraryName } from '../library/library';
 import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
@@ -13,7 +13,7 @@ import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
 import { runAgent, SHUTDOWN_REASON } from '../agent/run';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
-import { DEFAULT_MODEL_ID, type ModelRegistry } from '../model/registry';
+import { DEFAULT_MODEL_ID, effortFor, type ModelRegistry } from '../model/registry';
 import type { RetryOptions } from '../model/retry';
 import type { ModelAdapter } from '../model/types';
 import { evaluatePolicy } from '../policy/evaluate';
@@ -293,11 +293,22 @@ export class Runtime {
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
   }
 
-  /** Validates model ids, then applies a settings patch. */
+  /** Validates model ids, and reasoning levels against the model they apply to, then applies a settings patch. */
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void {
     for (const key of ['desk_model', 'thread_model', 'fallback_model'] as const) {
       const model = patch[key];
       if (model) this.o.models.get(model);
+    }
+    const current = getProject(this.o.store.db, projectId)?.settings;
+    for (const [effortKey, modelKey] of [
+      ['desk_reasoning_effort', 'desk_model'],
+      ['thread_reasoning_effort', 'thread_model'],
+    ] as const) {
+      const effort = patch[effortKey];
+      const model = patch[modelKey] ?? current?.[modelKey];
+      if (!effort || !model) continue;
+      const levels = this.o.models.get(model).reasoning_efforts;
+      if (!levels.includes(effort)) throw new ValidationError(`${model} does not take reasoning effort "${effort}"${levels.length ? ` (it takes: ${levels.join(', ')})` : ' (it takes none)'}`);
     }
     this.updateProject(projectId, { settings: patch });
   }
@@ -305,12 +316,17 @@ export class Runtime {
   /** Creates a thread for Desk: its own workspace (git worktree for a repo source, else a scratch dir), then starts it. */
   async spawnThread(
     parentId: string,
-    input: { title: string; brief: string; gitSourceId?: string; model?: string; skills?: string[] },
+    input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] },
   ): Promise<string> {
     const parent = this.requireAgent(parentId);
     const project = getProject(this.o.store.db, parent.project_id)!;
     const model = input.model ?? project.settings.thread_model;
-    this.o.models.get(model);
+    const info = this.o.models.get(model);
+    if (input.reasoningEffort && !info.reasoning_efforts.includes(input.reasoningEffort)) {
+      throw new ValidationError(
+        `${model} does not take reasoning effort "${input.reasoningEffort}"${info.reasoning_efforts.length ? ` (it takes: ${info.reasoning_efforts.join(', ')})` : ' (it takes none)'}`,
+      );
+    }
     const skills = this.requireUsableSkills(project.id, input.skills ?? []);
     let gitSource: { id: string; path: string } | undefined;
     if (input.gitSourceId) {
@@ -331,6 +347,7 @@ export class Runtime {
       payload: {
         role: 'thread',
         model,
+        ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
         title: input.title,
         brief: input.brief,
         workspace_path: workspacePath,
@@ -774,6 +791,11 @@ export class Runtime {
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),
         contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),
+        reasoningEffort: (agent, project, model) =>
+          effortFor(
+            this.o.models.has(model) ? this.o.models.get(model) : undefined,
+            agent.role === 'desk' ? project.settings.desk_reasoning_effort : (agent.reasoning_effort ?? project.settings.thread_reasoning_effort),
+          ),
         gate: (tool, input, project, a) =>
           evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
         toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, {

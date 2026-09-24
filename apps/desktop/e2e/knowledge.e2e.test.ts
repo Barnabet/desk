@@ -97,8 +97,12 @@ describe('knowledge and system screens, end to end', () => {
     await go(page, `#/p/${project.id}/settings`);
     const style = page.getByRole('region', { name: 'How Desk works' });
     await style.getByLabel('Review rounds').fill('3');
+    await style.getByLabel("Threads' reasoning effort").selectOption('high');
     await style.getByRole('button', { name: 'Save' }).click();
     await expect.poll(async () => (await client.projects.get(project.id)).project.settings.review_rounds).toBe(3);
+    expect((await client.projects.get(project.id)).project.settings.thread_reasoning_effort).toBe('high');
+    await style.scrollIntoViewIfNeeded();
+    await shot(page, 'k4-settings-style');
     const policy = page.getByRole('region', { name: 'Policy' });
     await policy.getByRole('button', { name: 'Add rule' }).click();
     await policy.getByLabel('Rule 10 tool').fill('web_fetch');

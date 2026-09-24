@@ -45,6 +45,7 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
           role: ev.payload.role,
           status: 'idle',
           model: ev.payload.model,
+          reasoning_effort: ev.payload.reasoning_effort ?? null,
           title: ev.payload.title,
           brief: ev.payload.brief,
           workspace_path: ev.payload.workspace_path,

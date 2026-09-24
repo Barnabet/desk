@@ -1,4 +1,4 @@
-import type { AgentStatus, EventInput, RunFinishReason } from '@desk/protocol';
+import type { AgentStatus, EventInput, ReasoningEffort, RunFinishReason } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { classifyModelError } from '../model/errors';
@@ -24,6 +24,11 @@ export type RunDeps = {
   toolContext: (agent: AgentRow, runId: string, toolCallId: string, signal: AbortSignal) => ToolContext;
   /** When set, `proxy_down` errors pause here until the proxy is back instead of failing the run. */
   proxy?: { markDown(projectId: string): void; waitUntilUp(signal: AbortSignal): Promise<void> };
+  /**
+   * The reasoning level to send for an agent's call to `model` (the agent's own level or its project's setting,
+   * checked against what the model accepts); undefined sends none.
+   */
+  reasoningEffort?: (agent: AgentRow, project: ProjectRow, model: string) => ReasoningEffort | undefined;
   /** The model's context window in tokens; without it only a context overflow triggers compaction. */
   contextWindow?: (model: string) => number | undefined;
   compaction?: { keepMessages?: number };
@@ -47,8 +52,11 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
 
   const runId = newId();
   const base = { project_id: agent.project_id, agent_id: agentId };
+  /** Read per call: settings can change during a run, and a fallback model may take different levels. */
+  const effortFor = (model: string) => deps.reasoningEffort?.(getAgent(store.db, agentId) ?? agent, getProject(store.db, agent.project_id) ?? project, model);
+  const startEffort = effortFor(agent.model);
   store.append([
-    { ...base, type: 'run.started', payload: { run_id: runId, model: agent.model } },
+    { ...base, type: 'run.started', payload: { run_id: runId, model: agent.model, ...(startEffort ? { reasoning_effort: startEffort } : {}) } },
     { ...base, type: 'agent.status_changed', payload: { status: 'running' } },
   ]);
 
@@ -73,12 +81,13 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   /** Set once sustained rate limiting switched this run to the project's fallback model. */
   let fallbackModel: string | undefined;
   const callModel = async (model: string, messages: ChatMessage[]): Promise<CompletionResult> => {
+    const effort = effortFor(model);
     for (;;) {
       try {
         return await withRetry(
           () =>
             deps.adapter.complete(
-              { model, messages, tools: specs },
+              { model, messages, tools: specs, ...(effort ? { reasoningEffort: effort } : {}) },
               {
                 signal,
                 onText: (text) =>

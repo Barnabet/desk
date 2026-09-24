@@ -7,6 +7,7 @@ import {
   GitInfo,
   MemoryKind,
   PlanItem,
+  ReasoningEffort,
   RunFinishReason,
   SkillName,
   SkillScope,
@@ -39,6 +40,8 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({
       role: AgentRole,
       model: z.string().min(1),
+      /** A level Desk chose for this thread; otherwise the project's thread setting applies. */
+      reasoning_effort: ReasoningEffort.optional(),
       title: z.string().nullable(),
       brief: z.string().nullable(),
       workspace_path: z.string().nullable(),
@@ -96,7 +99,7 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({ from_agent_id: z.string(), from_label: z.string(), kind: AgentMessageKind, text: z.string().min(1) }),
   ),
   event('inbox.drained', z.object({ run_id: z.string(), up_to: z.number().int() })),
-  event('run.started', z.object({ run_id: z.string(), model: z.string() })),
+  event('run.started', z.object({ run_id: z.string(), model: z.string(), reasoning_effort: ReasoningEffort.optional() })),
   event('run.finished', z.object({ run_id: z.string(), reason: RunFinishReason, detail: z.string().optional() })),
   event(
     'assistant.message',

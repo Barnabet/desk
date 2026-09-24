@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ProjectSummary } from '@desk/protocol';
+import type { ModelInfo, ProjectSummary } from '@desk/protocol';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { installBridge } from '../test/bridge';
@@ -19,7 +19,7 @@ beforeEach(() => {
 });
 
 const status = { running: true, version: '1.0.0', pid: 42, uptime_s: 3700, proxy: 'down', mode: 'packaged', bundledVersion: '1.0.0', agent: 'installed' };
-const model = (id: string) => ({ id, family: 'claude' as const, context_window: 200000, max_output_tokens: 32000, supports_reasoning_effort: true, concurrency: 4 });
+const model = (id: string): ModelInfo => ({ id, family: 'claude', context_window: 200000, max_output_tokens: 32000, reasoning_efforts: ['low', 'medium', 'high'], default_reasoning_effort: null, concurrency: 4 });
 
 function setup(extra: Record<string, (input: any) => unknown> = {}) {
   const bridge = installBridge({
@@ -89,9 +89,26 @@ describe('SystemScreen', () => {
     expect((within(reg).getByRole('button', { name: 'Save registry' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(within(reg).getByLabelText('Model 3 id'), { target: { value: 'gpt-6-sol' } });
     fireEvent.change(within(reg).getByLabelText('Model 3 family'), { target: { value: 'gpt' } });
+    // Reasoning levels: chips per level, and a default drawn from the chosen levels.
+    const pressed = (i: number) => within(within(reg).getByRole('group', { name: `Model ${i} reasoning levels` })).getAllByRole('button').filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent);
+    expect(pressed(1)).toEqual(['low', 'medium', 'high']);
+    expect((within(reg).getByLabelText('Model 3 default reasoning effort') as HTMLSelectElement).disabled).toBe(true);
+    const levels3 = within(reg).getByRole('group', { name: 'Model 3 reasoning levels' });
+    fireEvent.click(within(levels3).getByRole('button', { name: 'max' }));
+    fireEvent.click(within(levels3).getByRole('button', { name: 'high' }));
+    expect(pressed(3)).toEqual(['high', 'max']);
+    fireEvent.change(within(reg).getByLabelText('Model 3 default reasoning effort'), { target: { value: 'max' } });
+    fireEvent.click(within(levels3).getByRole('button', { name: 'max' }));
+    expect((within(reg).getByLabelText('Model 3 default reasoning effort') as HTMLSelectElement).value).toBe('');
+    fireEvent.change(within(reg).getByLabelText('Model 3 default reasoning effort'), { target: { value: 'high' } });
     fireEvent.click(within(reg).getByRole('button', { name: 'Remove model 2' }));
     fireEvent.click(within(reg).getByRole('button', { name: 'Save registry' }));
-    await waitFor(() => expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: Array<{ id: string }> }).models.map((m) => m.id)).toEqual(['claude-opus-5-5', 'gpt-6-sol']));
+    await waitFor(() =>
+      expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: ModelInfo[] }).models.map((m) => [m.id, m.reasoning_efforts, m.default_reasoning_effort])).toEqual([
+        ['claude-opus-5-5', ['low', 'medium', 'high'], null],
+        ['gpt-6-sol', ['high'], 'high'],
+      ]),
+    );
   });
 
   it('shows usage by model and project, notices, and the data directory', async () => {

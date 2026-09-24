@@ -185,7 +185,7 @@ describe('memory, library, usage, events, models', () => {
     const { api, saved } = await setup();
     const list = (await api('GET', '/models')).body as Array<{ id: string }>;
     expect(list.map((m) => m.id)).toContain('claude-opus-5-5');
-    const next = [...list, { id: 'extra', family: 'gpt', context_window: 1000, max_output_tokens: 100, supports_reasoning_effort: false, concurrency: 1 }];
+    const next = [...list, { id: 'extra', family: 'gpt', context_window: 1000, max_output_tokens: 100, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 1 }];
     expect((await api('PUT', '/models', next)).status).toBe(200);
     expect((saved() as Array<{ id: string }>).map((m) => m.id)).toContain('extra');
     expect((await api('PUT', '/models', [{ id: 'broken' }])).status).toBe(400);
