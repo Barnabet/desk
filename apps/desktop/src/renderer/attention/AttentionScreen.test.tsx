@@ -21,7 +21,8 @@ beforeEach(() => {
 });
 
 const recent = new Date(Date.now() - 4 * 60_000).toISOString();
-const older = new Date(Date.now() - 60 * 60_000).toISOString();
+// Past the hour by more than the shared clock's 15 s step (state/now.ts), so it reads "1h" whichever side of a tick it renders.
+const older = new Date(Date.now() - 60 * 60_000 - 20_000).toISOString();
 const items: AttentionItem[] = [
   { id: 'report:9:0', kind: 'needs_you', project_id: 'p', project_name: 'Tax 2026', agent_id: 'd', title: 'Upload the 1099', detail: 'Research is in', created_at: older, ref: { event_id: 9 } },
   { id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Tax 2026', agent_id: 't', title: 'Signup checklist wants to run bash', detail: 'Policy rule {"tool":"bash"} → ask', created_at: recent, ref: { approval_id: 'a1', thread_id: 't' } },
