@@ -4,10 +4,19 @@ import { formatThreadLine } from '../coordination/render';
 import { formatArtifactLine, listArtifacts } from '../library/library';
 import { memoryDigest } from '../memory/memory';
 import type { SkillStore } from '../skills/store';
+import type { SkillScope } from '@desk/protocol';
 import { listApprovals, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
 import { formatSkillLine, renderSkill } from '../tools/skills';
 
-export type PromptContext = { db: Db; agent: AgentRow; project: ProjectRow; libraryDir: string; skills?: SkillStore };
+export type PromptContext = {
+  db: Db;
+  agent: AgentRow;
+  project: ProjectRow;
+  libraryDir: string;
+  skills?: SkillStore;
+  /** What Desk set up for a skill's runtime, shown with its instructions. */
+  skillNote?: (s: { scope: SkillScope; name: string }) => string | null;
+};
 
 const MAX_LIBRARY_LINES = 30;
 const MAX_SKILL_LINES = 60;
@@ -55,7 +64,7 @@ function memorySection(db: Db, projectId: string): string {
 }
 
 /** Full instructions of the agent's active skills, then the other skills by name and description. */
-function skillsSections({ agent, project, skills }: PromptContext): string[] {
+function skillsSections({ agent, project, skills, skillNote }: PromptContext): string[] {
   if (!skills) return [];
   const visible = skills.list(project.id);
   const active = new Set(agent.active_skills);
@@ -66,7 +75,7 @@ function skillsSections({ agent, project, skills }: PromptContext): string[] {
     const s = visible.find((v) => v.name === name);
     const d = s && !s.error ? skills.get(s.scope, s.name, s.scope === 'project' ? project.id : undefined) : undefined;
     if (!d) continue;
-    const block = renderSkill(d, MAX_ACTIVE_SKILL_CHARS);
+    const block = renderSkill(d, MAX_ACTIVE_SKILL_CHARS, skillNote?.(d) ?? null);
     if (total + block.length > MAX_ACTIVE_SKILLS_TOTAL) {
       overflow.push(name);
       continue;

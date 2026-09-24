@@ -15,6 +15,15 @@ export const CatalogSource = z.discriminatedUnion('type', [
     /** Directory of the skill inside the repo; '' for the repo root. */
     path: z.string().regex(/^(|[\w.@-]+(\/[\w.@-]+)*)$/).refine(noDots, 'Paths cannot contain . or .. segments'),
     sha: z.string().regex(/^[0-9a-f]{40}$/),
+    /**
+     * For large repositories: the skill's files (relative to `path`), fetched one by one from raw.githubusercontent.com
+     * at `sha` instead of downloading the whole archive. The digest covers them the same way.
+     */
+    files: z.array(z.string().regex(/^[\w.@ -]+(\/[\w.@ -]+)*$/).refine(noDots, 'Paths cannot contain . or .. segments')).max(200).optional(),
+    /** In files mode: which of `files` are executable. */
+    executable: z.array(z.string()).optional(),
+    /** In files mode: the repository's licence file (repo-relative), kept with skills that have none of their own. */
+    license_file: z.string().regex(/^[\w.-]+(\/[\w.-]+)*$/).refine(noDots).optional(),
   }),
   /** Shipped with Desk under catalog/skills (first-party skills). */
   z.object({ type: z.literal('builtin'), path: z.string().regex(/^[\w.-]+(\/[\w.-]+)*$/).refine(noDots, 'Paths cannot contain . or .. segments') }),
@@ -41,7 +50,13 @@ export const CatalogRuntime = z.object({
       packages: z.array(z.string().regex(/^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?==[A-Za-z0-9._+!-]+$/)),
     })
     .optional(),
-  node: z.object({ lock: z.array(NodeLockEntry) }).optional(),
+  node: z
+    .object({
+      lock: z.array(NodeLockEntry),
+      /** Curation only (catalog:pin): a package-lock.json inside the skill, or `npm:<spec> …` resolved by npm at pin time. */
+      lock_from: z.string().optional(),
+    })
+    .optional(),
   extras: z.array(z.enum(['playwright-chromium'])).optional(),
 });
 export type CatalogRuntime = z.infer<typeof CatalogRuntime>;

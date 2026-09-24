@@ -32,7 +32,7 @@ describe('scanSkill', () => {
   });
 
   it('stays quiet on ordinary skills, code and binaries', () => {
-    const md = '---\nname: x\ndescription: y\n---\n\nUse `python3 scripts/run.py --help`.\n\n```bash\npip list | grep foo\n```\n';
+    const md = '---\nname: x\ndescription: y\n---\n\nUse `python3 scripts/run.py --help`.\n\n**Operators:** `>`, `<`, `!` (negation), `|` (OR). Say `Jot it down!`, `:)`.\n\n```bash\npip list | grep foo\n```\n';
     const py = 'import base64\nprint(base64.b64encode(b"hi"))\nurl = "https://example.com/data.csv"\n';
     expect(scanSkill([f('SKILL.md', md), f('scripts/run.py', py), { path: 'assets/logo.png', content: Buffer.from('‮'.repeat(3)) }])).toEqual([]);
   });

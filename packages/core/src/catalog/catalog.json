@@ -1,5 +1,959 @@
 {
   "version": 1,
   "updated": "2026-09-24",
-  "entries": []
+  "entries": [
+    {
+      "id": "paper-lookup",
+      "title": "Paper lookup",
+      "category": "research",
+      "summary": "Search free scholarly APIs (OpenAlex, arXiv, PubMed, Crossref and more) for papers, abstracts and full texts, with pagination and clean text extraction.",
+      "license": "MIT",
+      "homepage": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "source": {
+        "type": "github",
+        "repo": "K-Dense-AI/scientific-agent-skills",
+        "path": "skills/paper-lookup",
+        "sha": "49c6e97775eaa18ba791bebe23162a70ae601c18",
+        "files": [
+          "SKILL.md",
+          "references/arxiv.md",
+          "references/biorxiv.md",
+          "references/biostudies.md",
+          "references/core.md",
+          "references/crossref.md",
+          "references/doaj.md",
+          "references/europepmc.md",
+          "references/figshare.md",
+          "references/medrxiv.md",
+          "references/openalex.md",
+          "references/opencitations.md",
+          "references/pmc.md",
+          "references/pubmed.md",
+          "references/pubtator.md",
+          "references/ror.md",
+          "references/semantic-scholar.md",
+          "references/unpaywall.md",
+          "references/zenodo.md",
+          "scripts/_common.py",
+          "scripts/arxiv_atom.py",
+          "scripts/jats_to_text.py",
+          "scripts/openalex_abstract.py",
+          "scripts/paginate.py"
+        ],
+        "license_file": "LICENSE.md"
+      },
+      "digest": "sha256:4da4cd543dee8206188ce71b04801c9e4249ed9b0bd5127951c92a5e7bbf998a",
+      "files": 24,
+      "bytes": 170355,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": []
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/arxiv_atom.py",
+        "--help"
+      ],
+      "caveats": [
+        "Some sources rate-limit anonymous requests; the skill explains which optional API keys raise the limits."
+      ]
+    },
+    {
+      "id": "citation-management",
+      "title": "Citation management",
+      "category": "research",
+      "summary": "Find papers, turn DOIs into BibTeX, extract metadata and validate a bibliography against OpenAlex, PubMed and Crossref.",
+      "license": "MIT",
+      "homepage": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "source": {
+        "type": "github",
+        "repo": "K-Dense-AI/scientific-agent-skills",
+        "path": "skills/citation-management",
+        "sha": "49c6e97775eaa18ba791bebe23162a70ae601c18",
+        "files": [
+          "SKILL.md",
+          "assets/bibtex_template.bib",
+          "assets/citation_checklist.md",
+          "references/best_practices.md",
+          "references/bibtex_formatting.md",
+          "references/citation_validation.md",
+          "references/core_workflow.md",
+          "references/example_workflows.md",
+          "references/google_scholar_search.md",
+          "references/metadata_extraction.md",
+          "references/pubmed_search.md",
+          "references/script_reference.md",
+          "references/search_strategies.md",
+          "scripts/_common.py",
+          "scripts/doi_to_bibtex.py",
+          "scripts/extract_metadata.py",
+          "scripts/format_bibtex.py",
+          "scripts/search_google_scholar.py",
+          "scripts/search_openalex.py",
+          "scripts/search_pubmed.py",
+          "scripts/validate_citations.py"
+        ],
+        "executable": [
+          "scripts/extract_metadata.py",
+          "scripts/format_bibtex.py",
+          "scripts/search_google_scholar.py",
+          "scripts/search_pubmed.py",
+          "scripts/validate_citations.py"
+        ],
+        "license_file": "LICENSE.md"
+      },
+      "digest": "sha256:b338bce229c8d4cb5f9cee6231480aea32a4f6fab8455a66146a03c883a648f4",
+      "files": 21,
+      "bytes": 278612,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "requests==2.34.2"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/doi_to_bibtex.py",
+        "--help"
+      ],
+      "caveats": [
+        "Google Scholar search is often blocked by rate limits; OpenAlex and PubMed work without keys."
+      ]
+    },
+    {
+      "id": "deep-research",
+      "title": "Deep research",
+      "category": "research",
+      "summary": "Evidence-tracked research reports with citations, source governance and multi-pass synthesis, for literature reviews, market and competitive analysis.",
+      "license": "MIT",
+      "homepage": "https://github.com/daymade/claude-code-skills",
+      "source": {
+        "type": "github",
+        "repo": "daymade/claude-code-skills",
+        "path": "deep-research",
+        "sha": "1aef26bcf9949c92111e5d2d47877db18dc95d00"
+      },
+      "digest": "sha256:fcb2ca0d119bcb7a11edda8ce9c5769311be4048297d4340aa156533a295f8b7",
+      "files": 15,
+      "bytes": 82841,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "fact-checker",
+      "title": "Fact checker",
+      "category": "research",
+      "summary": "Verify the factual claims in a document against official sources, then propose corrections for you to confirm.",
+      "license": "MIT",
+      "homepage": "https://github.com/daymade/claude-code-skills",
+      "source": {
+        "type": "github",
+        "repo": "daymade/claude-code-skills",
+        "path": "fact-checker",
+        "sha": "1aef26bcf9949c92111e5d2d47877db18dc95d00"
+      },
+      "digest": "sha256:1fdfc2847f43a541b8e7a6bafabfe2b849b6e68e9b1362ecd4729ee40ddf54d4",
+      "files": 2,
+      "bytes": 14009,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "defuddle",
+      "title": "Defuddle",
+      "category": "research",
+      "summary": "Turn web pages into clean Markdown with the Defuddle CLI: main content only, without navigation, ads or clutter. Saves tokens when reading the web.",
+      "license": "MIT",
+      "homepage": "https://github.com/kepano/obsidian-skills",
+      "source": {
+        "type": "github",
+        "repo": "kepano/obsidian-skills",
+        "path": "skills/defuddle",
+        "sha": "3ccff5338ea700537839b21900aa5358a0402c98"
+      },
+      "digest": "sha256:e4ce557f368cfcf4c6af7196227f794d064c28989ef7cfdb9ff1e2a0000117de",
+      "files": 1,
+      "bytes": 831,
+      "runtime": {
+        "node": {
+          "lock": [
+            {
+              "name": "@mixmark-io/domino",
+              "version": "2.2.0",
+              "integrity": "sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==",
+              "path": "node_modules/@mixmark-io/domino"
+            },
+            {
+              "name": "@xmldom/xmldom",
+              "version": "0.9.12",
+              "integrity": "sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==",
+              "path": "node_modules/@xmldom/xmldom"
+            },
+            {
+              "name": "boolbase",
+              "version": "2.0.0",
+              "integrity": "sha512-DkVaaQHymRhpYEYo9x1oo7Q7B0Y6KJUsjm3c9eTyFDby4MHLBTwZ6ZDWBel5zrYxj1WsZgC5oLpiz+93MluXeA==",
+              "path": "node_modules/boolbase"
+            },
+            {
+              "name": "commander",
+              "version": "12.1.0",
+              "integrity": "sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==",
+              "path": "node_modules/commander"
+            },
+            {
+              "name": "css-select",
+              "version": "7.0.0",
+              "integrity": "sha512-snmjEVXy+1LnwXdxhYvTMj1d9tOh4HxkA1YmoayVBeeyR2C14Pum7fcxJIm4SswYspVy866eYNwlH6xC3/VH5g==",
+              "path": "node_modules/css-select"
+            },
+            {
+              "name": "css-what",
+              "version": "8.0.0",
+              "integrity": "sha512-DH0Bqq3DNp5tdOReuNyAA+Ev4Y2GS5FMbZpeTLP6C4CDi0h5nL0BmUPChXw3o/qbHLDWHl49sbNqQVY7bMSDdw==",
+              "path": "node_modules/css-what"
+            },
+            {
+              "name": "cssom",
+              "version": "0.5.0",
+              "integrity": "sha512-iKuQcq+NdHqlAcwUY0o/HL69XQrUaQdMjmStJ8JFmUaiiQErlhrmuigkg/CU4E2J0IyUKUrMAgl36TvN67MqTw==",
+              "path": "node_modules/cssom"
+            },
+            {
+              "name": "defuddle",
+              "version": "0.19.4",
+              "integrity": "sha512-Jz98aWlyEeuWcg9u2AavCEKknviI9GijMkrGFPk0wi1Lkfr1DDDw6XM+ak44Ol8kBDmDJsvU9Su2eUY09Fvh3Q==",
+              "path": "node_modules/defuddle"
+            },
+            {
+              "name": "dom-serializer",
+              "version": "3.1.1",
+              "integrity": "sha512-4MEa38/QexBob6gFNwu+EGdWvhJ1OKuNwdYY3Y3NyeWDQfnGeDYQUDfIRzWu5B5gsv03so2Uxd28YC6zrsx3Lw==",
+              "path": "node_modules/dom-serializer"
+            },
+            {
+              "name": "domelementtype",
+              "version": "3.0.0",
+              "integrity": "sha512-umCQid3jKbDmVjx8jGaW7uUykm4DEUeyV21hPxNMo2nV955DhUThwqyOIDtreepP31hl84X7G5U9ZfsWvIB3Pg==",
+              "path": "node_modules/domelementtype"
+            },
+            {
+              "name": "domhandler",
+              "version": "6.0.1",
+              "integrity": "sha512-gYzvtM72ZtxQO0T048kd6HWSbbGCNOUwcnfQ01cqIJ4X2IYKFFHZ5mKvrQETcFXxsRObZulDaKmy//R7TPtsBg==",
+              "path": "node_modules/domhandler"
+            },
+            {
+              "name": "domutils",
+              "version": "4.0.2",
+              "integrity": "sha512-qI4JLRKnSzqFqr7hAlS5xQDusBCjKSEG4t4+7aNrIQMHBcsC2TGEhuyABJdYkgSewL57PNLYEiibY2iPKhKpaA==",
+              "path": "node_modules/domutils"
+            },
+            {
+              "name": "entities",
+              "version": "8.1.0",
+              "integrity": "sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA==",
+              "path": "node_modules/entities"
+            },
+            {
+              "name": "html-escaper",
+              "version": "3.0.3",
+              "integrity": "sha512-RuMffC89BOWQoY0WKGpIhn5gX3iI54O6nRA0yC124NYVtzjmFWBIiFd8M0x+ZdX0P9R4lADg1mgP8C7PxGOWuQ==",
+              "path": "node_modules/html-escaper"
+            },
+            {
+              "name": "htmlparser2",
+              "version": "10.1.0",
+              "integrity": "sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ==",
+              "path": "node_modules/htmlparser2"
+            },
+            {
+              "name": "dom-serializer",
+              "version": "2.0.0",
+              "integrity": "sha512-wIkAryiqt/nV5EQKqQpo3SToSOV9J0DnbJqwK7Wv/Trc92zIAYZ4FlMu+JPFW1DfGFt81ZTCGgDEabffXeLyJg==",
+              "path": "node_modules/htmlparser2/node_modules/dom-serializer"
+            },
+            {
+              "name": "entities",
+              "version": "4.5.0",
+              "integrity": "sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==",
+              "path": "node_modules/htmlparser2/node_modules/dom-serializer/node_modules/entities"
+            },
+            {
+              "name": "domelementtype",
+              "version": "2.3.0",
+              "integrity": "sha512-OLETBj6w0OsagBwdXnPdN0cnMfF9opN69co+7ZrbfPGrdpPVNBUj02spi6B1N7wChLQiPn4CSH/zJvXw56gmHw==",
+              "path": "node_modules/htmlparser2/node_modules/domelementtype"
+            },
+            {
+              "name": "domhandler",
+              "version": "5.0.3",
+              "integrity": "sha512-cgwlv/1iFQiFnU96XXgROh8xTeetsnJiDsTc7TYCLFd9+/WNkIqPTxiM/8pSd8VIrhXGTf1Ny1q1hquVqDJB5w==",
+              "path": "node_modules/htmlparser2/node_modules/domhandler"
+            },
+            {
+              "name": "domutils",
+              "version": "3.2.2",
+              "integrity": "sha512-6kZKyUajlDuqlHKVX1w7gyslj9MPIXzIFiz/rGu35uC1wMi+kMhQwGhl4lt9unC9Vb9INnY9Z3/ZA3+FhASLaw==",
+              "path": "node_modules/htmlparser2/node_modules/domutils"
+            },
+            {
+              "name": "entities",
+              "version": "7.0.1",
+              "integrity": "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==",
+              "path": "node_modules/htmlparser2/node_modules/entities"
+            },
+            {
+              "name": "linkedom",
+              "version": "0.18.13",
+              "integrity": "sha512-ES/o9qotMpzpN2MHs+Iq/JcVoOj8Fa5wiQYrTdFpvAnwXL0g66XHHUc9WUMk6nAlBtGsFQ24ne+SYnvnaQ2FSw==",
+              "path": "node_modules/linkedom"
+            },
+            {
+              "name": "mathml-to-latex",
+              "version": "1.8.0",
+              "integrity": "sha512-gQ0uK3zqB8HwlfaXJkEL5rgaZNbKUiBMmBP/B/W+b+t6KcseLSuYb1b0BjLgS9ZiQa24ePkqTX8/6FaQuDL7wQ==",
+              "path": "node_modules/mathml-to-latex"
+            },
+            {
+              "name": "nth-check",
+              "version": "3.0.1",
+              "integrity": "sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ==",
+              "path": "node_modules/nth-check"
+            },
+            {
+              "name": "temml",
+              "version": "0.13.5",
+              "integrity": "sha512-aPkDDgunanpLNL0ql32HbolqLep+w8DRcVXRql7rWrMt/PhczdLgL4UBYYVU3BYjCNjkGq4EqwIicu/zWr1iOg==",
+              "path": "node_modules/temml"
+            },
+            {
+              "name": "turndown",
+              "version": "7.2.4",
+              "integrity": "sha512-I8yFsfRzmzK0WV1pNNOA4A7y4RDfFxPRxb3t+e3ui14qSGOxGtiSP6GjeX+Y6CHb7HYaFj7ECUD7VE5kQMZWGQ==",
+              "path": "node_modules/turndown"
+            },
+            {
+              "name": "uhyphen",
+              "version": "0.2.0",
+              "integrity": "sha512-qz3o9CHXmJJPGBdqzab7qAYuW8kQGKNEuoHFYrBwV6hWIMcpAmxDLXojcHfFr9US1Pe6zUswEIJIbLI610fuqA==",
+              "path": "node_modules/uhyphen"
+            }
+          ],
+          "lock_from": "npm:defuddle@0.19.4 linkedom turndown temml"
+        }
+      },
+      "smoke": [
+        "defuddle",
+        "--help"
+      ],
+      "caveats": [
+        "Fetching pages needs network access."
+      ]
+    },
+    {
+      "id": "markitdown",
+      "title": "MarkItDown",
+      "category": "documents",
+      "summary": "Convert PDF, Word, PowerPoint, Excel and HTML files to Markdown with Microsoft MarkItDown, one file or a whole folder at a time.",
+      "license": "MIT",
+      "homepage": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "source": {
+        "type": "github",
+        "repo": "K-Dense-AI/scientific-agent-skills",
+        "path": "skills/markitdown",
+        "sha": "49c6e97775eaa18ba791bebe23162a70ae601c18",
+        "files": [
+          "SKILL.md",
+          "references/api_reference.md",
+          "references/cloud_and_ocr.md",
+          "references/file_formats.md",
+          "references/mcp_and_plugins.md",
+          "references/migration.md",
+          "references/security.md",
+          "references/workflows.md",
+          "scripts/batch_convert.py",
+          "scripts/convert_literature.py",
+          "scripts/inspect_installation.py"
+        ],
+        "license_file": "LICENSE.md"
+      },
+      "digest": "sha256:f841a1c0b8b2c7ee4f3852d3f273a308cb4f5f756b63f2c527e363edceb4e9e3",
+      "files": 11,
+      "bytes": 103944,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "markitdown[pdf,docx,pptx,xlsx]==0.1.6"
+          ]
+        }
+      },
+      "smoke": [
+        "markitdown",
+        "SKILL.md"
+      ],
+      "caveats": [
+        "Audio transcription, OCR and Azure Document Intelligence are not set up."
+      ]
+    },
+    {
+      "id": "exploratory-data-analysis",
+      "title": "Exploratory data analysis",
+      "category": "documents",
+      "summary": "Profile a dataset before analysing it: types, distributions, missing values, leakage risks and a report scaffold, for tables, sequences and images.",
+      "license": "MIT",
+      "homepage": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "source": {
+        "type": "github",
+        "repo": "K-Dense-AI/scientific-agent-skills",
+        "path": "skills/exploratory-data-analysis",
+        "sha": "49c6e97775eaa18ba791bebe23162a70ae601c18",
+        "files": [
+          "SKILL.md",
+          "assets/report_template.md",
+          "references/bioinformatics_genomics_formats.md",
+          "references/chemistry_molecular_formats.md",
+          "references/general_scientific_formats.md",
+          "references/microscopy_imaging_formats.md",
+          "references/proteomics_metabolomics_formats.md",
+          "references/spectroscopy_analytical_formats.md",
+          "scripts/__init__.py",
+          "scripts/_capabilities.py",
+          "scripts/_common.py",
+          "scripts/_structured.py",
+          "scripts/_tabular.py",
+          "scripts/capability_manifest.py",
+          "scripts/distribution_sensitivity.py",
+          "scripts/eda_analyzer.py",
+          "scripts/image_inspector.py",
+          "scripts/missingness_leakage_audit.py",
+          "scripts/report_scaffold.py",
+          "scripts/sequence_inspector.py",
+          "scripts/tabular_profile.py"
+        ],
+        "license_file": "LICENSE.md"
+      },
+      "digest": "sha256:e7be847eed957a7f4a97237f118e8da0feccbdfffd611eca9513a9035d3812b4",
+      "files": 21,
+      "bytes": 206436,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": []
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/tabular_profile.py",
+        "--help"
+      ],
+      "caveats": []
+    },
+    {
+      "id": "excel-automation",
+      "title": "Excel automation",
+      "category": "documents",
+      "summary": "Create formatted Excel reports with openpyxl, and parse complex .xlsm financial models that openpyxl cannot open.",
+      "license": "MIT",
+      "homepage": "https://github.com/daymade/claude-code-skills",
+      "source": {
+        "type": "github",
+        "repo": "daymade/claude-code-skills",
+        "path": "daymade-docs/excel-automation",
+        "sha": "1aef26bcf9949c92111e5d2d47877db18dc95d00"
+      },
+      "digest": "sha256:2cb7fcba8f4003fe7c237831d8a0a7784061b11ecb2fc3a8939d7d273a52ecce",
+      "files": 4,
+      "bytes": 33995,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "openpyxl==3.1.5"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "-c",
+        "import openpyxl; print(openpyxl.__version__)"
+      ],
+      "caveats": [
+        "Controlling the Excel window with AppleScript needs Microsoft Excel and your approval to run osascript."
+      ]
+    },
+    {
+      "id": "frontend-slides",
+      "title": "Frontend slides",
+      "category": "documents",
+      "summary": "Build animation-rich HTML presentations from scratch or from a PowerPoint file, with style presets and template packs.",
+      "license": "MIT",
+      "homepage": "https://github.com/zarazhangrui/frontend-slides",
+      "source": {
+        "type": "github",
+        "repo": "zarazhangrui/frontend-slides",
+        "path": "plugins/frontend-slides/skills/frontend-slides",
+        "sha": "9906a34d640d2111f724544cbc50f7f130569ae1"
+      },
+      "digest": "sha256:3c182117f601481698cf94c6aaf57f5ca3be10de8d7f1984777468d58b524ffa",
+      "files": 79,
+      "bytes": 1747097,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "python-pptx==1.0.2"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "-c",
+        "import pptx; print(pptx.__version__)"
+      ],
+      "caveats": [
+        "PDF export (Playwright) and deploying to Vercel are not set up; decks are plain HTML files you can open anywhere."
+      ]
+    },
+    {
+      "id": "word-documents",
+      "title": "Word documents",
+      "category": "documents",
+      "summary": "Create, read and edit .docx files: write from Markdown, apply templates, replace text, insert and delete sections, set properties. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "word-documents"
+      },
+      "digest": "sha256:5866ec3264fc4c54705d9b46647d9aefd0204292a8896a3f8d4b2c83a7274b01",
+      "files": 9,
+      "bytes": 25152,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "python-docx==1.2.0"
+          ]
+        }
+      },
+      "smoke": [
+        "sh",
+        "-c",
+        "python3 scripts/docx_create.py --help >/dev/null && python3 scripts/docx_read.py --help >/dev/null && echo ok"
+      ],
+      "caveats": []
+    },
+    {
+      "id": "pdf-toolkit",
+      "title": "PDF toolkit",
+      "category": "documents",
+      "summary": "Read, create and change PDFs: text and tables, merge, split, rotate, fill forms, encrypt, and write reports from Markdown. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "pdf-toolkit"
+      },
+      "digest": "sha256:361b73e635d959e91e0a531346a282d365be016809cb6953ae2d4095dbeb6682",
+      "files": 10,
+      "bytes": 29362,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "pypdf==6.19.0",
+            "pdfplumber==0.11.10",
+            "reportlab==5.0.1"
+          ]
+        }
+      },
+      "smoke": [
+        "sh",
+        "-c",
+        "python3 scripts/pdf_create.py --help >/dev/null && python3 scripts/pdf_text.py --help >/dev/null && echo ok"
+      ],
+      "caveats": [
+        "No OCR: scanned PDFs without a text layer cannot be read."
+      ]
+    },
+    {
+      "id": "humanizer",
+      "title": "Humanizer",
+      "category": "writing",
+      "summary": "Rewrite AI-sounding text so it reads like its writer without changing what it says: removes stock contrasts, filler and other tells.",
+      "license": "MIT",
+      "homepage": "https://github.com/blader/humanizer",
+      "source": {
+        "type": "github",
+        "repo": "blader/humanizer",
+        "path": "",
+        "sha": "9862685f575c65a8247f90369951df1b3416e3d6"
+      },
+      "digest": "sha256:94d76d7c934657ede152a377da6217d0d204b3756fd64a0994f0cad635c0eff7",
+      "files": 9,
+      "bytes": 53963,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "writing-clearly-and-concisely",
+      "title": "Writing clearly and concisely",
+      "category": "writing",
+      "summary": "Apply Strunk's rules to prose people will read: documentation, reports, commit messages, error messages and UI text.",
+      "license": "MIT",
+      "homepage": "https://github.com/softaworks/agent-toolkit",
+      "source": {
+        "type": "github",
+        "repo": "softaworks/agent-toolkit",
+        "path": "skills/writing-clearly-and-concisely",
+        "sha": "3027f20f3181758385a1bb8c022d4041dfb4de84"
+      },
+      "digest": "sha256:876c8c9cbf5f0de5f48422f4cd067880abfeb2c5f6eed1a7586ab8fcb0b3ea49",
+      "files": 8,
+      "bytes": 177941,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "pretty-mermaid",
+      "title": "Pretty Mermaid",
+      "category": "writing",
+      "summary": "Render Mermaid diagrams as themed SVG, PNG or ASCII art, with 15 built-in themes, without a browser.",
+      "license": "MIT",
+      "homepage": "https://github.com/imxv/Pretty-mermaid-skills",
+      "source": {
+        "type": "github",
+        "repo": "imxv/Pretty-mermaid-skills",
+        "path": "",
+        "sha": "e234ab73c2992f03c36db04fd55ebb90abca9c45"
+      },
+      "digest": "sha256:27729fc749c615868030925c9e1cb84cd144d425fc3a50cfec8855b27713b2bb",
+      "files": 54,
+      "bytes": 1037677,
+      "runtime": {
+        "node": {
+          "lock": [
+            {
+              "name": "@resvg/resvg-js",
+              "version": "2.6.2",
+              "integrity": "sha512-xBaJish5OeGmniDj9cW5PRa/PtmuVU3ziqrbr5xJj901ZDN4TosrVaNZpEiLZAxdfnhAe7uQ7QFWfjPe9d9K2Q==",
+              "path": "node_modules/@resvg/resvg-js"
+            },
+            {
+              "name": "@resvg/resvg-js-android-arm-eabi",
+              "version": "2.6.2",
+              "integrity": "sha512-FrJibrAk6v29eabIPgcTUMPXiEz8ssrAk7TXxsiZzww9UTQ1Z5KAbFJs+Z0Ez+VZTYgnE5IQJqBcoSiMebtPHA==",
+              "path": "node_modules/@resvg/resvg-js-android-arm-eabi",
+              "os": [
+                "android"
+              ],
+              "cpu": [
+                "arm"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-android-arm64",
+              "version": "2.6.2",
+              "integrity": "sha512-VcOKezEhm2VqzXpcIJoITuvUS/fcjIw5NA/w3tjzWyzmvoCdd+QXIqy3FBGulWdClvp4g+IfUemigrkLThSjAQ==",
+              "path": "node_modules/@resvg/resvg-js-android-arm64",
+              "os": [
+                "android"
+              ],
+              "cpu": [
+                "arm64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-darwin-arm64",
+              "version": "2.6.2",
+              "integrity": "sha512-nmok2LnAd6nLUKI16aEB9ydMC6Lidiiq2m1nEBDR1LaaP7FGs4AJ90qDraxX+CWlVuRlvNjyYJTNv8qFjtL9+A==",
+              "path": "node_modules/@resvg/resvg-js-darwin-arm64",
+              "os": [
+                "darwin"
+              ],
+              "cpu": [
+                "arm64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-darwin-x64",
+              "version": "2.6.2",
+              "integrity": "sha512-GInyZLjgWDfsVT6+SHxQVRwNzV0AuA1uqGsOAW+0th56J7Nh6bHHKXHBWzUrihxMetcFDmQMAX1tZ1fZDYSRsw==",
+              "path": "node_modules/@resvg/resvg-js-darwin-x64",
+              "os": [
+                "darwin"
+              ],
+              "cpu": [
+                "x64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-linux-arm-gnueabihf",
+              "version": "2.6.2",
+              "integrity": "sha512-YIV3u/R9zJbpqTTNwTZM5/ocWetDKGsro0SWp70eGEM9eV2MerWyBRZnQIgzU3YBnSBQ1RcxRZvY/UxwESfZIw==",
+              "path": "node_modules/@resvg/resvg-js-linux-arm-gnueabihf",
+              "os": [
+                "linux"
+              ],
+              "cpu": [
+                "arm"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-linux-arm64-gnu",
+              "version": "2.6.2",
+              "integrity": "sha512-zc2BlJSim7YR4FZDQ8OUoJg5holYzdiYMeobb9pJuGDidGL9KZUv7SbiD4E8oZogtYY42UZEap7dqkkYuA91pg==",
+              "path": "node_modules/@resvg/resvg-js-linux-arm64-gnu",
+              "os": [
+                "linux"
+              ],
+              "cpu": [
+                "arm64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-linux-arm64-musl",
+              "version": "2.6.2",
+              "integrity": "sha512-3h3dLPWNgSsD4lQBJPb4f+kvdOSJHa5PjTYVsWHxLUzH4IFTJUAnmuWpw4KqyQ3NA5QCyhw4TWgxk3jRkQxEKg==",
+              "path": "node_modules/@resvg/resvg-js-linux-arm64-musl",
+              "os": [
+                "linux"
+              ],
+              "cpu": [
+                "arm64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-linux-x64-gnu",
+              "version": "2.6.2",
+              "integrity": "sha512-IVUe+ckIerA7xMZ50duAZzwf1U7khQe2E0QpUxu5MBJNao5RqC0zwV/Zm965vw6D3gGFUl7j4m+oJjubBVoftw==",
+              "path": "node_modules/@resvg/resvg-js-linux-x64-gnu",
+              "os": [
+                "linux"
+              ],
+              "cpu": [
+                "x64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-linux-x64-musl",
+              "version": "2.6.2",
+              "integrity": "sha512-UOf83vqTzoYQO9SZ0fPl2ZIFtNIz/Rr/y+7X8XRX1ZnBYsQ/tTb+cj9TE+KHOdmlTFBxhYzVkP2lRByCzqi4jQ==",
+              "path": "node_modules/@resvg/resvg-js-linux-x64-musl",
+              "os": [
+                "linux"
+              ],
+              "cpu": [
+                "x64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-win32-arm64-msvc",
+              "version": "2.6.2",
+              "integrity": "sha512-7C/RSgCa+7vqZ7qAbItfiaAWhyRSoD4l4BQAbVDqRRsRgY+S+hgS3in0Rxr7IorKUpGE69X48q6/nOAuTJQxeQ==",
+              "path": "node_modules/@resvg/resvg-js-win32-arm64-msvc",
+              "os": [
+                "win32"
+              ],
+              "cpu": [
+                "arm64"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-win32-ia32-msvc",
+              "version": "2.6.2",
+              "integrity": "sha512-har4aPAlvjnLcil40AC77YDIk6loMawuJwFINEM7n0pZviwMkMvjb2W5ZirsNOZY4aDbo5tLx0wNMREp5Brk+w==",
+              "path": "node_modules/@resvg/resvg-js-win32-ia32-msvc",
+              "os": [
+                "win32"
+              ],
+              "cpu": [
+                "ia32"
+              ]
+            },
+            {
+              "name": "@resvg/resvg-js-win32-x64-msvc",
+              "version": "2.6.2",
+              "integrity": "sha512-ZXtYhtUr5SSaBrUDq7DiyjOFJqBVL/dOBN7N/qmi/pO0IgiWW/f/ue3nbvu9joWE5aAKDoIzy/CxsY0suwGosQ==",
+              "path": "node_modules/@resvg/resvg-js-win32-x64-msvc",
+              "os": [
+                "win32"
+              ],
+              "cpu": [
+                "x64"
+              ]
+            },
+            {
+              "name": "beautiful-mermaid",
+              "version": "1.1.3",
+              "integrity": "sha512-TItrtrAyHp1vwFfFVYauWGrquouk/6SS21Aq3RsxindSYZODcN4xYrPZD6BiZRU+o5mKJzDPz9MUSMvELdylyg==",
+              "path": "node_modules/beautiful-mermaid"
+            },
+            {
+              "name": "elkjs",
+              "version": "0.11.1",
+              "integrity": "sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==",
+              "path": "node_modules/elkjs"
+            },
+            {
+              "name": "entities",
+              "version": "7.0.1",
+              "integrity": "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==",
+              "path": "node_modules/entities"
+            }
+          ],
+          "lock_from": "package-lock.json"
+        }
+      },
+      "smoke": [
+        "node",
+        "scripts/smoke-test.mjs"
+      ],
+      "caveats": []
+    },
+    {
+      "id": "summarize-meeting",
+      "title": "Summarize meeting",
+      "category": "planning",
+      "summary": "Turn a meeting transcript into structured notes: date, participants, decisions, summary and action items with owners.",
+      "license": "MIT",
+      "homepage": "https://github.com/phuryn/pm-skills",
+      "source": {
+        "type": "github",
+        "repo": "phuryn/pm-skills",
+        "path": "pm-execution/skills/summarize-meeting",
+        "sha": "8607e3b077817f89bf4a9b623246219734ac3be0"
+      },
+      "digest": "sha256:0cbb8b9c0d81ef47621b2818112dc8696dbcfa5d81c3f938e8081fa3664bdb63",
+      "files": 1,
+      "bytes": 2997,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "pre-mortem",
+      "title": "Pre-mortem",
+      "category": "planning",
+      "summary": "Imagine a plan has failed, then sort its risks into real problems, overblown worries and unspoken ones, with mitigations.",
+      "license": "MIT",
+      "homepage": "https://github.com/phuryn/pm-skills",
+      "source": {
+        "type": "github",
+        "repo": "phuryn/pm-skills",
+        "path": "pm-execution/skills/pre-mortem",
+        "sha": "8607e3b077817f89bf4a9b623246219734ac3be0"
+      },
+      "digest": "sha256:5d12ced24849c13fc280d0a4f9e01c88995f8fb24ba420cb7c4f2fac0d063b05",
+      "files": 1,
+      "bytes": 4082,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "systematic-debugging",
+      "title": "Systematic debugging",
+      "category": "code",
+      "summary": "Find the root cause before fixing: reproduce, trace, test one hypothesis at a time. Includes a script to bisect which test leaves stray state.",
+      "license": "MIT",
+      "homepage": "https://github.com/obra/superpowers",
+      "source": {
+        "type": "github",
+        "repo": "obra/superpowers",
+        "path": "skills/systematic-debugging",
+        "sha": "5bf4e78011075bcfc0dc295f0724994cd123ee71"
+      },
+      "digest": "sha256:ceffffc4d19836479cb5174563404170ff5a3f2b2915494f2f8920b4b761d83f",
+      "files": 11,
+      "bytes": 40777,
+      "runtime": {},
+      "smoke": [
+        "bash",
+        "-n",
+        "find-polluter.sh"
+      ],
+      "caveats": []
+    },
+    {
+      "id": "verification-before-completion",
+      "title": "Verification before completion",
+      "category": "code",
+      "summary": "Run the checks and read their output before claiming work is done, fixed or passing.",
+      "license": "MIT",
+      "homepage": "https://github.com/obra/superpowers",
+      "source": {
+        "type": "github",
+        "repo": "obra/superpowers",
+        "path": "skills/verification-before-completion",
+        "sha": "5bf4e78011075bcfc0dc295f0724994cd123ee71"
+      },
+      "digest": "sha256:031db48f6000d502d42bff793e0e4dfaddebdc5f4acf605d7f0016ee4313303f",
+      "files": 1,
+      "bytes": 3646,
+      "runtime": {},
+      "caveats": []
+    },
+    {
+      "id": "differential-review",
+      "title": "Differential review",
+      "category": "code",
+      "summary": "Security-focused review of a diff: git history for context, blast radius of each change, and a written report of findings.",
+      "license": "CC-BY-SA-4.0",
+      "homepage": "https://github.com/trailofbits/skills",
+      "source": {
+        "type": "github",
+        "repo": "trailofbits/skills",
+        "path": "plugins/differential-review/skills/differential-review",
+        "sha": "32e34f8173796e3566a51aee877dc96bc5191f64"
+      },
+      "digest": "sha256:bf26ccced277cd3f6df3bb686520db13f302e1b8dbc1cfb05e82f2444a16bb69",
+      "files": 7,
+      "bytes": 36573,
+      "runtime": {},
+      "caveats": [
+        "Licensed CC BY-SA 4.0: if you share a changed version, it must keep that licence."
+      ]
+    },
+    {
+      "id": "webapp-testing",
+      "title": "Web app testing",
+      "category": "code",
+      "summary": "Test local web apps with Playwright: start the server, drive pages, capture screenshots and browser logs.",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/anthropics/skills",
+      "source": {
+        "type": "github",
+        "repo": "anthropics/skills",
+        "path": "skills/webapp-testing",
+        "sha": "34040c9c568585f6929bedeaad110ad08f079624"
+      },
+      "digest": "sha256:a0adc500bc368f6cc0b966031dfcc73ee2ab9f3da3575de35553dc22bc5b1039",
+      "files": 6,
+      "bytes": 22394,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "playwright==1.63.0"
+          ]
+        },
+        "extras": [
+          "playwright-chromium"
+        ]
+      },
+      "smoke": [
+        "python3",
+        "-c",
+        "from playwright.sync_api import sync_playwright\nwith sync_playwright() as p:\n    b = p.chromium.launch()\n    pg = b.new_page()\n    pg.set_content('<h1>chromium ok</h1>')\n    print(pg.inner_text('h1'))\n    b.close()"
+      ],
+      "caveats": [
+        "Installing downloads a Chromium build of about 150 MB."
+      ]
+    }
+  ]
 }

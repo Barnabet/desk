@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CatalogEntry } from '@desk/protocol';
 import { getDeskAgent } from '../state/queries';
 import { executeToolCall } from '../tools/registry';
-import { skillRunTool } from '../tools/skills';
+import { skillReadTool, skillRunTool } from '../tools/skills';
 import { withSkillEnv, scrubbedEnv } from '../tools/bash';
 import type { Runtime } from '../runtime/runtime';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
@@ -98,6 +98,21 @@ describe('SkillRuntimes', () => {
     expect(env.bins).toEqual([join(dir, 'bin'), join(dir, 'py', 'bin')]);
     expect(env.vars).toMatchObject({ VIRTUAL_ENV: join(dir, 'py'), PYTHONDONTWRITEBYTECODE: '1' });
     expect(h.store.list({ types: ['skill.runtime_changed'] }).map((e) => e.type === 'skill.runtime_changed' && e.payload.state)).toEqual(['preparing', 'ready']);
+    expect(env.note).toMatch(/^Desk set up this skill's runtime: Python 3\.12 with requests==2\.32\.5 \(run scripts with python3\)\. Skip any install steps/);
+  });
+
+  it('answers uv run and pip install from the environment instead of installing anything', async () => {
+    const r = make({ uv: uvStub().uv });
+    r.setup(ref, entry({ python: { version: '3.12', packages: ['openpyxl==3.1.5'] } }), '2026-09-24');
+    await r.settled(ref);
+    const env = withSkillEnv({ PATH: '/usr/bin:/bin' }, r.env(ref)) as NodeJS.ProcessEnv;
+    const sh = (cmd: string) => spawnSync('/bin/sh', ['-c', cmd], { env, encoding: 'utf8' });
+    expect(sh('uv run --with openpyxl --python 3.12 scripts/report.py --out x').stdout.trim()).toBe('py-ok');
+    expect(sh('uv run python -c 1').stdout.trim()).toBe('py-ok');
+    const pip = sh('pip install openpyxl && uv pip install openpyxl');
+    expect(pip.status).toBe(0);
+    expect(pip.stderr).toContain('already installed this skill\'s Python packages (openpyxl==3.1.5)');
+    expect(sh('uv add requests').status).toBe(1);
   });
 
   it('records a failure with the installer error, and with no uv at all', async () => {
@@ -136,12 +151,22 @@ describe('SkillRuntimes', () => {
     const skillDir = join(h.dir, 'skills', 'tool', 'scripts');
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, 'run.mjs'), "import { hi } from 'hello-pkg';\nconsole.log(hi);\n");
+    // Scripts that spawn Node again (process.execPath) keep resolving from the environment.
+    writeFileSync(join(skillDir, 'spawn.mjs'), "import { spawnSync } from 'node:child_process';\nconst r = spawnSync(process.execPath, [new URL('./run.mjs', import.meta.url).pathname], { encoding: 'utf8' });\nprocess.stdout.write(`child: ${r.stdout}${r.stderr}`);\n");
     const env = withSkillEnv({ PATH: '/usr/bin:/bin' }, r.env(ref));
     const run = spawnSync('node', [join(skillDir, 'run.mjs')], { env: env as NodeJS.ProcessEnv, encoding: 'utf8' });
     expect(run.stderr).toBe('');
     expect(run.stdout.trim()).toBe('hi from pkg');
+    const nested = spawnSync('node', [join(skillDir, 'spawn.mjs')], { env: env as NodeJS.ProcessEnv, encoding: 'utf8' });
+    expect(nested.stdout.trim()).toBe('child: hi from pkg');
     const cli = spawnSync('hello', [], { env: env as NodeJS.ProcessEnv, encoding: 'utf8' });
     expect(cli.stdout.trim()).toBe('cli: hi from pkg');
+    const sh = (cmd: string) => spawnSync('/bin/sh', ['-c', cmd], { env: env as NodeJS.ProcessEnv, encoding: 'utf8' });
+    expect(sh('npm install -g hello-pkg').status).toBe(0);
+    expect(sh('npx -y hello@1.0.0').stdout.trim()).toBe('cli: hi from pkg');
+    expect(sh('npx cowsay').stderr).toContain("npx: cowsay is not part of this skill's runtime");
+    expect(sh('npm publish').status).toBe(1);
+    expect(r.env(ref).note).toContain('Node packages hello-pkg@1.0.0');
   });
 
   it('fails a Node package whose tarball does not match its integrity', async () => {
@@ -185,6 +210,8 @@ describe('skill runtimes in tools', () => {
 
     r.setup(ref, entry({ python: { version: '3.12', packages: [] } }), '2026-09-24');
     await r.settled(ref);
+    const read = await executeToolCall([skillReadTool], { id: 'r', name: 'skill_read', arguments: JSON.stringify({ name: 'tool' }) }, ctx);
+    expect(read.content).toContain("Runtime: Desk set up this skill's runtime: Python 3.12 (run scripts with python3).");
     const ok = await call({ name: 'tool', script: 'which.sh' });
     expect(ok.content).toContain(`${r.dir(ref)}/py/bin/python`);
     expect(ok.content).toContain(`${r.dir(ref)}/py`);

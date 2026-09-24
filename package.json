@@ -15,7 +15,9 @@
     "deskd": "node --import tsx apps/daemon/src/main.ts",
     "test:e2e": "pnpm --filter @desk/desktop build && vitest run --config vitest.e2e.config.ts",
     "desktop": "pnpm --filter @desk/desktop dev",
-    "package:desktop": "pnpm --filter @desk/desktop package"
+    "package:desktop": "pnpm --filter @desk/desktop package",
+    "catalog:pin": "node --import tsx packages/core/scripts/catalog.ts pin",
+    "catalog:check": "node --import tsx packages/core/scripts/catalog.ts check"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -5,7 +5,7 @@ import type { RuntimeServices, ToolContext } from '../tools/types';
 /** Throws on any access (except skill runtimes, which are empty): for unit tests of tools that must not touch runtime services. */
 export const NO_SERVICES = new Proxy({} as RuntimeServices, {
   get(_t, prop) {
-    if (prop === 'skillEnv') return () => ({ bins: [], vars: {}, blocked: null });
+    if (prop === 'skillEnv') return () => ({ bins: [], vars: {}, blocked: null, note: null });
     throw new Error(`Runtime services are not available in this test context (accessed ${String(prop)})`);
   },
 });

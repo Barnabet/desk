@@ -19,6 +19,7 @@
   },
   "include": [
     "packages/*/src",
+    "packages/core/scripts",
     "apps/*/src",
     "test/*/src",
     "vitest.config.ts",

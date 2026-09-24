@@ -1011,13 +1011,13 @@ Other changes:
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Run: `pnpm typecheck && pnpm test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/desktop
+git add -A packages apps docs
 git commit -m "feat(core): catalog schemas, safe tar.gz subtree extraction, tree digest, review scan
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1600,13 +1600,13 @@ Other changes:
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Run: `pnpm typecheck && pnpm test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/desktop
+git add -A packages apps docs
 git commit -m "feat(core,daemon): catalog service — list with install states, pinned prepare and review, install via the skill store; /v1/catalog routes and client
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2223,13 +2223,13 @@ Design notes:
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Run: `pnpm typecheck && pnpm test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A apps/desktop
+git add -A packages apps docs
 git commit -m "feat(core): Desk-managed skill runtimes — uv Python envs with prebuilt pinned wheels, npm lock installer with integrity checks and a resolving node shim; PATH in shell tools; retry and cleanup routes
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2237,3 +2237,74 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+
+### Task 4 (listing): Curation: first-party skills, pin and check tooling, the 20 entries
+
+**Files:**
+- Create:
+  - `catalog/skills/word-documents/**` and `catalog/skills/pdf-toolkit/**` (SKILL.md, LICENSE, `scripts/`, `references/`)
+  - `catalog/.gitignore`
+  - `packages/core/scripts/catalog.ts`
+  - `packages/core/src/catalog/curation.ts` and `curation.test.ts`
+  - `packages/core/src/catalog/catalog.test.ts`
+- Modify:
+  - `packages/core/src/catalog/catalog.json` (the 20 entries)
+  - `packages/protocol/src/catalog.ts` (files mode; `node.lock_from`)
+  - `packages/core/src/catalog/service.ts` and `service.test.ts` (files mode)
+  - `packages/core/src/catalog/runtimes.ts` and `runtimes.test.ts` (compat shims, runtime note, NODE_OPTIONS hook)
+  - `packages/core/src/catalog/review.ts` and `review.test.ts` (exec-block false positives)
+  - `packages/core/src/tools/skills.ts`, `tools/types.ts`, `agent/prompts.ts`, `runtime/runtime.ts`, `testing/context.ts` (runtime note)
+  - root `package.json` (`catalog:pin`, `catalog:check`) and `tsconfig.json` (includes `packages/core/scripts`)
+
+**Interfaces:**
+- **`flattenLock(lock)`** takes an npm lockfile (v2 or v3) and returns `NodeLockEntry[]`, sorted by path. It drops dev packages and links, and throws when a package has no integrity.
+- **`detectLicense(text, skillMd)`** returns the SPDX id or null. **`shellWord(s)`**.
+- **`SkillEnv.note`** and **`RuntimeServices.skillEnv(...).note`** carry the runtime note, which is null unless the runtime is ready.
+- **`renderSkill(d, maxChars?, runtimeNote?)`** adds a `Runtime:` line.
+- **`PromptContext.skillNote?`**
+- **`runtimeNote(entry)`**, exported from `runtimes.ts`.
+- **Catalog source, files mode:** `source.files`, `source.executable` and `source.license_file`. `CatalogServiceOptions.rawBase`.
+- **`runtime.node.lock_from`** is either `"package-lock.json"` or `"npm:<spec> …"`, and is resolved by `catalog:pin`.
+
+- [ ] **Step 1: Write the first-party skills.** Each script has `--help` and prints JSON or text. Test them by hand with a venv containing the pinned packages.
+  - **word-documents:**
+    - `docx_create.py`: Markdown-lite in, with `--template`, `--title` and `--author`.
+    - `docx_read.py`: outputs markdown, text or json.
+    - `docx_edit.py`: operations `replace` (with `first`), `append`, `insert_after`, `delete` and `properties`. It scans forward, so replacing "a" with "aa" terminates.
+  - **pdf-toolkit:**
+    - `pdf_info.py`
+    - `pdf_text.py`: `--pages`, `--layout`, `--tables` and `--format json`.
+    - `pdf_pages.py`: merge, extract, delete, rotate, split, encrypt (AES-256), decrypt and metadata.
+    - `pdf_form.py`: `list` reports field types (text, checkbox, radio, pushbutton, choice, signature); `fill` takes `--flatten`.
+    - `pdf_create.py`: reportlab platypus with a Unicode system font.
+- [ ] **Step 2: Write the curation helpers and their tests** (`curation.test.ts`: lock flattening with os/cpu and nested paths, licence detection, quoting). Write `catalog.test.ts`: the shipped catalog validates, has 20 unique ids with 40-hex SHAs and non-empty Node locks, and each builtin digest equals the digest of `catalog/skills/<id>` on disk.
+- [ ] **Step 3: Write the runtime compat shims and the runtime note** (tests in `runtimes.test.ts`):
+  - **`uv`:**
+    - `uv run [--with X …] script.py` runs the environment's python.
+    - `uv run python …` works the same way.
+    - `uv pip install` exits 0 with "already installed"; anything else exits 1.
+  - **`pip` and `pip3`:** `install` exits 0.
+  - **`npm`:** install, i, ci and add exit 0.
+  - **`npx [-y] name[@v]`:** runs a bin from the environment, or fails.
+  - **Runtime note:** `desk-env.json` records it, and `skill_read`, `skill_activate` and the active-skills prompt show it as `Runtime: Desk set up this skill's runtime: …`.
+  - **Node hook moves to NODE_OPTIONS:** the shim exports `NODE_OPTIONS="--import file:///…/resolve-register.mjs …"`, so Node processes a script spawns with `process.execPath` keep resolving. The file URL keeps "Application Support" safe. A test covers a nested spawn.
+- [ ] **Step 4: Write `catalog.json`** with the 20 entries from spec §2: titles, summaries of 200 characters or less, categories, licences, runtimes, smoke commands and caveats. Then run `pnpm catalog:pin`. The K-Dense repository is more than 50 MB, so its four skills use files mode. Pretty Mermaid's lock comes from its own `package-lock.json`, and Defuddle's from `npm:defuddle@0.19.4 linkedom turndown temml`, resolved with `--before` set to the catalog date.
+- [ ] **Step 5: Run `pnpm catalog:check`.** It installs each entry into a throwaway data dir, builds the real runtime (managed CPython 3.12 from uv, prebuilt wheels, npm tarballs, Chromium) and runs the smoke command under `sandbox-exec`.
+  - **All 20 pass**, including webapp-testing: Chromium starts and renders inside the sandbox, so no runner-up is needed.
+  - **The first run found three issues, all fixed:**
+    - Pretty Mermaid's self-test spawns `node` again, which lost the resolve hook. The fix is the NODE_OPTIONS hook from Step 3.
+    - Two exec-block false positives: `` `!` `` as an operator, and `` forget!`, `:)` ``. The rule now requires `!` at a word start.
+  - **Warnings that remain, as the review sheet will show them:**
+    - writing-clearly-and-concisely has a real U+200B inside a quoted AI-writing sample.
+    - systematic-debugging's CREATION-LOG mentions `~/.claude/CLAUDE.md` (memory-write).
+- [ ] **Step 6: Run the gates and commit.**
+
+```bash
+pnpm typecheck && pnpm test
+git add -A catalog packages package.json tsconfig.json docs
+git commit -m "feat(catalog): 20 pinned skills — first-party word-documents and pdf-toolkit, curation tooling (pin, sandboxed check), files mode for large repos, runtime compat shims and note
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---

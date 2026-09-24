@@ -476,8 +476,8 @@ export class Runtime {
   }
 
   /** See RuntimeServices.skillEnv. */
-  skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null } {
-    const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null };
+  skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null } {
+    const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null, note: null as string | null };
     const provider = this.o.skillEnv;
     if (!provider) return out;
     const agent = this.requireAgent(agentId);
@@ -486,7 +486,7 @@ export class Runtime {
       const e = provider.env(refOf(only));
       if (e.state === 'preparing') out.blocked = `${only.name}'s runtime is still being set up. Try again in a minute.`;
       else if (e.state === 'failed') out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
-      return { ...out, bins: e.bins, vars: e.vars };
+      return { ...out, bins: e.bins, vars: e.vars, note: e.note };
     }
     for (const name of agent.active_skills) {
       const skill = this.skills.resolve(name, agent.project_id);
@@ -728,7 +728,9 @@ export class Runtime {
 
   private systemPrompt(agent: AgentRow, project: ProjectRow): string {
     if (this.o.systemPrompt) return this.o.systemPrompt(agent, project);
-    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills };
+    const provider = this.o.skillEnv;
+    const skillNote = (s: { scope: SkillScope; name: string }) => provider?.env({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: project.id } : {}) }).note ?? null;
+    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote };
     return agent.role === 'desk' ? deskSystemPrompt(ctx) : threadSystemPrompt(ctx);
   }
 

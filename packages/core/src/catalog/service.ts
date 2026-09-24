@@ -21,7 +21,7 @@ import { parseSkillMd, SKILL_FILE } from '../skills/store';
 import { listProjects } from '../state/queries';
 import { readTree, treeDigest } from './digest';
 import { isScript, scanSkill } from './review';
-import { extractSubtree, type ExtractedFile } from './tar';
+import { DEFAULT_CAPS, extractSubtree, type ExtractedFile } from './tar';
 
 /** Returns the response body of a GET; throws on a non-2xx status. */
 export type CatalogFetch = (url: string) => Promise<AsyncIterable<Uint8Array>>;
@@ -44,6 +44,8 @@ export type CatalogServiceOptions = {
   fetch?: CatalogFetch;
   /** Base URL serving `/<owner>/<repo>/tar.gz/<sha>` (codeload.github.com; a fixture server in tests). */
   archiveBase?: string;
+  /** Base URL serving `/<owner>/<repo>/<sha>/<path>` (raw.githubusercontent.com), for entries that list their files. */
+  rawBase?: string;
   runtimes?: CatalogRuntimes;
 };
 
@@ -83,11 +85,13 @@ export class CatalogService {
   readonly catalog: CatalogFile;
   private readonly fetch: CatalogFetch;
   private readonly archiveBase: string;
+  private readonly rawBase: string;
 
   constructor(private readonly o: CatalogServiceOptions) {
     this.catalog = o.catalog ?? loadCatalog();
     this.fetch = o.fetch ?? httpFetch;
     this.archiveBase = (o.archiveBase ?? 'https://codeload.github.com').replace(/\/+$/, '');
+    this.rawBase = (o.rawBase ?? 'https://raw.githubusercontent.com').replace(/\/+$/, '');
   }
 
   entry(id: string): CatalogEntry {
@@ -194,11 +198,33 @@ export class CatalogService {
     };
   }
 
+  /** Files mode: each listed file (and the repo licence) from the raw host at the pinned commit, within the store's caps. */
+  private async fetchFiles(src: { repo: string; sha: string; path: string; files: string[]; executable?: string[]; license_file?: string }) {
+    const exec = new Set(src.executable ?? []);
+    const url = (p: string) => `${this.rawBase}/${src.repo}/${src.sha}/${p.split('/').map(encodeURIComponent).join('/')}`;
+    const files: ExtractedFile[] = [];
+    let total = 0;
+    for (const rel of src.files) {
+      const content = await collect(await this.fetch(url(src.path ? `${src.path}/${rel}` : rel)), DEFAULT_CAPS.maxFileBytes, rel);
+      total += content.length;
+      if (total > DEFAULT_CAPS.maxBytes) throw new ValidationError(`The skill is larger than ${DEFAULT_CAPS.maxBytes / 1024 / 1024} MB`);
+      files.push({ path: rel, content, mode: exec.has(rel) ? 0o755 : 0o644 });
+    }
+    const rootFiles: ExtractedFile[] = [];
+    if (src.license_file) {
+      const content = await collect(await this.fetch(url(src.license_file)), 256 * 1024, src.license_file);
+      rootFiles.push({ path: src.license_file.split('/').pop()!, content, mode: 0o644 });
+    }
+    return { files, rootFiles };
+  }
+
   /** Fetches or reads the entry, checks the digest and the SKILL.md, and writes it to a fresh staging directory. */
   private async stage(entry: CatalogEntry): Promise<Staged> {
     let files: ExtractedFile[];
     let rootFiles: ExtractedFile[] = [];
-    if (entry.source.type === 'github') {
+    if (entry.source.type === 'github' && entry.source.files) {
+      ({ files, rootFiles } = await this.fetchFiles(entry.source as typeof entry.source & { files: string[] }));
+    } else if (entry.source.type === 'github') {
       const { repo, sha, path } = entry.source;
       const body = await this.fetch(`${this.archiveBase}/${repo}/tar.gz/${sha}`);
       ({ files, rootFiles } = await extractSubtree(body, path, { rootFiles: LICENSE_FILE }));
@@ -234,4 +260,16 @@ export class CatalogService {
     }
     return { dir, files, licenseText, skillMd };
   }
+}
+
+/** Reads a response body into memory, refusing more than `max` bytes. */
+async function collect(body: AsyncIterable<Uint8Array>, max: number, name: string): Promise<Buffer> {
+  const parts: Buffer[] = [];
+  let n = 0;
+  for await (const chunk of body) {
+    n += chunk.length;
+    if (n > max) throw new ValidationError(`${name} is larger than ${Math.round(max / 1024 / 1024) || 1} MB`);
+    parts.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(parts);
 }

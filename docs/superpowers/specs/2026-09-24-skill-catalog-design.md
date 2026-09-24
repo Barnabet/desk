@@ -29,6 +29,8 @@
 
 All licences below were verified on 2026-09-24. Any entry that fails `catalog:check` in the sandbox (§7) is replaced by a runner-up, and the swap is recorded here.
 
+**Curation result (2026-09-24):** all 20 entries pass `catalog:check` under the real sandbox profile, so no runner-up was swapped in. That includes #20: Playwright's Chromium starts and renders inside `sandbox-exec`.
+
 | # | id | Source (repo → path) | Licence | Category | Runtime |
 |---|---|---|---|---|---|
 | 1 | paper-lookup | K-Dense-AI/scientific-agent-skills → `skills/paper-lookup` | MIT | Research | Python 3.12, stdlib |
@@ -186,6 +188,14 @@ All licences below were verified on 2026-09-24. Any entry that fails `catalog:ch
 
   Lifecycle scripts never run. `bin/` gets links from each package's `bin` field, wrapped to use the node shim.
 - **Extras:** `playwright-chromium` runs `playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH=<env>/browsers`.
+- **Node resolution:** each environment's `bin/node` exports `NODE_OPTIONS=--import file://…/resolve-register.mjs`. The hook retries failed bare imports from the environment, and because it is set in NODE_OPTIONS, Node processes a script spawns inherit it.
+- **Compat shims:** skills written for other agents often start with install steps, so `bin/` holds stand-ins:
+  - `uv run [--with …] script.py` runs the environment's python.
+  - `uv pip install`, `pip install` and `npm install` report that the packages are already installed.
+  - `npx <bin>` runs a bin from the environment.
+
+  None of them reach the network.
+- **Runtime note:** once the environment is ready, `skill_read`, `skill_activate` and the active-skills prompt show a `Runtime:` line naming the pinned packages, and tell the agent to skip install steps.
 
 **Setup and state**
 - Setup is async, per skill, and never blocks install.
@@ -252,7 +262,7 @@ All licences below were verified on 2026-09-24. Any entry that fails `catalog:ch
 
 ## 7. Curation tooling and verification
 
-- **`pnpm catalog:pin <id> <repo> <path> <ref>`** resolves the ref to a SHA (one API call, or `git ls-remote`), fetches, computes the digest, files and bytes, and writes the entry. The runtime fields are edited by hand.
+- **`pnpm catalog:pin [id…] [--ref <ref>]`** works on entries already written in `catalog.json`. It resolves each ref to a SHA with `git ls-remote`, fetches the skill, and writes its digest, file count and size. A repository too large for the 50 MB archive cap switches to files mode: one tree listing, then each file from raw.githubusercontent.com. Runtime fields are edited by hand, except Node locks: `runtime.node.lock_from` (a `package-lock.json` in the skill, or `npm:<spec> …`) is resolved into the flat lock.
 - **`pnpm catalog:check [id…]`** runs, for each entry:
   1. fetch and verify the digest
   2. validate against the spec

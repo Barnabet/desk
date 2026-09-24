@@ -47,7 +47,7 @@ export { executeToolCall, MAX_TOOL_OUTPUT_CHARS, prepareToolCall, runPreparedToo
 export { resolveInside } from './tools/paths';
 export { runProcess, type ProcessResult } from './tools/process';
 export { fileTools } from './tools/fs';
-export { bashTool, scrubbedEnv } from './tools/bash';
+export { bashTool, scrubbedEnv, withSkillEnv } from './tools/bash';
 export { completeTool } from './tools/thread';
 export { buildSandboxProfile, detectSandbox, NO_SANDBOX, shellInvocation, type SandboxSpec } from './tools/sandbox';
 export { bashBackgroundTool, bashKillTool, bashOutputTool, JobManager, jobTools, type JobSnapshot, type JobStatus } from './tools/jobs';

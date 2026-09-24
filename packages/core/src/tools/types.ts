@@ -49,7 +49,7 @@ export interface RuntimeServices {
    * PATH entries and variables from Desk-managed skill runtimes: of one skill (`only`), or of every active skill of the
    * agent whose runtime is ready. `blocked` explains why `only`'s runtime cannot be used yet.
    */
-  skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null };
+  skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null };
 }
 
 export type ToolYield = { status: AgentStatus; reason?: string };

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { GLOBAL_PROJECT_ID, type CatalogEntry, type NodeLockEntry, type RuntimeState, type RuntimesReport, type SkillScope } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import type { CatalogRuntimes, SkillRef } from './service';
@@ -11,7 +12,7 @@ export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (command: string, args: string[], opts: { env: Record<string, string>; cwd?: string; timeoutMs?: number }) => Promise<ExecResult>;
 
 /** A skill's runtime as tools see it: PATH entries and variables when ready, or why not. */
-export type SkillEnv = { state: RuntimeState; reason: string | null; bins: string[]; vars: Record<string, string> };
+export type SkillEnv = { state: RuntimeState; reason: string | null; bins: string[]; vars: Record<string, string>; note: string | null };
 
 /** What the agent runtime needs: the environment of a skill, and removal when the skill is deleted. */
 export interface SkillEnvProvider {
@@ -35,7 +36,7 @@ export type SkillRuntimesOptions = {
   arch?: string;
 };
 
-type EnvFile = { bins: string[]; vars: Record<string, string>; digest: string };
+type EnvFile = { bins: string[]; vars: Record<string, string>; digest: string; note?: string };
 
 const NPM_CAPS = { maxDownload: 80 * 1024 * 1024, maxBytes: 120 * 1024 * 1024, maxFiles: 5000, maxFileBytes: 60 * 1024 * 1024 };
 
@@ -105,9 +106,9 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 
   env(ref: SkillRef): SkillEnv {
     const s = this.state(ref);
-    if (s.state !== 'ready') return { ...s, bins: [], vars: {} };
+    if (s.state !== 'ready') return { ...s, bins: [], vars: {}, note: null };
     const file = JSON.parse(readFileSync(join(this.dir(ref), 'desk-env.json'), 'utf8')) as EnvFile;
-    return { ...s, bins: file.bins, vars: file.vars };
+    return { ...s, bins: file.bins, vars: file.vars, note: file.note ?? null };
   }
 
   /** Builds (or rebuilds) a skill's environment in the background; entries without runtime needs get none. */
@@ -200,6 +201,8 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
     // Scripts may call `node` even without packages; the shim runs the daemon's own Node.
     this.writeNodeShim(dir);
 
+    this.writeCompatShims(dir, entry);
+
     if (rt.extras?.includes('playwright-chromium')) {
       if (!rt.python) throw new Error('playwright-chromium needs the Python runtime with playwright');
       this.progress(ref, 'Downloading Chromium for Playwright');
@@ -207,7 +210,91 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
       await this.run(join(dir, 'py', 'bin', 'python'), ['-m', 'playwright', 'install', 'chromium'], { ...this.baseEnv(), PLAYWRIGHT_BROWSERS_PATH: browsers }, 20 * 60_000);
       env.vars.PLAYWRIGHT_BROWSERS_PATH = browsers;
     }
+    env.note = runtimeNote(entry);
     writeFileSync(join(dir, 'desk-env.json'), JSON.stringify(env, null, 2));
+  }
+
+  /**
+   * Skills written for other agents often start with `uv run --with x script.py`, `pip install x` or `npm install -g x`.
+   * The environment already holds everything, so these stand-ins run the script or report success instead of
+   * installing anything (they never reach the network).
+   */
+  private writeCompatShims(dir: string, entry: CatalogEntry): void {
+    const rt = entry.runtime;
+    if (rt.python) {
+      const py = shq(join(dir, 'py', 'bin', 'python'));
+      const pkgs = rt.python.packages.join(', ') || 'none needed';
+      writeExecutable(
+        join(dir, 'bin', 'uv'),
+        [
+          '#!/bin/sh',
+          "# Desk's stand-in for uv in a skill runtime: the packages are already installed.",
+          'case "$1" in',
+          '  run)',
+          '    shift',
+          '    while [ $# -gt 0 ]; do',
+          '      case "$1" in',
+          '        --with|--python|-p|--with-requirements|--project|--directory|--index-url|--extra-index-url|--env-file) if [ $# -ge 2 ]; then shift 2; else shift; fi ;;',
+          '        --) shift; break ;;',
+          '        -*) shift ;;',
+          '        *) break ;;',
+          '      esac',
+          '    done',
+          '    case "$1" in',
+          '      "") echo "uv run: nothing to run" >&2; exit 2 ;;',
+          '      python|python3) shift ;;',
+          '      *.py) ;;',
+          '      *) exec "$@" ;;',
+          '    esac',
+          `    exec ${py} "$@" ;;`,
+          '  pip)',
+          `    if [ "$2" = install ]; then echo "Desk already installed this skill's Python packages (${pkgs})." >&2; exit 0; fi ;;`,
+          'esac',
+          'echo "uv is managed by Desk here: only uv run and uv pip install work. Run scripts with python3." >&2',
+          'exit 1',
+          '',
+        ].join('\n'),
+      );
+      for (const name of ['pip', 'pip3']) {
+        writeExecutable(
+          join(dir, 'bin', name),
+          [
+            '#!/bin/sh',
+            `if [ "$1" = install ]; then echo "Desk already installed this skill's Python packages (${pkgs})." >&2; exit 0; fi`,
+            `exec ${py} -m pip "$@"`,
+            '',
+          ].join('\n'),
+        );
+      }
+    }
+    if (rt.node) {
+      const binDir = join(dir, 'bin');
+      const top = rt.node.lock.filter((l) => l.path === `node_modules/${l.name}`).map((l) => l.name).join(', ');
+      writeExecutable(
+        join(binDir, 'npm'),
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          `  install|i|ci|add) echo "Desk already installed this skill's Node packages (${top})." >&2; exit 0 ;;`,
+          'esac',
+          'echo "npm is managed by Desk here: packages are already installed, and their commands are on PATH." >&2',
+          'exit 1',
+          '',
+        ].join('\n'),
+      );
+      writeExecutable(
+        join(binDir, 'npx'),
+        [
+          '#!/bin/sh',
+          'while [ $# -gt 0 ]; do case "$1" in -y|--yes|--no-install|-q|--quiet) shift ;; *) break ;; esac; done',
+          'cmd="${1%@*}"; cmd="${cmd##*/}"',
+          `if [ -n "$cmd" ] && [ -x ${shq(binDir)}/"$cmd" ]; then shift; exec ${shq(binDir)}/"$cmd" "$@"; fi`,
+          'echo "npx: $1 is not part of this skill\'s runtime" >&2',
+          'exit 1',
+          '',
+        ].join('\n'),
+      );
+    }
   }
 
   private async installNode(ref: SkillRef, dir: string, lock: NodeLockEntry[]): Promise<void> {
@@ -267,7 +354,9 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
         'export ELECTRON_RUN_AS_NODE=1',
         `export DESK_NODE_MODULES=${shq(modules)}`,
         `export NODE_PATH=${shq(modules)}`,
-        `exec ${shq(this.o.nodeExec)} --import ${shq(join(lib, 'resolve-register.mjs'))} "$@"`,
+        // In NODE_OPTIONS (not argv) so Node processes the script spawns with process.execPath keep the hook.
+        `export NODE_OPTIONS="--import ${pathToFileURL(join(lib, 'resolve-register.mjs')).href}\${NODE_OPTIONS:+ $NODE_OPTIONS}"`,
+        `exec ${shq(this.o.nodeExec)} "$@"`,
         '',
       ].join('\n'),
     );
@@ -347,6 +436,20 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 }
 
 const base = (name: string) => name.split('/').pop()!;
+
+/** What agents are told about a ready runtime, next to the skill's instructions. */
+export function runtimeNote(entry: CatalogEntry): string | undefined {
+  const rt = entry.runtime;
+  const parts: string[] = [];
+  if (rt.python) parts.push(`Python ${rt.python.version}${rt.python.packages.length ? ` with ${rt.python.packages.join(', ')}` : ''} (run scripts with python3)`);
+  if (rt.node) {
+    const top = rt.node.lock.filter((l) => l.path === `node_modules/${l.name}`).map((l) => `${l.name}@${l.version}`);
+    parts.push(`Node packages ${top.join(', ')} (import them from scripts run with node; their commands are on PATH)`);
+  }
+  if (rt.extras?.includes('playwright-chromium')) parts.push('a Chromium browser for Playwright');
+  if (!parts.length) return undefined;
+  return `Desk set up this skill's runtime: ${parts.join('; ')}. Skip any install steps in the instructions (pip, uv, npm or npx installs): everything listed is already installed, and \`uv run\`, \`pip install\` and \`npm install\` are harmless stand-ins here.`;
+}
 
 function writeExecutable(path: string, text: string): void {
   writeFileSync(path, text);

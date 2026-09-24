@@ -43,13 +43,14 @@ export function formatSkillLine(s: SkillSummary, active?: Set<string>): string {
 }
 
 /** Instructions of a skill as an agent sees them: location, files and the SKILL.md body. */
-export function renderSkill(d: SkillDetail, maxChars = Infinity): string {
+export function renderSkill(d: SkillDetail, maxChars = Infinity, runtimeNote: string | null = null): string {
   const files = d.files.filter((f) => f.path !== 'SKILL.md').map((f) => `  ${f.path} (${f.size} bytes)`);
   const body = d.instructions.length > maxChars ? `${d.instructions.slice(0, maxChars)}\n[… truncated — read the rest with skill_read]` : d.instructions;
   return [
     `### Skill: ${d.name} (${d.scope}, v${d.version})`,
     `Directory: ${d.dir}`,
     ...(files.length ? ['Files:', ...files] : []),
+    ...(runtimeNote ? [`Runtime: ${runtimeNote}`] : []),
     '',
     body,
   ].join('\n');
@@ -100,7 +101,7 @@ export const skillReadTool = defineTool({
   async execute({ name, path }, ctx) {
     const skill = resolveSkill(ctx, name);
     const store = ctx.services.skills;
-    if (!path || path === 'SKILL.md') return renderSkill(detail(store, skill, ctx.projectId), MAX_READ_CHARS);
+    if (!path || path === 'SKILL.md') return renderSkill(detail(store, skill, ctx.projectId), MAX_READ_CHARS, ctx.services.skillEnv(ctx.agentId, skill).note);
     const buf = readFileSync(store.filePath(skill, path));
     if (buf.subarray(0, 8000).includes(0)) return `${path} is a binary file (${buf.length} bytes) at ${join(skill.dir, path)}.`;
     const text = buf.toString('utf8');
@@ -115,7 +116,7 @@ export const skillActivateTool = defineTool({
   input: z.object({ name: SkillName }),
   async execute({ name }, ctx) {
     const [skill] = ctx.services.activateSkills(ctx.agentId, [name]);
-    return `Skill "${name}" is active. Follow its instructions:\n\n${renderSkill(detail(ctx.services.skills, skill!, ctx.projectId))}`;
+    return `Skill "${name}" is active. Follow its instructions:\n\n${renderSkill(detail(ctx.services.skills, skill!, ctx.projectId), Infinity, ctx.services.skillEnv(ctx.agentId, skill!).note)}`;
   },
 });
 

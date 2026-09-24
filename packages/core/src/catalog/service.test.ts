@@ -155,6 +155,33 @@ describe('CatalogService', () => {
     expect(fetched).toEqual([]);
   });
 
+  it('fetches listed files one by one from the raw host for large repositories', async () => {
+    const raw = (path: string) => `https://raw.test/K-Dense-AI/scientific-agent-skills/${SHA1}/${path}`;
+    const bodies = new Map([
+      [raw('skills/paper-lookup/SKILL.md'), v1[0]!.content],
+      [raw('skills/paper-lookup/scripts/lookup.py'), v1[1]!.content],
+      [raw('LICENSE'), Buffer.from('MIT License\n')],
+    ]);
+    const rawFetch: CatalogFetch = async (u) => {
+      fetched.push(u);
+      const b = bodies.get(u);
+      if (!b) throw new Error(`404 ${u}`);
+      return chunked(b);
+    };
+    const e = entryFor(SHA1, v1);
+    const listed: CatalogEntry = { ...e, source: { ...e.source, files: ['SKILL.md', 'scripts/lookup.py'], executable: ['scripts/lookup.py'], license_file: 'LICENSE' } as CatalogEntry['source'] };
+    const c = new CatalogService({ runtime, store: h.store, dataDir: h.dir, catalog: { version: 1, updated: '2026-09-24', entries: [listed] }, builtinRoot: h.dir, fetch: rawFetch, rawBase: 'https://raw.test' });
+    const review = await c.prepare('paper-lookup');
+    expect(fetched).toEqual([raw('skills/paper-lookup/SKILL.md'), raw('skills/paper-lookup/scripts/lookup.py'), raw('LICENSE')]);
+    expect(review.files.map((f) => [f.path, f.script])).toEqual([['SKILL.md', false], ['scripts/lookup.py', true]]);
+    expect(review.license_text).toBe('MIT License\n');
+    await c.install('paper-lookup');
+    expect(readFileSync(join(runtime.skills.get('global', 'paper-lookup')!.dir, 'LICENSE'), 'utf8')).toBe('MIT License\n');
+
+    bodies.set(raw('skills/paper-lookup/scripts/lookup.py'), Buffer.from('print("tampered")\n'));
+    await expect(c.prepare('paper-lookup')).rejects.toThrow(/does not match the catalog/);
+  });
+
   it('reports unknown entries as not found', async () => {
     await expect(service([]).prepare('nope')).rejects.toThrow(/Unknown catalog skill: nope/);
   });

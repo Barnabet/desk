@@ -6,7 +6,7 @@ const SCRIPT_EXT = /\.(py|js|mjs|cjs|ts|sh|bash|zsh|rb|pl|r)$/i;
 
 const RULES: Array<{ kind: ReviewWarningKind; re: RegExp }> = [
   // Claude Code runs these before the model sees the skill; Desk never does, but they deserve a look.
-  { kind: 'exec-block', re: /!`[^`\n]+`|^\s*```!/ },
+  { kind: 'exec-block', re: /(?:^|[\s(])!`[^`\n]+`|^\s*```!/ },
   { kind: 'pipe-to-shell', re: /\b(curl|wget)\b[^\n|]*\|\s*(sudo\s+)?(ba|z|da)?sh\b/i },
   { kind: 'base64-blob', re: /[A-Za-z0-9+/]{200,}={0,2}/ },
   { kind: 'invisible-unicode', re: /[​-‏‪-‮⁠-⁤⁦-⁩﻿\u{E0000}-\u{E007F}]/u },
