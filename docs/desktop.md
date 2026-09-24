@@ -33,7 +33,7 @@ The CLI's `desk up --install` uses the same LaunchAgent label, so there is only 
 | **Conversation** | The line diagram: the trunk is Desk, threads fork and rejoin, stations link to chat items, and there is a live "now" marker. The chat shows Desk's replies (streamed), the thread feed, report and question cards, and notices. The composer can attach files to the Library or turn a message into a skill. A plan route panel sits alongside. |
 | **Threads** | A roster of cards. Each thread has a serpentine route with numbered stops, synced to a Narrative or Every-step transcript. You can steer, stop or archive a thread, or turn it into a skill. Tabs: Result, Diff, Files, Skill drafts, Usage. |
 | **Attention** | A flight-strip rack in four bays: clearance, queries, handoffs and holding. The inspector shows the exact arguments, who is asking and where, the policy reason and the thread's last words. Keys: J/K, ⌘⏎ approve, ⌘⌫ deny, E open. |
-| **Skills** | A map and a list covering global, project and shadowed skills, with live usage. The detail view has instructions, files, history (compare, restore, change notes), an editor with uploads, import, delete, and Ask Desk. |
+| **Skills** | A map and a list covering global, project and shadowed skills, with live usage. The detail view has instructions, files, history (compare, restore, change notes), an editor with uploads, import, delete, and Ask Desk. **Catalog** shows 20 pinned skills in five bays. Each has a review sheet (source at its commit, licence, every file with scripts marked, warnings, what Desk sets up, scope) and installs with live runtime progress. Installed catalog skills carry a "From catalog" mark, a runtime line with Retry, and "Update available". |
 | **Library** | A grid with a safe preview (Markdown, text, code and images from the daemon). It shows each file's origin, supports drag-and-drop upload, and has Save a copy. |
 | **Memory** | Entries grouped by kind, with search. You can add, correct (with the supersession chain shown) and delete. |
 | **Settings** | About, sources, working style (check-ins, autonomy, review rounds, models, slots), the ordered policy editor with reset, and archive. |
@@ -89,6 +89,7 @@ The end-to-end suite (`apps/desktop/e2e`):
 | `smoke.e2e.test.ts` | Onboarding, connecting, the map, and a live tray count |
 | `flows.e2e.test.ts` | Brief → threads fork → question → approval in Attention → revision loop → report → steering → tray popover |
 | `knowledge.e2e.test.ts` | Refine and restore a skill, library upload, memory correction, settings and policy, System, ⌘K |
+| `catalog.e2e.test.ts` | Browse the real catalog, review and install a first-party skill (uv stand-in), Ready, panel, map mark, System → Data |
 | `packaged.e2e.test.ts` | The packaged `Desk.app` from a clean data dir. deskd runs as the LaunchAgent would, but no real LaunchAgent is installed. Skipped if there is no build. |
 
 Set `DESK_E2E_SHOTS=<dir>` to save screenshots of each screen for visual review.
@@ -105,7 +106,7 @@ Environment switches:
 1. Builds main, preload and renderer (all bundled, so there are no runtime `node_modules`) and bundles deskd.
 2. Stages the app outside the workspace with an empty npm lockfile, so electron-builder collects no dependencies.
 3. Lays out `Desk.app` from the local Electron distribution, which avoids any download.
-4. Copies deskd with only the `darwin-*` sqlite prebuilds.
+4. Copies deskd with only the `darwin-*` sqlite prebuilds and the first-party catalog skills, and adds the pinned uv (`scripts/uv.mjs`: the version and SHA-256 are recorded there, cached in `apps/desktop/.cache`) at `Resources/deskd/bin/uv`, with its licences in `Resources/deskd/licenses/uv/`.
 5. Signs the bundle ad hoc, then writes the `.dmg` with `hdiutil` and the `.zip` with `ditto`.
 
 Signing with a Developer ID and notarising need your Apple identity. Set `mac.identity` and add a notarise step when you have one.

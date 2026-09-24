@@ -16,7 +16,9 @@ bin/desk …        # CLI (tsx loader, no build step)
 pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.mjs (+ migrations, better-sqlite3 prebuilds)
 pnpm desktop      # the Electron app against the repo daemon (Vite HMR)
 pnpm test:e2e     # builds the app and runs the Playwright-for-Electron suite (opens windows; set DESK_E2E_SHOTS=<dir> for screenshots)
-pnpm package:desktop   # unsigned (ad hoc) Desk.app → apps/desktop/release/*.dmg + .zip with the bundled deskd; enables e2e/packaged
+pnpm package:desktop   # unsigned (ad hoc) Desk.app → apps/desktop/release/*.dmg + .zip with the bundled deskd and pinned uv; enables e2e/packaged
+pnpm catalog:pin [ids]    # re-pin catalog.json entries: commit SHAs, digests, script counts, Node locks (lock_from)
+pnpm catalog:check [ids]  # install each catalog entry for real (uv on PATH or DESK_UV), build its runtime, run its smoke command sandboxed
 ```
 
 There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly. The desktop app is the exception: esbuild bundles its main and preload, and Vite builds its renderer.
@@ -45,6 +47,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `db/`: the drizzle schema and migrations.
   - `state/attention.ts`, `state/overview.ts`: what needs the user, and the cross-project summary (desktop app).
   - `workspaces/inspect.ts`: thread diff and confined workspace browsing.
+  - `catalog/`: the skill catalog. `catalog.json` holds the 20 pinned entries; `service.ts` fetches, verifies, stages and installs them; `runtimes.ts` builds Desk-managed environments (uv Python, npm lock, node shim, compat shims); `tar.ts`, `digest.ts`, `review.ts`; `curation.ts` holds helpers for `scripts/catalog.ts`.
   - `model/endpoint.ts`, `model/switchable.ts`: endpoint resolution (env → file → Keychain) and a runtime-configurable adapter.
   - `testing/`: the harness, exported as `@desk/core/testing`.
 - `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle, `notifier.ts` (macOS notifications), `scripts/bundle.mjs`.
@@ -54,6 +57,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `src/preload/`: exposes only `window.desk.{invoke,on,platform}`.
   - `src/renderer/`: React UI; talks to main only through `bridge.ts`. Agent text goes through `SafeMarkdown`.
 - `test/fake-model`: a scriptable OpenAI-compatible server. Every non-live test talks to it.
+- `catalog/skills/`: Desk's first-party catalog skills (`word-documents`, `pdf-toolkit`). After editing them, run `pnpm catalog:pin word-documents pdf-toolkit`; `catalog.test.ts` fails when a digest is stale.
 
 ## Conventions
 
@@ -85,5 +89,6 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - Graceful shutdown leaves agents `queued`, not `cancelled`.
 - Shell tools (`bash`, `bash_background`, `bash_readonly`, `skill_run`) never run unsandboxed without approval.
 - Threads cannot modify installed skills. They submit drafts, which Desk installs with `skill_write from_dir`.
+- Only the user installs catalog skills; every install is checked against its pinned digest, and `<data>/runtimes` is read-only to agents. Installers get a minimal environment (no secrets), npm install scripts never run, and `` !`cmd` `` blocks in skills are never executed.
 - Desk never merges branches.
 - The desktop renderer never sees the daemon token; every IPC payload is validated in main.

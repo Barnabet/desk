@@ -2366,3 +2366,59 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
+
+### Task 6 (listing): Packaging, live smoke, docs
+
+**Files:**
+- Create: `apps/desktop/scripts/uv.mjs`, `packages/core/src/catalog/catalog.live.test.ts`
+- Modify: `apps/desktop/scripts/package.mjs`, `apps/daemon/scripts/bundle.mjs`, `apps/daemon/src/main.ts`, `.gitignore`, `README.md`, `docs/desktop.md`, `CLAUDE.md`
+
+- [ ] **Step 1: Bundle and package.**
+  - `bundle.mjs` copies `catalog/skills` into `dist/catalog/skills` (without `__pycache__`, `*.pyc` or `.DS_Store`).
+  - `uv.mjs` pins uv 0.12.18, with the SHA-256 for arm64 and x64 equal to Astral's published `.sha256` files, and the SHA-256 of the MIT and Apache licence texts. It caches them in `apps/desktop/.cache`, then installs `Resources/deskd/bin/uv` and `Resources/deskd/licenses/uv/`, checking `uv --version`.
+  - In a bundled build, `main.ts` passes `runtimes.uv` pointing at `./bin/uv`; `DESK_UV` still takes precedence.
+- [ ] **Step 2: Verify the packaged app by hand.**
+  1. Start `Desk.app/Contents/MacOS/Desk deskd.mjs` with `ELECTRON_RUN_AS_NODE=1`, a clean data dir and `PATH=/usr/bin:/bin` (so no uv on PATH).
+  2. `desk catalog install word-documents --yes` and `pretty-mermaid --yes`. Both are Ready: CPython 3.12 comes from the bundled uv, and Node runs on Electron's.
+  3. `docx_create.py` and `docx_read.py`, plus the `uv run --with python-docx …` stand-in, work.
+  4. Pretty Mermaid's own self-test passes on Electron-as-Node, including the Node processes it spawns (the NODE_OPTIONS hook).
+- [ ] **Step 3: Live test.** `catalog.live.test.ts` (`DESK_LIVE=1`, about 80 s):
+  - It installs paper-lookup and pretty-mermaid from the real catalog, builds their real runtimes, and runs their smoke commands under `sandbox-exec`.
+  - A live Desk then has a thread render a Mermaid diagram with the skill. In the recorded run, the thread used `skill_run` directly with no install attempts, worked around two quirks in beautiful-mermaid's parser, and saved them to project memory.
+  - `DESK_LIVE_DUMP=<file>` writes the transcripts.
+- [ ] **Step 4: Docs.** README (concepts, CLI, data layout, development), `docs/desktop.md` (Skills → Catalog, e2e table, packaging) and CLAUDE.md (commands, layout, invariants).
+
+## Self-review (after Task 6)
+
+**Spec coverage:**
+- §2: all 20 entries ship. All pass `catalog:check` under the real sandbox profile, #20's Chromium included, so no runner-up was needed.
+- §3–§4: the format, pinning, digest checks, review scan, install states and history origins are covered by unit and route tests.
+- §5: uv Python, the npm lock installer, the node shim, retry, cleanup and the refusal of a failed runtime are all tested; the packaged build was checked by hand (Step 2).
+- §6: API, CLI and app are all present, with component tests and an e2e test.
+- §7: `catalog:pin` and `catalog:check`, and the live test.
+
+**Deviations from the spec, all deliberate:**
+- **Install state and runtime state** come from the event log (`skill.saved` origins, `skill.runtime_changed`) rather than projected columns. This was decided while planning.
+- **Builtin source paths** are relative to the builtin root (`"path": "word-documents"`), not repository paths.
+- **uv location:** it lives at `Resources/deskd/bin/uv` rather than `Resources/bin/uv`, so the deskd bundle is self-contained.
+- **Node shim:** there is one per environment (`<env>/bin/node`), not one shared shim, and it installs the resolve hook through `NODE_OPTIONS` so child Node processes inherit it.
+- **Additions not in the spec:**
+  - compat shims (`uv`, `pip`, `npm`, `npx`) and a `Runtime:` note next to skill instructions
+  - files mode for repositories over 50 MB
+  - `GET /v1/catalog/:id/files/*` for the review sheet
+  - a `scripts` count on entries
+- **Conflict code:** a 409 carries the generic `conflict` code, and its message says whether the name is taken or the skill was modified.
+- **Warning links** open the file and show its line number, but don't scroll to the line.
+- **e2e coverage:** the test uses the real catalog's builtin skill with a uv stand-in (offline) instead of a fixture archive server. Update and compare are covered by component and unit tests, not by e2e.
+
+**Bugs found while verifying, all fixed:**
+- `startDaemon` didn't wire `skillRuntimes`, so `/system/runtimes` returned 501.
+- Nested Node processes lost module resolution.
+- Two exec-block false positives.
+- The review sheet's file viewer overflowed its layout.
+- Two controls were both named "List".
+- The citation-management caveat was wrong: Google Scholar needs `scholarly`, which Desk doesn't install.
+
+**Open:**
+- Only arm64 packaging was exercised (the x64 uv hash is pinned but unused).
+- A signed and notarised build still needs an Apple identity.

@@ -69,6 +69,7 @@ bin/desk down
 | `memory <p> [query]`, `remember <p> <kind> <text>`, `forget <p> <id>` | Project memory |
 | `library <p>`, `upload <p> <file>` | Library |
 | `skills [p]`, `skill show\|import\|rm\|history\|restore … [-p project]` | Skills (global unless `-p`) |
+| `catalog`, `catalog show <id>`, `catalog install <id> [-p project] [--yes] [--replace]` | The skill catalog: list with install states, print the review, install after confirming |
 | `usage <p>` | Token usage per model |
 
 Projects are referenced by id or by name.
@@ -86,6 +87,11 @@ Projects are referenced by id or by name.
   - **Scripts:** agents run skill scripts with `skill_run`, in the same sandbox as the shell.
   - **Authoring:** Desk creates and refines skills with `skill_write` when you ask for an automation or correct how a kind of task should be done. For skills with scripts, a thread writes and tests a draft in its workspace and Desk reviews and installs it.
   - **History:** every change is versioned, and you can restore an earlier version or import existing skills with `desk skill import ~/.claude/skills/<name>`.
+- **Skill catalog**: 20 skills worth having, installable from the app (Skills → Catalog) or with `desk catalog install`.
+  - **Contents:** research, documents and data (including Desk's own `word-documents` and `pdf-toolkit`), writing and diagrams, planning, and code.
+  - **Pinning:** each entry is pinned to an exact commit and content digest. You review its source, licence, files and anything unusual before installing, and only you can install; Desk can suggest a skill but not install it.
+  - **Runtimes:** skills with scripts get a Desk-managed environment. Python comes from a bundled uv (prebuilt wheels, exact pins); Node packages come from a lockfile checked against integrity hashes, with no install scripts, running on the app's own Node. Nothing is installed system-wide.
+  - **Curation:** see `pnpm catalog:pin` and `pnpm catalog:check` in the spec (`docs/superpowers/specs/2026-09-24-skill-catalog-design.md`).
 
 ## Architecture
 
@@ -133,6 +139,8 @@ projects/<id>/skills/<name>/    project skills (+ .history/)
 projects/<id>/desk/             Desk's scratch workspace
 workspaces/<thread-id>/         thread workspaces (scratch dirs or git worktrees)
 workspaces/<thread-id>/.desk/   full outputs of truncated tool results
+catalog/staging/                catalog skills fetched for review
+runtimes/                       catalog skill environments (uv cache and managed Python under runtimes/uv)
 ```
 
 The model registry sets each model's `context_window` (used for compaction) and `concurrency` (the scheduler cap). The daemon listens on port 7433 by default (`--port`), and falls back to an ephemeral port if 7433 is taken.
@@ -167,6 +175,8 @@ The model registry sets each model's `context_window` (used for compaction) and 
 ```sh
 pnpm test          # unit + integration tests (fake model server; real sandbox and git where available)
 pnpm test:live     # live smokes against the configured endpoint (DESK_LIVE=1)
+pnpm catalog:pin   # re-pin catalog entries (commit SHAs, digests, Node locks)
+pnpm catalog:check # install every catalog entry for real and run its smoke command in the sandbox
 pnpm typecheck
 pnpm deskd --data-dir /tmp/desk-dev --port 0      # run the daemon in the foreground
 ```

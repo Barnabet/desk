@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import builder from 'electron-builder';
 import { buildMainAndPreload, buildRenderer } from './build.mjs';
+import { installUv } from './uv.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const repo = join(root, '..', '..');
@@ -70,13 +71,16 @@ if (win) process.exit(0);
 const appDir = join(release, arch === 'arm64' ? 'mac-arm64' : 'mac', 'Desk.app');
 if (!existsSync(appDir)) throw new Error(`Desk.app not found at ${appDir}`);
 // The bundled deskd goes in Resources/deskd with its node_modules (electron-builder's extraResources drops those),
-// keeping only this platform's better-sqlite3 prebuilds. Electron's default app is not needed.
+// keeping only this platform's better-sqlite3 prebuilds, and with the first-party catalog skills (bundle.mjs).
+// Electron's default app is not needed.
 const resources = join(appDir, 'Contents', 'Resources');
 const deskd = join(resources, 'deskd');
 cpSync(join(repo, 'apps', 'daemon', 'dist'), deskd, { recursive: true });
 const prebuilds = join(deskd, 'node_modules', 'better-sqlite3', 'prebuilds');
 for (const f of readdirSync(prebuilds)) if (!f.startsWith('darwin-')) rmSync(join(prebuilds, f));
 rmSync(join(resources, 'default_app.asar'), { force: true });
+// uv sets up Python for catalog skills; the daemon finds it at deskd/bin/uv.
+console.log(`bundled ${await installUv(deskd, arch)}`);
 run('codesign', ['--force', '--deep', '--sign', '-', appDir]);
 run('codesign', ['--verify', '--deep', '--strict', appDir]);
 

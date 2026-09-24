@@ -8,3 +8,4 @@ coverage/
 apps/daemon/dist/
 apps/desktop/dist/
 apps/desktop/release/
+apps/desktop/.cache/

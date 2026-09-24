@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { macKeychain } from '@desk/core';
@@ -9,6 +10,8 @@ import { daemonPaths, defaultDataDir } from './paths';
 const { values } = parseArgs({ options: { port: { type: 'string' }, 'data-dir': { type: 'string' } } });
 const dataDir = values['data-dir'] ?? defaultDataDir();
 const log = createLogger(daemonPaths(dataDir).logFile);
+/** The packaged app ships uv next to deskd for Python skill runtimes; DESK_UV still wins. */
+const bundledUv = process.env.DESK_BUNDLED === '1' && !process.env.DESK_UV ? fileURLToPath(new URL('./bin/uv', import.meta.url)) : null;
 
 process.on('uncaughtException', (err) => log.error('uncaught exception', err));
 process.on('unhandledRejection', (err) => log.error('unhandled rejection', err));
@@ -21,6 +24,7 @@ try {
     ...(process.env.DESK_BUNDLED === '1'
       ? { migrationsDir: fileURLToPath(new URL('./drizzle', import.meta.url)), catalog: { builtinRoot: fileURLToPath(new URL('./catalog/skills', import.meta.url)) } }
       : {}),
+    ...(bundledUv && existsSync(bundledUv) ? { runtimes: { uv: bundledUv } } : {}),
     ...(process.platform === 'darwin' ? { keychain: macKeychain(), notify: macNotify } : {}),
   });
   let stopping = false;
