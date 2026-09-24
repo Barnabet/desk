@@ -101,7 +101,7 @@ Global skills live under `/v1/skills`, project skills under `/v1/projects/:id/sk
 | GET | `/:name/files/<path>` | | Raw file; escaping paths return 400 |
 | PUT | `/:name` | `SkillWriteRequest { description?, instructions?, files?[{path, content_base64}], remove_files?, change_note? }` | Creates the skill (201) or refines it (200). The previous version goes to history. A `SKILL.md` may be sent as a file |
 | DELETE | `/:name` | | The last version stays in history |
-| GET | `/:name/history` | | `[{ version, description, current }]` |
+| GET | `/:name/history` | | `[{ version, description, current, change_note, origin, ts }]`. `origin` is `user` or `agent:<id>`; `origin` and `ts` are null for versions with no `skill.saved` record |
 | POST | `/:name/restore` | `{ version }` | Restores that version as the newest one |
 | POST | `/import` | `{ path, name? }` | Copies a local skill directory (e.g. `~/.claude/skills/x`). The name defaults to the frontmatter `name`. 201 |
 

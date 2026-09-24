@@ -46,7 +46,12 @@ describe('skills API', () => {
     expect((await api('GET', '/skills/greet/files/..%2F..%2Fx')).status).toBe(400);
     expect((await api('PUT', '/skills/greet', { instructions: 'Say hi' })).body).toMatchObject({ version: 2, created: false });
     expect((await api('GET', '/skills')).body.map((s: any) => [s.name, s.version])).toEqual([['greet', 2]]);
-    expect((await api('GET', '/skills/greet/history')).body.map((x: any) => x.version)).toEqual([1, 2]);
+    const history = (await api('GET', '/skills/greet/history')).body;
+    expect(history.map((x: any) => [x.version, x.change_note, x.origin, x.current])).toEqual([
+      [1, 'v1', 'user', false],
+      [2, 'Updated', 'user', true],
+    ]);
+    expect(typeof history[0].ts).toBe('string');
     expect((await api('DELETE', '/skills/greet')).status).toBe(200);
     expect((await api('GET', '/skills/greet')).status).toBe(404);
     expect((await api('POST', '/skills/greet/restore', { version: 2 })).body.version).toBe(3);

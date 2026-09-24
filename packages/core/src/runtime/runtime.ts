@@ -426,8 +426,17 @@ export class Runtime {
     });
   }
 
+  /** Versions of a skill, each with its change note, origin and time from the `skill.saved` log. */
   skillHistory(scope: SkillScope, name: string, projectId?: string) {
-    return this.skills.history(scope, name, projectId);
+    const notes = new Map<number, { change_note: string; origin: string; ts: string }>();
+    // A global skill saved by an agent is logged under that agent's project, so global history reads the whole log.
+    for (const e of this.o.store.list({ ...(scope === 'project' && projectId ? { projectId } : {}), types: ['skill.saved'] })) {
+      if (e.type === 'skill.saved' && e.payload.scope === scope && e.payload.name === name) notes.set(e.payload.version, { change_note: e.payload.change_note, origin: e.payload.origin, ts: e.ts });
+    }
+    return this.skills.history(scope, name, projectId).map((h) => {
+      const n = notes.get(h.version);
+      return { ...h, change_note: n?.change_note ?? '', origin: n?.origin ?? null, ts: n?.ts ?? null };
+    });
   }
 
   /** A skill as it was at `version`; the scope resolves like getSkill when omitted. */

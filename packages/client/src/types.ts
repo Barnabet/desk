@@ -22,6 +22,7 @@ export type ProjectOverview = {
 /** Paged event lists (chat, transcript, events). */
 export type EventPage = { events: StoredEvent[]; next_after: number };
 
-export type SkillHistoryEntry = { version: number; description: string; current: boolean };
+/** One version of a skill; `origin` is `user`, `agent:<id>` or null for versions saved before the log existed. */
+export type SkillHistoryEntry = { version: number; description: string; current: boolean; change_note: string; origin: string | null; ts: string | null };
 export type SkillSaveResult = { version: number; dir: string; created: boolean; description: string };
 export type ProjectUsage = { rows: UsageRow[]; totals: { prompt_tokens: number; completion_tokens: number } };
