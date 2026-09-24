@@ -10,18 +10,22 @@
   "scripts": {
     "test": "vitest run",
     "test:live": "DESK_LIVE=1 vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json",
     "desk": "node --import tsx apps/cli/src/main.ts",
-    "deskd": "node --import tsx apps/daemon/src/main.ts"
+    "deskd": "node --import tsx apps/daemon/src/main.ts",
+    "test:e2e": "pnpm --filter @desk/desktop build && vitest run --config vitest.e2e.config.ts",
+    "desktop": "pnpm --filter @desk/desktop dev"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "jsdom": "^30.1.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "electron",
       "esbuild"
     ]
   }

@@ -6,3 +6,4 @@ node_modules/
 coverage/
 .sandbox-test-*/
 apps/daemon/dist/
+apps/desktop/dist/
