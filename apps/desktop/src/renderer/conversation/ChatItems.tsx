@@ -126,7 +126,7 @@ export function ChatItemView(o: {
           {item.answered ? (
             <span className="muted small">Answered</span>
           ) : (
-            <div className="actions">
+            <div className="choice-options">
               {item.options.map((opt, i) => (
                 <Button key={opt} size="sm" variant={i === 0 ? 'primary' : 'secondary'} pending={o.answering === opt} disabled={o.answering !== null} onClick={() => o.onAnswer(opt)}>
                   {opt}

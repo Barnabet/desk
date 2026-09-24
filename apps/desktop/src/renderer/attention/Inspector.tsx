@@ -154,7 +154,7 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
           ) : (
             <>
               {i.ref.options?.length ? (
-                <div className="actions">
+                <div className="choice-options">
                   {i.ref.options.map((opt, k) => (
                     <Button key={opt} variant={k === 0 ? 'primary' : 'secondary'} pending={a.busy === opt} disabled={a.busy !== null} onClick={() => a.answer(opt)}>
                       {opt}

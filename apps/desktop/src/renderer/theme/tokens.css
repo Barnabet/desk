@@ -325,6 +325,31 @@ pre {
   align-items: center;
   gap: 8px;
 }
+/* Answer options (Desk's questions): long choices wrap inside their button and never widen the card. */
+.choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.choice-options .btn {
+  height: auto;
+  min-height: 32px;
+  max-width: 100%;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+.choice-options .btn-sm {
+  min-height: 28px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.choice-options .link {
+  white-space: nowrap;
+}
 
 /* Cards, sheets, toasts, overlays */
 .card {
