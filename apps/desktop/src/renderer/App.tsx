@@ -5,7 +5,7 @@ import { ProjectNav } from './components/ProjectNav';
 import { TitleBar } from './components/TitleBar';
 import { Toaster } from './components/Toast';
 import { navigate, useRoute, type Route } from './router';
-import { MapScreen } from './screens/MapScreen';
+import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
 import { Pending } from './screens/Pending';
 import { startGlobalSync } from './state/global';

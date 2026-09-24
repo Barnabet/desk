@@ -1,0 +1,454 @@
+.map-screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+.map-head {
+  position: absolute;
+  left: 32px;
+  top: 24px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 320px;
+  pointer-events: none;
+}
+.map-head > * {
+  pointer-events: auto;
+}
+.map-screen > .page {
+  padding-top: 150px;
+}
+.segmented {
+  display: inline-flex;
+  width: max-content;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--nav);
+}
+.segmented button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-min);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.segmented button[aria-pressed='true'] {
+  background: #fff;
+  color: var(--ink);
+  font-weight: 500;
+}
+.map-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.map-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+.map-zoom {
+  position: absolute;
+  right: 396px;
+  top: 20px;
+  display: flex;
+  gap: 4px;
+}
+.map-zoom button {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: #fffc;
+  cursor: pointer;
+}
+.orbit-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.orbit-sun {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 30px;
+  background: var(--ink);
+  color: #f7f5f0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.orbit-sun-label {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-min);
+  white-space: nowrap;
+}
+.orbit-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.orbit-label-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.orbit-label-sub {
+  font-size: 11.5px;
+}
+.orbit-desk {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #f7f5f0;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  cursor: pointer;
+}
+.orbit-desk-idle {
+  background: #f7f5f0;
+  color: var(--text-min);
+  border: 1.5px solid var(--muted);
+}
+.orbit-thread {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translate(-7px, -50%);
+  white-space: nowrap;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--run-text);
+}
+.orbit-thread.left {
+  flex-direction: row-reverse;
+  transform: translate(calc(-100% + 7px), -50%);
+}
+.orbit-thread-dot {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--run);
+  box-shadow: 0 0 0 4px rgba(47, 91, 211, 0.2);
+}
+.orbit-thread-waiting,
+.orbit-thread-queued {
+  color: var(--wait-text);
+}
+.orbit-thread-waiting .orbit-thread-dot,
+.orbit-thread-queued .orbit-thread-dot {
+  background: #fff;
+  border: 2.5px solid var(--wait);
+  box-shadow: none;
+}
+.orbit-thread-done,
+.orbit-thread-cancelled,
+.orbit-thread-idle {
+  color: var(--text-min);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+.orbit-thread-done .orbit-thread-dot,
+.orbit-thread-cancelled .orbit-thread-dot,
+.orbit-thread-idle .orbit-thread-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--muted-blue);
+  box-shadow: none;
+}
+.orbit-thread-failed {
+  color: var(--accent);
+}
+.orbit-thread-failed .orbit-thread-dot {
+  background: #fff;
+  border: 2.5px solid var(--accent);
+  box-shadow: none;
+}
+.orbit-callout {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translate(-11px, -100%);
+  text-decoration: none;
+  color: var(--ink);
+  z-index: 2;
+}
+.orbit-pin {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 4px var(--accent-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.orbit-callout-card {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(28, 27, 24, 0.1);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.orbit-callout-kind {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--accent);
+  display: inline-block;
+}
+.map-legend {
+  position: absolute;
+  left: 32px;
+  bottom: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  max-width: calc(100% - 700px);
+  min-width: 360px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  color: var(--text);
+}
+.map-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-disc {
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  border: 1px solid;
+}
+.legend-running {
+  background: #e3e8f5;
+  border-color: #c9d3ec;
+}
+.legend-waiting {
+  background: #f3e6cf;
+  border-color: #e6d3af;
+}
+.legend-idle {
+  background: #e6e1d7;
+  border-color: #d6cfc1;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+}
+.legend-dot-running {
+  background: var(--run);
+}
+.legend-dot-waiting {
+  background: #fff;
+  border: 2px solid var(--wait);
+}
+.legend-dot-needs {
+  background: var(--accent);
+}
+.new-project-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 24px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border: 1.5px dashed var(--muted);
+  border-radius: 21px;
+  background: #f7f5f0;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 8px 20px rgba(28, 27, 24, 0.1);
+  cursor: pointer;
+}
+.territory {
+  position: absolute;
+  right: 28px;
+  top: 24px;
+  z-index: 5;
+  width: 336px;
+  max-height: calc(100% - 110px);
+  overflow: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.territory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.territory-name {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+.territory-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.territory-quote p {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.territory-quote span {
+  font-size: 12px;
+}
+.territory-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+}
+.territory-row {
+  display: flex;
+  justify-content: space-between;
+}
+.waypoints {
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.waypoints-rule {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 7px;
+  border-top: 1.5px dashed var(--rule);
+}
+.waypoint {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #fff;
+  border: 2px solid #b9b3a7;
+}
+.waypoint-done {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.waypoint-run {
+  border-color: var(--run);
+}
+.waypoint-wait {
+  border-color: var(--wait);
+}
+.waypoint-dropped {
+  border-style: dashed;
+}
+.territory-thread {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  text-decoration: none;
+}
+.grow {
+  flex: 1;
+}
+.status-dot {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  background: var(--muted-blue);
+}
+.status-dot-running {
+  background: var(--run);
+}
+.status-dot-waiting,
+.status-dot-queued {
+  background: #fff;
+  border: 2px solid var(--wait);
+}
+.status-dot-failed {
+  background: var(--accent);
+}
+.territory-thread-status {
+  font-size: 12px;
+  color: var(--text-min);
+}
+.status-text-running {
+  color: var(--run-text);
+}
+.status-text-waiting,
+.status-text-queued {
+  color: var(--wait-text);
+}
+.needs-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--accent-tint);
+  font-size: 13px;
+}
+.needs-count {
+  color: var(--accent);
+}
+a.btn {
+  text-decoration: none;
+}
