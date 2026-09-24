@@ -76,6 +76,7 @@ renderer (React, sandboxed, no Node)          main process (Node)               
 ```sh
 pnpm desktop            # Vite HMR + Electron; finds or starts the repo daemon (tsx)
 pnpm test               # includes the desktop unit and component tests (jsdom)
+pnpm test:live          # includes a desktop IPC smoke against a real deskd and the model endpoint
 pnpm test:e2e           # builds the app, then Playwright-for-Electron against a real deskd + fake model
 pnpm package:desktop    # release/Desk-<v>-<arch>.dmg and .zip (then `pnpm test:e2e` also runs the packaged test)
 pnpm --filter @desk/desktop icon   # regenerate build/icon.png and icon.icns from build/icon.svg

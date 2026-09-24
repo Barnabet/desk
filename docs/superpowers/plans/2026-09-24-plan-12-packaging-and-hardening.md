@@ -648,6 +648,6 @@ Coverage against spec §10, §11 (Plan 12's row) and §12:
 | The full e2e suite (§10's flow list) | `smoke`, `flows` (Plan 10), `knowledge` (Plan 11) and `packaged` (Task 1). `pnpm test:e2e` runs all four. |
 | Docs: README and `docs/desktop.md` | Task 2 |
 | Unsigned build; Windows configured but untested | Task 1 (`identity: null` plus ad-hoc signing; `--win` gives an NSIS config), documented in Task 2 |
-| `pnpm test:live` desktop smoke | Not added. The packaged e2e covers the same wiring against the fake model; a live smoke would only re-test the proxy, which `pnpm test:live` already covers for deskd. |
+| `pnpm test:live` desktop smoke | Added after Task 2: `apps/desktop/src/main/desktop.live.test.ts` sends the desktop IPC handlers to a real deskd using the configured endpoint. It tests the endpoint, creates a project and checks that Desk's own reply contains the requested word. |
 
 Both tasks were written from the code that shipped.
