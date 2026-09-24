@@ -43,3 +43,10 @@ describe('INBOX_EVENT_TYPES', () => {
     expect(INBOX_EVENT_TYPES).toContain('message.user');
   });
 });
+
+describe('attention.dismissed', () => {
+  it('is a valid event body', () => {
+    expect(EventBody.parse({ type: 'attention.dismissed', payload: { item_id: 'report:12:0' } })).toMatchObject({ type: 'attention.dismissed' });
+    expect(() => EventBody.parse({ type: 'attention.dismissed', payload: { item_id: '' } })).toThrow();
+  });
+});

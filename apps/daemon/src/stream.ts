@@ -16,6 +16,8 @@ function send(ws: WebSocket, msg: StreamServerMessage): void {
 
 function serve(ws: WebSocket, store: EventStore): void {
   let sub: Subscription | null = null;
+  let hello: { client: string; notifications: boolean } | null = null;
+  void hello;
   const matches = (projectId: string) => sub !== null && (sub.projectId === '*' || sub.projectId === projectId);
 
   const unsubscribe = store.subscribe((item: StreamItem) => {
@@ -32,7 +34,11 @@ function serve(ws: WebSocket, store: EventStore): void {
     try {
       parsed = StreamClientMessage.parse(JSON.parse(String(data)));
     } catch {
-      send(ws, { kind: 'error', message: 'Expected {"subscribe":{"project_id":string,"after_seq":number}}' });
+      send(ws, { kind: 'error', message: 'Expected {"subscribe":{"project_id":string,"after_seq":number}} or {"hello":{"client":string,"notifications":boolean}}' });
+      return;
+    }
+    if ('hello' in parsed) {
+      hello = parsed.hello;
       return;
     }
     const { project_id, after_seq } = parsed.subscribe;

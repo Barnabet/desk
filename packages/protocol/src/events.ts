@@ -158,6 +158,7 @@ export const EventBody = z.discriminatedUnion('type', [
     'system.notice',
     z.object({ level: z.enum(['info', 'warning', 'error']), code: z.string(), message: z.string() }),
   ),
+  event('attention.dismissed', z.object({ item_id: z.string().min(1) })),
   event(
     'context.compacted',
     z.object({
