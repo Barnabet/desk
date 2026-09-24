@@ -12,6 +12,7 @@ export function daemonPaths(dataDir: string) {
     daemonJson: join(dataDir, 'daemon.json'),
     lock: join(dataDir, 'daemon.lock'),
     models: join(dataDir, 'models.json'),
+    config: join(dataDir, 'config.json'),
     logs: join(dataDir, 'logs'),
     logFile: join(dataDir, 'logs', 'deskd.log'),
   };

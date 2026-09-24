@@ -117,6 +117,11 @@ export class Runtime {
     });
   }
 
+  /** Model proxy reachability as last observed ('unknown' without a health probe). */
+  get proxyState(): 'up' | 'down' | 'unknown' {
+    return this.proxy ? (this.proxy.isDown ? 'down' : 'up') : 'unknown';
+  }
+
   // ── projects & agents ────────────────────────────────────────────────
 
   /** Creates a project, its directories and its Desk agent. */

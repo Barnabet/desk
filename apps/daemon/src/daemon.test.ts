@@ -40,7 +40,7 @@ describe('startDaemon', () => {
     expect(statSync(daemonPaths(dir).daemonJson).mode & 0o777).toBe(0o600);
     expect(readFileSync(daemonPaths(dir).daemonJson, 'utf8')).not.toContain('secret-key-xyz');
     expect(d.token).toMatch(/^[0-9a-f]{64}$/);
-    expect(await (await fetch(`http://127.0.0.1:${d.port}/v1/health`)).json()).toEqual({ version: '1.0.0-test', protocol_version: 1 });
+    expect(await (await fetch(`http://127.0.0.1:${d.port}/v1/health`)).json()).toMatchObject({ version: '1.0.0-test', protocol_version: 1 });
     expect((await api(d, '/projects')).status).toBe(200);
   });
 

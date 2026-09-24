@@ -1764,7 +1764,7 @@ describe('daemon config and health', () => {
     expect((await api('GET', '/config')).body).toEqual({ notifications: 'auto' });
     expect((await api('PATCH', '/config', { notifications: 'off' })).body).toEqual({ notifications: 'off' });
     expect(JSON.parse(await readFile(join(dir, 'config.json'), 'utf8'))).toMatchObject({ notifications: 'off' });
-    const health = await (await fetch(`http://127.0.0.1:${daemon!.port}/v1/health`)).json();
+    const health = (await (await fetch(`http://127.0.0.1:${daemon!.port}/v1/health`)).json()) as { uptime_s: number };
     expect(health).toMatchObject({ protocol_version: 1, proxy: 'up' });
     expect(health.uptime_s).toBeGreaterThanOrEqual(0);
   });
