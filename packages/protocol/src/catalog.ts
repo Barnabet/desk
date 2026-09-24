@@ -27,6 +27,9 @@ export const NodeLockEntry = z.object({
   integrity: z.string().regex(/^sha(256|384|512)-[A-Za-z0-9+/=]+$/),
   /** Install location relative to the environment, e.g. node_modules/@resvg/resvg-js. */
   path: z.string().regex(/^node_modules\/(@[\w.-]+\/)?[\w.-]+(\/node_modules\/(@[\w.-]+\/)?[\w.-]+)*$/),
+  /** Platform-specific packages (prebuilt binaries): installed only where they match, like npm's os/cpu fields. */
+  os: z.array(z.string()).optional(),
+  cpu: z.array(z.string()).optional(),
 });
 export type NodeLockEntry = z.infer<typeof NodeLockEntry>;
 

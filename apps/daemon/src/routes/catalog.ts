@@ -4,7 +4,7 @@ import type { AppDeps } from '../app';
 import { body, HttpError } from '../http';
 
 /** The skill catalog: pinned, reviewed skills the user installs (spec: 2026-09-24-skill-catalog-design). */
-export function catalogRoutes({ catalog }: AppDeps): Hono {
+export function catalogRoutes({ catalog, skillRuntimes }: AppDeps): Hono {
   const r = new Hono();
   const need = () => {
     if (!catalog) throw new HttpError(501, 'unsupported', 'The skill catalog is not available in this daemon');
@@ -16,5 +16,16 @@ export function catalogRoutes({ catalog }: AppDeps): Hono {
     const req = await body(c, CatalogInstallRequest);
     return c.json(await need().install(c.req.param('id'), req), 201);
   });
+
+  const runtimes = () => {
+    if (!skillRuntimes) throw new HttpError(501, 'unsupported', 'Skill runtimes are not available in this daemon');
+    return skillRuntimes;
+  };
+  r.post('/skills/:name/runtime/retry', (c) => c.json(need().retryRuntime({ scope: 'global', name: c.req.param('name') })));
+  r.post('/projects/:id/skills/:name/runtime/retry', (c) =>
+    c.json(need().retryRuntime({ scope: 'project', name: c.req.param('name'), projectId: c.req.param('id') })),
+  );
+  r.get('/system/runtimes', (c) => c.json(runtimes().report()));
+  r.post('/system/runtimes/cleanup', (c) => c.json(runtimes().cleanup()));
   return r;
 }

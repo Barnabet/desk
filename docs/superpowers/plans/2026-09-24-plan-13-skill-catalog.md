@@ -1614,3 +1614,626 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 3 (listing): Runtimes: uv, Node lockfile installer, node shim with resolve hook; PATH in tools; retry and cleanup
+
+**Files:**
+- Create: `packages/core/src/catalog/runtimes.test.ts`, `packages/core/src/catalog/runtimes.ts`
+- Modify: `packages/protocol/src/catalog.ts`, `packages/core/src/runtime/runtime.ts`, `packages/core/src/tools/types.ts`, `packages/core/src/tools/bash.ts`, `packages/core/src/tools/jobs.ts`, `packages/core/src/tools/skills.ts`, `packages/core/src/testing/context.ts`, `packages/core/src/catalog/service.ts`, `packages/core/src/agent/prompts.ts`, `packages/core/src/index.ts`, `apps/daemon/src/daemon.ts`, `apps/daemon/src/app.ts`, `apps/daemon/src/routes/catalog.ts`, `apps/daemon/src/catalog.test.ts`, `packages/client/src/client.ts`, `docs/api.md`
+
+**Interfaces:**
+
+- **`SkillRuntimes`** implements both `CatalogRuntimes` (`setup` and `state`) and `SkillEnvProvider` (`env(ref) → { state, reason, bins, vars }` and `remove(ref)`). It also has `dir(ref)`, `settled(ref)`, `report()` and `cleanup()`.
+- **`RuntimeServices.skillEnv(agentId, only?)`** returns `{ bins, vars, blocked }`. It merges ready runtimes for all of an agent's active skills, or returns one skill's runtime with the reason it's blocked.
+- **`withSkillEnv(env, e)`** puts the `bins` first on PATH and merges the vars.
+- **`CatalogService.retryRuntime(ref)`**.
+- **`NodeLockEntry`** gains optional `os` and `cpu` fields.
+- **Daemon options:** `runtimes { uv?, nodeExec?, registry? }`. `uv` defaults to `DESK_UV`, then the first `uv` on PATH.
+
+- [ ] **Step 1: Write the failing tests**
+
+`packages/core/src/catalog/runtimes.test.ts`:
+
+```ts
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { CatalogEntry } from '@desk/protocol';
+import { getDeskAgent } from '../state/queries';
+import { executeToolCall } from '../tools/registry';
+import { skillRunTool } from '../tools/skills';
+import { withSkillEnv, scrubbedEnv } from '../tools/bash';
+import type { Runtime } from '../runtime/runtime';
+import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
+import { testToolContext } from '../testing/context';
+import { makeTarball } from '../testing/tarball';
+import { SkillRuntimes } from './runtimes';
+
+let h: Harness;
+let server: Server | undefined;
+let exists: boolean;
+beforeEach(async () => {
+  h = await createHarness();
+  exists = true;
+});
+afterEach(async () => {
+  await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+  server = undefined;
+  delete process.env.DESK_OPENAI_API_KEY;
+  await h.cleanup();
+});
+
+/** A uv stand-in: logs its arguments and the variables it sees, creates venvs, and fails `pip` when asked to. */
+function uvStub(failPip = false): { uv: string; log: string } {
+  const log = join(h.dir, 'uv.log');
+  const uv = join(h.dir, failPip ? 'uv-fail' : 'uv');
+  writeFileSync(
+    uv,
+    [
+      '#!/bin/sh',
+      `echo "$* | pref=$UV_PYTHON_PREFERENCE key=\${DESK_OPENAI_API_KEY:-none}" >> '${log}'`,
+      'if [ "$1" = venv ]; then eval last=\\${$#}; mkdir -p "$last/bin"; printf \'#!/bin/sh\\necho py-ok\\n\' > "$last/bin/python"; chmod +x "$last/bin/python"; fi',
+      failPip ? 'if [ "$1" = pip ]; then echo "error: no wheel for pandas==9.9.9 on this platform" >&2; exit 2; fi' : '',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(uv, 0o755);
+  return { uv, log };
+}
+
+const entry = (runtime: CatalogEntry['runtime']): CatalogEntry => ({
+  id: 'tool',
+  title: 'Tool',
+  category: 'code',
+  summary: 's',
+  license: 'MIT',
+  homepage: 'https://example.com',
+  source: { type: 'builtin', path: 'tool' },
+  digest: `sha256:${'0'.repeat(64)}`,
+  files: 1,
+  bytes: 1,
+  runtime,
+  caveats: [],
+});
+
+const make = (o: Partial<ConstructorParameters<typeof SkillRuntimes>[0]> = {}) =>
+  new SkillRuntimes({ dataDir: h.dir, store: h.store, uv: null, nodeExec: process.execPath, exists: () => exists, ...o });
+const ref = { scope: 'global' as const, name: 'tool' };
+
+/** A tiny npm registry serving tarballs built on the fly. */
+async function registry(pkgs: Record<string, Buffer>): Promise<string> {
+  server = createServer((req, res) => {
+    const body = pkgs[req.url ?? ''];
+    if (!body) return void res.writeHead(404).end();
+    res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(body);
+  });
+  await new Promise<void>((r) => server!.listen(0, '127.0.0.1', r));
+  return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
+}
+const sri = (b: Buffer) => `sha512-${createHash('sha512').update(b).digest('base64')}`;
+
+describe('SkillRuntimes', () => {
+  it('builds a Python environment with uv: managed Python, prebuilt wheels, exact pins, no inherited secrets', async () => {
+    process.env.DESK_OPENAI_API_KEY = 'sk-should-not-leak';
+    const { uv, log } = uvStub();
+    const r = make({ uv });
+    r.setup(ref, entry({ python: { version: '3.12', packages: ['requests==2.32.5'] } }), '2026-09-24');
+    expect(r.state(ref)).toEqual({ state: 'preparing', reason: null });
+    await r.settled(ref);
+    expect(r.state(ref)).toEqual({ state: 'ready', reason: null });
+    const dir = r.dir(ref);
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual([
+      `venv --no-config --python 3.12 ${dir}/py | pref=only-managed key=none`,
+      `pip install --no-config --python ${dir}/py/bin/python --only-binary :all: --exclude-newer 2026-09-24T23:59:59Z requests==2.32.5 | pref=only-managed key=none`,
+    ]);
+    const env = r.env(ref);
+    expect(env.bins).toEqual([join(dir, 'bin'), join(dir, 'py', 'bin')]);
+    expect(env.vars).toMatchObject({ VIRTUAL_ENV: join(dir, 'py'), PYTHONDONTWRITEBYTECODE: '1' });
+    expect(h.store.list({ types: ['skill.runtime_changed'] }).map((e) => e.type === 'skill.runtime_changed' && e.payload.state)).toEqual(['preparing', 'ready']);
+  });
+
+  it('records a failure with the installer error, and with no uv at all', async () => {
+    const r = make({ uv: uvStub(true).uv });
+    r.setup(ref, entry({ python: { version: '3.12', packages: ['pandas==9.9.9'] } }), '2026-09-24');
+    await r.settled(ref);
+    expect(r.state(ref).state).toBe('failed');
+    expect(r.state(ref).reason).toMatch(/uv-fail pip failed: error: no wheel for pandas==9\.9\.9/);
+    expect(r.env(ref)).toMatchObject({ bins: [], vars: {} });
+
+    const none = make({ uv: null });
+    none.setup(ref, entry({ python: { version: '3.12', packages: [] } }), '2026-09-24');
+    await none.settled(ref);
+    expect(none.state(ref).reason).toMatch(/uv is not available/);
+  });
+
+  it('installs Node packages from the lock with integrity checks and no scripts, and resolves them from skill scripts', async () => {
+    const pkg = makeTarball('package', [
+      { name: 'package.json', content: JSON.stringify({ name: 'hello-pkg', version: '1.0.0', type: 'module', exports: './index.mjs', bin: { hello: 'cli.mjs' }, scripts: { postinstall: 'touch /tmp/desk-should-not-run' } }) },
+      { name: 'index.mjs', content: "export const hi = 'hi from pkg';\n" },
+      { name: 'cli.mjs', content: "import { hi } from './index.mjs';\nconsole.log(`cli: ${hi}`);\n" },
+    ]);
+    const base = await registry({ '/hello-pkg/-/hello-pkg-1.0.0.tgz': pkg });
+    const r = make({ registry: base });
+    const lock = [
+      { name: 'hello-pkg', version: '1.0.0', integrity: sri(pkg), path: 'node_modules/hello-pkg' },
+      { name: '@x/win-only', version: '1.0.0', integrity: sri(pkg), path: 'node_modules/@x/win-only', os: ['win32'] },
+    ];
+    r.setup(ref, entry({ node: { lock } }), '2026-09-24');
+    await r.settled(ref);
+    expect(r.state(ref)).toEqual({ state: 'ready', reason: null });
+    const dir = r.dir(ref);
+    expect(existsSync(join(dir, 'node', 'node_modules', '@x'))).toBe(false);
+
+    // A skill script elsewhere imports the package by name.
+    const skillDir = join(h.dir, 'skills', 'tool', 'scripts');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'run.mjs'), "import { hi } from 'hello-pkg';\nconsole.log(hi);\n");
+    const env = withSkillEnv({ PATH: '/usr/bin:/bin' }, r.env(ref));
+    const run = spawnSync('node', [join(skillDir, 'run.mjs')], { env: env as NodeJS.ProcessEnv, encoding: 'utf8' });
+    expect(run.stderr).toBe('');
+    expect(run.stdout.trim()).toBe('hi from pkg');
+    const cli = spawnSync('hello', [], { env: env as NodeJS.ProcessEnv, encoding: 'utf8' });
+    expect(cli.stdout.trim()).toBe('cli: hi from pkg');
+  });
+
+  it('fails a Node package whose tarball does not match its integrity', async () => {
+    const pkg = makeTarball('package', [{ name: 'package.json', content: '{"name":"evil"}' }]);
+    const base = await registry({ '/evil/-/evil-1.0.0.tgz': pkg });
+    const r = make({ registry: base });
+    r.setup(ref, entry({ node: { lock: [{ name: 'evil', version: '1.0.0', integrity: `sha512-${Buffer.alloc(64).toString('base64')}`, path: 'node_modules/evil' }] } }), '2026-09-24');
+    await r.settled(ref);
+    expect(r.state(ref).reason).toMatch(/evil@1\.0\.0 does not match its integrity hash/);
+  });
+
+  it('keeps no runtime for skills that need none, removes environments, and cleans up orphans', async () => {
+    const r = make({ uv: uvStub().uv });
+    r.setup(ref, entry({}), '2026-09-24');
+    expect(r.state(ref)).toEqual({ state: 'none', reason: null });
+    expect(h.store.list({ types: ['skill.runtime_changed'] })).toEqual([]);
+
+    r.setup(ref, entry({ python: { version: '3.12', packages: [] } }), '2026-09-24');
+    await r.settled(ref);
+    expect(r.report().envs).toEqual([{ scope: 'global', project_id: null, name: 'tool', bytes: expect.any(Number), orphan: false }]);
+    exists = false;
+    expect(r.report().envs[0]!.orphan).toBe(true);
+    expect(r.cleanup()).toMatchObject({ removed: 1 });
+    expect(existsSync(r.dir(ref))).toBe(false);
+    expect(r.state(ref)).toEqual({ state: 'none', reason: null });
+  });
+});
+
+describe('skill runtimes in tools', () => {
+  let rt: Runtime;
+  afterEach(async () => rt?.shutdown());
+
+  it('puts a ready runtime on PATH for skill_run, refuses a failed one, and drops it when the skill is deleted', async () => {
+    const r = make({ uv: uvStub().uv });
+    rt = newRuntime(h, { skillEnv: r });
+    const projectId = rt.createProject({ name: 'P', goal: 'G', settings: { desk_model: FAKE_MODEL.id, thread_model: FAKE_MODEL.id } });
+    const desk = getDeskAgent(h.store.db, projectId)!;
+    rt.saveSkill({ scope: 'global', name: 'tool', description: 'Tool', instructions: 'x', files: [{ path: 'scripts/which.sh', content: 'command -v python\necho "$VIRTUAL_ENV"\n' }] });
+    const ctx = testToolContext(desk.workspace_path!, { projectId, agentId: desk.id, services: rt.services });
+    const call = (input: unknown) => executeToolCall([skillRunTool], { id: 'c', name: 'skill_run', arguments: JSON.stringify(input) }, ctx);
+
+    r.setup(ref, entry({ python: { version: '3.12', packages: [] } }), '2026-09-24');
+    await r.settled(ref);
+    const ok = await call({ name: 'tool', script: 'which.sh' });
+    expect(ok.content).toContain(`${r.dir(ref)}/py/bin/python`);
+    expect(ok.content).toContain(`${r.dir(ref)}/py`);
+
+    const failing = make({ uv: uvStub(true).uv });
+    failing.setup(ref, entry({ python: { version: '3.12', packages: ['x==1'] } }), '2026-09-24');
+    await failing.settled(ref);
+    const refused = await call({ name: 'tool', script: 'which.sh' });
+    expect(refused).toMatchObject({ status: 'error', content: expect.stringMatching(/tool's runtime is not ready: .*no wheel/) });
+
+    rt.deleteSkill('global', 'tool');
+    expect(r.state(ref)).toEqual({ state: 'none', reason: null });
+    expect(withSkillEnv(scrubbedEnv('/w', { PATH: '/usr/bin' }), rt.skillEnv(desk.id)).PATH).toBe('/usr/bin');
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run packages/core/src/catalog apps/daemon/src/catalog.test.ts`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`packages/core/src/catalog/runtimes.ts`:
+
+```ts
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { GLOBAL_PROJECT_ID, type CatalogEntry, type NodeLockEntry, type RuntimeState, type RuntimesReport, type SkillScope } from '@desk/protocol';
+import type { EventStore } from '../events/store';
+import type { CatalogRuntimes, SkillRef } from './service';
+import { extractSubtree } from './tar';
+
+export type ExecResult = { code: number; stdout: string; stderr: string };
+export type Exec = (command: string, args: string[], opts: { env: Record<string, string>; cwd?: string; timeoutMs?: number }) => Promise<ExecResult>;
+
+/** A skill's runtime as tools see it: PATH entries and variables when ready, or why not. */
+export type SkillEnv = { state: RuntimeState; reason: string | null; bins: string[]; vars: Record<string, string> };
+
+/** What the agent runtime needs: the environment of a skill, and removal when the skill is deleted. */
+export interface SkillEnvProvider {
+  env(ref: SkillRef): SkillEnv;
+  remove(ref: SkillRef): void;
+}
+
+export type SkillRuntimesOptions = {
+  dataDir: string;
+  store: EventStore;
+  /** The uv binary (bundled in the app; DESK_UV or PATH in dev); null when unavailable. */
+  uv: string | null;
+  /** How to run Node: the daemon's own executable (the app binary with ELECTRON_RUN_AS_NODE=1 when packaged). */
+  nodeExec: string;
+  /** Whether a skill still exists (orphaned environments are reported and cleaned up). */
+  exists: (ref: SkillRef) => boolean;
+  registry?: string;
+  fetch?: typeof fetch;
+  exec?: Exec;
+  platform?: NodeJS.Platform;
+  arch?: string;
+};
+
+type EnvFile = { bins: string[]; vars: Record<string, string>; digest: string };
+
+const NPM_CAPS = { maxDownload: 80 * 1024 * 1024, maxBytes: 120 * 1024 * 1024, maxFiles: 5000, maxFileBytes: 60 * 1024 * 1024 };
+
+/** Node resolve hook: bare imports that fail next to the script are retried from the skill's environment. */
+const HOOKS = `import { pathToFileURL } from 'node:url';
+const dir = process.env.DESK_NODE_MODULES;
+const base = dir ? pathToFileURL(dir.replace(/\\/node_modules\\/?$/, '') + '/').href : null;
+export async function resolve(specifier, context, next) {
+  try {
+    return await next(specifier, context);
+  } catch (err) {
+    if (!base || err?.code !== 'ERR_MODULE_NOT_FOUND' || /^(\\.|\\/|node:|file:|data:)/.test(specifier)) throw err;
+    return next(specifier, { ...context, parentURL: base });
+  }
+}
+`;
+const REGISTER = `import { register } from 'node:module';\nregister('./resolve-hooks.mjs', import.meta.url);\n`;
+
+const defaultExec: Exec = (command, args, opts) =>
+  new Promise((resolve) => {
+    const child = spawn(command, args, { env: opts.env, cwd: opts.cwd ?? '/', stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => (stdout += String(d)));
+    child.stderr.on('data', (d) => (stderr += String(d)));
+    const timer = opts.timeoutMs ? setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs) : null;
+    child.on('error', (err) => resolve({ code: 127, stdout, stderr: `${stderr}${err.message}` }));
+    child.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * Desk-managed runtimes for catalog skills: one environment per installed skill under `<data>/runtimes`, with Python
+ * from uv (prebuilt wheels only, exact pins) and Node packages from a lockfile checked against its integrity hashes
+ * (install scripts never run). Nothing is installed system-wide; agents only read and execute these directories.
+ */
+export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
+  private readonly root: string;
+  private readonly exec: Exec;
+  private readonly fetch: typeof fetch;
+  private queue: Promise<void> = Promise.resolve();
+  private readonly pending = new Map<string, Promise<void>>();
+
+  constructor(private readonly o: SkillRuntimesOptions) {
+    this.root = join(o.dataDir, 'runtimes');
+    this.exec = o.exec ?? defaultExec;
+    this.fetch = o.fetch ?? fetch;
+  }
+
+  /** The environment directory of a skill. */
+  dir(ref: SkillRef): string {
+    return join(this.root, ref.scope, ref.scope === 'project' ? ref.projectId! : '_global', ref.name);
+  }
+
+  state(ref: SkillRef): { state: RuntimeState; reason: string | null } {
+    const last = this.lastEvent(ref);
+    if (!last || last.state === 'removed') return { state: 'none', reason: null };
+    if (last.state === 'ready' && !existsSync(join(this.dir(ref), 'desk-env.json'))) {
+      return { state: 'failed', reason: 'The environment is missing from disk. Retry to rebuild it.' };
+    }
+    return { state: last.state, reason: last.reason };
+  }
+
+  env(ref: SkillRef): SkillEnv {
+    const s = this.state(ref);
+    if (s.state !== 'ready') return { ...s, bins: [], vars: {} };
+    const file = JSON.parse(readFileSync(join(this.dir(ref), 'desk-env.json'), 'utf8')) as EnvFile;
+    return { ...s, bins: file.bins, vars: file.vars };
+  }
+
+  /** Builds (or rebuilds) a skill's environment in the background; entries without runtime needs get none. */
+  setup(ref: SkillRef, entry: CatalogEntry, updated: string): void {
+    const rt = entry.runtime;
+    if (!rt.python && !rt.node && !rt.extras?.length) {
+      if (this.lastEvent(ref) && this.lastEvent(ref)!.state !== 'removed') this.remove(ref);
+      return;
+    }
+    this.record(ref, 'preparing', null);
+    const key = this.key(ref);
+    const job = (this.queue = this.queue
+      .catch(() => {})
+      .then(() => this.build(ref, entry, updated))
+      .then(
+        () => this.record(ref, 'ready', null),
+        (err: unknown) => this.record(ref, 'failed', this.reason(err)),
+      ));
+    this.pending.set(key, job);
+    void job.finally(() => this.pending.get(key) === job && this.pending.delete(key));
+  }
+
+  /** Resolves when the current setup of a skill (if any) has finished (tests, CLI). */
+  async settled(ref: SkillRef): Promise<void> {
+    await this.pending.get(this.key(ref));
+  }
+
+  remove(ref: SkillRef): void {
+    const dir = this.dir(ref);
+    const had = existsSync(dir);
+    rmSync(dir, { recursive: true, force: true });
+    const last = this.lastEvent(ref);
+    if (had || (last && last.state !== 'removed')) this.record(ref, 'removed', null);
+  }
+
+  report(): RuntimesReport {
+    const envs: RuntimesReport['envs'] = [];
+    for (const ref of this.listEnvs()) {
+      envs.push({ scope: ref.scope, project_id: ref.projectId ?? null, name: ref.name, bytes: du(this.dir(ref)), orphan: !this.o.exists(ref) });
+    }
+    return { bytes: existsSync(this.root) ? du(this.root) : 0, envs };
+  }
+
+  /** Removes environments whose skill no longer exists. */
+  cleanup(): { removed: number; bytes: number } {
+    let removed = 0;
+    let bytes = 0;
+    for (const ref of this.listEnvs()) {
+      if (this.o.exists(ref)) continue;
+      bytes += du(this.dir(ref));
+      this.remove(ref);
+      removed++;
+    }
+    return { removed, bytes };
+  }
+
+  // ── building ─────────────────────────────────────────────────────────
+
+  private async build(ref: SkillRef, entry: CatalogEntry, updated: string): Promise<void> {
+    const dir = this.dir(ref);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(join(dir, 'bin'), { recursive: true });
+    const env: EnvFile = { bins: [join(dir, 'bin')], vars: { PYTHONDONTWRITEBYTECODE: '1' }, digest: entry.digest };
+    const rt = entry.runtime;
+
+    if (rt.python) {
+      if (!this.o.uv) throw new Error('uv is not available, so Desk cannot set up Python. Reinstall Desk, or set DESK_UV in development.');
+      const uvEnv = this.uvEnv();
+      this.progress(ref, `Setting up Python ${rt.python.version}`);
+      const py = join(dir, 'py');
+      await this.run(this.o.uv, ['venv', '--no-config', '--python', rt.python.version, py], uvEnv, 15 * 60_000);
+      if (rt.python.packages.length) {
+        this.progress(ref, `Installing ${rt.python.packages.length} Python package${rt.python.packages.length === 1 ? '' : 's'}`);
+        await this.run(
+          this.o.uv,
+          ['pip', 'install', '--no-config', '--python', join(py, 'bin', 'python'), '--only-binary', ':all:', '--exclude-newer', `${updated}T23:59:59Z`, ...rt.python.packages],
+          uvEnv,
+          15 * 60_000,
+        );
+      }
+      env.bins.push(join(py, 'bin'));
+      env.vars.VIRTUAL_ENV = py;
+    }
+
+    if (rt.node) {
+      await this.installNode(ref, dir, rt.node.lock);
+      env.vars.DESK_NODE_MODULES = join(dir, 'node', 'node_modules');
+      env.vars.NODE_PATH = join(dir, 'node', 'node_modules');
+    }
+    // Scripts may call `node` even without packages; the shim runs the daemon's own Node.
+    this.writeNodeShim(dir);
+
+    if (rt.extras?.includes('playwright-chromium')) {
+      if (!rt.python) throw new Error('playwright-chromium needs the Python runtime with playwright');
+      this.progress(ref, 'Downloading Chromium for Playwright');
+      const browsers = join(dir, 'browsers');
+      await this.run(join(dir, 'py', 'bin', 'python'), ['-m', 'playwright', 'install', 'chromium'], { ...this.baseEnv(), PLAYWRIGHT_BROWSERS_PATH: browsers }, 20 * 60_000);
+      env.vars.PLAYWRIGHT_BROWSERS_PATH = browsers;
+    }
+    writeFileSync(join(dir, 'desk-env.json'), JSON.stringify(env, null, 2));
+  }
+
+  private async installNode(ref: SkillRef, dir: string, lock: NodeLockEntry[]): Promise<void> {
+    const registry = (this.o.registry ?? 'https://registry.npmjs.org').replace(/\/+$/, '');
+    const platform = this.o.platform ?? process.platform;
+    const arch = this.o.arch ?? process.arch;
+    const wanted = lock.filter((l) => (!l.os || l.os.includes(platform)) && (!l.cpu || l.cpu.includes(arch)));
+    let done = 0;
+    for (const l of wanted) {
+      this.progress(ref, `Installing ${l.name}`, done, wanted.length);
+      const base = l.name.startsWith('@') ? l.name.split('/')[1]! : l.name;
+      const res = await this.fetch(`${registry}/${l.name}/-/${base}-${l.version}.tgz`);
+      if (!res.ok) throw new Error(`Downloading ${l.name}@${l.version} failed (${res.status})`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      const [alg, expected] = [l.integrity.slice(0, l.integrity.indexOf('-')), l.integrity.slice(l.integrity.indexOf('-') + 1)];
+      if (createHash(alg).update(buf).digest('base64') !== expected) throw new Error(`${l.name}@${l.version} does not match its integrity hash`);
+      const { files } = await extractSubtree(
+        (async function* () {
+          yield buf;
+        })(),
+        '',
+        { caps: NPM_CAPS },
+      );
+      for (const f of files) {
+        const target = join(dir, 'node', l.path, f.path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, f.content);
+        chmodSync(target, f.mode & 0o111 ? 0o755 : 0o644);
+      }
+      done++;
+    }
+    // Command-line entry points of top-level packages become wrappers in bin/.
+    for (const l of wanted) {
+      if (l.path !== `node_modules/${l.name}`) continue;
+      const pkgFile = join(dir, 'node', l.path, 'package.json');
+      if (!existsSync(pkgFile)) continue;
+      const pkg = JSON.parse(readFileSync(pkgFile, 'utf8')) as { name?: string; bin?: string | Record<string, string> };
+      const bins = typeof pkg.bin === 'string' ? { [base(pkg.name ?? l.name)]: pkg.bin } : (pkg.bin ?? {});
+      for (const [name, rel] of Object.entries(bins)) {
+        if (!/^[\w.-]+$/.test(name)) continue;
+        const script = join(dir, 'node', l.path, rel);
+        writeExecutable(join(dir, 'bin', name), `#!/bin/sh\nexec ${shq(join(dir, 'bin', 'node'))} ${shq(script)} "$@"\n`);
+      }
+    }
+  }
+
+  private writeNodeShim(dir: string): void {
+    const lib = join(this.root, 'lib');
+    mkdirSync(lib, { recursive: true });
+    writeFileSync(join(lib, 'resolve-hooks.mjs'), HOOKS);
+    writeFileSync(join(lib, 'resolve-register.mjs'), REGISTER);
+    const modules = join(dir, 'node', 'node_modules');
+    writeExecutable(
+      join(dir, 'bin', 'node'),
+      [
+        '#!/bin/sh',
+        'export ELECTRON_RUN_AS_NODE=1',
+        `export DESK_NODE_MODULES=${shq(modules)}`,
+        `export NODE_PATH=${shq(modules)}`,
+        `exec ${shq(this.o.nodeExec)} --import ${shq(join(lib, 'resolve-register.mjs'))} "$@"`,
+        '',
+      ].join('\n'),
+    );
+  }
+
+  private uvEnv(): Record<string, string> {
+    return {
+      ...this.baseEnv(),
+      UV_CACHE_DIR: join(this.root, 'uv', 'cache'),
+      UV_PYTHON_INSTALL_DIR: join(this.root, 'uv', 'python'),
+      UV_PYTHON_PREFERENCE: 'only-managed',
+      UV_NO_CONFIG: '1',
+    };
+  }
+
+  /** A minimal environment for installers: no inherited secrets. */
+  private baseEnv(): Record<string, string> {
+    return { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: process.env.HOME ?? '/tmp', LANG: 'en_US.UTF-8', TMPDIR: process.env.TMPDIR ?? '/tmp' };
+  }
+
+  private async run(command: string, args: string[], env: Record<string, string>, timeoutMs: number): Promise<void> {
+    const r = await this.exec(command, args, { env, timeoutMs });
+    if (r.code !== 0) throw new Error(`${command.split('/').pop()} ${args[0]} failed: ${(r.stderr || r.stdout).trim().split('\n').slice(-6).join('\n')}`);
+  }
+
+  // ── state ────────────────────────────────────────────────────────────
+
+  private key(ref: SkillRef): string {
+    return `${ref.scope}/${ref.projectId ?? ''}/${ref.name}`;
+  }
+
+  private lastEvent(ref: SkillRef): { state: 'preparing' | 'ready' | 'failed' | 'removed'; reason: string | null } | null {
+    const events = this.o.store.list({ projectId: ref.scope === 'project' ? ref.projectId! : GLOBAL_PROJECT_ID, types: ['skill.runtime_changed'] });
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === 'skill.runtime_changed' && e.payload.scope === ref.scope && e.payload.name === ref.name) return e.payload;
+    }
+    return null;
+  }
+
+  private record(ref: SkillRef, state: 'preparing' | 'ready' | 'failed' | 'removed', reason: string | null): void {
+    this.o.store.append({
+      project_id: ref.scope === 'project' ? ref.projectId! : GLOBAL_PROJECT_ID,
+      agent_id: null,
+      type: 'skill.runtime_changed',
+      payload: { scope: ref.scope, name: ref.name, state, reason },
+    });
+  }
+
+  private progress(ref: SkillRef, step: string, done?: number, total?: number): void {
+    this.o.store.publishEphemeral({
+      type: 'skill.runtime_progress',
+      project_id: ref.scope === 'project' ? ref.projectId! : GLOBAL_PROJECT_ID,
+      agent_id: null,
+      payload: { scope: ref.scope, name: ref.name, step, ...(done !== undefined ? { done } : {}), ...(total !== undefined ? { total } : {}) },
+    });
+  }
+
+  private reason(err: unknown): string {
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.split(this.o.dataDir).join('<data>').slice(0, 800);
+  }
+
+  private listEnvs(): SkillRef[] {
+    const out: SkillRef[] = [];
+    for (const scope of ['global', 'project'] as SkillScope[]) {
+      const scopeDir = join(this.root, scope);
+      if (!existsSync(scopeDir)) continue;
+      for (const owner of readdirSync(scopeDir)) {
+        for (const name of readdirSync(join(scopeDir, owner))) {
+          out.push({ scope, name, ...(scope === 'project' ? { projectId: owner } : {}) });
+        }
+      }
+    }
+    return out;
+  }
+}
+
+const base = (name: string) => name.split('/').pop()!;
+
+function writeExecutable(path: string, text: string): void {
+  writeFileSync(path, text);
+  chmodSync(path, 0o755);
+}
+
+/** Bytes on disk under a directory (links not followed). */
+function du(path: string): number {
+  const st = lstatSync(path);
+  if (!st.isDirectory()) return st.isFile() ? statSync(path).size : 0;
+  let n = 0;
+  for (const name of readdirSync(path)) n += du(join(path, name));
+  return n;
+}
+```
+
+Design notes:
+- **Node shim.** Each environment gets `bin/node`, which runs the daemon's own executable with `ELECTRON_RUN_AS_NODE=1` and `--import <data>/runtimes/lib/resolve-register.mjs`. That hook retries bare imports that fail next to the script from `DESK_NODE_MODULES`. This lets a skill's `scripts/*.mjs` import packages that live in its environment, without writing into the skill directory.
+- **Installers never inherit secrets.** uv gets `PATH`, `HOME`, `LANG`, `TMPDIR` and `UV_*` only; the test checks that `DESK_OPENAI_API_KEY` doesn't reach it.
+- **Setups run one at a time,** so the managed CPython downloads once.
+- **Tools:** `bash`, `bash_readonly`, `bash_background` and `skill_run` all apply skill environments. `NO_SERVICES` in the test context answers `skillEnv` with an empty environment.
+- **Deleting a skill** removes its runtime, which records `removed`.
+- **Desk's prompt** gains the catalog line (suggest, never install).
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(core): Desk-managed skill runtimes — uv Python envs with prebuilt pinned wheels, npm lock installer with integrity checks and a resolving node shim; PATH in shell tools; retry and cleanup routes
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

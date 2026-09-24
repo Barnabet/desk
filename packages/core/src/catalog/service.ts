@@ -156,6 +156,16 @@ export class CatalogService {
     };
   }
 
+  /** Rebuilds the runtime of an installed catalog skill (after a failure, or when its environment went missing). */
+  retryRuntime(ref: SkillRef): { state: RuntimeState; reason: string | null } {
+    const entry = this.catalog.entries.find((e) => e.id === ref.name);
+    const install = entry ? this.installOf(entry, ref, this.o.store.list({ types: ['skill.saved', 'skill.deleted'] })) : null;
+    if (!entry || !install || install.state === 'name_taken') throw new NotFoundError(`${ref.name} was not installed from the catalog`);
+    if (!this.o.runtimes) throw new ConflictError('Skill runtimes are not available in this daemon');
+    this.o.runtimes.setup(ref, entry, this.catalog.updated);
+    return this.o.runtimes.state(ref);
+  }
+
   /** The install state of an entry in one scope, from the skill.saved log; null when no skill of that name exists there. */
   private installOf(entry: CatalogEntry, ref: SkillRef, log: StoredEvent[]): CatalogInstall | null {
     let history: string[] = [];

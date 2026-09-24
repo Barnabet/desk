@@ -89,3 +89,4 @@ export { CatalogService, catalogMarker, httpFetch, loadCatalog, type CatalogFetc
 export { extractSubtree, DEFAULT_CAPS, type ExtractCaps, type ExtractedFile } from './catalog/tar';
 export { readTree, treeDigest } from './catalog/digest';
 export { isScript, scanSkill } from './catalog/review';
+export { SkillRuntimes, type Exec, type SkillEnv, type SkillEnvProvider, type SkillRuntimesOptions } from './catalog/runtimes';

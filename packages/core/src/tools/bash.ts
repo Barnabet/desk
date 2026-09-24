@@ -24,6 +24,12 @@ export function scrubbedEnv(workspace: string, source: NodeJS.ProcessEnv = proce
   return env;
 }
 
+/** Puts skill runtimes first on PATH and adds their variables. */
+export function withSkillEnv(env: NodeJS.ProcessEnv, e: { bins: string[]; vars: Record<string, string> }): NodeJS.ProcessEnv {
+  if (!e.bins.length && !Object.keys(e.vars).length) return env;
+  return { ...env, ...e.vars, PATH: [...e.bins, env.PATH ?? '/usr/bin:/bin'].join(':') };
+}
+
 export const bashTool = defineTool({
   name: 'bash',
   description:
@@ -37,7 +43,7 @@ export const bashTool = defineTool({
     const r = await runProcess({
       ...shellInvocation(command, ctx.sandbox),
       cwd: ctx.workspace,
-      env: scrubbedEnv(ctx.workspace),
+      env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
       timeoutMs: timeout_s * 1000,
       signal: ctx.signal,
     });
@@ -59,7 +65,7 @@ export const bashReadonlyTool = defineTool({
     const r = await runProcess({
       ...shellInvocation(command, { enabled: ctx.sandbox.enabled, writable: [] }),
       cwd: ctx.workspace,
-      env: scrubbedEnv(ctx.workspace),
+      env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
       timeoutMs: timeout_s * 1000,
       signal: ctx.signal,
     });

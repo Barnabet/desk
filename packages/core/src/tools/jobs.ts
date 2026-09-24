@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 import { newId } from '../ids';
-import { scrubbedEnv } from './bash';
+import { scrubbedEnv, withSkillEnv } from './bash';
 import { shellInvocation, type SandboxSpec } from './sandbox';
 import { defineTool } from './types';
 
@@ -104,7 +104,7 @@ export const bashBackgroundTool = defineTool({
   input: z.object({ command: z.string().min(1) }),
   gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command }, ctx) {
-    const id = ctx.jobs.start(ctx.agentId, { command, cwd: ctx.workspace, env: scrubbedEnv(ctx.workspace), sandbox: ctx.sandbox });
+    const id = ctx.jobs.start(ctx.agentId, { command, cwd: ctx.workspace, env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)), sandbox: ctx.sandbox });
     return `Started ${id}. Use bash_output to read its output and bash_kill to stop it.`;
   },
 });

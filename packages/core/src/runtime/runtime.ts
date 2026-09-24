@@ -38,6 +38,7 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { detectSandbox } from '../tools/sandbox';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
+import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { Scheduler } from './scheduler';
 import { toolsForRole } from './toolsets';
@@ -60,6 +61,8 @@ export type RuntimeOptions = {
   proxyProbeIntervalMs?: number;
   /** Called with internal errors that are not tied to a request (defaults to console.error). */
   onError?: (err: unknown, context: string) => void;
+  /** Desk-managed runtimes of catalog skills (PATH for scripts, removal with the skill). */
+  skillEnv?: SkillEnvProvider;
 };
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
@@ -106,6 +109,7 @@ export class Runtime {
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
       resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),
       updateSettings: (projectId, patch) => this.updateSettings(projectId, patch),
+      skillEnv: (agentId, only) => this.skillEnv(agentId, only),
     };
     this.scheduler = new Scheduler({
       modelConcurrency: (model) => o.models.get(model).concurrency,
@@ -418,6 +422,7 @@ export class Runtime {
   deleteSkill(scope: SkillScope, name: string, projectId?: string, meta: { origin?: string; projectId?: string; agentId?: string } = {}): void {
     if (scope === 'project') this.requireOpenProject(projectId ?? '');
     this.skills.delete(scope, name, projectId);
+    this.o.skillEnv?.remove({ scope, name, ...(scope === 'project' && projectId ? { projectId } : {}) });
     this.o.store.append({
       project_id: projectId ?? meta.projectId ?? GLOBAL_PROJECT_ID,
       agent_id: meta.agentId ?? null,
@@ -468,6 +473,30 @@ export class Runtime {
       { scope: opts.scope, name, fromDir: path, ...(opts.projectId ? { projectId: opts.projectId } : {}) },
       { origin: 'user', changeNote: `Imported from ${path}` },
     );
+  }
+
+  /** See RuntimeServices.skillEnv. */
+  skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null } {
+    const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null };
+    const provider = this.o.skillEnv;
+    if (!provider) return out;
+    const agent = this.requireAgent(agentId);
+    const refOf = (s: { scope: SkillScope; name: string }) => ({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: agent.project_id } : {}) });
+    if (only) {
+      const e = provider.env(refOf(only));
+      if (e.state === 'preparing') out.blocked = `${only.name}'s runtime is still being set up. Try again in a minute.`;
+      else if (e.state === 'failed') out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
+      return { ...out, bins: e.bins, vars: e.vars };
+    }
+    for (const name of agent.active_skills) {
+      const skill = this.skills.resolve(name, agent.project_id);
+      if (!skill) continue;
+      const e = provider.env(refOf(skill));
+      if (e.state !== 'ready') continue;
+      out.bins.push(...e.bins);
+      Object.assign(out.vars, e.vars);
+    }
+    return out;
   }
 
   /** Adds skills to an agent's active set (their instructions join its system prompt from its next run). */

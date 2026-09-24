@@ -117,6 +117,18 @@ Reviewed skills pinned to a commit and a content digest, installed only at the u
 | POST | `/v1/catalog/:id/prepare` | | Downloads the pinned archive (GitHub codeload) or reads the builtin skill, verifies the digest, and stages it. Returns `CatalogReview { entry, source_url, files[{path, size, script}], skill_md, license_text, warnings[{file, line, kind, excerpt}] }`. A digest mismatch is a 400 and nothing is staged |
 | POST | `/v1/catalog/:id/install` | `{ scope?: 'global'\|'project', project_id?, replace_modified? }` | Installs through the skill store with origin `catalog:<id>@<sha>`, and returns `{ skill, state, runtime }` (201). A 409 means `name_taken`, or `modified` without `replace_modified: true` |
 
+**Runtimes.** Entries with `runtime.python`, `runtime.node` or `runtime.extras` get a Desk-managed environment under `<data>/runtimes/<scope>/<project|_global>/<name>`, built in the background after install.
+- Python comes from uv, with prebuilt wheels only and exact pins.
+- Node packages come from the lock, checked against their integrity hashes; install scripts never run.
+- State is stored as `skill.runtime_changed { scope, name, state: preparing|ready|failed|removed, reason }`, and progress streams as the ephemeral `skill.runtime_progress { scope, name, step, done?, total? }` (`agent_id: null`).
+- `skill_run` refuses a skill whose runtime is `preparing` or `failed`. When the runtime is ready, `bash` and `skill_run` put its `bin` directories first on PATH.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/v1/skills/:name/runtime/retry`, `/v1/projects/:id/skills/:name/runtime/retry` | Rebuilds the runtime of a catalog-installed skill; returns `{ state, reason }`. 404 for skills not from the catalog |
+| GET | `/v1/system/runtimes` | `{ bytes, envs[{ scope, project_id, name, bytes, orphan }] }` |
+| POST | `/v1/system/runtimes/cleanup` | Removes environments whose skill no longer exists: `{ removed, bytes }` |
+
 Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never runs), `pipe-to-shell`, `base64-blob`, `invisible-unicode`, `paste-site` and `memory-write`. The limits are the skill store's: 50 MB download, 10 MB, 200 files, 2 MB per file, and no links or special files.
 
 ## Desktop app endpoints

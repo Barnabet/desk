@@ -7,7 +7,7 @@ import {
   type ModelEndpointTestResult,
   type ModelInfo,
 } from '@desk/protocol';
-import type { CatalogService, EventStore, ModelRegistry, Runtime } from '@desk/core';
+import type { CatalogService, EventStore, ModelRegistry, Runtime, SkillRuntimes } from '@desk/core';
 import { bearerAuth, errorResponse } from './http';
 import { agentRoutes } from './routes/agents';
 import { catalogRoutes } from './routes/catalog';
@@ -31,6 +31,8 @@ export type AppDeps = {
   models: ModelRegistry;
   /** The skill catalog; routes answer 501 without it. */
   catalog?: CatalogService;
+  /** Desk-managed skill runtimes (retry, sizes, cleanup). */
+  skillRuntimes?: SkillRuntimes;
   token: string;
   version: string;
   /** Persists the model registry after PUT /models. */

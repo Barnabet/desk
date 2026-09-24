@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CatalogService,
   createSwitchableAdapter,
+  SkillRuntimes,
   EventStore,
   ModelRegistry,
   normalizeBaseURL,
@@ -28,6 +30,15 @@ import { daemonPaths, type DaemonInfo } from './paths';
 import { startServer } from './server';
 
 export const DAEMON_VERSION = '1.0.0';
+
+/** uv for skill runtimes: DESK_UV, then the first uv on PATH; null when there is none. */
+function findUv(): string | null {
+  if (process.env.DESK_UV) return process.env.DESK_UV;
+  for (const dir of (process.env.PATH ?? '').split(':')) {
+    if (dir && existsSync(join(dir, 'uv'))) return join(dir, 'uv');
+  }
+  return null;
+}
 export const DEFAULT_PORT = 7433;
 
 export type DaemonOptions = {
@@ -47,6 +58,8 @@ export type DaemonOptions = {
   migrationsDir?: string;
   /** Skill catalog: first-party skills folder, archive host and fetch (tests point these at fixtures). */
   catalog?: { builtinRoot?: string; archiveBase?: string; fetch?: CatalogFetch; file?: CatalogFile };
+  /** Skill runtimes: the uv binary (default: DESK_UV, then uv on PATH), the Node used by skill scripts, npm registry. */
+  runtimes?: { uv?: string | null; nodeExec?: string; registry?: string };
   sandboxAvailable?: boolean;
   stallIntervalMs?: number;
   now?: () => number;
@@ -73,7 +86,17 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
     let endpointState = resolveEndpoint();
     if (!endpointState.config) log.info('no model endpoint configured yet; agents stay paused until one is set');
     const adapter = createSwitchableAdapter(endpointState.config, models);
+    let runtimeRef: Runtime | null = null;
+    const skillRuntimes = new SkillRuntimes({
+      dataDir: o.dataDir,
+      store,
+      uv: o.runtimes?.uv !== undefined ? o.runtimes.uv : findUv(),
+      nodeExec: o.runtimes?.nodeExec ?? process.execPath,
+      exists: (ref) => !!runtimeRef?.skills.get(ref.scope, ref.name, ref.projectId),
+      ...(o.runtimes?.registry ? { registry: o.runtimes.registry } : {}),
+    });
     const runtime = new Runtime({
+      skillEnv: skillRuntimes,
       store,
       adapter,
       models,
@@ -81,8 +104,10 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       ...(o.sandboxAvailable !== undefined ? { sandboxAvailable: o.sandboxAvailable } : {}),
       onError: (err, ctx) => log.error(`runtime error (${ctx})`, err),
     });
+    runtimeRef = runtime;
     const catalog = new CatalogService({
       runtime,
+      runtimes: skillRuntimes,
       store,
       dataDir: o.dataDir,
       builtinRoot: o.catalog?.builtinRoot ?? fileURLToPath(new URL('../../../catalog/skills', import.meta.url)),

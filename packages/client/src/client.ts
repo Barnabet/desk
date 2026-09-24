@@ -5,6 +5,8 @@ import type {
   CatalogInstallResult,
   CatalogItem,
   CatalogReview,
+  RuntimeState,
+  RuntimesReport,
   CreateProjectRequest,
   DaemonConfig,
   DaemonConfigPatch,
@@ -222,6 +224,10 @@ export class DeskClient {
     list: () => this.get<CatalogItem[]>('/catalog'),
     prepare: (id: string) => this.request<CatalogReview>('POST', `/catalog/${enc(id)}/prepare`),
     install: (id: string, req: CatalogInstallRequest = {}) => this.post<CatalogInstallResult>(`/catalog/${enc(id)}/install`, req),
+    /** Rebuilds a catalog skill's runtime (after a failure). */
+    retryRuntime: (s: SkillScopeRef, name: string) => this.request<{ state: RuntimeState; reason: string | null }>('POST', `${this.skillBase(s)}/${enc(name)}/runtime/retry`),
+    runtimes: () => this.get<RuntimesReport>('/system/runtimes'),
+    cleanupRuntimes: () => this.request<{ removed: number; bytes: number }>('POST', '/system/runtimes/cleanup'),
   };
 
   models = {

@@ -45,6 +45,11 @@ export interface RuntimeServices {
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string }): Promise<void>;
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void;
+  /**
+   * PATH entries and variables from Desk-managed skill runtimes: of one skill (`only`), or of every active skill of the
+   * agent whose runtime is ready. `blocked` explains why `only`'s runtime cannot be used yet.
+   */
+  skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null };
 }
 
 export type ToolYield = { status: AgentStatus; reason?: string };

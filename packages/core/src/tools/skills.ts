@@ -4,7 +4,7 @@ import { SkillName, SkillScope } from '@desk/protocol';
 import { z } from 'zod';
 import type { SkillDetail, SkillStore, SkillSummary } from '../skills/store';
 import { getAgent } from '../state/queries';
-import { scrubbedEnv } from './bash';
+import { scrubbedEnv, withSkillEnv } from './bash';
 import { runProcess } from './process';
 import { shellInvocation } from './sandbox';
 import { defineTool, type ToolContext } from './types';
@@ -134,11 +134,13 @@ export const skillRunTool = defineTool({
   async execute({ name, script, args, stdin, timeout_s }, ctx) {
     const skill = resolveSkill(ctx, name);
     const file = locateScript(skill, script, ctx.services.skills);
+    const skillEnv = ctx.services.skillEnv(ctx.agentId, { scope: skill.scope, name: skill.name });
+    if (skillEnv.blocked) throw new Error(skillEnv.blocked);
     const command = [commandFor(file), ...args.map(shellQuote)].join(' ');
     const r = await runProcess({
       ...shellInvocation(command, ctx.sandbox),
       cwd: ctx.workspace,
-      env: { ...scrubbedEnv(ctx.workspace), SKILL_DIR: skill.dir, SKILL_NAME: skill.name },
+      env: { ...withSkillEnv(scrubbedEnv(ctx.workspace), skillEnv), SKILL_DIR: skill.dir, SKILL_NAME: skill.name },
       timeoutMs: timeout_s * 1000,
       signal: ctx.signal,
       ...(stdin !== undefined ? { stdin } : {}),
