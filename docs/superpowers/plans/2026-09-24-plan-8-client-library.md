@@ -983,7 +983,7 @@ export class DeskStream {
       }
     };
     ws.onerror = () => {};
-    ws.onclose = (e: CloseEvent) => {
+    ws.onclose = (e: { code: number }) => {
       if (this.ws !== ws) return;
       this.ws = null;
       if (this.closed) {
