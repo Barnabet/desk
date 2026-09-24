@@ -7158,3 +7158,315 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 6: Project switcher (⌘P) and unread markers in the title bar
+
+**Files:**
+- Create: `apps/desktop/src/renderer/components/TitleBar.test.tsx`, `apps/desktop/src/renderer/components/ProjectSwitcher.tsx`, `apps/desktop/src/renderer/components/TitleBar.tsx`
+- Modify: `apps/desktop/src/renderer/state/unread.ts`, `apps/desktop/src/renderer/theme/tokens.css`, `apps/desktop/src/renderer/map/map.css`
+
+**Interfaces:**
+
+- Consumes: `useGlobal` (overview), `unreadIn` (Task 1), `projectSummaryLine` (Task 2) and `navigate`.
+- Produces:
+
+```ts
+// state/unread.ts
+export function useSeen(): Record<string, string>;
+// components/ProjectSwitcher.tsx
+export function switcherList(projects: ProjectSummary[], query: string, seen: Record<string, string>): ProjectSummary[];
+export function ProjectSwitcher(props: { currentId: string | null }): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/components/TitleBar.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AttentionItem } from '@desk/protocol';
+import { initialGlobalState } from '../../shared/state';
+import { globalStore } from '../state/global';
+import { markSeen, resetSeen } from '../state/unread';
+import { installBridge } from '../test/bridge';
+import { TitleBar } from './TitleBar';
+
+afterEach(cleanup);
+beforeEach(() => installBridge());
+
+const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
+
+describe('TitleBar', () => {
+  it('shows places, the daemon state and the attention pill', () => {
+    globalStore.set({
+      ...initialGlobalState(),
+      connection: { status: 'live' },
+      system: { proxy: 'up', notices: [], lastSeq: 0 },
+      attention: [item('a'), item('b'), item('c')],
+      overview: [{ project: { id: 'p1', name: 'Onboarding revamp', goal: '', updated_at: '' }, desk_status: 'idle', threads: [], latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 }],
+    });
+    render(<TitleBar route={{ name: 'project', id: 'p1', tab: 'conversation' }} />);
+    const nav = screen.getByRole('navigation', { name: 'Places' });
+    expect(nav.textContent).toContain('Map');
+    expect(nav.textContent).toContain('Onboarding revamp');
+    expect(screen.getByRole('link', { name: 'Onboarding revamp' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByText('deskd · proxy up')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '3 need you' }).getAttribute('href')).toBe('#/attention');
+  });
+
+  it('says when nothing needs you and when deskd is down', () => {
+    globalStore.set({ ...initialGlobalState(), connection: { status: 'offline' } });
+    render(<TitleBar route={{ name: 'map' }} />);
+    expect(screen.getByText('deskd not running')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'All clear' })).toBeTruthy();
+  });
+
+  it('switches projects with ⌘P, filtering and the keyboard, and marks unread ones', () => {
+    resetSeen();
+    const summary = (id: string, name: string, updated: string, attention = 0) => ({
+      project: { id, name, goal: `${name} goal`, updated_at: updated },
+      desk_status: 'idle' as const,
+      threads: [{ id: `${id}t`, title: null, status: 'running' as const, reason: null, activity: null, model: 'm', git_branch: null, skills: [], review_round: 0, created_at: updated, updated_at: updated }],
+      latest_report: null,
+      plan_progress: { done: 0, total: 0 },
+      attention_count: attention,
+    });
+    globalStore.set({ ...initialGlobalState(), overview: [summary('a', 'Alpha', '2026-09-24T10:00:00.000Z'), summary('b', 'Beta', '2026-09-24T11:00:00.000Z', 2)] });
+    markSeen('a', '2026-09-24T12:00:00.000Z');
+    render(<TitleBar route={{ name: 'project', id: 'a', tab: 'conversation' }} />);
+    expect(screen.getByLabelText('Another project has news')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    const pop = screen.getByRole('dialog', { name: 'Switch project' });
+    const options = within(pop).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringContaining('Beta'), expect.stringContaining('Alpha'), '+ New project']);
+    expect(within(options[0]!).getByLabelText('unread')).toBeTruthy();
+    const box = within(pop).getByRole('combobox', { name: 'Find a project' });
+    fireEvent.change(box, { target: { value: 'alp' } });
+    expect(within(pop).getAllByRole('option')).toHaveLength(2);
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(window.location.hash).toBe('#/p/a/conversation');
+    expect(screen.queryByRole('dialog', { name: 'Switch project' })).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/components/TitleBar.test.tsx`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/components/ProjectSwitcher.tsx`:
+
+```tsx
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import type { ProjectSummary } from '@desk/protocol';
+import { projectSummaryLine } from '../map/OrbitMap';
+import { href, navigate } from '../router';
+import { useGlobal } from '../state/global';
+import { unreadIn, useSeen } from '../state/unread';
+
+/** Filters by name or goal, then orders: needs you, unread, most recent activity. */
+export function switcherList(projects: ProjectSummary[], query: string, seen: Record<string, string>): ProjectSummary[] {
+  const q = query.trim().toLowerCase();
+  return projects
+    .filter((p) => !q || p.project.name.toLowerCase().includes(q) || p.project.goal.toLowerCase().includes(q))
+    .sort((a, b) => Number(b.attention_count > 0) - Number(a.attention_count > 0) || Number(unreadIn(b, seen)) - Number(unreadIn(a, seen)) || b.project.updated_at.localeCompare(a.project.updated_at));
+}
+
+/** The ⌘P project switcher in the title bar. */
+export function ProjectSwitcher({ currentId }: { currentId: string | null }) {
+  const overview = useGlobal((g) => g.overview);
+  const seen = useSeen();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const list = useMemo(() => switcherList(overview, query, seen), [overview, query, seen]);
+  const othersUnread = overview.some((p) => p.project.id !== currentId && unreadIn(p, seen));
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActive(0);
+    inputRef.current?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [open]);
+  useEffect(() => setActive(0), [query]);
+
+  const go = (p: ProjectSummary | undefined) => {
+    setOpen(false);
+    navigate(p ? href({ name: 'project', id: p.project.id, tab: 'conversation' }) : href({ name: 'map', newProject: true }));
+  };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    const n = list.length + 1;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((a) => (a + 1) % n);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((a) => (a - 1 + n) % n);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      go(list[active]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  const optId = (i: number) => `${listId}-${i}`;
+
+  return (
+    <div className="switcher" ref={rootRef}>
+      <button type="button" className="switcher-btn" aria-label="Switch project (⌘P)" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {currentId ? null : <span>Projects</span>}
+        <span aria-hidden="true">▾</span>
+        {othersUnread ? <span className="unread-dot" aria-label="Another project has news" /> : null}
+      </button>
+      {open ? (
+        <div className="switcher-pop card" role="dialog" aria-label="Switch project">
+          <input
+            ref={inputRef}
+            type="text"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-activedescendant={optId(active)}
+            aria-label="Find a project"
+            placeholder="Find a project"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKey}
+          />
+          <ul id={listId} role="listbox" aria-label="Projects">
+            {list.map((p, i) => (
+              <li
+                key={p.project.id}
+                id={optId(i)}
+                role="option"
+                aria-selected={i === active}
+                className={p.project.id === currentId ? 'current' : undefined}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => go(p)}
+              >
+                <span className="switcher-name">
+                  {p.project.name}
+                  {unreadIn(p, seen) ? <span className="unread-dot" aria-label="unread" /> : null}
+                </span>
+                <span className="switcher-sub">{projectSummaryLine(p)}</span>
+                {p.attention_count ? <span className="switcher-needs">{p.attention_count}</span> : null}
+              </li>
+            ))}
+            <li id={optId(list.length)} role="option" aria-selected={active === list.length} className="switcher-new" onMouseEnter={() => setActive(list.length)} onClick={() => go(undefined)}>
+              + New project
+            </li>
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/components/TitleBar.tsx`:
+
+```tsx
+import { href, type Route } from '../router';
+import { useGlobal } from '../state/global';
+import { ProjectSwitcher } from './ProjectSwitcher';
+
+function daemonLabel(status: string, proxy: string): { label: string; tone: '' | 'ok' | 'warn' | 'bad' } {
+  switch (status) {
+    case 'live':
+      return { label: `deskd · proxy ${proxy}`, tone: proxy === 'up' ? 'ok' : 'warn' };
+    case 'reconnecting':
+      return { label: 'reconnecting…', tone: 'warn' };
+    case 'offline':
+      return { label: 'deskd not running', tone: 'bad' };
+    case 'mismatch':
+      return { label: 'deskd needs an update', tone: 'bad' };
+    default:
+      return { label: 'connecting…', tone: '' };
+  }
+}
+
+/** Places nav (Map · project · ⌘P switcher · Skills · System), daemon status, and the attention pill. */
+export function TitleBar({ route }: { route: Route }) {
+  const count = useGlobal((s) => s.attention.length);
+  const status = useGlobal((s) => s.connection.status);
+  const proxy = useGlobal((s) => s.system.proxy);
+  const overview = useGlobal((s) => s.overview);
+  const projectId = route.name === 'project' ? route.id : null;
+  const project = projectId ? overview.find((p) => p.project.id === projectId) : undefined;
+  const d = daemonLabel(status, proxy);
+  const mac = window.desk?.platform === 'darwin';
+  return (
+    <header className={`titlebar${mac ? ' mac' : ''}`}>
+      <nav aria-label="Places" className="places">
+        <a href={href({ name: 'map' })} aria-current={route.name === 'map' ? 'page' : undefined}>
+          Map
+        </a>
+        {project ? (
+          <a href={href({ name: 'project', id: project.project.id, tab: 'conversation' })} aria-current="page">
+            {project.project.name}
+          </a>
+        ) : null}
+        <ProjectSwitcher currentId={project ? project.project.id : null} />
+        <a href={href({ name: 'skills' })} aria-current={route.name === 'skills' ? 'page' : undefined}>
+          Skills
+        </a>
+        <a href={href({ name: 'system' })} aria-current={route.name === 'system' ? 'page' : undefined}>
+          System
+        </a>
+      </nav>
+      <span className="spacer" />
+      <span className="daemon">
+        <span className={`dot ${d.tone}`} aria-hidden="true" />
+        {d.label}
+      </span>
+      <a href={href({ name: 'attention' })} className={`pill ${count ? 'needs' : 'clear'}`} aria-current={route.name === 'attention' ? 'page' : undefined}>
+        {count ? `${count} need you` : 'All clear'}
+      </a>
+    </header>
+  );
+}
+```
+
+Other changes:
+- Append `useSeen()` to `state/unread.ts`; it returns `useStore(seenStore, (s) => s)`.
+- Move `.unread-dot` from `map.css` to `tokens.css`, and add the "Project switcher" CSS block: `.switcher`, `.switcher-btn`, `.switcher-pop`, the options, `.switcher-needs` and `.switcher-new`. These match the `.places` pill, with a white card popover of 380px and the active option in `--run-pastel`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): ⌘P project switcher with filter, keyboard, needs-you counts and unread dots
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+

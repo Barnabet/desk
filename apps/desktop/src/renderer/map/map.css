@@ -210,13 +210,6 @@
   font-weight: 600;
   color: var(--accent);
 }
-.unread-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 4px;
-  background: var(--accent);
-  display: inline-block;
-}
 .map-legend {
   position: absolute;
   left: 32px;

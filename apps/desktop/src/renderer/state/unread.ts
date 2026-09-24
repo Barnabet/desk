@@ -44,3 +44,8 @@ export function useUnread(p: ProjectSummary): boolean {
 export function resetSeen(): void {
   seenStore.set({});
 }
+
+/** The whole last-seen map (a stable reference until something is marked seen). */
+export function useSeen(): Record<string, string> {
+  return useStore(seenStore, (s) => s);
+}

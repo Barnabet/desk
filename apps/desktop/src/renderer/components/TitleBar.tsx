@@ -1,5 +1,6 @@
 import { href, type Route } from '../router';
 import { useGlobal } from '../state/global';
+import { ProjectSwitcher } from './ProjectSwitcher';
 
 function daemonLabel(status: string, proxy: string): { label: string; tone: '' | 'ok' | 'warn' | 'bad' } {
   switch (status) {
@@ -16,7 +17,7 @@ function daemonLabel(status: string, proxy: string): { label: string; tone: '' |
   }
 }
 
-/** Places nav (Map · project · Skills · System), daemon status, and the attention pill. */
+/** Places nav (Map · project · ⌘P switcher · Skills · System), daemon status, and the attention pill. */
 export function TitleBar({ route }: { route: Route }) {
   const count = useGlobal((s) => s.attention.length);
   const status = useGlobal((s) => s.connection.status);
@@ -37,6 +38,7 @@ export function TitleBar({ route }: { route: Route }) {
             {project.project.name}
           </a>
         ) : null}
+        <ProjectSwitcher currentId={project ? project.project.id : null} />
         <a href={href({ name: 'skills' })} aria-current={route.name === 'skills' ? 'page' : undefined}>
           Skills
         </a>
