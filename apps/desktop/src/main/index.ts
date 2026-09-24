@@ -203,5 +203,28 @@ if (!e2e && !app.requestSingleInstanceLock()) {
 } else {
   // Closing the last window keeps Desk in the menu bar; Quit is in the tray menu and ⌘Q.
   app.on('window-all-closed', () => {});
-  app.whenReady().then(start, (err) => console.error(err));
+  app.whenReady().then(offerMoveToApplications).then(start, (err) => console.error(err));
+}
+
+/**
+ * The LaunchAgent runs deskd from the app bundle, so a packaged Desk should live in /Applications rather than
+ * in Downloads or a mounted disk image. Moving relaunches the app.
+ */
+async function offerMoveToApplications(): Promise<void> {
+  if (e2e || !app.isPackaged || process.platform !== 'darwin' || app.isInApplicationsFolder()) return;
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Move to Applications', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'Move Desk to your Applications folder?',
+    detail: 'Desk keeps its background service (deskd) running from the app, so it works best from Applications.',
+  });
+  if (response === 0) {
+    try {
+      app.moveToApplicationsFolder();
+    } catch {
+      // Declined or not possible (an existing copy is running): carry on from here.
+    }
+  }
 }

@@ -14,7 +14,8 @@
     "desk": "node --import tsx apps/cli/src/main.ts",
     "deskd": "node --import tsx apps/daemon/src/main.ts",
     "test:e2e": "pnpm --filter @desk/desktop build && vitest run --config vitest.e2e.config.ts",
-    "desktop": "pnpm --filter @desk/desktop dev"
+    "desktop": "pnpm --filter @desk/desktop dev",
+    "package:desktop": "pnpm --filter @desk/desktop package"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
