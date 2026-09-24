@@ -27,6 +27,18 @@ describe('SkillStore', () => {
     expect(detail.files.map((f) => f.path)).toEqual(['SKILL.md', 'references/format.md', 'scripts/collect.sh']);
   });
 
+  it('reads any past version with its instructions and files', async () => {
+    store.save({ scope: 'global', ...basic, instructions: 'first', files: [{ path: 'notes.md', content: 'v1 notes' }] });
+    store.save({ scope: 'global', ...basic, instructions: 'second' });
+    const v1 = store.getVersion('global', 'weekly-report', 1)!;
+    expect(v1).toMatchObject({ version: 1, instructions: 'first', description: basic.description });
+    expect(v1.files.map((f) => f.path)).toContain('notes.md');
+    expect(await readFile(store.filePath(v1, 'notes.md'), 'utf8')).toBe('v1 notes');
+    expect(store.getVersion('global', 'weekly-report', 2)).toMatchObject({ version: 2, instructions: 'second' });
+    expect(store.getVersion('global', 'weekly-report', 3)).toBeUndefined();
+    expect(() => store.getVersion('global', '../x', 1)).toThrow();
+  });
+
   it('project skills shadow global ones', () => {
     store.save({ scope: 'global', ...basic });
     store.save({ scope: 'global', name: 'other', description: 'Other skill', instructions: 'x' });

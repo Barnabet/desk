@@ -224,6 +224,25 @@ export class SkillStore {
     return { ...summary, ...parsed, files: listFiles(dir) };
   }
 
+  /** A skill as it was at `version` (history), or the live skill when `version` is current. */
+  getVersion(scope: SkillScope, name: string, version: number, projectId?: string): SkillDetail | undefined {
+    checkSkillName(name);
+    const live = join(this.root(scope, projectId), name);
+    if (version === this.currentVersion(scope, name, projectId) && existsSync(live)) return this.get(scope, name, projectId);
+    const dir = join(this.historyDir(scope, name, projectId), String(version));
+    if (!existsSync(dir)) return undefined;
+    let parsed: ParsedSkillMd = { frontmatter: {}, instructions: '' };
+    let description = '';
+    let error: string | undefined;
+    try {
+      parsed = parseSkillMd(readFileSync(join(dir, SKILL_FILE), 'utf8'));
+      description = checkDescription(parsed.frontmatter.description);
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    return { name, scope, dir, version, description, ...(error ? { error } : {}), ...parsed, files: listFiles(dir) };
+  }
+
   /** Resolves a file inside a skill, refusing paths (or symlinks) that lead outside it. */
   filePath(skill: SkillSummary, path: string): string {
     const rel = checkRelativePath(path);

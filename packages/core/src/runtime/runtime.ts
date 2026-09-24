@@ -425,6 +425,16 @@ export class Runtime {
     return this.skills.history(scope, name, projectId);
   }
 
+  /** A skill as it was at `version`; the scope resolves like getSkill when omitted. */
+  getSkillVersion(name: string, version: number, opts: { scope?: SkillScope; projectId?: string } = {}): SkillDetail {
+    const scopes: SkillScope[] = opts.scope ? [opts.scope] : opts.projectId ? ['project', 'global'] : ['global'];
+    for (const scope of scopes) {
+      const v = this.skills.getVersion(scope, name, version, scope === 'project' ? opts.projectId : undefined);
+      if (v) return v;
+    }
+    throw new NotFoundError(`Skill ${name} has no version ${version}`);
+  }
+
   restoreSkill(scope: SkillScope, name: string, version: number, projectId?: string) {
     const r = this.skills.restore(scope, name, version, projectId);
     this.o.store.append({
