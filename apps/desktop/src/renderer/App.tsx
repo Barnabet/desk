@@ -5,6 +5,7 @@ import { ProjectNav } from './components/ProjectNav';
 import { TitleBar } from './components/TitleBar';
 import { Toaster } from './components/Toast';
 import { navigate, useRoute, type Route } from './router';
+import { AttentionScreen } from './attention/AttentionScreen';
 import { ConversationScreen } from './conversation/ConversationScreen';
 import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
@@ -18,7 +19,7 @@ function Screen({ route }: { route: Route }) {
     case 'map':
       return <MapScreen newProject={route.newProject ?? false} />;
     case 'attention':
-      return <Pending title="Attention" />;
+      return <AttentionScreen {...(route.item ? { itemId: route.item } : {})} />;
     case 'skills':
       return <Pending title="Skills" />;
     case 'system':

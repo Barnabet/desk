@@ -5981,3 +5981,1180 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
+### Task 5: Attention — flight strips, rack, inspector, keys
+
+**Files:**
+- Create: `apps/desktop/src/renderer/attention/AttentionScreen.test.tsx`, `apps/desktop/src/renderer/attention/strips.ts`, `apps/desktop/src/renderer/attention/FlightStrip.tsx`, `apps/desktop/src/renderer/attention/StripRack.tsx`, `apps/desktop/src/renderer/attention/Inspector.tsx`, `apps/desktop/src/renderer/attention/AttentionScreen.tsx`, `apps/desktop/src/renderer/attention/attention.css`
+- Modify: `apps/desktop/src/renderer/App.tsx`
+
+**Interfaces:**
+
+- Consumes: `useGlobal` (attention, overview); `useSession` and `useTranscript` for the selected item's project, which supply the approval's arguments, the thread's branch and workdir, and its last words; `replaceRoute` (Task 4); `groupAttention` and `STRIP_CODE`.
+- Produces:
+
+```ts
+// attention/strips.ts
+export const BAYS: Array<{ key: keyof AttentionBays; name: string; sub: string }>;
+export function rackOrder(items: AttentionItem[]): { bays: AttentionBays; flat: AttentionItem[] };
+export function gauge(createdAt: string, now: number): number;   // 0–1 over 0–2h
+export function waited(createdAt: string, now: number): string;
+export function stripWho(i: AttentionItem, threadTitle: (id: string) => string | null): { label: string; name: string; tag: string };
+// attention/FlightStrip.tsx (the tray popover reuses it with compact)
+export function FlightStrip(props: { item: AttentionItem; now: number; selected: boolean; threadTitle(id: string): string | null; onSelect(): void; compact?: boolean }): JSX.Element;
+// attention/Inspector.tsx
+export function describeArgs(tool: string, args: string): { command: string | null; pretty: string };
+// attention/AttentionScreen.tsx
+export function AttentionScreen(props: { itemId?: string }): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing tests**
+
+`apps/desktop/src/renderer/attention/AttentionScreen.test.tsx`:
+
+```tsx
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProjectOverview } from '@desk/client';
+import type { AttentionItem, StoredEvent } from '@desk/protocol';
+import { ev } from '@desk/client/testing';
+import { initialGlobalState } from '../../shared/state';
+import { toastStore } from '../components/Toast';
+import { useRoute } from '../router';
+import { globalStore } from '../state/global';
+import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
+import { installBridge } from '../test/bridge';
+import { AttentionScreen } from './AttentionScreen';
+
+afterEach(cleanup);
+beforeEach(() => {
+  resetSessions();
+  setReleaseDelay(0);
+  window.location.hash = '#/attention';
+  toastStore.set([]);
+});
+
+const recent = new Date(Date.now() - 4 * 60_000).toISOString();
+const older = new Date(Date.now() - 60 * 60_000).toISOString();
+const items: AttentionItem[] = [
+  { id: 'report:9:0', kind: 'needs_you', project_id: 'p', project_name: 'Tax 2026', agent_id: 'd', title: 'Upload the 1099', detail: 'Research is in', created_at: older, ref: { event_id: 9 } },
+  { id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Tax 2026', agent_id: 't', title: 'Signup checklist wants to run bash', detail: 'Policy rule {"tool":"bash"} → ask', created_at: recent, ref: { approval_id: 'a1', thread_id: 't' } },
+  { id: 'question:7', kind: 'question', project_id: 'p', project_name: 'Tax 2026', agent_id: 'd', title: 'Data source or teammate first?', detail: '', created_at: recent, ref: { event_id: 7, options: ['Data source', 'Teammate'] } },
+];
+
+const overview = () =>
+  ({
+    project: { id: 'p', name: 'Tax 2026', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
+    desk: null,
+    sources: [],
+    plan: null,
+    threads: [],
+    approvals: [],
+    last_seq: 0,
+  }) as unknown as ProjectOverview;
+
+const events: StoredEvent[] = [
+  ev(1, 'agent.created', { role: 'thread', model: 'm', title: 'Signup checklist', brief: 'b', workspace_path: '/data/workspaces/signup-checklist', parent_id: 'd', git: { source_id: 's', branch: 'desk/signup-checklist', base: 'main', common_dir: '/r/.git' } }, { agent: 't' }),
+  ev(2, 'assistant.message', { run_id: 'r', content: 'I will install bun, then run the tests.', tool_calls: [] }, { agent: 't' }),
+  ev(3, 'approval.requested', { approval_id: 'a1', run_id: 'r', tool_call_id: 'c', tool: 'bash', arguments: '{"command":"curl -fsSL https://bun.sh/install | bash"}', reason: 'Policy rule {"tool":"bash"} → ask', delegate_to_desk: false }, { agent: 't' }),
+];
+
+function Routed() {
+  const r = useRoute();
+  return <AttentionScreen {...(r.name === 'attention' && r.item ? { itemId: r.item } : {})} />;
+}
+
+function setup(extra: Record<string, (input: any) => unknown> = {}, list = items) {
+  globalStore.set({ ...initialGlobalState(), connection: { status: 'live' }, attention: list });
+  const bridge = installBridge({
+    'projects.get': () => overview(),
+    'broker.watch': () => {
+      for (const e of events) bridge.emit('desk:event', e);
+      return { ok: true };
+    },
+    'broker.unwatch': () => ({ ok: true }),
+    ...extra,
+  });
+  startSessionRouting();
+  render(<Routed />);
+  return bridge;
+}
+
+describe('AttentionScreen', () => {
+  it('racks strips by bay and inspects the first one with the full request', async () => {
+    setup();
+    const rack = screen.getByRole('region', { name: 'Strip rack' });
+    expect(within(rack).getByRole('group', { name: /^CLEARANCE/ }).textContent).toContain('APR');
+    expect(within(rack).getByRole('group', { name: /^QUERIES/ }).textContent).toContain('Data source or teammate first?');
+    expect(screen.getByText('3 items across 1 project · oldest 1h')).toBeTruthy();
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    expect((await within(insp).findByLabelText('Command')).textContent).toBe('$ curl -fsSL https://bun.sh/install | bash');
+    expect(insp.textContent).toContain('desk/signup-checklist');
+    expect(insp.textContent).toContain('workspaces/signup-checklist');
+    expect(await within(insp).findByText('I will install bun, then run the tests.')).toBeTruthy();
+    expect(insp.textContent).toContain('1 of 3');
+  });
+
+  it('approves with ⌘⏎ and sends the note', async () => {
+    const bridge = setup({ 'approvals.resolve': () => ({ ok: true }) });
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    fireEvent.change(within(insp).getByLabelText('Note to the thread (optional)'), { target: { value: 'Use npm test' } });
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'approved', note: 'Use npm test' }));
+  });
+
+  it('explains a 409 with who decided', async () => {
+    setup({
+      'approvals.resolve': () => {
+        throw { code: 'conflict', message: 'already resolved', status: 409 };
+      },
+      'approvals.list': () => [{ id: 'a1', resolved_by: 'desk', status: 'approved' }],
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /^Deny/ }));
+    await waitFor(() => expect(toastStore.get().map((t) => t.message)).toContain('Already decided by Desk.'));
+  });
+
+  it('moves with J and K, answers a question, and dismisses a hand-off', async () => {
+    const bridge = setup({ 'projects.send': () => ({ ok: true }), 'attention.dismiss': () => ({ ok: true }) });
+    await screen.findByRole('article', { name: /clearance request/ });
+    fireEvent.keyDown(window, { key: 'j' });
+    const q = await screen.findByRole('article', { name: /question from desk/ });
+    fireEvent.click(within(q).getByRole('button', { name: 'Data source' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.send')?.input).toEqual({ id: 'p', text: 'Data source' }));
+    expect(await within(q).findByText(/^Sent\./)).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'j' });
+    const h = await screen.findByRole('article', { name: /from a report/ });
+    fireEvent.click(within(h).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'attention.dismiss')?.input).toEqual({ id: 'report:9:0' }));
+    fireEvent.keyDown(window, { key: 'e' });
+    expect(window.location.hash).toBe('#/p/p/conversation');
+  });
+
+  it('is all clear when nothing needs you', () => {
+    setup({}, []);
+    expect(screen.getByRole('heading', { name: 'All clear' })).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pnpm vitest run apps/desktop/src/renderer/attention`
+Expected: FAIL, because the modules don't exist yet.
+
+- [ ] **Step 3: Implement**
+
+`apps/desktop/src/renderer/attention/strips.ts`:
+
+```ts
+import { groupAttention, type AttentionBays } from '@desk/client';
+import type { AttentionItem } from '@desk/protocol';
+import { STRIP_CODE } from '../../shared/attention';
+import { duration } from '../format';
+
+export const BAYS: Array<{ key: keyof AttentionBays; name: string; sub: string }> = [
+  { key: 'clearance', name: 'CLEARANCE', sub: 'Approvals' },
+  { key: 'queries', name: 'QUERIES', sub: 'Questions' },
+  { key: 'handoffs', name: 'HANDOFFS', sub: 'From reports' },
+  { key: 'holding', name: 'HOLDING', sub: 'Stalled or failed' },
+];
+
+/** Items in rack order (bay by bay, oldest first within a bay), which is also the J/K order. */
+export function rackOrder(items: AttentionItem[]): { bays: AttentionBays; flat: AttentionItem[] } {
+  const g = groupAttention(items);
+  const bays = Object.fromEntries(Object.entries(g).map(([k, v]) => [k, [...v].sort((a, b) => a.created_at.localeCompare(b.created_at))])) as AttentionBays;
+  return { bays, flat: BAYS.flatMap((b) => bays[b.key]) };
+}
+
+const TWO_HOURS = 2 * 3_600_000;
+
+/** Fraction of the 0–2h wait gauge, never quite empty so a fresh item still shows a sliver. */
+export const gauge = (createdAt: string, now: number) => Math.min(1, Math.max(0.04, (now - Date.parse(createdAt)) / TWO_HOURS));
+
+export const waited = (createdAt: string, now: number) => duration(Math.max(0, now - Date.parse(createdAt)));
+
+/** The strip's third column: who is involved and a short tag. */
+export function stripWho(i: AttentionItem, threadTitle: (id: string) => string | null): { label: string; name: string; tag: string } {
+  switch (i.kind) {
+    case 'approval': {
+      const tool = /wants to run (.+)$/.exec(i.title)?.[1] ?? '';
+      return i.ref.thread_id ? { label: 'Thread', name: threadTitle(i.ref.thread_id) ?? 'A thread', tag: tool } : { label: 'Asked by', name: 'Desk', tag: tool };
+    }
+    case 'question':
+      return { label: 'Asked by', name: 'Desk', tag: i.ref.options?.length ? `${i.ref.options.length} options` : 'free answer' };
+    case 'needs_you':
+      return { label: 'From', name: "Desk's report", tag: 'needs_you' };
+    default:
+      return { label: 'Thread', name: (i.ref.thread_id && threadTitle(i.ref.thread_id)) || i.title.replace(/ (has stalled|failed)$/, ''), tag: i.kind };
+  }
+}
+
+export const KIND_NAME: Record<AttentionItem['kind'], string> = {
+  approval: 'Clearance request',
+  question: 'Question from Desk',
+  needs_you: 'From a report',
+  stalled: 'Stalled thread',
+  failed: 'Failed thread',
+};
+
+export { STRIP_CODE };
+```
+
+`apps/desktop/src/renderer/attention/FlightStrip.tsx`:
+
+```tsx
+import type { AttentionItem } from '@desk/protocol';
+import { gauge, STRIP_CODE, stripWho, waited } from './strips';
+
+const CAP_COLOR: Record<AttentionItem['kind'], string> = { approval: 'var(--accent)', question: 'var(--ink)', needs_you: 'var(--ink)', stalled: 'var(--wait)', failed: 'var(--accent)' };
+
+/** One flight strip: end cap (code and age), project and title, who, the wait gauge, and a chevron. */
+export function FlightStrip(o: { item: AttentionItem; now: number; selected: boolean; threadTitle(id: string): string | null; onSelect(): void; compact?: boolean }) {
+  const { item: i } = o;
+  const who = stripWho(i, o.threadTitle);
+  const g = gauge(i.created_at, o.now);
+  const age = waited(i.created_at, o.now);
+  return (
+    <button
+      type="button"
+      className={`strip strip-${i.kind}${o.selected ? ' selected' : ''}${o.compact ? ' compact' : ''}`}
+      aria-current={o.selected || undefined}
+      aria-label={`${STRIP_CODE[i.kind]}, ${i.project_name}: ${i.title}. ${who.label} ${who.name}. Waiting ${age}.`}
+      onClick={o.onSelect}
+    >
+      <span className="strip-cap" aria-hidden="true">
+        <span className="strip-code">{STRIP_CODE[i.kind]}</span>
+        <span className="strip-age">{age}</span>
+      </span>
+      <span className="strip-title" aria-hidden="true">
+        <span className="strip-project">{i.project_name}</span>
+        <span className="strip-text">{i.title}</span>
+      </span>
+      {o.compact ? null : (
+        <>
+          <span className="strip-col strip-who" aria-hidden="true">
+            <span className="strip-label">{who.label}</span>
+            <span className="strip-name">{who.name}</span>
+            <span className={`strip-tag${i.kind === 'stalled' ? ' wait' : ''}`}>{who.tag}</span>
+          </span>
+          <span className="strip-col strip-wait" aria-hidden="true">
+            <span className="strip-label">Waiting</span>
+            <svg width="76" height="10" viewBox="0 0 76 10">
+              <rect x="0" y="3" width="76" height="4" rx="2" fill="#E6E0D4" />
+              <path d="M38 1 V9 M75.5 1 V9" stroke="#8A857B" strokeWidth="1" />
+              <rect x="0" y="3" width={Math.max(3, 76 * g)} height="4" rx="2" fill={CAP_COLOR[i.kind]} />
+            </svg>
+            <span className="strip-age-big">{age}</span>
+          </span>
+        </>
+      )}
+      <span className="strip-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
+  );
+}
+```
+
+`apps/desktop/src/renderer/attention/StripRack.tsx`:
+
+```tsx
+import type { AttentionBays } from '@desk/client';
+import { FlightStrip } from './FlightStrip';
+import { BAYS } from './strips';
+
+/** The rack: four bays, each a recessed tray holding its strips. */
+export function StripRack(o: { bays: AttentionBays; now: number; selectedId: string | null; threadTitle(id: string): string | null; onSelect(id: string): void }) {
+  return (
+    <section className="rack" aria-label="Strip rack">
+      {BAYS.map((b) => {
+        const items = o.bays[b.key];
+        return (
+          <div key={b.key} className="bay" role="group" aria-label={`${b.name}: ${b.sub}, ${items.length}`}>
+            <div className="bay-name">
+              <span className="bay-title">{b.name}</span>
+              <span className="bay-sub">
+                {b.sub} · {items.length}
+              </span>
+            </div>
+            <div className="bay-tray">
+              {items.length ? (
+                items.map((i) => <FlightStrip key={i.id} item={i} now={o.now} selected={i.id === o.selectedId} threadTitle={o.threadTitle} onSelect={() => o.onSelect(i.id)} />)
+              ) : (
+                <span className="bay-empty">Nothing here</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+```
+
+`apps/desktop/src/renderer/attention/Inspector.tsx`:
+
+```tsx
+import { useMemo, useState } from 'react';
+import type { AttentionItem } from '@desk/protocol';
+import { Button } from '../components/Button';
+import { CodeBlock } from '../components/CodeBlock';
+import { SafeMarkdown } from '../components/SafeMarkdown';
+import { clock } from '../format';
+import { href } from '../router';
+import { useSession, useTranscript } from '../state/session';
+import { KIND_NAME, STRIP_CODE, waited } from './strips';
+
+const SHELL = new Set(['bash', 'bash_background', 'bash_readonly']);
+
+/** A shell command reads as `$ command`; anything else as pretty JSON. */
+export function describeArgs(tool: string, args: string): { command: string | null; pretty: string } {
+  try {
+    const v = JSON.parse(args) as Record<string, unknown>;
+    const pretty = JSON.stringify(v, null, 2);
+    if (SHELL.has(tool) && typeof v.command === 'string') return { command: v.command, pretty };
+    if (tool === 'skill_run' && typeof v.script === 'string') return { command: [v.skill, v.script, ...(Array.isArray(v.args) ? v.args : [])].filter(Boolean).join(' '), pretty };
+    return { command: null, pretty };
+  } catch {
+    return { command: null, pretty: args };
+  }
+}
+
+export type InspectorActions = {
+  note: string;
+  setNote(v: string): void;
+  busy: string | null;
+  answered: boolean;
+  resolve(decision: 'approved' | 'denied'): void;
+  answer(text: string): void;
+  dismiss(): void;
+  open(): void;
+};
+
+function Fact({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="fact">
+      <span className="fact-label">{label}</span>
+      <span className={mono ? 'mono fact-value' : 'fact-value'}>{children}</span>
+    </div>
+  );
+}
+
+/** The selected strip in full, with the controls to act on it. */
+export function Inspector(o: { item: AttentionItem; index: number; total: number; now: number; a: InspectorActions }) {
+  const { item: i, a } = o;
+  const s = useSession(i.project_id);
+  const agentId = i.agent_id ?? '';
+  const transcript = useTranscript(s, i.project_id, agentId);
+  const [raw, setRaw] = useState(false);
+  const [free, setFree] = useState('');
+  const approval = i.ref.approval_id ? s.project?.approvals.find((x) => x.id === i.ref.approval_id) : undefined;
+  const agent = s.project ? (s.project.desk?.id === agentId ? s.project.desk : s.project.threads.find((t) => t.id === agentId)) : undefined;
+  const lastWords = useMemo(() => {
+    for (let k = transcript.entries.length - 1; k >= 0; k--) {
+      const e = transcript.entries[k]!;
+      if (e.kind === 'assistant' && e.text.trim()) return e.text.trim();
+    }
+    return null;
+  }, [transcript.entries]);
+  const threadHref = i.ref.thread_id ? href({ name: 'project', id: i.project_id, tab: 'threads', threadId: i.ref.thread_id }) : null;
+  const args = approval ? describeArgs(approval.tool, approval.arguments) : null;
+
+  return (
+    <article className="card inspector" aria-label={`Selected: ${KIND_NAME[i.kind].toLowerCase()}`}>
+      <div className="inspector-eyebrow">
+        <span className={`strip-code-badge code-${i.kind}`}>{STRIP_CODE[i.kind]}</span>
+        <span className="eyebrow">{KIND_NAME[i.kind]}</span>
+        <span className="muted">
+          · {i.project_name} · {i.kind === 'approval' ? `paused since ${clock(i.created_at)}` : `waiting ${waited(i.created_at, o.now)}`}
+        </span>
+        <span className="grow" />
+        <span className="muted">
+          {o.index + 1} of {o.total}
+        </span>
+      </div>
+
+      {i.kind === 'approval' ? (
+        <>
+          <h2 className="inspector-title">{i.title}</h2>
+          {args ? (
+            <>
+              {args.command && !raw ? (
+                <pre className="command" aria-label="Command">
+                  <span className="command-prompt">$ </span>
+                  {args.command}
+                </pre>
+              ) : (
+                <CodeBlock code={raw ? approval!.arguments : args.pretty} language={raw ? 'raw arguments' : 'arguments'} />
+              )}
+              <button type="button" className="link small inspector-raw" onClick={() => setRaw((r) => !r)}>
+                {raw ? 'Show readable' : 'Show raw arguments'}
+              </button>
+            </>
+          ) : (
+            <p className="muted">{s.status === 'loading' ? 'Loading the request…' : 'The request details are not available.'}</p>
+          )}
+          <div className="facts">
+            <Fact label="TOOL" mono>
+              {approval?.tool ?? '—'}
+            </Fact>
+            <Fact label={agent?.role === 'desk' ? 'ASKED BY' : 'THREAD'}>{threadHref ? <a href={threadHref}>{agent?.title ?? 'Thread'}</a> : 'Desk'}</Fact>
+            <Fact label="BRANCH" mono>
+              {agent?.git_branch ?? 'scratch workspace'}
+            </Fact>
+            <Fact label="PROJECT">
+              <a href={href({ name: 'project', id: i.project_id, tab: 'conversation' })}>{i.project_name}</a>
+            </Fact>
+            <Fact label="WORKDIR" mono>
+              <span title={agent?.workspace_path ?? ''}>{agent?.workspace_path?.split('/').slice(-2).join('/') ?? '—'}</span>
+            </Fact>
+            <Fact label="REQUESTED">{clock(i.created_at)}</Fact>
+          </div>
+          <div className="why">
+            <div className="why-row">
+              <span className="why-label">Why it's asking</span>
+              <div className="why-body">
+                <p>{i.detail || approval?.reason}</p>
+              </div>
+            </div>
+            <div className="why-row">
+              <span className="why-label">What the thread said</span>
+              {lastWords ? <SafeMarkdown className="why-quote" text={lastWords} /> : <p className="muted">Nothing yet.</p>}
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="attention-note">Note to the thread (optional)</label>
+            <input id="attention-note" type="text" value={a.note} onChange={(e) => a.setNote(e.target.value)} placeholder="e.g. Use npm test instead" maxLength={2000} />
+          </div>
+          <div className="inspector-actions">
+            <Button variant="primary" pending={a.busy === 'approved'} disabled={a.busy !== null} onClick={() => a.resolve('approved')}>
+              Approve once <kbd>⌘⏎</kbd>
+            </Button>
+            <Button pending={a.busy === 'denied'} disabled={a.busy !== null} onClick={() => a.resolve('denied')}>
+              Deny <kbd>⌘⌫</kbd>
+            </Button>
+            <span className="grow" />
+            <a className="small" href={href({ name: 'project', id: i.project_id, tab: 'settings' })}>
+              Edit policy rules
+            </a>
+          </div>
+          <p className="muted small">The thread resumes as soon as you decide. If you deny, it's told why and tries another way.</p>
+        </>
+      ) : i.kind === 'question' ? (
+        <>
+          <h2 className="inspector-title">{i.title}</h2>
+          {a.answered ? (
+            <p className="muted">Sent. Desk picks it up at its next step.</p>
+          ) : (
+            <>
+              {i.ref.options?.length ? (
+                <div className="actions">
+                  {i.ref.options.map((opt, k) => (
+                    <Button key={opt} variant={k === 0 ? 'primary' : 'secondary'} pending={a.busy === opt} disabled={a.busy !== null} onClick={() => a.answer(opt)}>
+                      {opt}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+              <form
+                className="free-answer"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (free.trim()) a.answer(free.trim());
+                }}
+              >
+                <label htmlFor="attention-answer">Answer in your own words</label>
+                <div className="free-answer-row">
+                  <input id="attention-answer" type="text" value={free} onChange={(e) => setFree(e.target.value)} />
+                  <Button type="submit" disabled={!free.trim() || a.busy !== null}>
+                    Send
+                  </Button>
+                </div>
+              </form>
+            </>
+          )}
+          <div className="inspector-actions">
+            <Button variant="ghost" onClick={a.open}>
+              Open conversation <kbd>E</kbd>
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <h2 className="inspector-title">{i.title}</h2>
+          {i.detail ? (
+            <div className="why">
+              <div className="why-row">
+                <span className="why-label">{i.kind === 'needs_you' ? 'From the report' : i.kind === 'failed' ? 'Reason' : 'What the thread said'}</span>
+                {i.kind === 'stalled' ? <SafeMarkdown className="why-quote" text={i.detail} /> : <p>{i.detail}</p>}
+              </div>
+            </div>
+          ) : null}
+          <div className="inspector-actions">
+            <Button variant="primary" onClick={a.open}>
+              {i.kind === 'needs_you' ? 'Open conversation' : 'Open thread'} <kbd>E</kbd>
+            </Button>
+            <Button pending={a.busy === 'dismiss'} onClick={a.dismiss}>
+              Dismiss
+            </Button>
+          </div>
+          <p className="muted small">
+            {i.kind === 'needs_you' ? 'Dismiss once it is done. Desk is not told; tell it in the conversation if it needs to know.' : 'Dismissing hides this here. The thread is not changed.'}
+          </p>
+        </>
+      )}
+    </article>
+  );
+}
+```
+
+`apps/desktop/src/renderer/attention/AttentionScreen.tsx`:
+
+```tsx
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AttentionItem } from '@desk/protocol';
+import { call, DeskCallError } from '../bridge';
+import { EmptyState } from '../components/EmptyState';
+import { toast, toastError } from '../components/Toast';
+import { plural } from '../format';
+import { href, navigate, replaceRoute } from '../router';
+import { useGlobal } from '../state/global';
+import { useNow } from '../state/now';
+import { Inspector } from './Inspector';
+import { StripRack } from './StripRack';
+import { rackOrder, STRIP_CODE, waited } from './strips';
+import './attention.css';
+
+const WHO: Record<string, string> = { user: 'you, in another window', desk: 'Desk', system: 'Desk (the thread was stopped)' };
+
+function openTarget(i: AttentionItem): string {
+  if ((i.kind === 'stalled' || i.kind === 'failed' || i.kind === 'approval') && i.ref.thread_id) return href({ name: 'project', id: i.project_id, tab: 'threads', threadId: i.ref.thread_id });
+  return href({ name: 'project', id: i.project_id, tab: 'conversation' });
+}
+
+const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+/** Everything that needs you, as flight strips in a rack, with the selected strip inspected on the right. */
+export function AttentionScreen({ itemId }: { itemId?: string }) {
+  const items = useGlobal((g) => g.attention);
+  const overview = useGlobal((g) => g.overview);
+  const now = useNow();
+  const { bays, flat } = useMemo(() => rackOrder(items), [items]);
+  const titles = useMemo(() => new Map(overview.flatMap((p) => p.threads.map((t) => [t.id, t.title] as const))), [overview]);
+  const threadTitle = useCallback((id: string) => titles.get(id) ?? null, [titles]);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [answered, setAnswered] = useState<Set<string>>(new Set());
+  const lastIndex = useRef(0);
+
+  const found = flat.findIndex((i) => i.id === itemId);
+  const index = found >= 0 ? found : Math.min(lastIndex.current, flat.length - 1);
+  const selected = index >= 0 ? flat[index] : undefined;
+  useEffect(() => {
+    if (found >= 0) lastIndex.current = found;
+    else if (selected) replaceRoute({ name: 'attention', item: selected.id });
+  }, [found, selected]);
+  useEffect(() => {
+    setNote('');
+    setBusy(null);
+  }, [selected?.id]);
+
+  const select = useCallback((id: string) => replaceRoute({ name: 'attention', item: id }), []);
+
+  const resolve = useCallback(
+    async (decision: 'approved' | 'denied') => {
+      if (!selected || selected.kind !== 'approval' || !selected.ref.approval_id || busy) return;
+      setBusy(decision);
+      try {
+        await call('approvals.resolve', { id: selected.ref.approval_id, decision, ...(note.trim() ? { note: note.trim() } : {}) });
+      } catch (err) {
+        if (err instanceof DeskCallError && err.status === 409) {
+          const all = await call('approvals.list', { projectId: selected.project_id }).catch(() => []);
+          const by = all.find((x) => x.id === selected.ref.approval_id)?.resolved_by;
+          toast({ tone: 'info', message: `Already decided by ${by ? (WHO[by] ?? by) : 'someone else'}.` });
+        } else toastError(err);
+        setBusy(null);
+      }
+    },
+    [selected, note, busy],
+  );
+  const answer = useCallback(
+    async (text: string) => {
+      if (!selected) return;
+      setBusy(text);
+      try {
+        await call('projects.send', { id: selected.project_id, text });
+        setAnswered((s) => new Set(s).add(selected.id));
+      } catch (err) {
+        toastError(err);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [selected],
+  );
+  const dismiss = useCallback(async () => {
+    if (!selected) return;
+    setBusy('dismiss');
+    try {
+      await call('attention.dismiss', { id: selected.id });
+    } catch (err) {
+      toastError(err);
+      setBusy(null);
+    }
+  }, [selected]);
+  const open = useCallback(() => selected && navigate(openTarget(selected)), [selected]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!flat.length) return;
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === 'Enter') {
+        e.preventDefault();
+        void resolve('approved');
+      } else if (mod && e.key === 'Backspace') {
+        e.preventDefault();
+        void resolve('denied');
+      } else if (!mod && !e.altKey && !typing(e.target)) {
+        const k = e.key.toLowerCase();
+        if (k === 'j' || k === 'k') {
+          e.preventDefault();
+          const next = Math.max(0, Math.min(flat.length - 1, index + (k === 'j' ? 1 : -1)));
+          select(flat[next]!.id);
+        } else if (k === 'e') {
+          e.preventDefault();
+          open();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [flat, index, resolve, open, select]);
+
+  const projects = new Set(items.map((i) => i.project_id)).size;
+  const oldest = flat.reduce<string | null>((m, i) => (m === null || i.created_at < m ? i.created_at : m), null);
+
+  return (
+    <div className="attention">
+      <div className="attention-left">
+        <header className="attention-head">
+          <h1>Needs you</h1>
+          <p className="muted">
+            {flat.length ? `${plural(flat.length, 'item')} across ${plural(projects, 'project')} · oldest ${waited(oldest!, now)}` : 'Nothing is waiting on you.'}
+          </p>
+        </header>
+        <StripRack bays={bays} now={now} selectedId={selected?.id ?? null} threadTitle={threadTitle} onSelect={select} />
+        <p className="keys mono">J K move · ⌘⏎ approve · ⌘⌫ deny · E open</p>
+        <div className="strip-legend" aria-hidden="true">
+          <span>
+            <span className="strip-code-badge code-approval">{STRIP_CODE.approval}</span>Approval
+          </span>
+          <span>
+            <span className="strip-code-badge code-question">{STRIP_CODE.question}</span>Question from Desk
+          </span>
+          <span>
+            <span className="strip-code-badge code-needs_you">{STRIP_CODE.needs_you}</span>From a report
+          </span>
+          <span>
+            <span className="strip-code-badge code-stalled">{STRIP_CODE.stalled}</span>Stalled thread
+          </span>
+          <span>
+            <span className="strip-code-badge code-failed">{STRIP_CODE.failed}</span>Failed thread
+          </span>
+          <span className="muted">Bar = wait, 0–2h</span>
+        </div>
+      </div>
+      <div className="attention-right">
+        {selected ? (
+          <Inspector
+            key={selected.id}
+            item={selected}
+            index={index}
+            total={flat.length}
+            now={now}
+            a={{ note, setNote, busy, answered: answered.has(selected.id), resolve: (d) => void resolve(d), answer: (t) => void answer(t), dismiss: () => void dismiss(), open }}
+          />
+        ) : (
+          <EmptyState title="All clear" action={<a href="#/map">Back to the map</a>}>
+            Approvals, questions, hand-offs from reports and stuck threads land here.
+          </EmptyState>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+`apps/desktop/src/renderer/attention/attention.css`:
+
+```css
+.attention {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(560px, 756px) minmax(400px, 596px);
+  gap: 40px;
+  padding: 20px 24px;
+  overflow: auto;
+}
+.attention-left {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.attention-head h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 34px;
+  line-height: 40px;
+  font-weight: 500;
+}
+.attention-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.rack {
+  padding: 12px;
+  background: var(--titlebar);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 #f2eee6, inset 0 -1px 0 var(--rule);
+}
+.bay {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px 0;
+  border-bottom: 1px dashed #cfc7b8;
+}
+.bay:last-child {
+  border-bottom: 0;
+}
+.bay-name {
+  width: 100px;
+  min-height: 96px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+.bay-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text);
+}
+.bay-sub {
+  font-size: 11.5px;
+  color: var(--text-min);
+}
+.bay-tray {
+  flex: 1;
+  min-width: 0;
+  min-height: 96px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 8px;
+  border-radius: 8px;
+  background: var(--nav);
+  box-shadow: inset 0 2px 3px rgba(28, 27, 24, 0.14), inset 0 -1px 0 #ede8de;
+}
+.bay-empty {
+  margin: auto 0;
+  padding-left: 8px;
+  font-size: 12px;
+  color: var(--text-min);
+}
+.strip {
+  width: calc(100% - 28px);
+  height: 72px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(28, 27, 24, 0.1), 0 2px 6px rgba(28, 27, 24, 0.06);
+  overflow: hidden;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: margin 0.15s, box-shadow 0.15s;
+}
+.strip.selected {
+  margin-left: 28px;
+  box-shadow: 0 12px 26px rgba(28, 27, 24, 0.2), 0 2px 4px rgba(28, 27, 24, 0.1);
+}
+.strip:focus-visible {
+  outline: 2px solid var(--run);
+  outline-offset: 2px;
+}
+.strip-cap {
+  width: 64px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+}
+.strip-question .strip-cap {
+  background: var(--ink);
+}
+.strip-needs_you .strip-cap {
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink);
+  border-radius: 5px 0 0 5px;
+  background: #fff;
+  color: var(--ink);
+}
+.strip-stalled .strip-cap {
+  background: var(--wait);
+}
+.strip-code {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.strip-age {
+  font-size: 11px;
+}
+.strip-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 12px;
+}
+.strip-project {
+  font-size: 11.5px;
+  line-height: 15px;
+  color: var(--text-min);
+}
+.strip-text {
+  font-size: 14px;
+  line-height: 17px;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.strip-col {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 12px;
+  border-left: 1px solid var(--rule-soft);
+}
+.strip-who {
+  width: 136px;
+  box-sizing: border-box;
+}
+.strip-wait {
+  width: 100px;
+  box-sizing: border-box;
+  gap: 4px;
+}
+.strip-label {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--text-min);
+}
+.strip-name {
+  font-size: 12.5px;
+  line-height: 16px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.strip-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.strip-tag.wait {
+  color: var(--wait-text);
+}
+.strip-age-big {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 16px;
+  font-weight: 500;
+}
+.strip-chevron {
+  width: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--rule-soft);
+  font-size: 20px;
+  color: var(--text-min);
+}
+.strip.compact {
+  width: 100%;
+  height: 46px;
+}
+.strip.compact .strip-cap {
+  width: 48px;
+}
+.strip.compact .strip-code {
+  font-size: 12px;
+}
+.strip.compact .strip-text {
+  font-size: 12.5px;
+  -webkit-line-clamp: 1;
+}
+.strip.compact .strip-chevron {
+  width: 26px;
+}
+.keys {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-min);
+}
+.strip-legend {
+  width: max-content;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  color: var(--text);
+}
+.strip-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.strip-code-badge {
+  height: 18px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.code-question {
+  background: var(--ink);
+}
+.code-needs_you {
+  border: 1.5px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+.code-stalled {
+  background: var(--wait);
+}
+.attention-right {
+  min-width: 0;
+}
+.inspector {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+.inspector-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.inspector-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  line-height: 31px;
+  font-weight: 500;
+}
+.command {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.command-prompt {
+  color: #b9b3a7;
+}
+.inspector-raw {
+  align-self: flex-start;
+  margin-top: -8px;
+}
+.facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--rule-soft);
+  overflow: hidden;
+}
+.fact {
+  min-height: 46px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 12px;
+  background: #fff;
+  min-width: 0;
+}
+.fact-label {
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.08em;
+  color: var(--text-min);
+}
+.fact-value {
+  font-size: 13px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.why {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule-soft);
+  border-radius: 8px;
+}
+.why-row {
+  display: flex;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.why-row:last-child {
+  border-bottom: 0;
+}
+.why-label {
+  width: 108px;
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 600;
+}
+.why-row p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text);
+}
+.why-quote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 21px;
+  color: var(--text);
+}
+.inspector input[type='text'] {
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid #cfc9bd;
+  border-radius: 10px;
+  background: #fbfaf7;
+  font-size: 13px;
+}
+.inspector-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.inspector-actions .btn {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 14px;
+}
+kbd {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.7;
+}
+.free-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.free-answer label {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.free-answer-row {
+  display: flex;
+  gap: 8px;
+}
+.free-answer-row input {
+  flex: 1;
+}
+
+@media (max-width: 1279px) {
+  .attention {
+    grid-template-columns: minmax(520px, 1fr) minmax(380px, 1fr);
+    gap: 20px;
+  }
+  .strip-who {
+    display: none;
+  }
+}
+```
+
+In `App.tsx`, route `attention` to `<AttentionScreen itemId={route.item} />`, passing `itemId` only when it is set.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm vitest run apps/desktop && pnpm typecheck`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A apps/desktop
+git commit -m "feat(desktop): attention — flight-strip rack in four bays, approval inspector with command, facts and last words, answers, dismiss, J/K/E/⌘⏎/⌘⌫, 409 handling
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
