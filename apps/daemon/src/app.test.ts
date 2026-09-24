@@ -62,6 +62,14 @@ describe('projects', () => {
     expect((await api('POST', `/projects/${project.id}/messages`, { text: 'hi' })).status).toBe(409);
   });
 
+  it('patches one setting without resetting the others', async () => {
+    const { api } = await setup();
+    const { project } = await newProject(api, { settings: { thread_model: FAKE_MODEL.id, review_rounds: 5, policy: [] } });
+    await api('PATCH', `/projects/${project.id}`, { settings: { check_in: 'minimal' } });
+    const s = (await api('GET', `/projects/${project.id}`)).body.project.settings;
+    expect(s).toMatchObject({ check_in: 'minimal', review_rounds: 5, thread_model: FAKE_MODEL.id, policy: [] });
+  });
+
   it('adds and removes sources, validating paths', async () => {
     const { api } = await setup();
     const { project } = await newProject(api);

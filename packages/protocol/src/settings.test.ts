@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, EventBody, ProjectSettings, resolveSettings } from '@desk/protocol';
+import { DEFAULT_POLICY, EventBody, ProjectSettings, ProjectSettingsPatch, resolveSettings, UpdateProjectRequest } from '@desk/protocol';
 
 describe('ProjectSettings', () => {
   it('resolves defaults', () => {
@@ -39,5 +39,12 @@ describe('ProjectSettings', () => {
   it('validates project.updated events', () => {
     expect(EventBody.parse({ type: 'project.updated', payload: { settings: { check_in: 'detailed' } } }).type).toBe('project.updated');
     expect(() => EventBody.parse({ type: 'project.updated', payload: { settings: { check_in: 'nope' } } })).toThrow();
+  });
+
+  it('parses patches to exactly the given keys (no defaults)', () => {
+    expect(ProjectSettingsPatch.parse({ check_in: 'minimal' })).toEqual({ check_in: 'minimal' });
+    expect(UpdateProjectRequest.parse({ settings: { review_rounds: 3 } })).toEqual({ settings: { review_rounds: 3 } });
+    expect(ProjectSettingsPatch.parse({})).toEqual({});
+    expect(() => ProjectSettingsPatch.parse({ check_in: 'loud' })).toThrow();
   });
 });

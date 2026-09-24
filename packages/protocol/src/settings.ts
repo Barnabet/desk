@@ -30,20 +30,32 @@ export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'web_search', action: 'allow' },
 ];
 
+/** Field validators without defaults, shared by the full settings and patches. */
+const settingsFields = {
+  desk_model: z.string().min(1),
+  thread_model: z.string().min(1),
+  fallback_model: z.string().min(1).nullable(),
+  max_concurrent_threads: z.number().int().min(1).max(32),
+  check_in: z.enum(['minimal', 'normal', 'detailed']),
+  autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']),
+  review_rounds: z.number().int().min(0).max(10),
+  policy: z.array(PolicyRule),
+};
+
 export const ProjectSettings = z.object({
-  desk_model: z.string().min(1).default('claude-opus-5-5'),
-  thread_model: z.string().min(1).default('claude-opus-5-5'),
-  fallback_model: z.string().min(1).nullable().default(null),
-  max_concurrent_threads: z.number().int().min(1).max(32).default(4),
-  check_in: z.enum(['minimal', 'normal', 'detailed']).default('normal'),
-  autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']).default('dispatch-freely'),
-  review_rounds: z.number().int().min(0).max(10).default(2),
-  policy: z.array(PolicyRule).default(() => DEFAULT_POLICY.map((r) => ({ ...r }))),
+  desk_model: settingsFields.desk_model.default('claude-opus-5-5'),
+  thread_model: settingsFields.thread_model.default('claude-opus-5-5'),
+  fallback_model: settingsFields.fallback_model.default(null),
+  max_concurrent_threads: settingsFields.max_concurrent_threads.default(4),
+  check_in: settingsFields.check_in.default('normal'),
+  autonomy: settingsFields.autonomy.default('dispatch-freely'),
+  review_rounds: settingsFields.review_rounds.default(2),
+  policy: settingsFields.policy.default(() => DEFAULT_POLICY.map((r) => ({ ...r }))),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
-/** Input-side settings: every field optional (a patch). */
-export const ProjectSettingsPatch = ProjectSettings.partial();
+/** A settings patch: only the given keys (zod 4 would apply `.default()`s inside `.partial()`, resetting the rest). */
+export const ProjectSettingsPatch = z.object(settingsFields).partial();
 export type ProjectSettingsPatch = z.input<typeof ProjectSettingsPatch>;
 
 export function resolveSettings(partial: ProjectSettingsPatch = {}): ProjectSettings {
