@@ -1,6 +1,6 @@
 # Desk — notes for coding agents
 
-Desk is a local-first macOS daemon (`deskd`) plus a CLI (`desk`). A per-project coordinator agent ("Desk") dispatches parallel worker agents ("threads"). It also manages shared memory, a library, and skills (instructions plus scripts). There is no UI in this repo; the UI is designed separately against `docs/api.md`.
+Desk is a local-first macOS daemon (`deskd`), a CLI (`desk`) and an Electron desktop app (`apps/desktop`, see `docs/desktop.md`). A per-project coordinator agent ("Desk") dispatches parallel worker agents ("threads"). It also manages shared memory, a library, and skills (instructions plus scripts). Every client goes through the API in `docs/api.md`.
 
 - **Design:** `docs/superpowers/specs/2026-09-23-desk-daemon-design.md`. §14 lists deviations from the original design.
 - **Plans:** `docs/superpowers/plans/`.
@@ -15,7 +15,8 @@ pnpm test:live    # live smokes against the local model proxy (slow; DESK_LIVE=1
 bin/desk …        # CLI (tsx loader, no build step)
 pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.mjs (+ migrations, better-sqlite3 prebuilds)
 pnpm desktop      # the Electron app against the repo daemon (Vite HMR)
-pnpm test:e2e     # builds the app and runs the Playwright-for-Electron smoke (opens a window)
+pnpm test:e2e     # builds the app and runs the Playwright-for-Electron suite (opens windows; set DESK_E2E_SHOTS=<dir> for screenshots)
+pnpm package:desktop   # unsigned (ad hoc) Desk.app → apps/desktop/release/*.dmg + .zip with the bundled deskd; enables e2e/packaged
 ```
 
 There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly. The desktop app is the exception: esbuild bundles its main and preload, and Vite builds its renderer.

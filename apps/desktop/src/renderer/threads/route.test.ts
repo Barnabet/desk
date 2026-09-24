@@ -49,6 +49,20 @@ describe('narrate', () => {
 });
 
 describe('routeLayout', () => {
+  it('spreads each row across the full width, with the turns inside it', () => {
+    const stops = stopsOf(narrate(transcript()));
+    const l = routeLayout(stops, 980, false);
+    const xs = l.points.filter((p) => p.row === 0).map((p) => p.x);
+    expect(Math.min(...xs)).toBe(120);
+    expect(Math.max(...xs)).toBe(860);
+    for (const piece of l.pieces) {
+      for (const n of piece.d.match(/-?\d+(\.\d+)?/g)!.filter((_, i) => i % 2 === 0).map(Number)) {
+        expect(n).toBeGreaterThanOrEqual(0);
+        expect(n).toBeLessThanOrEqual(980);
+      }
+    }
+  });
+
   it('snakes stops across rows and marks the live stretch after the last revision', () => {
     const stops = stopsOf(narrate(transcript()));
     const l = routeLayout(stops, 980, true);

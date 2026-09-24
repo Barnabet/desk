@@ -9,7 +9,10 @@ Knowledge accumulates across the work:
 
 Work is general (research, writing, analysis, planning, code); git is a capability, not the core model.
 
-v1.0 is the headless backend: the `deskd` daemon with an HTTP and WebSocket API, plus the `desk` CLI. The desktop UI is designed separately against [the API](docs/api.md).
+Desk has three parts:
+- the `deskd` daemon, with an HTTP and WebSocket API ([reference](docs/api.md))
+- the `desk` CLI
+- the **Desk desktop app** (Electron, macOS): a map of your projects, a line diagram of each conversation, thread routes, an attention rack, skills, library, memory, settings and system, plus a menu-bar popover. See [`docs/desktop.md`](docs/desktop.md).
 
 ## Requirements
 
@@ -18,6 +21,10 @@ v1.0 is the headless backend: the `deskd` daemon with an HTTP and WebSocket API,
 - An OpenAI-compatible Chat Completions endpoint. By default that is a local CLIProxyAPI serving `claude-opus-5-5` (the default model), `claude-fable-5-1`, `gpt-6-astra` and `gpt-6-sol`.
 
 ## Install
+
+**The app:** run `pnpm install && pnpm package:desktop`, then open `apps/desktop/release/Desk-<version>-<arch>.dmg` and drag Desk to Applications. The first launch needs right-click → Open, because the build is unsigned. Onboarding starts the bundled deskd and sets up the model endpoint. The rest of this README covers the daemon and CLI; the app is described in [`docs/desktop.md`](docs/desktop.md).
+
+**From source (daemon and CLI):**
 
 ```sh
 pnpm install
@@ -83,7 +90,7 @@ Projects are referenced by id or by name.
 ## Architecture
 
 ```
- desk CLI / future desktop app
+ desk CLI / Desk desktop app (Electron main process)
         │  HTTP + WebSocket (127.0.0.1, bearer token)
         ▼
  deskd (apps/daemon) ── Hono routes, ws stream, lock, launchd, stall timer
@@ -167,16 +174,18 @@ pnpm deskd --data-dir /tmp/desk-dev --port 0      # run the daemon in the foregr
 ### Desktop app (development)
 
 ```sh
-pnpm desktop       # Electron app with Vite HMR; finds (or starts) the repo daemon
-pnpm test:e2e      # builds the app and runs the Playwright-for-Electron smoke test against a real deskd
+pnpm desktop            # Electron app with Vite HMR; finds (or starts) the repo daemon
+pnpm test:e2e           # builds the app, then Playwright-for-Electron flows against a real deskd + fake model
+pnpm package:desktop    # apps/desktop/release/Desk-<v>-<arch>.dmg and .zip, with the bundled deskd
 ```
 
-The app keeps running in the menu bar when its window closes. It stores its own preferences in Electron's `userData` folder and never stores the daemon token.
+The app keeps running in the menu bar when its window closes. It stores its own preferences in Electron's `userData` folder and never stores the daemon token. Architecture, security rules and packaging are covered in [`docs/desktop.md`](docs/desktop.md).
 
 The spec is in [`docs/superpowers/specs/2026-09-23-desk-daemon-design.md`](docs/superpowers/specs/2026-09-23-desk-daemon-design.md) and the implementation plans are in [`docs/superpowers/plans/`](docs/superpowers/plans/). Contributor notes for agents are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Known limitations (v1.0)
 
 - After a hard crash (SIGKILL), background processes started by agents keep running as orphans; the recovered run does not reattach to them.
-- There is no UI yet, and no MCP connectors (planned for v1.1).
+- There are no MCP connectors yet (planned for v1.1).
+- The desktop build is ad-hoc signed, not notarised. The Windows target is configured but untested, because deskd is macOS-only.
 - Cost is reported in tokens, not currency.

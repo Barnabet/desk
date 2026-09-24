@@ -4,7 +4,7 @@ import { routeLayout, stopText, type Stop, type StopKind } from './route';
 
 const INNER: Record<StopKind, (s: Stop) => string> = {
   brief: () => 'Brief',
-  work: (s) => (s.tools.length ? String(s.tools.length) : '¶'),
+  work: (s) => (s.tools.length ? `${s.tools.length} ${s.tools.length === 1 ? 'tool' : 'tools'}` : '¶'),
   detour: () => 'detour',
   result: () => 'Report',
   revision: (s) => {

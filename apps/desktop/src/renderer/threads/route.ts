@@ -78,7 +78,7 @@ export function stopText(s: Stop, reviewRounds: number): { title: string; sub: s
     case 'steer':
       return { title: `You steered · ${clock(s.from)}`, sub: '', quote: clip(e.text, 70) };
     case 'approval':
-      return { title: e.state === 'pending' ? 'Waiting for your approval' : `Approval ${e.state}`, sub: `${e.tool} · ${clock(s.from)}` };
+      return { title: e.state === 'pending' ? 'Waiting for your approval' : e.state === 'approved' ? 'You approved' : e.state === 'denied' ? 'You denied' : `Approval ${e.state}`, sub: `${e.tool} · ${clock(s.from)}` };
     case 'incoming':
       return { title: `${e.fromLabel} · ${e.messageKind}`, sub: clock(s.from), quote: clip(e.text, 70) };
     default: {
@@ -104,19 +104,21 @@ export type RouteLayout = {
 
 const SPACING = 190;
 const ROW_GAP = 200;
-const MARGIN = 80;
+const MARGIN = 120;
 const TOP = 150;
 
-const RADIUS: Record<StopKind, number> = { brief: 28, work: 32, detour: 30, result: 28, revision: 28, steer: 24, approval: 24, incoming: 24 };
+const RADIUS: Record<StopKind, number> = { brief: 28, work: 38, detour: 30, result: 28, revision: 28, steer: 24, approval: 24, incoming: 24 };
 
 /** Lays the stops out as a serpentine: left to right, a U-turn, then right to left, and so on. */
 export function routeLayout(stops: Stop[], width: number, running: boolean): RouteLayout {
   const perRow = Math.max(2, Math.floor((width - MARGIN * 2) / SPACING) + 1);
+  // Spread the columns to fill the width rather than leaving the remainder empty on the right.
+  const step = (width - MARGIN * 2) / (perRow - 1);
   const total = stops.length + (running ? 1 : 0);
   const pos = (i: number) => {
     const row = Math.floor(i / perRow);
     const col = i % perRow;
-    const x = row % 2 === 0 ? MARGIN + col * SPACING : width - MARGIN - col * SPACING - ((width - MARGIN * 2) % SPACING);
+    const x = row % 2 === 0 ? MARGIN + col * step : width - MARGIN - col * step;
     return { row, x, y: TOP + row * ROW_GAP };
   };
   const points = stops.map((stop, i) => {
@@ -132,7 +134,7 @@ export function routeLayout(stops: Stop[], width: number, running: boolean): Rou
       return `M${a.x} ${a.y} C${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`;
     }
     const dir = a.row % 2 === 0 ? 1 : -1;
-    const bulge = Math.max(a.x, b.x) * (dir > 0 ? 1 : 0) + Math.min(a.x, b.x) * (dir < 0 ? 1 : 0) + dir * 90;
+    const bulge = Math.max(a.x, b.x) * (dir > 0 ? 1 : 0) + Math.min(a.x, b.x) * (dir < 0 ? 1 : 0) + dir * 72;
     return `M${a.x} ${a.y} C${bulge} ${a.y} ${bulge} ${b.y} ${b.x} ${b.y}`;
   };
   const lastRevision = stops.map((s) => s.kind).lastIndexOf('revision');
