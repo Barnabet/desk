@@ -136,8 +136,11 @@ pre {
 .titlebar.mac {
   padding-left: 84px;
 }
+/* The title bar drags the window, and its children inherit that: anything clickable, including popovers, opts out. */
 .titlebar a,
-.titlebar button {
+.titlebar button,
+.titlebar input,
+.titlebar [role='dialog'] {
   -webkit-app-region: no-drag;
 }
 .places {
