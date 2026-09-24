@@ -15,6 +15,7 @@ import {
 } from '@desk/core';
 import { createApp } from './app';
 import { loadDaemonFile, saveDaemonFile } from './config-file';
+import { startNotifier, type Notification } from './notifier';
 import { HttpError } from './http';
 import { acquireLock } from './lock';
 import { createLogger, type Logger } from './logger';
@@ -36,6 +37,8 @@ export type DaemonOptions = {
   home?: string;
   /** Where PUT /config/model-endpoint stores the key; null disables it (default null; main.ts passes the macOS Keychain). */
   keychain?: Keychain | null;
+  /** Posts notifications (main.ts passes macNotify on macOS; tests leave it unset). */
+  notify?: (n: Notification) => void;
   sandboxAvailable?: boolean;
   stallIntervalMs?: number;
   now?: () => number;
@@ -110,6 +113,16 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
     });
     const server = await startServer({ app, store, token, port: o.port ?? DEFAULT_PORT });
 
+    const stopNotifier = o.notify
+      ? startNotifier({
+          store,
+          enabled: () => file.notifications === 'auto',
+          suppressed: () => server.notifyingClients() > 0,
+          post: o.notify,
+          onError: (err) => log.error('notifier failed', err),
+        })
+      : () => {};
+
     const info: DaemonInfo = { port: server.port, token, pid: process.pid, version, started_at: new Date().toISOString() };
     writeFileSync(paths.daemonJson, JSON.stringify(info, null, 2), { mode: 0o600 });
     chmodSync(paths.daemonJson, 0o600);
@@ -137,6 +150,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       async stop() {
         if (stopped) return;
         stopped = true;
+        stopNotifier();
         clearInterval(stallTimer);
         await server.close();
         await runtime.shutdown();

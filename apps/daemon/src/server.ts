@@ -5,7 +5,7 @@ import type { Hono } from 'hono';
 import type { EventStore } from '@desk/core';
 import { attachStream } from './stream';
 
-export type RunningServer = { port: number; server: Server; close(): Promise<void> };
+export type RunningServer = { port: number; server: Server; close(): Promise<void>; notifyingClients(): number };
 
 function listen(app: Hono, port: number): Promise<Server> {
   return new Promise((resolve, reject) => {
@@ -23,13 +23,14 @@ export async function startServer(opts: { app: Hono; store: EventStore; token: s
     if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || opts.port === 0) throw err;
     server = await listen(opts.app, 0);
   }
-  const closeStream = attachStream(server, opts.store, opts.token);
+  const stream = attachStream(server, opts.store, opts.token);
   return {
     port: (server.address() as AddressInfo).port,
     server,
+    notifyingClients: () => stream.notifyingClients(),
     close: () =>
       new Promise<void>((resolve) => {
-        closeStream();
+        stream.close();
         server.closeAllConnections?.();
         server.close(() => resolve());
       }),

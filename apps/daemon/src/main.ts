@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { macKeychain } from '@desk/core';
 import { startDaemon, DEFAULT_PORT } from './daemon';
 import { createLogger } from './logger';
+import { macNotify } from './notifier';
 import { daemonPaths, defaultDataDir } from './paths';
 
 const { values } = parseArgs({ options: { port: { type: 'string' }, 'data-dir': { type: 'string' } } });
@@ -16,7 +17,7 @@ try {
     dataDir,
     port: values.port ? Number(values.port) : DEFAULT_PORT,
     log,
-    ...(process.platform === 'darwin' ? { keychain: macKeychain() } : {}),
+    ...(process.platform === 'darwin' ? { keychain: macKeychain(), notify: macNotify } : {}),
   });
   let stopping = false;
   const stop = async (signal: string) => {

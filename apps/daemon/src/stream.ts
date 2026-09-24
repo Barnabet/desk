@@ -14,10 +14,8 @@ function send(ws: WebSocket, msg: StreamServerMessage): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function serve(ws: WebSocket, store: EventStore): void {
+function serve(ws: WebSocket, store: EventStore, notifying: Set<WebSocket>): void {
   let sub: Subscription | null = null;
-  let hello: { client: string; notifications: boolean } | null = null;
-  void hello;
   const matches = (projectId: string) => sub !== null && (sub.projectId === '*' || sub.projectId === projectId);
 
   const unsubscribe = store.subscribe((item: StreamItem) => {
@@ -38,7 +36,8 @@ function serve(ws: WebSocket, store: EventStore): void {
       return;
     }
     if ('hello' in parsed) {
-      hello = parsed.hello;
+      if (parsed.hello.notifications) notifying.add(ws);
+      else notifying.delete(ws);
       return;
     }
     const { project_id, after_seq } = parsed.subscribe;
@@ -58,14 +57,16 @@ function serve(ws: WebSocket, store: EventStore): void {
   const heartbeat = setInterval(() => ws.ping(), HEARTBEAT_MS);
   heartbeat.unref();
   ws.on('close', () => {
+    notifying.delete(ws);
     clearInterval(heartbeat);
     unsubscribe();
   });
 }
 
-/** Serves `/v1/stream` WebSocket upgrades on `server`. Returns a closer for all open sockets. */
-export function attachStream(server: Server, store: EventStore, token: string): () => void {
+/** Serves `/v1/stream` WebSocket upgrades on `server`. Also counts clients that announced they show notifications. */
+export function attachStream(server: Server, store: EventStore, token: string): { close(): void; notifyingClients(): number } {
   const wss = new WebSocketServer({ noServer: true });
+  const notifying = new Set<WebSocket>();
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== '/v1/stream') {
@@ -77,11 +78,14 @@ export function attachStream(server: Server, store: EventStore, token: string): 
         ws.close(4401, 'unauthorized');
         return;
       }
-      serve(ws, store);
+      serve(ws, store, notifying);
     });
   });
-  return () => {
-    for (const client of wss.clients) client.terminate();
-    wss.close();
+  return {
+    close: () => {
+      for (const client of wss.clients) client.terminate();
+      wss.close();
+    },
+    notifyingClients: () => notifying.size,
   };
 }

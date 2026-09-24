@@ -118,4 +118,15 @@ describe('event stream', () => {
     expect(err.kind === 'error' && err.message).toMatch(/subscribe/);
     c.ws.close();
   });
+
+  it('counts desktop clients that say hello with notifications', async () => {
+    await setup();
+    const c = await connect();
+    c.ws.send(JSON.stringify({ hello: { client: 'desktop', notifications: true } }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(server!.notifyingClients()).toBe(1);
+    c.ws.close();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(server!.notifyingClients()).toBe(0);
+  });
 });
