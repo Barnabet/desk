@@ -6259,7 +6259,9 @@ git commit -m "feat(web-server): POST /rpc/:op over the bff handlers and webChan
 - Consumes: `dispatch`, `HandlerContext` from `@desk/bff/server`; `GlobalState`, `IpcResult`, `initialGlobalState` (test) from `@desk/bff/contract`; `Sessions`; the frames of W0b.1; `attachUpgrades` and the test helpers of W0b.3.
 - Produces: `PushHubDeps = { sessions; broker: { snapshot(): GlobalState; dropSender(senderId): void }; ctx(senderId): HandlerContext; onGrantedChange?(granted: number): void; authTimeoutMs?; log?(message, err?) }`; `class PushHub { handleUpgrade: UpgradeRoute; send(senderId, channel: WebPushChannel, payload); broadcast(channel, payload); notify(notices: WebNotice[]); granted(): number; close() }`. Sender ids start at 1 and are never reused; `/rpc` uses 0.
 
-Spec §2 and §5: the first client frame is `{ session }` within 5 seconds, else close 4401; a revoked session closes its sockets with 4401; `broker.watch`/`unwatch` arrive as `{ op, id, input }`, are validated by the same `channels` schemas with this socket as the sender, and are answered `{ ack: id, result }` after the frames they caused; closing a socket drops its sender (its watches); `{ notifyPermission }` updates a count of sockets that may show notifications, reported through `onGrantedChange` whenever it changes; `desk:notify` goes only to those sockets.
+Spec §2 and §5: the first client frame is `{ session }` within 5 seconds, else close 4401; a revoked session closes its sockets with 4401; `broker.watch`/`unwatch` arrive as `{ op, id, input }`, are validated by the same `channels` schemas with this socket as the sender, and are answered `{ ack: id, result }` after the frames they caused; closing a socket drops its sender (its watches); a bad frame (over 64 KiB, invalid UTF-8, unmasked) makes ws close the socket (1009, 1007, 1002) and is logged, never thrown; `{ notifyPermission }` updates a count of sockets that may show notifications, reported through `onGrantedChange` whenever it changes; `desk:notify` goes only to those sockets.
+
+**Deviation (review fix):** the plan's `accept()` first added no `'error'` listener to the accepted socket. ws emits `'error'` on the WebSocket for any bad frame (over `maxPayload`, invalid UTF-8, unmasked, a bad opcode) before it closes the socket itself, and with no listener the EventEmitter throws: one 70 KiB frame from any local process that passes the Host and Origin checks, before sign-in, crashed desk web. `accept()` now logs the error (`push socket error: <message>`, no stack) and lets ws close the socket; the `'close'` handler drops the sender as before. `dev.ts` guards its sockets the same way. The case "survives a bad frame before and after sign-in" covers it, and `setup` collects the log lines.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6296,12 +6298,14 @@ async function setup(watch: HandlerContext['broker']['watch'] = async () => {}) 
   const dropped: number[] = [];
   const granted: number[] = [];
   const unwatched: Array<[number, string]> = [];
+  const logs: string[] = [];
   const h = new PushHub({
     sessions,
     broker: { snapshot: () => initialGlobalState(), dropSender: (id) => void dropped.push(id) },
     ctx: (senderId) => ({ ...unusedContext(senderId), broker: { snapshot: () => initialGlobalState(), watch, unwatch: (s, p) => void unwatched.push([s, p]) } }),
     onGrantedChange: (n) => void granted.push(n),
     authTimeoutMs: 100,
+    log: (message) => void logs.push(message),
   });
   hub = h;
   const s = createServer((_req, res) => res.writeHead(404).end());
@@ -6310,7 +6314,7 @@ async function setup(watch: HandlerContext['broker']['watch'] = async () => {}) 
   attachUpgrades(s, { port: () => port, routes: { '/push': h.handleUpgrade } });
   await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', () => resolve()));
   port = (s.address() as AddressInfo).port;
-  return { hub: h, sessions, secret, port, dropped, granted, unwatched };
+  return { hub: h, sessions, secret, port, dropped, granted, unwatched, logs };
 }
 
 const NOTICE: WebNotice = { tag: 'question:1', title: 'Launch: Desk has a question', body: 'Which first?', route: '#/attention?item=question%3A1' };
@@ -6341,6 +6345,25 @@ describe('/push', () => {
     const live = await connected(port, secret);
     sessions.revoke(secret);
     expect(await live.closed).toBe(4401);
+  });
+
+  it('survives a bad frame before and after sign-in: ws closes the socket with 1009 and drops its sender', async () => {
+    const { port, secret, dropped, logs } = await setup();
+    const early = openPush(port);
+    await early.opened;
+    early.ws.on('error', () => {});
+    early.ws.send('x'.repeat(70 * 1024));
+    expect(await early.closed).toBe(1009);
+    const a = await connected(port, secret); // sender 1
+    a.ws.on('error', () => {});
+    a.ws.send('x'.repeat(70 * 1024));
+    expect(await a.closed).toBe(1009);
+    await until(() => dropped.length === 1);
+    expect(dropped).toEqual([1]);
+    expect(logs).toHaveLength(2);
+    for (const line of logs) expect(line).toMatch(/^push socket error: /);
+    const b = await connected(port, secret);
+    expect(b.frames[0]).toEqual({ channel: 'desk:global', payload: initialGlobalState() });
   });
 
   it('refuses upgrades without Host 127.0.0.1:<port> (421) or Origin http://127.0.0.1:<port> (403)', async () => {
@@ -6497,6 +6520,9 @@ export class PushHub {
   };
 
   private accept(ws: WebSocket): void {
+    // A bad frame (over maxPayload, unmasked, invalid UTF-8) emits 'error' before ws closes the socket itself
+    // (1009, 1002, 1007), signed in or not: unhandled, it would crash desk web. 'close' then drops the sender.
+    ws.on('error', (err) => this.d.log?.(`push socket error: ${err.message}`));
     let client: Client | null = null;
     const timer = setTimeout(() => ws.close(CLOSE_UNAUTHORIZED, 'no session'), this.d.authTimeoutMs ?? AUTH_TIMEOUT_MS);
     ws.on('message', (data) => {
@@ -6578,7 +6604,7 @@ export class PushHub {
 - [ ] **Step 4: Run the test**
 
 Run: `pnpm vitest run apps/web-server/src/push.test.ts --maxWorkers=2`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 Run: `pnpm typecheck`
 Expected: exit 0.
