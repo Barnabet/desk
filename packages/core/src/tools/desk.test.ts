@@ -63,7 +63,8 @@ describe('spawn_thread', () => {
     expect(existsSync(t.workspace_path!)).toBe(true);
     const first = h.fake.requests.find((r) => r.model === FAKE_MODEL.id)!;
     const [start] = h.store.list({ agentId: id, types: ['message.agent'] });
-    expect(first.messages.at(-1)).toEqual({ role: 'user', content: `[message #${start!.id} from Desk — note]\n> Begin your assignment.` });
+    expect(start?.type === 'message.agent' && start.payload.kind).toBe('start');
+    expect(first.messages.at(-1)).toEqual({ role: 'user', content: `[message #${start!.id} from Desk — start]\n> Begin your assignment.` });
   });
 
   it('creates a git worktree thread for a repository source', async () => {

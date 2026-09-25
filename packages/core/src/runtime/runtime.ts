@@ -482,7 +482,7 @@ export class Runtime {
         ...(skills.length ? { skills } : {}),
       },
     });
-    this.deliver(parent.id, id, 'note', 'Begin your assignment.');
+    this.deliver(parent.id, id, 'start', 'Begin your assignment.');
     return id;
   }
 

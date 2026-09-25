@@ -23,7 +23,7 @@ async function setup(script: Script) {
   const desk = getDeskAgent(h.store.db, projectId)!;
   const threadId = rt.createThread(projectId, { title: 'Research', brief: 'Find facts', workspacePath: join(h.dir, 'ws') });
   /** Starts the thread the way spawn_thread does (the user's own messages would be quoted in its notices). */
-  const begin = (id: string) => rt.deliver(desk.id, id, 'note', 'Begin your assignment.');
+  const begin = (id: string) => rt.deliver(desk.id, id, 'start', 'Begin your assignment.');
   return { rt, projectId, desk, threadId, begin };
 }
 

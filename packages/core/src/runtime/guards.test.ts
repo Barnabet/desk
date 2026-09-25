@@ -50,7 +50,7 @@ async function setup(threads: Scripts, extra: Partial<RuntimeOptions> = {}) {
   const desk = getDeskAgent(h.store.db, projectId)!;
   const thread = (title: string) => rt.createThread(projectId, { title, brief: `Do the ${title} part`, workspacePath: join(h.dir, title) });
   /** Starts a thread the way spawn_thread does. */
-  const begin = (id: string) => rt.deliver(desk.id, id, 'note', 'Begin your assignment.');
+  const begin = (id: string) => rt.deliver(desk.id, id, 'start', 'Begin your assignment.');
   return { rt, projectId, desk, thread, begin };
 }
 
