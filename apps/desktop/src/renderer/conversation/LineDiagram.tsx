@@ -1,13 +1,16 @@
 import { useLayoutEffect, useRef } from 'react';
-import type { ProjectState, ThreadView } from '@desk/client';
-import type { AgentStatus } from '@desk/protocol';
+import type { MessagesState, ProjectState, ThreadView } from '@desk/client';
+import type { AgentStatus, AttentionItem } from '@desk/protocol';
+import { AnsweringBadge } from '../components/AnsweringBadge';
 import { ago, clock, duration } from '../format';
 import { href } from '../router';
+import { answeringLabel, waitLabel } from '../waits';
 import type { LaneGeometry, LineGeometry } from './lineGeometry';
 
 type StationG = LineGeometry['stations'][number];
 
-function laneStatus(l: LaneGeometry, reviewRounds: number, waitingOnYou: boolean, now: number): { text: string; tone: AgentStatus } {
+/** A lane label's second line. `wait`: what a waiting thread waits on, from the message fold (waitLabel). */
+function laneStatus(l: LaneGeometry, reviewRounds: number, wait: string | null, now: number): { text: string; tone: AgentStatus } {
   const t = l.thread;
   const status = t?.status ?? l.lane.status;
   const since = ago(l.lane.forkedAt, now);
@@ -15,7 +18,7 @@ function laneStatus(l: LaneGeometry, reviewRounds: number, waitingOnYou: boolean
     case 'running':
       return { text: t?.review_round ? `revision ${t.review_round} of ${reviewRounds} · ${since}` : `running · ${since}`, tone: status };
     case 'waiting':
-      return { text: waitingOnYou ? `waiting on you · ${since}` : `waiting · ${since}`, tone: status };
+      return { text: wait ?? `waiting · ${since}`, tone: status };
     case 'queued':
       return { text: /restart/i.test(t?.reason ?? '') ? 'will resume' : 'queued', tone: status };
     case 'done': {
@@ -37,6 +40,10 @@ const shortModel = (m: string) => m.replace(/^claude-/, '');
 export function LineDiagram(o: {
   g: LineGeometry;
   project: ProjectState;
+  /** The session's message fold: what waiting threads wait on, and which threads are answering. */
+  messages: MessagesState;
+  /** The project's attention items: only a thread with one is "waiting on you". */
+  attention: readonly AttentionItem[];
   now: number;
   onStation(s: StationG): void;
 }) {
@@ -197,15 +204,26 @@ export function LineDiagram(o: {
         </span>
       </div>
       {g.rows.map((l) => {
-        const approval = pendingApproval(l.lane.threadId);
-        const s = laneStatus(l, project.project.settings.review_rounds, !!approval, o.now);
+        const id = l.lane.threadId;
+        const waiting = (l.thread?.status ?? l.lane.status) === 'waiting';
+        const s = laneStatus(l, project.project.settings.review_rounds, waiting ? waitLabel(o.messages, id, o.attention, o.now) : null, o.now);
+        // An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3).
+        const answering = answeringLabel(o.messages, id);
         return (
-          <a key={l.lane.threadId} className="line-label" style={{ top: l.y - 15 }} href={threadHref(l.lane.threadId)}>
+          <a key={id} className="line-label" style={{ top: l.y - 15 }} href={threadHref(id)}>
             <span className="line-label-title">
               <span className="line-swatch" style={{ background: l.color }} />
               {l.lane.title}
             </span>
-            <span className={`line-label-sub status-text-${s.tone}`}>{s.text}</span>
+            <span className={`line-label-sub status-text-${s.tone}`}>
+              {answering ? (
+                <>
+                  {s.tone} · <AnsweringBadge label={answering} />
+                </>
+              ) : (
+                s.text
+              )}
+            </span>
           </a>
         );
       })}

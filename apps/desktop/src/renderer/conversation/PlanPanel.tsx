@@ -1,12 +1,12 @@
 import type { ProjectState } from '@desk/client';
-import type { PlanItem } from '@desk/protocol';
+import type { AttentionItem, PlanItem } from '@desk/protocol';
 import { StatusChip } from '../components/StatusChip';
 import { href } from '../router';
 
 const STATUS: Record<PlanItem['status'], string> = { todo: 'To do', in_progress: 'In progress', done: 'Done', dropped: 'Dropped' };
 
 /** The plan as a route of waypoints, the merge note, and Desk's card. */
-export function PlanPanel({ project, proxyDown }: { project: ProjectState; proxyDown: boolean }) {
+export function PlanPanel({ project, proxyDown, attention }: { project: ProjectState; proxyDown: boolean; attention: readonly AttentionItem[] }) {
   const threads = new Map(project.threads.map((t) => [t.id, t]));
   const items = project.plan;
   const done = items.filter((i) => i.status === 'done').length;
@@ -24,6 +24,8 @@ export function PlanPanel({ project, proxyDown }: { project: ProjectState; proxy
           {items.map((i) => {
             const linked = i.thread_ids.map((id) => threads.get(id)).filter((t) => t !== undefined);
             const waiting = linked.some((t) => t.status === 'waiting');
+            // "waiting on you" only for a thread with an attention item, TerritoryInspector's check (design spec §8 item 4).
+            const onYou = linked.some((t) => t.status === 'waiting' && attention.some((a) => a.ref.thread_id === t.id));
             const tone = i.status === 'in_progress' ? (waiting ? 'wait' : 'run') : i.status;
             return (
               <li key={i.id} className={`plan-stop plan-${tone}`}>
@@ -39,7 +41,7 @@ export function PlanPanel({ project, proxyDown }: { project: ProjectState; proxy
                         {t.review_round && t.status !== 'done' ? ` · revision ${t.review_round}/${s.review_rounds}` : ''}
                       </span>
                     ))}
-                    {waiting ? ' · waiting on you' : ''}
+                    {onYou ? ' · waiting on you' : ''}
                     {i.status === 'todo' && !linked.length ? ' · Desk, once the threads report' : ''}
                   </span>
                   {i.notes ? <span className="muted small">{i.notes}</span> : null}

@@ -1058,3 +1058,13 @@ pre {
 .palette-foot {
   padding: 4px 12px;
 }
+/* A thread's answer run in progress: lane labels, roster cards and the thread head. */
+.answering-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--run-text);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}

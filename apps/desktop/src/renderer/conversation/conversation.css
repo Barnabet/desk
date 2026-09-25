@@ -1026,3 +1026,8 @@
   flex-direction: column;
   gap: 2px;
 }
+.line-label-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

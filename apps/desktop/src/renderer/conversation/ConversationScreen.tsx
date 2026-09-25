@@ -74,7 +74,8 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const viewsRef = useRef<Map<string, RowView>>(new Map());
   const views = useMemo(() => (viewsRef.current = keepStable(viewsRef.current, rowViews(s.chat.items, s.messages))), [s.chat.items, s.messages]);
 
-  const attentionIds = useMemo(() => new Set(attention.filter((i) => i.project_id === projectId).map((i) => i.id)), [attention, projectId]);
+  const projectAttention = useMemo(() => attention.filter((i) => i.project_id === projectId), [attention, projectId]);
+  const attentionIds = useMemo(() => new Set(projectAttention.map((i) => i.id)), [projectAttention]);
   const threads = s.project?.threads;
   const geometry = useMemo(() => lineGeometry({ timeline: s.timeline, threads: threads ?? [], now, width }), [s.timeline, threads, now, width]);
 
@@ -151,7 +152,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
 
   return (
     <div className="conversation" ref={rootRef}>
-      <LineDiagram g={geometry} project={project} now={now} onStation={onStation} />
+      <LineDiagram g={geometry} project={project} messages={s.messages} attention={projectAttention} now={now} onStation={onStation} />
       <div className={`conv-body${planOpen ? ' plan-open' : ''}`}>
         <div className="conv-intro">
           <WhatsUp project={project} now={now} />
@@ -206,7 +207,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
           <Composer projectId={projectId} draft={draft} setDraft={setDraft} textareaRef={textareaRef} onSent={(t) => setPending((p) => [...p, t])} />
         </section>
         <div className="conv-side">
-          <PlanPanel project={project} proxyDown={proxy === 'down'} />
+          <PlanPanel project={project} proxyDown={proxy === 'down'} attention={projectAttention} />
           {narrow ? <ServicesCard project={project} /> : null}
         </div>
       </div>

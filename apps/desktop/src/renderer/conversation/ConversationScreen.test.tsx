@@ -258,4 +258,39 @@ describe('messages in the conversation', () => {
     expect(row('tools:5')!.textContent).toBe('');
     expect(row('e:6')!.textContent).toContain('Desk → Auth API · note');
   });
+
+  it('labels lanes and plan stops with what threads wait on, "you" only for an attention item, and who is answering', async () => {
+    const asked = minutesAgo(4);
+    const approved = minutesAgo(2);
+    const approval: AttentionItem = { id: 'approval:x1', kind: 'approval', project_id: 'p', project_name: 'Onboarding revamp', agent_id: 'f', title: 'Frontend wants to run bash', detail: '', created_at: approved, ref: { approval_id: 'x1', thread_id: 'f' } };
+    const plan = {
+      project_id: 'p',
+      items: [
+        { id: '1', title: 'Login API', status: 'in_progress', thread_ids: ['a'], notes: '' },
+        { id: '2', title: 'Login page', status: 'in_progress', thread_ids: ['f'], notes: '' },
+      ],
+      updated_at: 't',
+    };
+    show(
+      [
+        ...team(),
+        created(5, 'b', minutesAgo(8)),
+        ev(6, 'agent.status_changed', { status: 'done' }, { agent: 'b', ts: minutesAgo(7) }),
+        msg(7, 'a', 'f', 'question', 'Which token format?', asked, { tracked: true }),
+        ev(8, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, { agent: 'a', ts: asked }),
+        ev(9, 'agent.status_changed', { status: 'waiting', reason: 'Waiting for approval' }, { agent: 'f', ts: approved }),
+        // Billing is done and answers Desk: its status stays done.
+        msg(10, 'd', 'b', 'question', 'Which currency?', minutesAgo(1), { tracked: true }),
+        ev(11, 'run.started', { run_id: 'rb', model: 'm', answering: 10 }, { agent: 'b', ts: minutesAgo(1) }),
+      ],
+      [approval],
+      { 'projects.get': () => ({ ...overview(), plan }) },
+    );
+    expect(await screen.findByText('waiting on Frontend · 4m')).toBeTruthy();
+    expect(screen.getByText('waiting on you · 2m')).toBeTruthy();
+    expect(screen.getByText('answering Desk').closest('.line-label-sub')!.textContent).toBe('done · answering Desk');
+    const panel = screen.getByRole('complementary', { name: 'Plan and Desk' });
+    expect(within(panel).getByText('Login API').closest('li')!.textContent).not.toContain('waiting on you');
+    expect(within(panel).getByText('Login page').closest('li')!.textContent).toContain('waiting on you');
+  });
 });
