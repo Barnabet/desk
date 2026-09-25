@@ -146,6 +146,8 @@ export class Runtime {
   private readonly resolving = new Map<string, number>();
   /** Each project's message fold, brought up to date on every read (messages()). */
   private readonly folds = new Map<string, MessagesState>();
+  /** Threads being archived: from archiveThread's first step, nothing new reaches them (design spec §3.5). */
+  private readonly archiving = new Set<string>();
   /** Those calls' abort controllers, and when each resolution has recorded its result: a shutdown aborts and awaits them. */
   private readonly resolutions = new Set<{ controller: AbortController; recorded: Promise<void> }>();
   /**
@@ -490,17 +492,30 @@ export class Runtime {
     return id;
   }
 
-  /** Deletes a finished thread's workspace (keeping any git branch) and marks it archived. */
+  /**
+   * Archives a finished thread (design spec §3.5): from the first step nothing new reaches it, the questions to it are
+   * closed, an answer run in flight ends, then its services stop, its workspace goes (keeping any git branch) and it is
+   * marked archived. If a step fails, it stays unarchived and can be archived again.
+   */
   async archiveThread(threadId: string): Promise<void> {
     const t = this.requireAgent(threadId);
     if (t.role !== 'thread') throw new ValidationError('Only threads can be archived');
     if (!TERMINAL.has(t.status)) throw new ConflictError(`Thread ${threadId} is ${t.status}; stop it before archiving`);
-    await this.stopServicesOf(t.project_id, 'thread_archived', t.id);
-    if (t.workspace_path) {
-      const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
-      await removeWorkspace({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
+    if (this.archiving.has(t.id)) throw new ConflictError(`Thread ${threadId} is already being archived`);
+    this.archiving.add(t.id);
+    try {
+      // Closed before the stop, so the stopped job's afterRun finds nothing open and starts nothing.
+      this.closeQuestionsTo(t, WHY.archived);
+      await this.scheduler.stopAndWait(t.id);
+      await this.stopServicesOf(t.project_id, 'thread_archived', t.id);
+      if (t.workspace_path) {
+        const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
+        await removeWorkspace({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
+      }
+      this.o.store.append({ project_id: t.project_id, agent_id: t.id, type: 'agent.archived', payload: {} });
+    } finally {
+      this.archiving.delete(t.id);
     }
-    this.o.store.append({ project_id: t.project_id, agent_id: t.id, type: 'agent.archived', payload: {} });
   }
 
   /** Low-level thread creation in an existing directory. `parentId` defaults to the project's Desk; `null` makes a standalone thread. */
@@ -816,7 +831,7 @@ export class Runtime {
    */
   sendMessage(agentId: string, text: string, opts: { question?: boolean } = {}): void {
     const agent = this.requireAgent(agentId);
-    if (agent.archived_at) throw new ConflictError(`Thread ${agentId} is archived`);
+    if (agent.archived_at || this.archiving.has(agentId)) throw new ConflictError(`Thread ${agentId} is archived`);
     this.requireOpenProject(agent.project_id);
     if (opts.question && agent.role !== 'thread') throw new ValidationError('Only a thread can be asked a question; write to Desk instead');
     this.o.store.append({
@@ -834,14 +849,16 @@ export class Runtime {
   }
 
   /**
-   * Stops an agent: kills its jobs, aborts or dequeues its run and denies its pending approvals. A running run ends
-   * `cancelled` by itself; otherwise an agent that has not finished is cancelled here. `by` is the agent that stopped
-   * it (Desk, or the project's archive): the cancellation is not reported back to it.
+   * Stops an agent: kills its jobs, dequeues or aborts its job and denies its pending approvals (design spec §3.5).
+   * A running full run ends `cancelled` by itself. Otherwise (no job, a queued job, or an answer job, which counts as
+   * no job) an agent that has not finished is cancelled here. Stopping a thread closes the open questions to it;
+   * stopping Desk closes nothing. `by` is the agent that stopped it (Desk, or the project's archive): the cancellation
+   * is not reported back to it.
    */
   stopAgent(agentId: string, opts: { by?: string; reason?: string } = {}): void {
     const agent = this.requireAgent(agentId);
     this.jobs.killAll(agentId);
-    const { state } = this.scheduler.stop(agentId);
+    const { state, job } = this.scheduler.stop(agentId);
     for (const ap of pendingApprovalsFor(this.o.store.db, agentId)) {
       this.o.store.append([
         { project_id: agent.project_id, agent_id: agentId, type: 'approval.resolved', payload: { approval_id: ap.id, decision: 'denied', resolved_by: 'system', note: 'Agent stopped' } },
@@ -853,20 +870,22 @@ export class Runtime {
         },
       ]);
     }
-    if (state === 'running') {
+    if (state === 'running' && job?.kind === 'run') {
       // The run's own ending appends `cancelled`; afterRun's notifyParent consumes this entry.
       if (opts.by) this.silentStops.add(agentId);
       if (!this.stoppedAt.has(agentId)) this.stoppedAt.set(agentId, lastEvent(this.o.store.db, agentId)?.id ?? 0);
-      return;
+    } else if (!TERMINAL.has(this.requireAgent(agentId).status)) {
+      this.o.store.append({
+        project_id: agent.project_id,
+        agent_id: agentId,
+        type: 'agent.status_changed',
+        payload: { status: 'cancelled', reason: opts.reason ?? (state === 'queued' && job?.kind === 'run' ? 'Stopped before starting' : 'Stopped') },
+      });
+      if (!opts.by) this.notifyParent(this.requireAgent(agentId));
     }
-    if (TERMINAL.has(this.requireAgent(agentId).status)) return;
-    this.o.store.append({
-      project_id: agent.project_id,
-      agent_id: agentId,
-      type: 'agent.status_changed',
-      payload: { status: 'cancelled', reason: opts.reason ?? (state === 'queued' ? 'Stopped before starting' : 'Stopped') },
-    });
-    if (!opts.by) this.notifyParent(this.requireAgent(agentId));
+    // A stopped thread answers no one: each asker gets the runtime's closure. An aborted answer run finds its question
+    // closed and appends only run.finished.
+    this.closeQuestionsTo(this.requireAgent(agentId), WHY.stopped);
   }
 
   /** Reports running/waiting threads with no activity for `thresholdMs` to their Desk, once per stall. Returns reported thread ids. */
@@ -1146,6 +1165,15 @@ export class Runtime {
     return event ? [event] : [];
   }
 
+  /**
+   * Closes every open question to a thread with the runtime's `(<title> <why>.)`, through answer(), which wakes each
+   * asker (design spec §3.5). Desk's questions are never closed: a stopped Desk leaves them for when the user resumes it.
+   */
+  private closeQuestionsTo(thread: AgentRow, why: string): void {
+    if (thread.role !== 'thread') return;
+    for (const q of openTo(this.messages(thread.project_id), thread.id)) this.answer(q.id, thread.id, closureText(thread.title, why), { auto: true });
+  }
+
   /** Unknown models are assumed to see images; the endpoint answers for itself. */
   private modelSeesImages(model: string): boolean {
     return this.o.models.has(model) ? this.o.models.get(model).vision : true;
@@ -1255,7 +1283,7 @@ export class Runtime {
     // A run stopped while running is cancelled from the stop, not from the `cancelled` its ending appended.
     const cancelledAt = agent.status === 'cancelled' ? (this.stoppedAt.get(agent.id) ?? lastEvent(store.db, agent.id, 'agent.status_changed')?.id) : undefined;
     return {
-      agent: { role: agent.role, status: agent.status, archived: Boolean(agent.archived_at) },
+      agent: { role: agent.role, status: agent.status, archived: Boolean(agent.archived_at) || this.archiving.has(agent.id) },
       ...(cancelledAt !== undefined ? { cancelledAt } : {}),
       projectArchived: Boolean(getProject(store.db, agent.project_id)?.archived_at),
       pendingApprovals: pendingApprovalsFor(store.db, agent.id).length + (this.resolving.get(agent.id) ?? 0),

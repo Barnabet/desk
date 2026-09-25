@@ -593,3 +593,118 @@ describe('notices after answer runs', () => {
     expect(notices(desk.id, t, 'completed')).toEqual(['Summary: "v1"', '(The user wrote to it since its last report: "Add the EU prices.".)\nSummary: "v2"']);
   });
 });
+
+describe('stopping and archiving', () => {
+  it('cancels a waiting thread stopped during an answer run, tells Desk, and closes the question once', async () => {
+    let t = '';
+    const { desk, thread, begin, stopped } = await setup({
+      Waiter: (req) => {
+        if (answering(req)) {
+          rt.stop(t);
+          return hang();
+        }
+        return lastUser(req).includes('Carry on.') ? tools(call('act')) : tools(call('wait_for_reply'));
+      },
+    });
+    t = thread('Waiter');
+    begin(t);
+    await rt.whenIdle();
+    expect(status(t)).toBe('waiting');
+    const q = ask(stopped('Checkout'), t, 'Per seat?');
+    await rt.whenIdle();
+    expect(status(t)).toBe('cancelled');
+    expect(notices(desk.id, t, 'cancelled')).toEqual(['Stopped by the user.']);
+    expect(answersTo(q).map((e) => [e.payload.text, e.payload.auto])).toEqual([['(Waiter was stopped before answering.)', true]]);
+    const [run] = answerRuns(t);
+    expect(endOf(run!.payload.run_id).payload).toMatchObject({ reason: 'stopped' });
+
+    // No silent-stop entry was left behind: when the user resumes it and stops it again, Desk hears of it again.
+    during = (id) => rt.stop(id);
+    rt.sendMessage(t, 'Carry on.');
+    await rt.whenIdle();
+    expect(status(t)).toBe('cancelled');
+    expect(notices(desk.id, t, 'cancelled')).toHaveLength(2);
+  });
+
+  it("drops a done thread's queued answer job when Desk stops it, closes the question, and never runs it", async () => {
+    const { desk, thread, begin, stopped, finished } = await setup(
+      { Pricing: (req) => (answering(req) ? text('Per seat.') : tools(call('complete', { summary: 'Pricing page done' }))), Busy: () => hang() },
+      { concurrency: 1 },
+    );
+    const t = await finished('Pricing');
+    const busy = thread('Busy');
+    begin(busy);
+    await until(() => threadRequests('Busy').length === 1, 'Busy to hold the only model slot');
+    const q = ask(stopped('Checkout'), t, 'Per seat?');
+    expect(rt.scheduler.isActive(t)).toBe(true);
+    // What Desk's stop_thread does.
+    rt.stopAgent(t, { by: desk.id, reason: 'No longer needed' });
+    expect(rt.scheduler.isActive(t)).toBe(false);
+    expect(answersTo(q).map((e) => [e.payload.text, e.payload.auto])).toEqual([['(Pricing was stopped before answering.)', true]]);
+
+    rt.stop(busy);
+    await rt.whenIdle();
+    rt.deliver(desk.id, t, 'note', 'Anything else?');
+    await rt.whenIdle();
+    const next = newRuntime(h, { toolsFor: testTools() });
+    next.recover();
+    await next.whenIdle();
+    expect(answerRuns(t)).toEqual([]);
+    expect(status(t)).toBe('done');
+    expect(notices(desk.id, t, 'cancelled')).toEqual([]);
+  });
+
+  it('archives a done thread during its answer run: both questions closed, nothing started after, workspace gone', async () => {
+    let t = '';
+    let archiving: Promise<void> | undefined;
+    let mark = 0;
+    let refused: unknown;
+    const { stopped, finished } = await setup({
+      Pricing: (req) => {
+        if (!answering(req)) return tools(call('complete', { summary: 'Pricing page done' }));
+        if (!archiving) {
+          mark = lastId();
+          archiving = rt.archiveThread(t);
+          // From the archive's first step on, nothing new reaches the thread.
+          try {
+            rt.sendMessage(t, 'One more thing.');
+          } catch (e) {
+            refused = e;
+          }
+        }
+        return hang();
+      },
+    });
+    t = await finished('Pricing');
+    const [a, b] = [stopped('Checkout'), stopped('Billing')];
+    const qa = ask(a, t, 'Per seat?');
+    const qb = ask(b, t, 'Which currency?');
+    await until(() => archiving !== undefined, 'the archive to start');
+    await archiving;
+    await rt.whenIdle();
+
+    expect(refused).toBeInstanceOf(ConflictError);
+    for (const q of [qa, qb]) expect(answersTo(q).map((e) => [e.payload.text, e.payload.auto])).toEqual([['(Pricing was archived before answering.)', true]]);
+    const [run, ...more] = answerRuns(t);
+    expect(more).toEqual([]);
+    expect(run!.payload.answering).toBe(qa);
+    expect(h.store.list({ agentId: t, after: mark, types: ['run.started'] })).toEqual([]);
+    const [archived] = h.store.list({ agentId: t, types: ['agent.archived'] });
+    expect(endOf(run!.payload.run_id).payload).toMatchObject({ reason: 'stopped' });
+    expect(endOf(run!.payload.run_id).id).toBeLessThan(archived!.id);
+    expect(existsSync(join(h.dir, 'Pricing'))).toBe(false);
+    expect(rt.scheduler.isActive(t)).toBe(false);
+    expect(h.store.list({ agentId: t, types: ['message.user'] })).toEqual([]);
+  });
+
+  it('closes no question to Desk when Desk is stopped', async () => {
+    const { projectId, desk, stopped } = await setup({});
+    const q = ask(stopped('Research'), desk.id, 'Which region?');
+    await rt.whenIdle();
+    rt.stop(desk.id);
+    await rt.whenIdle();
+    expect(status(desk.id)).toBe('cancelled');
+    expect(messageById(rt.messages(projectId), q)).toMatchObject({ state: 'open' });
+    expect(answersTo(q)).toEqual([]);
+  });
+});
