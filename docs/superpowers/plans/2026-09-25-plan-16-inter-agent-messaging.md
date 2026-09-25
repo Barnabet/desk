@@ -14186,7 +14186,7 @@ with:
   program
     .command('tell <thread> <text...>')
     .description('Message a thread directly')
-    .option('--ask', 'ask a question: a finished thread answers from its context and stays finished')
+    .option('--ask', 'ask a question: an idle, done or failed thread answers from its context and keeps its status; any other thread (a stopped one too) reads it as a message and runs')
     .action(async (id: string, words: string[], opts: { ask?: boolean }) => {
       await client().post(`/threads/${id}/messages`, { text: words.join(' '), ...(opts.ask ? { question: true } : {}) });
       say(opts.ask ? `Asked ${id}` : `Sent to ${id}`);
@@ -14409,7 +14409,7 @@ In `packages/client/src/client.ts`, replace:
 (the one under `threads = {`, whose path is `/threads/…/messages`) with:
 
 ```ts
-    /** Steers a thread; with `question`, asks it (the user's Ask: a finished thread answers and stays finished). */
+    /** Steers a thread; with `question`, asks it (the user's Ask: an idle, done or failed thread answers and keeps its status; any other thread reads it as a message). */
     send: (id: string, text: string, opts: { question?: boolean } = {}) =>
       this.post<{ ok: true }>(`/threads/${enc(id)}/messages`, { text, ...(opts.question ? { question: true } : {}) }),
 ```

@@ -372,7 +372,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   program
     .command('tell <thread> <text...>')
     .description('Message a thread directly')
-    .option('--ask', 'ask a question: a finished thread answers from its context and stays finished')
+    .option('--ask', 'ask a question: an idle, done or failed thread answers from its context and keeps its status; any other thread (a stopped one too) reads it as a message and runs')
     .action(async (id: string, words: string[], opts: { ask?: boolean }) => {
       await client().post(`/threads/${id}/messages`, { text: words.join(' '), ...(opts.ask ? { question: true } : {}) });
       say(opts.ask ? `Asked ${id}` : `Sent to ${id}`);

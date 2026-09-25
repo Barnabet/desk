@@ -133,6 +133,12 @@ describe('desk CLI', () => {
     expect(tail).toContain('you asked "Pricing page": How did you price it?');
     expect(tail).toContain('"Pricing page" › Per seat.');
   });
+
+  it('says which threads answer an Ask and which read it as a message', async () => {
+    const help = (await cli('tell', '--help')).out.replace(/\s+/g, ' ');
+    expect(help).toContain('an idle, done or failed thread answers from its context and keeps its status');
+    expect(help).toContain('any other thread (a stopped one too) reads it as a message and runs');
+  });
 });
 
 describe('launchd plist', () => {
