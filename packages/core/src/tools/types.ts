@@ -53,6 +53,8 @@ export interface RuntimeServices {
   sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void;
   spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] }): Promise<string>;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
+  /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
+  isStopping(agentId: string): boolean;
   resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string }): Promise<void>;
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void;
   /**

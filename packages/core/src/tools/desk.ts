@@ -12,11 +12,11 @@ function requireThread(ctx: ToolContext, threadId: string): AgentRow {
   return t;
 }
 
-/** Why Desk may not send `kind` to thread `t` now (§2.4 checks 3–4), or null. */
-function refusal(t: AgentRow, kind: 'note' | 'revision'): string | null {
+/** Why Desk may not send `kind` to thread `t` now (§2.4 checks 3–4), or null. `stopping`: its running job was stopped. */
+function refusal(t: AgentRow, kind: 'note' | 'revision', stopping: boolean): string | null {
   const name = `"${t.title ?? 'untitled'}"`;
   if (t.archived_at) return `${name} is archived.`;
-  if (t.status === 'cancelled') return `${name} was stopped; it cannot receive messages.`;
+  if (t.status === 'cancelled' || stopping) return `${name} was stopped; it cannot receive messages.`;
   if (kind === 'note' && (t.status === 'done' || t.status === 'failed')) {
     return `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`;
   }
@@ -66,7 +66,7 @@ export const messageThreadTool = defineTool({
   }),
   async execute({ thread_id, text, kind, skills = [] }, ctx) {
     const t = requireThread(ctx, thread_id);
-    const refused = refusal(t, kind);
+    const refused = refusal(t, kind, ctx.services.isStopping(t.id));
     if (refused) throw new Error(refused);
     if (skills.length) ctx.services.activateSkills(t.id, skills);
     if (kind === 'revision') {

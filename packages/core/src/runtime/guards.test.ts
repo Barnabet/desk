@@ -2,9 +2,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { call, hang, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
+import { buildToolContext } from '../agent/context';
 import { ConflictError } from '../errors';
 import { getAgent, getDeskAgent, listApprovals, type AgentRow } from '../state/queries';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
+import { messageThreadTool } from '../tools/desk';
 import { completeTool } from '../tools/thread';
 import { defineTool, type Tool } from '../tools/types';
 import type { RuntimeOptions } from './runtime';
@@ -154,6 +156,40 @@ describe('wakes in the runtime', () => {
       for (const said of ['Actually, use the v2 API.', 'Late note.', 'Go on.']) expect(batch).toContain(said);
     },
   );
+
+  it('a user message sent after Stop, while the stopped run winds down, resumes the thread', async () => {
+    const { rt, thread, begin } = await setup({ Pivot: (req) => (turns(req) === 0 ? tools(call('act')) : text('Doing Y.')) });
+    const t = thread('Pivot');
+    // The user presses Stop, then writes, both before the stopped run has ended.
+    during = (id) => {
+      rt.stop(id);
+      rt.sendMessage(id, 'Do Y instead.');
+    };
+    begin(t);
+    await rt.whenIdle();
+    expect(runs(t)).toHaveLength(2);
+    expect(status(t)).toBe('idle');
+    expect(lastText(threadRequests('Pivot').at(-1)!)).toContain('Do Y instead.');
+  });
+
+  it("Desk's message_thread refuses a thread whose stopped run is still winding down", async () => {
+    const { rt, desk, thread, begin } = await setup({ Pivot: () => tools(call('act')) });
+    const t = thread('Pivot');
+    const deskCtx = buildToolContext(desk, 'run', 'tc', new AbortController().signal, { sandboxEnabled: false, jobs: rt.jobs, services: rt.services });
+    let refused: Promise<string | null> | undefined;
+    during = (id) => {
+      rt.stop(id);
+      refused = messageThreadTool.execute({ thread_id: id, kind: 'revision', text: 'Add sources.' }, deskCtx).then(
+        () => null,
+        (e: Error) => e.message,
+      );
+    };
+    begin(t);
+    await rt.whenIdle();
+    expect(await refused).toBe('"Pivot" was stopped; it cannot receive messages.');
+    expect(h.store.list({ agentId: t, types: ['agent.revision'] })).toEqual([]);
+    expect(status(t)).toBe('cancelled');
+  });
 
   it('a stopped Desk still receives completed, and reads it when the user writes', async () => {
     const { rt, projectId, desk, thread, begin } = await setup({ Ship: () => tools(call('complete', { summary: 'Shipped' })) });

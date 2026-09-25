@@ -6,7 +6,10 @@ export type Item = { id: number; from: 'user' | 'desk' | 'thread'; kind: AgentMe
 /** Everything wakeDecision reads about one agent. Runtime builds it from the store and its in-memory state. */
 export type WakeState = {
   agent: { role: AgentRole; status: AgentStatus; archived: boolean };
-  /** Set while the agent is cancelled: the id of the `agent.status_changed` that cancelled it. */
+  /**
+   * Set while the agent is cancelled: where the stop happened. That is the id of the `agent.status_changed` that
+   * cancelled it, or, for a run stopped while running, the agent's last event id when the stop landed.
+   */
   cancelledAt?: number;
   projectArchived: boolean;
   /** Approvals pending in the store, plus approved calls that resolveApproval is still running. */

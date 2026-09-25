@@ -108,6 +108,11 @@ export class Runtime {
   private readonly stallNotified = new Map<string, number>();
   /** Approved calls resolveApproval is still running, per agent: until their results exist, nothing may run the agent. */
   private readonly resolving = new Map<string, number>();
+  /**
+   * Running jobs stopped by stopAgent, until their afterRun: the agent's last event id at the stop. The run appends
+   * `cancelled` only when it winds down, and a user message sent in between still counts as sent after the stop.
+   */
+  private readonly stoppedAt = new Map<string, number>();
   private shuttingDown = false;
 
   constructor(private readonly o: RuntimeOptions) {
@@ -145,6 +150,7 @@ export class Runtime {
       sendAgentMessage: (from, to, kind, text) => this.sendAgentMessage(from, to, kind, text),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
+      isStopping: (agentId) => this.stoppedAt.has(agentId),
       resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),
       updateSettings: (projectId, patch) => this.updateSettings(projectId, patch),
       skillEnv: (agentId, only) => this.skillEnv(agentId, only),
@@ -780,6 +786,7 @@ export class Runtime {
     if (state === 'running') {
       // The run's own ending appends `cancelled`; afterRun's notifyParent consumes this entry.
       if (opts.by) this.silentStops.add(agentId);
+      if (!this.stoppedAt.has(agentId)) this.stoppedAt.set(agentId, lastEvent(this.o.store.db, agentId)?.id ?? 0);
       return;
     }
     if (TERMINAL.has(this.requireAgent(agentId).status)) return;
@@ -1048,10 +1055,11 @@ export class Runtime {
       if (e.type === 'message.agent') return [{ id: e.id, from: roles.get(e.payload.from_agent_id) === 'desk' ? 'desk' : 'thread', kind: e.payload.kind }];
       return [];
     });
-    const cancel = agent.status === 'cancelled' ? lastEvent(store.db, agent.id, 'agent.status_changed') : undefined;
+    // A run stopped while running is cancelled from the stop, not from the `cancelled` its ending appended.
+    const cancelledAt = agent.status === 'cancelled' ? (this.stoppedAt.get(agent.id) ?? lastEvent(store.db, agent.id, 'agent.status_changed')?.id) : undefined;
     return {
       agent: { role: agent.role, status: agent.status, archived: Boolean(agent.archived_at) },
-      ...(cancel ? { cancelledAt: cancel.id } : {}),
+      ...(cancelledAt !== undefined ? { cancelledAt } : {}),
       projectArchived: Boolean(getProject(store.db, agent.project_id)?.archived_at),
       pendingApprovals: pendingApprovalsFor(store.db, agent.id).length + (this.resolving.get(agent.id) ?? 0),
       pending,
@@ -1109,13 +1117,18 @@ export class Runtime {
 
   /** After every job: kills a finished agent's jobs, tells its Desk, reminds Desk about What's up, then decides what runs next. */
   private afterRun(agentId: string): void {
-    const agent = this.requireAgent(agentId);
-    if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
-    this.notifyParent(agent, true);
-    // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
-    this.silentStops.delete(agentId);
-    this.remindWhatsUp(agent);
-    this.wake(agentId);
+    try {
+      const agent = this.requireAgent(agentId);
+      if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
+      this.notifyParent(agent, true);
+      // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
+      this.silentStops.delete(agentId);
+      this.remindWhatsUp(agent);
+      this.wake(agentId);
+    } finally {
+      // The stop point served this wake; from here on the `cancelled` event marks the stop.
+      this.stoppedAt.delete(agentId);
+    }
   }
 
   /** Desk ended its turn after changing things without rewriting What's up: remind it once (it runs again to do so). */

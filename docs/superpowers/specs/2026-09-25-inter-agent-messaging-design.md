@@ -211,7 +211,7 @@ export const snippet = (text: string, max: number) => JSON.stringify(clip(text.r
 2. A thread must not target Desk with `message_thread`: "Use message_desk to reach Desk."
 3. The recipient must not be archived: "X is archived." The project must not be archived either. A thread in the `archiving` set (§3.5) counts as archived.
 4. The recipient's state must allow the kind:
-   - Cancelled thread: "X was stopped; it cannot receive messages." This check applies to thread recipients only. A cancelled Desk is never refused: every message to it is stored through `deliver()`, as runtime notices already are, and `wakeDecision` rule 3 keeps it from running until the user writes to it. Stopping Desk does not stop the threads, so their questions, blockers and updates must not be lost.
+   - Cancelled thread, or one whose stopped run is still winding down: "X was stopped; it cannot receive messages." This check applies to thread recipients only. A cancelled Desk is never refused: every message to it is stored through `deliver()`, as runtime notices already are, and `wakeDecision` rule 3 keeps it from running until the user writes to it. Stopping Desk does not stop the threads, so their questions, blockers and updates must not be lost.
    - A `note` from a sibling to a done or failed thread: "X has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change."
    - The same from Desk: "X has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch."
    - A note that would auto-link as an answer (check 8) is allowed on a failed or cancelled thread, whose question is still open (§1.3). It is stored, and it wakes the recipient only as §3.2 allows.
@@ -257,7 +257,8 @@ The Desk `revision` path is unchanged: it checks the review-round limit, then ap
 type Item = { id: number; from: 'user' | 'desk' | 'thread'; kind: AgentMessageKind | 'user' | 'user_question' };
 type WakeState = {
   agent: { role: AgentRole; status: AgentStatus; archived: boolean };  // archived: archived, or in the `archiving` set (§3.5)
-  cancelledAt?: number;                     // when cancelled: the id of the agent.status_changed that cancelled it
+  cancelledAt?: number;                     // when cancelled: the id of the agent.status_changed that cancelled it, or for a run
+                                            // stopped while running, the agent's last event id at the stop (in memory until its afterRun)
   projectArchived: boolean;
   pendingApprovals: number;                 // approvals pending in the store, plus the agent's `resolving` count (§3.4)
   pending: Item[];                          // inbox items after inbox_cursor, oldest first
@@ -355,6 +356,7 @@ This table follows from §3.2. The unit test for `wakeDecision` is generated fro
 
      An aborted or dropped answer job therefore counts as no job: a waiting or idle thread that was answering is cancelled here, and Desk is told.
   6. If `fullRun` and `by` is set: add to `silentStops`. The run's own ending sets `cancelled`, even when the stop lands in the tool phase (§3.6, "A stopped run ends cancelled"), and `afterRun`'s `notifyParent` consumes the entry.
+     If `fullRun`, whoever stopped it: record the agent's last event id in the in-memory `stoppedAt` map. Until `afterRun` has woken the agent, it is the agent's `cancelledAt`, so a user message sent after the stop but before the run's `cancelled` still resumes it, and `send()` check 4 treats the thread as stopped.
   7. For a thread: `closeQuestionsTo(agent, 'was stopped before answering')`. An aborted answer run then finds its question closed and appends only `run.finished` (§4.6).
 - **`archiveThread`** still requires a terminal status. It then runs:
   1. Add the thread to the in-memory `archiving` set. `wakeDecision` reads it as `archived: true`, and `send()` check 3, `sendMessage` and `requireThread` refuse the thread. From here on, no job, question, revision or message reaches it, including while steps 4 and 5 are awaited.
