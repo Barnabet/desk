@@ -1,7 +1,8 @@
 import { signal, type Provider } from '@angular/core';
-import type { Channel, ChannelInput, ChannelOutput, IpcError } from '@desk/bff/contract';
+import type { Channel, ChannelInput, ChannelOutput, GlobalState, IpcError } from '@desk/bff/contract';
 import type { NotifyPermission, WebChannel, WebChannelInput, WebChannelOutput, WebPushChannel } from '@desk/web-server/contract';
 import { DeskBridge, DeskCallError, type DeskBridgeApi, type FolderPurpose, type FolderRequest, type PushStatus } from '../core/desk-bridge';
+import { GlobalStore } from '../core/global.store';
 
 /** A scripted answer: return (or resolve) the value, or throw (or reject with) an IpcError-shaped object to fail. */
 export type FakeHandler = (input: any) => unknown;
@@ -113,4 +114,16 @@ export class FakeDeskBridge implements DeskBridgeApi {
       this.folderState.set({ purpose });
     });
   }
+}
+
+/** Makes the GlobalStore start from `state`, for specs of components that read global state. */
+export function provideGlobal(state: GlobalState): Provider {
+  return {
+    provide: GlobalStore,
+    useFactory: () => {
+      const store = new GlobalStore();
+      store.set(state);
+      return store;
+    },
+  };
 }
