@@ -708,3 +708,58 @@ describe('stopping and archiving', () => {
     expect(answersTo(q)).toEqual([]);
   });
 });
+
+describe('crash recovery of answer runs', () => {
+  /** A done thread whose answer run a crash cut off in its tool phase; with `answered`, its answer was already stored. */
+  async function crashed(answered: boolean) {
+    const { projectId, thread, stopped } = await setup({});
+    const t = thread('Pricing');
+    const asker = stopped('Checkout');
+    const base = { project_id: projectId, agent_id: t };
+    h.store.append({ ...base, type: 'agent.status_changed', payload: { status: 'done' } });
+    const [q] = h.store.append({
+      ...base,
+      type: 'message.agent',
+      payload: { from_agent_id: asker, from_label: `thread "Checkout" (${asker})`, kind: 'question', text: 'Per seat?', tracked: true },
+    });
+    const events: EventInput[] = [
+      { ...base, type: 'run.started', payload: { run_id: 'r1', model: FAKE_MODEL.id, answering: q!.id } },
+      { ...base, type: 'inbox.drained', payload: { run_id: 'r1', up_to: q!.id } },
+      { ...base, type: 'assistant.message', payload: { run_id: 'r1', content: null, tool_calls: [{ id: 'c1', name: 'read_file', arguments: '{"path":"notes.md"}' }] } },
+      { ...base, type: 'tool.call', payload: { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', arguments: '{"path":"notes.md"}' } },
+    ];
+    if (answered) {
+      events.push({
+        project_id: projectId,
+        agent_id: asker,
+        type: 'message.agent',
+        payload: { from_agent_id: t, from_label: `thread "Pricing" (${t})`, kind: 'answer', text: 'Per seat.', reply_to: q!.id },
+      });
+    }
+    const seeded = h.store.append(events);
+    return { t, q: q!.id, mark: seeded.at(-1)!.id };
+  }
+
+  it('finishes the cut-off run without a status change and writes the restart closure', async () => {
+    const { t, q, mark } = await crashed(false);
+    const next = newRuntime(h, { toolsFor: testTools() });
+    next.recover();
+    await next.whenIdle();
+    expect(endOf('r1').payload).toMatchObject({ reason: 'error', detail: 'daemon_restart' });
+    expect(h.store.list({ agentId: t, types: ['tool.result'] }).map((e) => e.type === 'tool.result' && [e.payload.tool_call_id, e.payload.status])).toEqual([['c1', 'interrupted']]);
+    expect(statusChanges(t, mark)).toEqual([]);
+    expect(answersTo(q).map((e) => [e.payload.text, e.payload.auto])).toEqual([['(Pricing could not answer: Desk was restarting. Ask again if you still need to know.)', true]]);
+    // The question is closed, so no answer run starts after the restart.
+    expect(h.fake.requests).toEqual([]);
+  });
+
+  it('writes no second answer when the question was answered before the crash', async () => {
+    const { q } = await crashed(true);
+    const next = newRuntime(h, { toolsFor: testTools() });
+    next.recover();
+    await next.whenIdle();
+    expect(endOf('r1').payload).toMatchObject({ reason: 'error', detail: 'daemon_restart' });
+    expect(answersTo(q).map((e) => e.payload.text)).toEqual(['Per seat.']);
+    expect(h.fake.requests).toEqual([]);
+  });
+});

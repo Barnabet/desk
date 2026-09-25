@@ -1010,9 +1010,9 @@ export class Runtime {
       approvalsRepaired.add(agent.id);
       repaired(agent.project_id);
     }
-    for (const agent of listLiveAgents(this.o.store.db, ['running'])) {
-      this.repairCrashedRun(agent);
-      repaired(agent.project_id);
+    // Every live agent whose last run has no end: a full run (left `running`) or an answer run (any status).
+    for (const agent of listLiveAgents(this.o.store.db)) {
+      if (this.repairCrashedRun(agent)) repaired(agent.project_id);
     }
     for (const [projectId, count] of repairedByProject) {
       this.o.store.append({
@@ -1068,38 +1068,52 @@ export class Runtime {
     return missing.length > 0;
   }
 
-  /** Closes a run that has `run.started` but no `run.finished`: never re-executes calls whose outcome is unknown. */
-  private repairCrashedRun(agent: AgentRow): void {
+  /**
+   * Finishes the agent's last run if a crash cut it off (`run.started` with no later `run.finished`), and never
+   * re-executes calls whose outcome is unknown. A full run leaves the agent `queued`, or `waiting` on its approvals. An
+   * answer run changes no status and closes its question with the restart closure, unless it already has an answer
+   * (design spec §3.6). Returns whether it repaired a run.
+   */
+  private repairCrashedRun(agent: AgentRow): boolean {
     const { store } = this.o;
     const started = lastEvent(store.db, agent.id, 'run.started');
-    if (started?.type !== 'run.started') return;
+    if (started?.type !== 'run.started') return false;
+    const finished = lastEvent(store.db, agent.id, 'run.finished');
+    if (finished && finished.id > started.id) return false;
     const runId = started.payload.run_id;
     const since = store.list({ agentId: agent.id, after: started.id, types: ['tool.call', 'tool.result', 'approval.requested'] });
     const settled = new Set(since.flatMap((e) => (e.type === 'tool.result' || e.type === 'approval.requested' ? [e.payload.tool_call_id] : [])));
     const base = { project_id: agent.project_id, agent_id: agent.id };
-    const interrupted = since.flatMap((e) =>
+    const interrupted = since.flatMap((e): EventInput[] =>
       e.type === 'tool.call' && !settled.has(e.payload.tool_call_id)
         ? [
             {
               ...base,
-              type: 'tool.result' as const,
+              type: 'tool.result',
               payload: {
                 run_id: runId,
                 tool_call_id: e.payload.tool_call_id,
                 name: e.payload.name,
-                status: 'interrupted' as const,
+                status: 'interrupted',
                 content: INTERRUPTED_BY_RESTART,
               },
             },
           ]
         : [],
     );
+    const end: EventInput = { ...base, type: 'run.finished', payload: { run_id: runId, reason: 'error', detail: 'daemon_restart' } };
+    if (started.payload.answering !== undefined) {
+      const q = messageById(this.messages(agent.project_id), started.payload.answering);
+      store.append([...interrupted, end, ...(q ? this.answerEnding(agent, q, WHY.restart, true) : [])]);
+      return true;
+    }
     const waiting = pendingApprovalsFor(store.db, agent.id).length > 0;
     store.append([
       ...interrupted,
-      { ...base, type: 'run.finished', payload: { run_id: runId, reason: 'error', detail: 'daemon_restart' } },
+      end,
       { ...base, type: 'agent.status_changed', payload: { status: waiting ? 'waiting' : 'queued', reason: 'Recovered after daemon restart' } },
     ]);
+    return true;
   }
 
   // ── internals ────────────────────────────────────────────────────────
