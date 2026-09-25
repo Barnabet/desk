@@ -237,3 +237,34 @@ describe('while paused', () => {
     expect(pauses(projectId)).toHaveLength(1);
   });
 });
+
+describe('send results while paused', () => {
+  it('tell the sender when the pause holds its message, and only then', async () => {
+    const { desk, thread, setStatus, drained, writer } = await pausedProject();
+    const held = 'automatic wakes are paused in this project; it reads this once the user resumes them';
+    const busy = thread('Busy');
+    setStatus(busy, 'running');
+    const asker = thread('Asker');
+    setStatus(asker, 'waiting');
+
+    // Desk would run for a thread's update: the pause holds it.
+    const u = rt.send({ from: busy, to: desk.id, kind: 'update', text: 'Halfway.' });
+    expect(u.note).toBe(`Sent update #${u.id} to Desk (${held}).`);
+    // A running thread reads a note at its next step, paused or not.
+    const n = rt.send({ from: desk.id, to: busy, kind: 'note', text: 'Carry on.' });
+    expect(n.note).toBe(`Sent note #${n.id} to "Busy" (running: it sees this at its next step).`);
+    // The answer to a waiting asker is held.
+    const q = rt.send({ from: asker, to: busy, kind: 'question', text: 'Which port?' });
+    drained(busy, q.id);
+    const a = rt.send({ from: busy, to: 'Asker', kind: 'note', text: '8080.' });
+    expect(a).toEqual({ id: expect.any(Number), kind: 'answer', replyTo: q.id, note: `Sent #${a.id} to "Asker" as the answer to its question #${q.id} (${held}).` });
+    // A held revision does not claim the thread was reopened.
+    const r = rt.send({ from: desk.id, to: writer, kind: 'revision', text: 'Add sources.' });
+    expect(r.note).toBe(`Sent revision 1 to "Writer" (${held}).`);
+
+    await rt.whenIdle();
+    expect(runs(desk.id)).toHaveLength(0);
+    expect(runs(asker)).toHaveLength(0);
+    expect(runs(writer)).toHaveLength(1);
+  });
+});

@@ -134,6 +134,8 @@ export const MAX_MESSAGE_CHARS = 4000;
 /** Questions and notes one thread may send other threads per rolling hour; answers are exempt (design spec §5.3). */
 export const SENDER_CAP = 20;
 const HOUR_MS = 60 * 60_000;
+/** The outcome a send's result names when the pause holds the recipient (design spec §2.5, §5.4). */
+const PAUSED_NOTE = 'automatic wakes are paused in this project; it reads this once the user resumes them';
 
 /** How a refusal or a tool result names an agent: Desk, or a thread's quoted, sanitised title. */
 function nameOf(a: AgentRow): string {
@@ -489,11 +491,16 @@ export class Runtime {
     }
     if (answers) {
       const id = this.answer(answers.id, from.id, input.text, { toolCallId: input.toolCallId });
-      if (id !== null) return { id, kind: 'answer', replyTo: answers.id, note: `Sent #${id} to ${name} as the answer to its question #${answers.id}.` };
+      if (id !== null) {
+        const held = this.heldByPause(to.id) ? ` (${PAUSED_NOTE})` : '';
+        return { id, kind: 'answer', replyTo: answers.id, note: `Sent #${id} to ${name} as the answer to its question #${answers.id}${held}.` };
+      }
     }
     if (input.kind === 'revision') return this.sendRevision(from, to, input);
     const next = this.sendOutcome(from, to, input.kind);
     const id = this.deliver(from.id, to.id, input.kind, input.text, { tracked: input.kind === 'question', toolCallId: input.toolCallId });
+    // The pause kept the recipient from being woken (maybe this very send paused the project): it reads this after the resume.
+    if (this.heldByPause(to.id)) return { id, kind: input.kind, note: `Sent ${input.kind} #${id} to ${name} (${PAUSED_NOTE}).` };
     // Waiting pays off when the recipient reads the question in a full run; an answer run or a held recipient is said as such.
     const hint = from.role === 'thread' && input.kind === 'question' && next.readsInRun ? ' Call wait_for_reply to pause until it answers, or keep working.' : '';
     return { id, kind: input.kind, note: `Sent ${input.kind} #${id} to ${name} (${next.text}).${hint}` };
@@ -1301,6 +1308,17 @@ export class Runtime {
     for (const q of openTo(this.messages(thread.project_id), thread.id)) this.answer(q.id, thread.id, closureText(thread.title, why), { auto: true });
   }
 
+  /**
+   * Whether the pause is what keeps the agent from running now (design spec §2.5): its project is paused, it has no
+   * queued or running job, and wakeDecision would start it for another agent or a lifecycle item.
+   */
+  private heldByPause(agentId: string): boolean {
+    const agent = this.requireAgent(agentId);
+    if (!this.paused.has(agent.project_id) || this.scheduler.isActive(agent.id)) return false;
+    const d = wakeDecision(this.wakeState(agent));
+    return d.kind !== 'none' && (d.trigger === 'agent' || d.trigger === 'lifecycle');
+  }
+
   /** The agent a send names: an agent of the project by id, or a thread by exact title (threadsByRef). */
   private resolveRecipient(projectId: string, ref: string): AgentRow {
     const byId = getAgent(this.o.store.db, ref);
@@ -1334,7 +1352,9 @@ export class Runtime {
     const round = to.review_round + 1;
     this.o.store.append({ project_id: to.project_id, agent_id: to.id, type: 'agent.revision', payload: { round, feedback: input.text } });
     const id = this.deliver(from.id, to.id, 'revision', input.text, { toolCallId: input.toolCallId });
-    return { id, kind: 'revision', note: `Sent revision ${round} to ${nameOf(to)}; it has been reopened.` };
+    // Held by the pause, the thread reopens only once the user resumes the project.
+    const outcome = this.heldByPause(to.id) ? ` (${PAUSED_NOTE})` : '; it has been reopened';
+    return { id, kind: 'revision', note: `Sent revision ${round} to ${nameOf(to)}${outcome}.` };
   }
 
   /**
