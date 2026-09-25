@@ -49,7 +49,7 @@ Pass `next_after` as the next `after` to continue.
 | PATCH | `/v1/projects/:id/sources/:sid` | `{ agent_write }` | Turns agents' write access to the folder on or off (`source.updated`) |
 | DELETE | `/v1/projects/:id/sources/:sid` | | |
 | POST | `/v1/projects/:id/messages` | `{ text }` | Message to Desk. 202; Desk wakes. 400 with `question: true`: only a thread can be asked |
-| GET | `/v1/projects/:id/chat` | paging | Desk conversation events: user and agent messages, assistant messages, reports, questions, notices |
+| GET | `/v1/projects/:id/chat` | paging | Desk's own stream: the user's and agents' messages to Desk, assistant messages, tool calls and results, reports, questions, status changes and run endings. Project notices and messages between threads are not included; read them from `/events` |
 | GET | `/v1/projects/:id/plan` | | `{ items: PlanItem[] }` or `null` |
 | GET | `/v1/projects/:id/usage` | | `{ rows (per model), totals }` |
 | GET | `/v1/projects/:id/events` | paging + `types` | Raw event log (limit ≤ 5000, default 500) |
@@ -166,7 +166,7 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 | kind | id | Present while | ref |
 |---|---|---|---|
 | `approval` | `approval:<approval_id>` | pending and not delegated to Desk | `approval_id`, `thread_id` |
-| `question` | `question:<event_id>` | it is the project's latest `question.asked` and no `message.user` followed | `event_id`, `options` |
+| `question` | `question:<event_id>` | it is the project's latest `question.asked` and no `message.user` to Desk followed (a message to a thread does not answer Desk) | `event_id`, `options` |
 | `needs_you` | `report:<event_id>:<i>` | it is in the project's latest `report`, not dismissed | `event_id` |
 | `stalled` | `stalled:<thread>:<event_id>` | the thread is running/waiting, its latest `stalled` notice has no thread activity after it, not dismissed | `thread_id`, `event_id` |
 | `failed` | `failed:<thread>` | the thread is `failed`, not archived, not dismissed | `thread_id` |
@@ -228,10 +228,19 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 | Projects | `project.created`, `project.updated`, `project.archived`, `source.added`, `source.updated`, `source.removed` |
 | Agents | `agent.created`, `agent.status_changed`, `agent.result`, `agent.revision`, `agent.model_switched`, `agent.skills_changed`, `agent.archived` |
 | Coordination | `plan.updated`, `report`, `question.asked`, `whats_up.updated` (Desk's What's up, written with `update_whats_up`; when Desk ends a turn after changing things without rewriting it, the runtime sends Desk a `message.agent` of kind `reminder`, which clients do not show) |
-| Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result` (with `images` for `view_image`, see Attachments), `images.withheld`, `context.compacted`, `usage` |
+| Messages and runs | `message.user` (`question: true` for the user's Ask), `message.agent` (see Messages below), `inbox.drained`, `run.started` (`answering` on an answer run), `run.finished`, `assistant.message`, `tool.call`, `tool.result` (with `images` for `view_image`, see Attachments), `images.withheld`, `context.compacted`, `usage` |
 | Approvals | `approval.requested`, `approval.resolved` |
 | Services | `service.started`, `service.url`, `service.exited`, `service.stopped` (reason `requested`, `restart`, `thread_archived`, `project_archived`, `daemon_shutdown` or `daemon_restart`) |
 | Knowledge | `memory.written`, `memory.deleted`, `artifact.published`, `skill.saved`, `skill.deleted` |
 | System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, `wakes_paused`, …; `attention.dismissed` |
 
 **Agent statuses:** `idle`, `queued`, `running`, `waiting` (on a reply, an approval or threads), `done`, `failed`, `cancelled`.
+
+**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`) and `reminder` (for Desk alone). Optional fields:
+
+- `tracked: true`: a question whose state the runtime follows: open, then answered, closed (the runtime wrote the answer) or withdrawn (the asker finished).
+- `reply_to`: on an `answer`, the id of the question it answers. A note or update to an agent whose question the sender has seen is stored as its answer.
+- `auto: true`: an answer the runtime wrote because the recipient could not answer (it was stopped, archived, hit its step limit or failed); its text says why, in parentheses.
+- `tool_call_id`: the tool call that sent the message (absent on runtime notices and closures).
+
+A question to an idle, done or failed thread, or the user's Ask (`message.user` with `question: true`, sent with `POST /v1/threads/:id/messages`), starts an **answer run**: `run.started` carries `answering: <question id>`, the thread answers from its context without changing its status, result or branch, and the same run's `run.finished` ends it. Clients show "answering …" from the start until that end. `@desk/protocol` folds these events into one view for clients and the runtime (`foldMessages` in `messages.ts`): who asked whom, what is still open, and which thread is answering.
