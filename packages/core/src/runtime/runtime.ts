@@ -1336,9 +1336,12 @@ export class Runtime {
    * Runs one job. An answer job first checks that wakeDecision still picks its question: when the question was
    * answered or withdrawn, or a revision or a user message now comes first, it returns without appending anything
    * and afterRun decides again (§3.4). It then runs in answer mode (§4): the same tools, system prompt and effort as a
-   * full run, at most ANSWER_MAX_STEPS steps, no status change, and an ending that closes the question.
+   * full run, at most ANSWER_MAX_STEPS steps, no status change, and an ending that closes the question. Nothing is
+   * awaited between that check and runAgent's first append, so the run starts on what the check saw, never on a
+   * decision that an archive or a stop made while the job waited has changed.
    */
   private async execute(job: Job, signal: AbortSignal): Promise<void> {
+    const sandboxAvailable = await this.sandboxAvailable();
     const agent = this.requireAgent(job.agentId);
     let answer: RunDeps['answer'];
     let asker: AgentRow | 'user' = 'user';
@@ -1356,7 +1359,6 @@ export class Runtime {
       };
     }
     const maxSteps = this.o.maxSteps ?? { desk: 60, thread: 200 };
-    const sandboxAvailable = await this.sandboxAvailable();
     const gate: RunDeps['gate'] = (tool, input, project, a) =>
       evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) });
     await runAgent(

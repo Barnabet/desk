@@ -717,6 +717,23 @@ describe('stopping and archiving', () => {
     expect(h.store.list({ agentId: t, types: ['message.user'] })).toEqual([]);
   });
 
+  it('starts no answer run when the thread is archived as its answer job begins', async () => {
+    const { stopped, finished } = await setup({ Pricing: (req) => (answering(req) ? text('Per seat.') : tools(call('complete', { summary: 'Pricing page done' }))) });
+    const t = await finished('Pricing');
+    const mark = lastId();
+    const q = ask(stopped('Checkout'), t, 'Per seat?');
+    // The question started the answer job, whose first step runs in the next microtask; the archive starts in the one
+    // after, before the job's next step.
+    let archiving: Promise<void> | undefined;
+    queueMicrotask(() => (archiving = rt.archiveThread(t)));
+    await until(() => archiving !== undefined, 'the archive to start');
+    await archiving;
+    await rt.whenIdle();
+    expect(h.store.list({ agentId: t, after: mark, types: ['run.started', 'inbox.drained'] })).toEqual([]);
+    expect(answersTo(q).map((e) => [e.payload.text, e.payload.auto])).toEqual([['(Pricing was archived before answering.)', true]]);
+    expect(h.fake.requests.filter(answering)).toEqual([]);
+  });
+
   it('closes no question to Desk when Desk is stopped', async () => {
     const { projectId, desk, stopped } = await setup({});
     const q = ask(stopped('Research'), desk.id, 'Which region?');
