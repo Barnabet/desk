@@ -106,6 +106,8 @@ export class Runtime {
   private readonly silentStops = new Set<string>();
   /** Last event id already reported as stalled, per thread. */
   private readonly stallNotified = new Map<string, number>();
+  /** Approved calls resolveApproval is still running, per agent: until their results exist, nothing may run the agent. */
+  private readonly resolving = new Map<string, number>();
   private shuttingDown = false;
 
   constructor(private readonly o: RuntimeOptions) {
@@ -806,7 +808,10 @@ export class Runtime {
     return reported;
   }
 
-  /** Resolves a pending approval: runs (or denies) the held tool call, then resumes the agent. */
+  /**
+   * Resolves a pending approval: runs (or denies) the held tool call, then resumes the agent. Until the call's
+   * `tool.result` exists the agent's conversation ends in a call without a result, so `resolving` holds every wake.
+   */
   async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string } = {}): Promise<void> {
     const { store } = this.o;
     const ap = getApproval(store.db, approvalId);
@@ -814,33 +819,42 @@ export class Runtime {
     if (ap.status !== 'pending') throw new ConflictError(`Approval ${approvalId} is already resolved (${ap.status})`);
     const by = opts.by ?? 'user';
     const base = { project_id: ap.project_id, agent_id: ap.agent_id };
-    store.append({ ...base, type: 'approval.resolved', payload: { approval_id: ap.id, decision, resolved_by: by, ...(opts.note ? { note: opts.note } : {}) } });
+    this.resolving.set(ap.agent_id, (this.resolving.get(ap.agent_id) ?? 0) + 1);
+    try {
+      store.append({ ...base, type: 'approval.resolved', payload: { approval_id: ap.id, decision, resolved_by: by, ...(opts.note ? { note: opts.note } : {}) } });
 
-    const agent = this.requireAgent(ap.agent_id);
-    let result: ToolResult;
-    if (decision === 'approved') {
-      const prepared = prepareToolCall(this.toolsFor(agent), { id: ap.tool_call_id, name: ap.tool, arguments: ap.arguments });
-      result = prepared.ok
-        ? await runPreparedTool(prepared.tool, prepared.input, await this.toolContext(agent, ap.run_id, ap.tool_call_id, new AbortController().signal))
-        : prepared.result;
-    } else {
-      result = { status: 'denied', content: `Denied by ${by}${opts.note ? `: ${opts.note}` : ''}` };
+      const agent = this.requireAgent(ap.agent_id);
+      let result: ToolResult;
+      if (decision === 'approved') {
+        const prepared = prepareToolCall(this.toolsFor(agent), { id: ap.tool_call_id, name: ap.tool, arguments: ap.arguments });
+        result = prepared.ok
+          ? await runPreparedTool(prepared.tool, prepared.input, await this.toolContext(agent, ap.run_id, ap.tool_call_id, new AbortController().signal))
+          : prepared.result;
+      } else {
+        result = { status: 'denied', content: `Denied by ${by}${opts.note ? `: ${opts.note}` : ''}` };
+      }
+      store.append({
+        ...base,
+        type: 'tool.result',
+        payload: {
+          run_id: ap.run_id,
+          tool_call_id: ap.tool_call_id,
+          name: ap.tool,
+          status: result.status,
+          content: result.content,
+          ...(result.images?.length ? { images: result.images } : {}),
+        },
+      });
+    } finally {
+      const left = (this.resolving.get(ap.agent_id) ?? 1) - 1;
+      if (left > 0) this.resolving.set(ap.agent_id, left);
+      else this.resolving.delete(ap.agent_id);
     }
-    store.append({
-      ...base,
-      type: 'tool.result',
-      payload: {
-        run_id: ap.run_id,
-        tool_call_id: ap.tool_call_id,
-        name: ap.tool,
-        status: result.status,
-        content: result.content,
-        ...(result.images?.length ? { images: result.images } : {}),
-      },
-    });
-
+    // Two approvals of one step can resolve at once: the last to finish resumes the agent.
+    if (this.resolving.has(ap.agent_id)) return;
     const current = this.requireAgent(ap.agent_id);
-    if (current.status === 'waiting' && pendingApprovalsFor(store.db, ap.agent_id).length === 0) this.schedule(current);
+    if (current.status === 'waiting' && pendingApprovalsFor(store.db, ap.agent_id).length === 0 && !this.scheduler.isActive(ap.agent_id)) this.schedule(current);
+    else this.wake(ap.agent_id);
   }
 
   whenIdle(): Promise<void> {
@@ -1039,7 +1053,7 @@ export class Runtime {
       agent: { role: agent.role, status: agent.status, archived: Boolean(agent.archived_at) },
       ...(cancel ? { cancelledAt: cancel.id } : {}),
       projectArchived: Boolean(getProject(store.db, agent.project_id)?.archived_at),
-      pendingApprovals: pendingApprovalsFor(store.db, agent.id).length,
+      pendingApprovals: pendingApprovalsFor(store.db, agent.id).length + (this.resolving.get(agent.id) ?? 0),
       pending,
     };
   }

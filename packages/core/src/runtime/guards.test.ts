@@ -268,3 +268,47 @@ describe('notices to Desk', () => {
     ]);
   });
 });
+
+describe('approvals being resolved', () => {
+  it('holds a Desk note while an approved call runs, then runs once with the note', async () => {
+    let started = false;
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    const slowPost = defineTool({
+      name: 'post_update',
+      description: 'Post an update (returns when the test releases it)',
+      input: z.object({ title: z.string() }),
+      gate: { subject: () => ({}), unmatched: 'ask' },
+      async execute({ title }) {
+        started = true;
+        await released;
+        return `Posted "${title}"`;
+      },
+    });
+    const { rt, projectId, desk, thread, begin } = await setup(
+      { Poster: (req) => (turns(req) === 0 ? tools(call('post_update', { title: 'Weekly' }, 'c1')) : text('Posted, with the changelog.')) },
+      { toolsFor: (a) => (a.role === 'thread' ? [slowPost, completeTool] : toolsForRole(a)) },
+    );
+    const t = thread('Poster');
+    begin(t);
+    await rt.whenIdle();
+    expect(status(t)).toBe('waiting');
+
+    const [ap] = listApprovals(h.store.db, projectId, 'pending');
+    const resolving = rt.resolveApproval(ap!.id, 'approved');
+    await until(() => started);
+    rt.sendAgentMessage(desk.id, t, 'note', 'Also mention the changelog.');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs(t)).toHaveLength(1);
+
+    release();
+    await resolving;
+    await rt.whenIdle();
+    const [result] = h.store.list({ agentId: t, types: ['tool.result'] });
+    expect(runs(t)).toHaveLength(2);
+    expect(runs(t)[1]!.id).toBeGreaterThan(result!.id);
+    const sent = threadRequests('Poster').at(-1)!.messages;
+    expect(sent.at(-2)).toMatchObject({ role: 'tool', tool_call_id: 'c1', content: 'Posted "Weekly"' });
+    expect(String(sent.at(-1)?.content)).toContain('Also mention the changelog.');
+  });
+});
