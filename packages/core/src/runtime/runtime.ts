@@ -11,6 +11,7 @@ import {
   openFrom,
   openTo,
   sanitizeLabel,
+  sentSince,
   ServiceName,
   snippet,
   type AgentMessageKind,
@@ -58,6 +59,7 @@ import {
   listServices,
   listSources,
   pendingApprovalsFor,
+  threadsByRef,
   type AgentRow,
   type ProjectRow,
   type ServiceRow,
@@ -71,7 +73,7 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { readAgentFile } from '../tools/agent-files';
 import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard } from '../tools/sandbox';
-import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
+import type { RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
@@ -120,6 +122,17 @@ export type DeliverOptions = {
   /** The tool call that sent it. */
   toolCallId?: string;
 };
+
+/** The longest message the send tools take (design spec §5.3). Only tool inputs are checked, so old events stay valid. */
+export const MAX_MESSAGE_CHARS = 4000;
+/** Questions and notes one thread may send other threads per rolling hour; answers are exempt (design spec §5.3). */
+export const SENDER_CAP = 20;
+const HOUR_MS = 60 * 60_000;
+
+/** How a refusal or a tool result names an agent: Desk, or a thread's quoted, sanitised title. */
+function nameOf(a: AgentRow): string {
+  return a.role === 'desk' ? 'Desk' : `"${sanitizeLabel(a.title ?? 'untitled')}"`;
+}
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
 /** The result recovery records for a call cut off by an unclean exit: it is never run again. */
@@ -191,6 +204,8 @@ export class Runtime {
       libraryDir: (projectId) => this.libraryDir(projectId),
       publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
       deliver: (from, to, kind, text, opts) => this.deliver(from, to, kind, text, opts),
+      send: (input) => this.send(input),
+      messages: (projectId) => this.messages(projectId),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
       isStopping: (agentId) => this.stoppedAt.has(agentId),
@@ -409,6 +424,56 @@ export class Runtime {
     const next = foldMessages(this.o.store.list({ projectId, after: prev.lastId, types: MESSAGE_FOLD_TYPES }), prev);
     this.folds.set(projectId, next);
     return next;
+  }
+
+  /**
+   * The message tools' one send path (design spec §2.4). Checks, in order: the recipient (an agent of the sender's
+   * project by id, or a thread by exact title; not the sender), that neither it nor the project is archived, that its
+   * state takes this kind, the text size, one open question per asker and thread, and a thread's 20 questions or
+   * notes to other threads an hour. Desk's revision then goes its own way (sendRevision); anything else is delivered,
+   * a question tracked, with the tool call that sent it. Each refusal throws the text the model reads; `note` is the
+   * tool result (§2.5). The thread message_thread tool refuses Desk as a target itself (§2.4 check 2).
+   */
+  send(input: SendInput): SendResult {
+    const from = this.requireAgent(input.from);
+    const to = this.resolveRecipient(from.project_id, input.to);
+    if (to.id === from.id) throw new Error('That is you.');
+    const name = nameOf(to);
+    if (to.archived_at || this.archiving.has(to.id)) throw new Error(`${name} is archived.`);
+    if (getProject(this.o.store.db, from.project_id)?.archived_at) throw new Error('This project is archived.');
+    const s = this.messages(from.project_id);
+    // A stopped Desk takes every message: it reads them when the user resumes it. A stopped thread takes none.
+    if (to.role === 'thread') {
+      if (to.status === 'cancelled') throw new Error(`${name} was stopped; it cannot receive messages.`);
+      if (input.kind === 'note' && (to.status === 'done' || to.status === 'failed')) {
+        throw new Error(
+          from.role === 'desk'
+            ? `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`
+            : `${name} has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change.`,
+        );
+      }
+    }
+    if (input.text.length > MAX_MESSAGE_CHARS) {
+      throw new Error(`Messages are limited to ${MAX_MESSAGE_CHARS} characters; publish long content with library_publish and send its path.`);
+    }
+    if (input.kind === 'question' && to.role === 'thread') {
+      const asked = openFrom(s, from.id).find((q) => q.to === to.id);
+      if (asked) throw new Error(`You already asked ${name} #${asked.id} and it has not answered. Wait for the answer (wait_for_reply) or send a note.`);
+    }
+    if (from.role === 'thread' && to.role === 'thread' && (input.kind === 'question' || input.kind === 'note')) {
+      const since = new Date(Date.now() - HOUR_MS).toISOString();
+      if (sentSince(s, from.id, since).length >= SENDER_CAP) {
+        throw new Error(
+          `You have sent ${SENDER_CAP} questions or notes to other threads this hour. Stop and ask Desk (message_desk) to coordinate, or keep working with what you have.`,
+        );
+      }
+    }
+    if (input.kind === 'revision') return this.sendRevision(from, to, input);
+    const next = this.sendOutcome(from, to, input.kind);
+    const id = this.deliver(from.id, to.id, input.kind, input.text, { tracked: input.kind === 'question', toolCallId: input.toolCallId });
+    // Waiting pays off when the recipient reads the question in a full run; an answer run or a held recipient is said as such.
+    const hint = from.role === 'thread' && input.kind === 'question' && next.readsInRun ? ' Call wait_for_reply to pause until it answers, or keep working.' : '';
+    return { id, kind: input.kind, note: `Sent ${input.kind} #${id} to ${name} (${next.text}).${hint}` };
   }
 
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
@@ -1204,6 +1269,56 @@ export class Runtime {
   private closeQuestionsTo(thread: AgentRow, why: string): void {
     if (thread.role !== 'thread') return;
     for (const q of openTo(this.messages(thread.project_id), thread.id)) this.answer(q.id, thread.id, closureText(thread.title, why), { auto: true });
+  }
+
+  /** The agent a send names: an agent of the project by id, or a thread by exact title (threadsByRef). */
+  private resolveRecipient(projectId: string, ref: string): AgentRow {
+    const byId = getAgent(this.o.store.db, ref);
+    if (byId) {
+      if (byId.project_id !== projectId) throw new Error(`Unknown thread: ${ref}`);
+      return byId;
+    }
+    const titled = threadsByRef(this.o.store.db, projectId, ref);
+    if (titled.length > 1) throw new Error(`Several threads are titled "${ref}"; use its id.`);
+    if (!titled[0]) throw new Error(`Unknown thread: ${ref}`);
+    return titled[0];
+  }
+
+  /** Desk's revision, as before: the review-round limit, then `agent.revision`, then the message that reopens the thread. */
+  private sendRevision(from: AgentRow, to: AgentRow, input: SendInput): SendResult {
+    if (from.role !== 'desk' || to.role !== 'thread') throw new Error('Only Desk sends revisions.');
+    const limit = getProject(this.o.store.db, to.project_id)!.settings.review_rounds;
+    if (to.review_round >= limit) {
+      throw new Error(`Review round limit (${limit}) reached for ${nameOf(to)}: accept the work with noted caveats or escalate to the user.`);
+    }
+    const round = to.review_round + 1;
+    this.o.store.append({ project_id: to.project_id, agent_id: to.id, type: 'agent.revision', payload: { round, feedback: input.text } });
+    const id = this.deliver(from.id, to.id, 'revision', input.text, { toolCallId: input.toolCallId });
+    return { id, kind: 'revision', note: `Sent revision ${round} to ${nameOf(to)}; it has been reopened.` };
+  }
+
+  /**
+   * What happens next to a message `from` is sending `to` now, for its tool result (design spec §2.5, following the
+   * delivery table §3.3), and whether the recipient reads it in a full run (as opposed to an answer run, or later).
+   */
+  private sendOutcome(from: AgentRow, to: AgentRow, kind: SendInput['kind']): { text: string; readsInRun: boolean } {
+    const held = pendingApprovalsFor(this.o.store.db, to.id).length + (this.resolving.get(to.id) ?? 0) > 0;
+    if (to.role === 'desk' && to.status === 'cancelled') return { text: 'stopped by the user: it reads this when the user resumes it', readsInRun: false };
+    if (to.status === 'running') return { text: 'running: it sees this at its next step', readsInRun: true };
+    if (to.status === 'queued') return { text: 'queued: it sees this when it starts', readsInRun: true };
+    if (held) return { text: 'waiting on an approval: it sees this once the approval is decided', readsInRun: false };
+    // Desk runs for anything (rule 3).
+    if (to.role === 'desk') return { text: `${to.status}: it is woken to read this`, readsInRun: true };
+    const state = to.status === 'waiting' ? 'waiting on its own reply' : to.status;
+    // Rule 4.6: an idle, done or failed thread answers a question in an answer run; so does a waiting one, unless Desk asks.
+    if (kind === 'question' && to.status !== 'waiting') {
+      return { text: `${state}: it will be woken to answer from its context; its result stays final`, readsInRun: false };
+    }
+    if (kind === 'question' && from.role === 'thread') return { text: `${state}: it will be woken just to answer you, and keeps waiting`, readsInRun: false };
+    // Rules 4.4 and 4.5: anything from Desk runs a waiting or idle thread.
+    if (from.role === 'desk') return { text: `${state}: it is woken to read this`, readsInRun: true };
+    if (to.status === 'idle') return { text: 'idle: it reads this when Desk or the user resumes it', readsInRun: false };
+    return { text: `${state}: it reads this when it next runs; notes from other threads do not wake it`, readsInRun: false };
   }
 
   /** Unknown models are assumed to see images; the endpoint answers for itself. */

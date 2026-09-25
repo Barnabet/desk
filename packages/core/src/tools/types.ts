@@ -1,5 +1,16 @@
 import type { z } from 'zod';
-import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, ReasoningEffort, SkillScope, ToolImage, ToolResultStatus } from '@desk/protocol';
+import type {
+  AgentMessageKind,
+  AgentStatus,
+  ArtifactKind,
+  MemoryKind,
+  MessagesState,
+  ProjectSettingsPatch,
+  ReasoningEffort,
+  SkillScope,
+  ToolImage,
+  ToolResultStatus,
+} from '@desk/protocol';
 import type { AttachmentStore } from '../attachments/store';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
@@ -25,6 +36,18 @@ export type ToolContext = {
   /** The model that asked for this call (a run's fallback model after a switch); unset outside a model step, e.g. after an approval. */
   model?: string;
 };
+
+/** A message tool's request to Runtime.send (design spec §2.4). `to` is an agent id, or a thread's exact title. */
+export type SendInput = {
+  from: string;
+  to: string;
+  kind: Extract<AgentMessageKind, 'note' | 'question' | 'revision' | 'update' | 'blocker'>;
+  text: string;
+  toolCallId?: string;
+};
+
+/** What Runtime.send stored: the message id, its kind (`answer` when it answered a question), and the tool's result. */
+export type SendResult = { id: number; kind: AgentMessageKind; replyTo?: number; note: string };
 
 /** Runtime capabilities available to tools (implemented by Runtime). */
 export interface RuntimeServices {
@@ -61,6 +84,13 @@ export interface RuntimeServices {
     text: string,
     opts?: { replyTo?: number; auto?: boolean; tracked?: boolean; toolCallId?: string },
   ): number;
+  /**
+   * The message tools' one send path: refuses what the recipient cannot take (the Error's message is the tool result),
+   * records an answer or delivers, and says what happens next.
+   */
+  send(input: SendInput): SendResult;
+  /** The project's message fold: the agent directory, every message with its question state, the answer runs. */
+  messages(projectId: string): MessagesState;
   spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] }): Promise<string>;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
