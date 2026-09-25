@@ -41,6 +41,19 @@ const age = (iso: string, now: number) => duration(Math.max(0, now - Date.parse(
 /** A runtime closure's text without its parentheses: "(Frontend was stopped before answering.)" → "Frontend was …". */
 const unwrap = (text: string) => text.replace(/^\(([\s\S]*)\)$/, '$1');
 
+const CANNOT = 'could not answer: ';
+
+/**
+ * Why `title` could not answer, from the runtime's closure `(<title> <why>.)`: "Desk was restarting. …" when the closure
+ * already says it could not answer, "it was stopped before answering." otherwise, or the whole text if it is not one.
+ */
+function closureReason(title: string, text: string): string {
+  const body = unwrap(text);
+  if (!body.startsWith(`${title} `)) return body;
+  const why = body.slice(title.length + 1);
+  return why.startsWith(CANNOT) ? why.slice(CANNOT.length) : `it ${why}`;
+}
+
 /** A message's text, at most three lines until "more". Agent text always goes through SafeMarkdown. */
 function Clamped({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -177,7 +190,7 @@ export function ChatItemView(o: {
         // The runtime closed Desk's question for a thread that could not answer: never shown as an answer.
         return (
           <div className="chat-feed feed-closed">
-            <span className="feed-closed-text">{`${agentLabel(item.fromLabel)} could not answer: ${unwrap(item.text)}`}</span>
+            <span className="feed-closed-text">{`${agentLabel(item.fromLabel)} could not answer: ${closureReason(agentLabel(item.fromLabel), item.text)}`}</span>
             <span className="muted small">{clock(item.ts)}</span>
             {view?.answers ? <Quote a={view.answers} onJump={o.onJump} /> : null}
           </div>

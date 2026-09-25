@@ -225,8 +225,13 @@ describe('messages in the conversation', () => {
       ev(8, 'message.user', { text: 'How did you price it?', question: true }, { agent: 'f', ts: at.ask }),
       msg(9, 'd', 'f', 'question', 'Done yet?', at.q, { tracked: true }),
       msg(10, 'f', 'd', 'answer', '(Frontend was stopped before answering.)', at.closed, { reply_to: 9, auto: true }),
+      msg(11, 'd', 'a', 'question', 'Ready?', at.closed, { tracked: true }),
+      msg(12, 'a', 'd', 'answer', '(Auth API could not answer: Desk was restarting. Ask again if you still need to know.)', at.closed, { reply_to: 11, auto: true }),
     ]);
-    await waitFor(() => expect(row('e:10')?.textContent).toContain('Frontend could not answer: Frontend was stopped before answering.'));
+    await waitFor(() => expect(row('e:10')?.textContent).toContain('Frontend could not answer: it was stopped before answering.'));
+    // A closure that already says it could not answer is not said twice.
+    expect(row('e:12')!.textContent).toContain('Auth API could not answer: Desk was restarting. Ask again if you still need to know.');
+    expect(row('e:12')!.textContent).not.toContain('could not answer: Auth API');
     expect(row('e:5')).toBeNull();
     expect(row('e:6')!.textContent).toContain(`Desk → Auth API · note · ${clock(at.note)}`);
     fireEvent.click(within(row('e:6')!).getByRole('button', { name: 'more' }));
