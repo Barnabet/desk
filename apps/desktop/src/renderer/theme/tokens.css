@@ -1068,3 +1068,45 @@ pre {
   font-weight: 500;
   white-space: nowrap;
 }
+
+/* The pair sheet (design spec §8 item 8): two agents' messages, each answer nested under its question. */
+.pair-rows,
+.pair-answers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pair-answers {
+  margin-top: 8px;
+  padding-left: 14px;
+  border-left: 2px solid var(--rule);
+}
+.pair-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+}
+.pair-msg.muted {
+  color: var(--text-min);
+}
+.pair-head {
+  font-size: 12px;
+  font-weight: 600;
+}
+.pair-text p {
+  margin: 0;
+}
+.pair-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+}
+.pair-open {
+  color: var(--wait-text);
+  font-weight: 600;
+}
