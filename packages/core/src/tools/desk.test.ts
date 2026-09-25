@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type FakeReply, type Script } from '@desk/fake-model';
-import type { AgentStatus } from '@desk/protocol';
+import type { AgentStatus, EventOf } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
 import { getPlan } from '../coordination/plan';
 import { getAgent, getDeskAgent, listApprovals, listThreads, type AgentRow } from '../state/queries';
@@ -201,7 +201,7 @@ describe('message_thread refusals', () => {
     expect(h.store.list({ projectId, types: ['message.agent', 'agent.revision'] })).toEqual([]);
 
     const fresh = thread('Fresh');
-    await expect(send(fresh, 'note')).resolves.toBe(`Sent to ${fresh}.`);
+    await expect(send(fresh, 'note')).resolves.toMatch(/^Sent note #\d+ to "Fresh" \(idle: it is woken to read this\)\.$/);
     await rt.whenIdle();
   });
 });
@@ -230,5 +230,34 @@ describe('thread references', () => {
     await expect(stopThreadTool.execute({ thread_id: 'Pricing', reason: 'Not needed' }, ctx)).resolves.toBe('Stopped Pricing.');
     expect(getAgent(h.store.db, live)?.status).toBe('cancelled');
     expect(getAgent(h.store.db, old)?.status).toBe('done');
+  });
+});
+
+describe('message_thread through the send path', () => {
+  it('asks a thread by title, tracked, and activates skills only with a message it sent', async () => {
+    const { rt, projectId, ctx } = await setup();
+    rt.saveSkill({ scope: 'project', projectId, name: 'house-style', description: 'Our writing style', instructions: 'STYLE: short sentences.' });
+    const t = rt.createThread(projectId, { title: 'Pricing', brief: 'Find pricing', workspacePath: join(h.dir, 'pricing') });
+    // Marked running without a job: what it is sent waits for a next step that never comes.
+    h.store.append({ project_id: projectId, agent_id: t, type: 'agent.status_changed', payload: { status: 'running' } });
+    const sent = () => h.store.list({ agentId: t, types: ['message.agent'] }) as Array<EventOf<'message.agent'>>;
+
+    await expect(messageThreadTool.execute({ thread_id: 'Pricing', kind: 'note', text: 'Use it.', skills: ['no-such-skill'] }, ctx)).rejects.toThrow(
+      'Unknown skill: no-such-skill',
+    );
+    await expect(messageThreadTool.execute({ thread_id: 'Nobody', kind: 'note', text: 'Use it.', skills: ['house-style'] }, ctx)).rejects.toThrow(
+      'Unknown thread: Nobody',
+    );
+    expect(sent()).toEqual([]);
+    expect(getAgent(h.store.db, t)!.active_skills).toEqual([]);
+
+    const out = await messageThreadTool.execute({ thread_id: 'Pricing', kind: 'question', text: 'Per seat?', skills: ['house-style'] }, ctx);
+    const [q] = sent();
+    expect(out).toBe(`Sent question #${q!.id} to "Pricing" (running: it sees this at its next step).`);
+    expect(q!.payload).toMatchObject({ from_label: 'Desk', kind: 'question', text: 'Per seat?', tracked: true, tool_call_id: 'tc' });
+    expect(getAgent(h.store.db, t)!.active_skills).toEqual(['house-style']);
+    expect(messageThreadTool.description).toBe(
+      'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
+    );
   });
 });

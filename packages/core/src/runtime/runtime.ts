@@ -445,10 +445,11 @@ export class Runtime {
     if (getProject(this.o.store.db, from.project_id)?.archived_at) throw new Error('This project is archived.');
     const s = this.messages(from.project_id);
     const answers = this.answerable(s, from, to, input.kind);
-    // A stopped Desk takes every message: it reads them when the user resumes it. A stopped thread takes only the
-    // answer to its own open question (a failed or stopped asker keeps its questions open, §1.3).
+    // A stopped Desk takes every message: it reads them when the user resumes it. A stopped thread (or one whose
+    // stopped run is still winding down) takes only the answer to its own open question (a failed or stopped asker
+    // keeps its questions open, §1.3).
     if (to.role === 'thread' && !answers) {
-      if (to.status === 'cancelled') throw new Error(`${name} was stopped; it cannot receive messages.`);
+      if (to.status === 'cancelled' || this.stoppedAt.has(to.id)) throw new Error(`${name} was stopped; it cannot receive messages.`);
       if (input.kind === 'note' && (to.status === 'done' || to.status === 'failed')) {
         throw new Error(
           from.role === 'desk'

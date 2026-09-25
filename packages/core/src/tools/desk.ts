@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { PlanItemStatus, ReasoningEffort, sanitizeLabel, SkillName, type EventInput } from '@desk/protocol';
+import { messageById, PlanItemStatus, ReasoningEffort, sanitizeLabel, SkillName, type EventInput } from '@desk/protocol';
 import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coordination/render';
 import { newId } from '../ids';
-import { getAgent, getApproval, getProject, lastEvent, listThreads, pendingApprovalsFor, threadsByRef, type AgentRow } from '../state/queries';
+import { getAgent, getApproval, lastEvent, listThreads, pendingApprovalsFor, threadsByRef, type AgentRow } from '../state/queries';
 import { git } from '../workspaces/workspaces';
 import { defineTool, type Tool, type ToolContext } from './types';
 
@@ -17,17 +17,6 @@ export function requireThread(ctx: ToolContext, ref: string): AgentRow {
   if (!t) throw new Error(`Unknown thread: ${ref}`);
   if (t.archived_at) throw new Error(`"${sanitizeLabel(t.title ?? 'untitled')}" is archived.`);
   return t;
-}
-
-/** Why Desk may not send `kind` to thread `t` now (§2.4 checks 3–4), or null. `stopping`: its running job was stopped. */
-function refusal(t: AgentRow, kind: 'note' | 'revision', stopping: boolean): string | null {
-  const name = `"${t.title ?? 'untitled'}"`;
-  if (t.archived_at) return `${name} is archived.`;
-  if (t.status === 'cancelled' || stopping) return `${name} was stopped; it cannot receive messages.`;
-  if (kind === 'note' && (t.status === 'done' || t.status === 'failed')) {
-    return `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`;
-  }
-  return null;
 }
 
 const emit = (ctx: ToolContext, e: EventInput) => ctx.services.store.append(e);
@@ -64,27 +53,25 @@ export const spawnThreadTool = defineTool({
 export const messageThreadTool = defineTool({
   name: 'message_thread',
   description:
-    'Send a message to a thread: a `note` (answer, extra context, redirection) or a `revision` (send finished work back with specific feedback; reopens the thread, limited by the project review-round setting). Pass skills to activate more skills on it.',
+    'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
   input: z.object({
     thread_id: z.string(),
     text: z.string().min(1),
-    kind: z.enum(['note', 'revision']).default('note'),
+    kind: z.enum(['note', 'question', 'revision']).default('note'),
     skills: z.array(SkillName).optional().describe('Skills to activate on the thread (effective from its next turn)'),
   }),
   async execute({ thread_id, text, kind, skills = [] }, ctx) {
-    const t = requireThread(ctx, thread_id);
-    const refused = refusal(t, kind, ctx.services.isStopping(t.id));
-    if (refused) throw new Error(refused);
-    if (skills.length) ctx.services.activateSkills(t.id, skills);
-    if (kind === 'revision') {
-      const limit = getProject(ctx.services.store.db, ctx.projectId)!.settings.review_rounds;
-      if (t.review_round >= limit) {
-        throw new Error(`Review round limit (${limit}) reached for ${thread_id}: accept the work with noted caveats or escalate to the user.`);
-      }
-      emit(ctx, { project_id: ctx.projectId, agent_id: t.id, type: 'agent.revision', payload: { round: t.review_round + 1, feedback: text } });
+    // Skill names are checked first, so a bad one sends nothing.
+    for (const name of skills) {
+      const skill = ctx.services.skills.resolve(name, ctx.projectId);
+      if (!skill) throw new Error(`Unknown skill: ${name}`);
+      if (skill.error) throw new Error(`Skill ${name} is broken: ${skill.error}`);
     }
-    ctx.services.deliver(ctx.agentId, t.id, kind, text);
-    return kind === 'revision' ? `Sent revision ${t.review_round + 1} to ${thread_id}; it has been reopened.` : `Sent to ${thread_id}.`;
+    const sent = ctx.services.send({ from: ctx.agentId, to: thread_id, kind, text, toolCallId: ctx.toolCallId });
+    // Activated in the same turn of the event loop, before the woken thread builds its system prompt.
+    const to = messageById(ctx.services.messages(ctx.projectId), sent.id)?.to;
+    if (skills.length && to) ctx.services.activateSkills(to, skills);
+    return sent.note;
   },
 });
 
