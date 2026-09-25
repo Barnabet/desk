@@ -430,9 +430,11 @@ export class Runtime {
    * The message tools' one send path (design spec §2.4). Checks, in order: the recipient (an agent of the sender's
    * project by id, or a thread by exact title; not the sender), that neither it nor the project is archived, that its
    * state takes this kind, the text size, one open question per asker and thread, and a thread's 20 questions or
-   * notes to other threads an hour. Desk's revision then goes its own way (sendRevision); anything else is delivered,
-   * a question tracked, with the tool call that sent it. Each refusal throws the text the model reads; `note` is the
-   * tool result (§2.5). The thread message_thread tool refuses Desk as a target itself (§2.4 check 2).
+   * notes to other threads an hour. A note or an update to an agent whose open question the sender has seen is that
+   * question's answer (auto-link, §1.3): it may reach a failed or stopped asker, and it is exempt from the sender cap.
+   * Desk's revision goes its own way (sendRevision); anything else is delivered, a question tracked, with the tool call
+   * that sent it. Each refusal throws the text the model reads; `note` is the tool result (§2.5). The thread
+   * message_thread tool refuses Desk as a target itself (§2.4 check 2).
    */
   send(input: SendInput): SendResult {
     const from = this.requireAgent(input.from);
@@ -442,8 +444,10 @@ export class Runtime {
     if (to.archived_at || this.archiving.has(to.id)) throw new Error(`${name} is archived.`);
     if (getProject(this.o.store.db, from.project_id)?.archived_at) throw new Error('This project is archived.');
     const s = this.messages(from.project_id);
-    // A stopped Desk takes every message: it reads them when the user resumes it. A stopped thread takes none.
-    if (to.role === 'thread') {
+    const answers = this.answerable(s, from, to, input.kind);
+    // A stopped Desk takes every message: it reads them when the user resumes it. A stopped thread takes only the
+    // answer to its own open question (a failed or stopped asker keeps its questions open, §1.3).
+    if (to.role === 'thread' && !answers) {
       if (to.status === 'cancelled') throw new Error(`${name} was stopped; it cannot receive messages.`);
       if (input.kind === 'note' && (to.status === 'done' || to.status === 'failed')) {
         throw new Error(
@@ -460,13 +464,17 @@ export class Runtime {
       const asked = openFrom(s, from.id).find((q) => q.to === to.id);
       if (asked) throw new Error(`You already asked ${name} #${asked.id} and it has not answered. Wait for the answer (wait_for_reply) or send a note.`);
     }
-    if (from.role === 'thread' && to.role === 'thread' && (input.kind === 'question' || input.kind === 'note')) {
+    if (from.role === 'thread' && to.role === 'thread' && !answers && (input.kind === 'question' || input.kind === 'note')) {
       const since = new Date(Date.now() - HOUR_MS).toISOString();
       if (sentSince(s, from.id, since).length >= SENDER_CAP) {
         throw new Error(
           `You have sent ${SENDER_CAP} questions or notes to other threads this hour. Stop and ask Desk (message_desk) to coordinate, or keep working with what you have.`,
         );
       }
+    }
+    if (answers) {
+      const id = this.answer(answers.id, from.id, input.text, { toolCallId: input.toolCallId });
+      if (id !== null) return { id, kind: 'answer', replyTo: answers.id, note: `Sent #${id} to ${name} as the answer to its question #${answers.id}.` };
     }
     if (input.kind === 'revision') return this.sendRevision(from, to, input);
     const next = this.sendOutcome(from, to, input.kind);
@@ -1282,6 +1290,16 @@ export class Runtime {
     if (titled.length > 1) throw new Error(`Several threads are titled "${ref}"; use its id.`);
     if (!titled[0]) throw new Error(`Unknown thread: ${ref}`);
     return titled[0];
+  }
+
+  /**
+   * The question a message from `from` to `to` answers, if any (design spec §1.3): for a note or an update, `to`'s
+   * oldest open question to `from` that `from` has seen (at or below its inbox cursor). Untracked questions have no
+   * state, so they are never answered this way; questions, blockers and revisions never answer.
+   */
+  private answerable(s: MessagesState, from: AgentRow, to: AgentRow, kind: SendInput['kind']): MessageView | undefined {
+    if (kind !== 'note' && kind !== 'update') return undefined;
+    return openFrom(s, to.id).find((q) => q.to === from.id && q.id <= from.inbox_cursor);
   }
 
   /** Desk's revision, as before: the review-round limit, then `agent.revision`, then the message that reopens the thread. */

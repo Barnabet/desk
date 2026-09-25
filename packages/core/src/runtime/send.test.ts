@@ -220,3 +220,80 @@ describe('send results (design spec §2.5)', () => {
     await rt.whenIdle();
   });
 });
+
+describe('auto-link (design spec §1.3)', () => {
+  it("records B's note as the answer to A's question once B has seen it, and wakes waiting A", async () => {
+    const { projectId, thread, drained } = await setup();
+    const a = thread('Auth API', 'waiting');
+    const b = thread('Frontend', 'running');
+    const q = rt.send({ from: a, to: b, kind: 'question', text: 'Which token format?' });
+
+    // Before B read the question, its note is only a note, and a sibling note does not wake A.
+    const early = rt.send({ from: b, to: a, kind: 'note', text: 'Renamed userId to user_id.' });
+    expect(early.note).toBe(
+      `Sent note #${early.id} to "Auth API" (waiting on its own reply: it reads this when it next runs; notes from other threads do not wake it).`,
+    );
+    expect(stored(early.id).payload.reply_to).toBeUndefined();
+    await rt.whenIdle();
+    expect(threadRequests('Auth API')).toHaveLength(0);
+
+    drained(b, q.id);
+    const r = rt.send({ from: b, to: 'Auth API', kind: 'note', text: 'JWT, RS256.', toolCallId: 'call_a' });
+    expect(r).toEqual({ id: expect.any(Number), kind: 'answer', replyTo: q.id, note: `Sent #${r.id} to "Auth API" as the answer to its question #${q.id}.` });
+    expect(stored(r.id)).toMatchObject({ agent_id: a, payload: { from_agent_id: b, kind: 'answer', reply_to: q.id, text: 'JWT, RS256.', tool_call_id: 'call_a' } });
+    expect(messageById(rt.messages(projectId), q.id)).toMatchObject({ state: 'answered', answerId: r.id });
+    await rt.whenIdle();
+    const [run] = threadRequests('Auth API');
+    expect(String(run!.messages.at(-1)!.content)).toContain(`[message #${r.id} from thread "Frontend" (${b}) — answer to your question #${q.id}]\n> JWT, RS256.`);
+  });
+
+  it("records Desk's note to a thread that asked it as the answer, and wakes the thread", async () => {
+    const { desk, thread } = await setup();
+    const t = thread('Research', 'waiting');
+    const q = rt.send({ from: t, to: desk.id, kind: 'question', text: 'Which region?' });
+    await rt.whenIdle();
+    expect(getAgent(h.store.db, desk.id)!.inbox_cursor).toBeGreaterThanOrEqual(q.id);
+    const r = rt.send({ from: desk.id, to: t, kind: 'note', text: 'EU only.' });
+    expect(r).toMatchObject({ kind: 'answer', replyTo: q.id, note: `Sent #${r.id} to "Research" as the answer to its question #${q.id}.` });
+    await rt.whenIdle();
+    expect(threadRequests('Research')[0]!.messages.at(-1)).toEqual({ role: 'user', content: `[message #${r.id} from Desk — answer to your question #${q.id}]\n> EU only.` });
+  });
+
+  it("never links Desk's note to an untracked (legacy) question", async () => {
+    const { desk, thread } = await setup();
+    const t = thread('Research', 'waiting');
+    rt.deliver(t, desk.id, 'question', 'Which region?');
+    await rt.whenIdle();
+    const r = rt.send({ from: desk.id, to: t, kind: 'note', text: 'EU only.' });
+    expect(r.kind).toBe('note');
+    expect(stored(r.id).payload.reply_to).toBeUndefined();
+    expect(r.note).toBe(`Sent note #${r.id} to "Research" (waiting on its own reply: it is woken to read this).`);
+    await rt.whenIdle();
+  });
+
+  it('lets an answer reach a stopped or failed asker, and exempts answers from the sender cap', async () => {
+    const { thread, setStatus, drained } = await setup();
+    const b = thread('Frontend', 'running');
+    const scout = thread('Scout', 'running');
+    const q = rt.send({ from: scout, to: b, kind: 'question', text: 'Which token format?' });
+    setStatus(scout, 'cancelled');
+    drained(b, q.id);
+
+    const c = thread('Checkout', 'running');
+    for (let i = 0; i < 20; i++) rt.send({ from: b, to: c, kind: 'note', text: `Note ${i}` });
+    expect(() => rt.send({ from: b, to: c, kind: 'note', text: 'One more.' })).toThrow(/^You have sent 20 questions or notes/);
+
+    expect(rt.send({ from: b, to: 'Scout', kind: 'note', text: 'JWT.' })).toMatchObject({ kind: 'answer', replyTo: q.id });
+    // Answered, the stopped thread takes nothing more.
+    expect(() => rt.send({ from: b, to: 'Scout', kind: 'note', text: 'Also RS256.' })).toThrow('"Scout" was stopped; it cannot receive messages.');
+
+    const deploy = thread('Deploy', 'running');
+    const q2 = rt.send({ from: deploy, to: b, kind: 'question', text: 'Which port?' });
+    setStatus(deploy, 'failed');
+    drained(b, q2.id);
+    expect(rt.send({ from: b, to: deploy, kind: 'note', text: '8080.' })).toMatchObject({ kind: 'answer', replyTo: q2.id });
+    await rt.whenIdle();
+    expect(threadRequests('Scout')).toHaveLength(0);
+    expect(threadRequests('Deploy')).toHaveLength(0);
+  });
+});
