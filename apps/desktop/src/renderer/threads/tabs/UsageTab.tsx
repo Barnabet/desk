@@ -19,7 +19,22 @@ export function usageByModel(events: StoredEvent[], agentId: string): ModelUsage
   return [...by.values()];
 }
 
-export const tokens = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+/** A token count in at most ~3 significant digits: 236, 7.7k, 402M, 3.2B. */
+export function tokens(n: number): string {
+  if (n < 1000) return String(n);
+  const units: Array<[number, string]> = [
+    [1e3, 'k'],
+    [1e6, 'M'],
+    [1e9, 'B'],
+  ];
+  for (const [i, [size, unit]] of units.entries()) {
+    const v = n / size;
+    const text = v < 9.95 ? v.toFixed(1) : String(Math.round(v));
+    // 999_700 rounds to "1000k"; the next unit says it better.
+    if (Number(text) < 1000 || i === units.length - 1) return `${text}${unit}`;
+  }
+  return String(n);
+}
 
 export function UsageTab({ usage }: { usage: ModelUsage[] }) {
   if (!usage.length) return <EmptyState title="No usage yet">Token counts appear after the thread's first model call.</EmptyState>;
