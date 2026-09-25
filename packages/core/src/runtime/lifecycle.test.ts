@@ -21,7 +21,7 @@ async function setup(script: Script) {
   const desk = getDeskAgent(h.store.db, projectId)!;
   const threadId = rt.createThread(projectId, { title: 'Research', brief: 'Find facts', workspacePath: join(h.dir, 'ws') });
   /** Starts the thread the way spawn_thread does (the user's own messages would be quoted in its notices). */
-  const begin = (id: string) => rt.sendAgentMessage(desk.id, id, 'note', 'Begin your assignment.');
+  const begin = (id: string) => rt.deliver(desk.id, id, 'note', 'Begin your assignment.');
   return { rt, projectId, desk, threadId, begin };
 }
 
@@ -75,7 +75,7 @@ describe('thread lifecycle notifications', () => {
     await rt.whenIdle();
     expect(getAgent(h.store.db, threadId)?.status).toBe('waiting');
     expect(lastDeskInput()).toBe(`[from thread "Research" (${threadId}) — question] Which region?`);
-    rt.sendAgentMessage(desk.id, threadId, 'note', 'EU only.');
+    rt.deliver(desk.id, threadId, 'note', 'EU only.');
     await rt.whenIdle();
     const threadReqs = h.fake.requests.filter((r) => r.model === FAKE_MODEL.id);
     expect(threadReqs.at(-1)!.messages.at(-1)).toEqual({ role: 'user', content: '[from Desk — note] EU only.' });

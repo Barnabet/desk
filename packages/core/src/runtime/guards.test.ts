@@ -50,7 +50,7 @@ async function setup(threads: Scripts, extra: Partial<RuntimeOptions> = {}) {
   const desk = getDeskAgent(h.store.db, projectId)!;
   const thread = (title: string) => rt.createThread(projectId, { title, brief: `Do the ${title} part`, workspacePath: join(h.dir, title) });
   /** Starts a thread the way spawn_thread does. */
-  const begin = (id: string) => rt.sendAgentMessage(desk.id, id, 'note', 'Begin your assignment.');
+  const begin = (id: string) => rt.deliver(desk.id, id, 'note', 'Begin your assignment.');
   return { rt, projectId, desk, thread, begin };
 }
 
@@ -74,7 +74,7 @@ describe('wakes in the runtime', () => {
     expect(status(t)).toBe('done');
     const requests = h.fake.requests.length;
 
-    rt.sendAgentMessage(desk.id, t, 'note', 'Also cover the footer.');
+    rt.deliver(desk.id, t, 'note', 'Also cover the footer.');
     await rt.whenIdle();
     expect(status(t)).toBe('done');
     expect(h.fake.requests.length).toBe(requests);
@@ -91,7 +91,7 @@ describe('wakes in the runtime', () => {
     const t = thread('Draft');
     begin(t);
     await rt.whenIdle();
-    rt.sendAgentMessage(desk.id, t, 'revision', 'Add sources.');
+    rt.deliver(desk.id, t, 'revision', 'Add sources.');
     await rt.whenIdle();
     expect(runs(t)).toHaveLength(2);
     expect(getAgent(h.store.db, t)).toMatchObject({ status: 'done', result_summary: 'v2' });
@@ -102,7 +102,7 @@ describe('wakes in the runtime', () => {
     const t = thread('Waiter');
     begin(t);
     await until(() => threadRequests('Waiter').length === 1);
-    rt.sendAgentMessage(desk.id, t, 'note', 'Extra context.');
+    rt.deliver(desk.id, t, 'note', 'Extra context.');
     rt.stop(t);
     await rt.whenIdle();
     expect(status(t)).toBe('cancelled');
@@ -141,7 +141,7 @@ describe('wakes in the runtime', () => {
       if (yieldTool === 'complete') expect(getAgent(h.store.db, t)?.result_summary).toBe('Finished early');
 
       // Neither a later Desk note, the stale user message, nor a restart runs it again.
-      rt.sendAgentMessage(desk.id, t, 'note', 'Late note.');
+      rt.deliver(desk.id, t, 'note', 'Late note.');
       await rt.whenIdle();
       const next = newRuntime(h, { toolsFor: withAct });
       expect(next.recover()).not.toContain(t);
@@ -218,7 +218,7 @@ describe('archives', () => {
     await rt.whenIdle();
     await rt.archiveThread(old);
     // A revision reopens a done thread that is not archived: here it must not.
-    rt.sendAgentMessage(desk.id, old, 'revision', 'Add sources.');
+    rt.deliver(desk.id, old, 'revision', 'Add sources.');
     await rt.whenIdle();
     expect(runs(old)).toHaveLength(1);
     expect(() => rt.sendMessage(old, 'Hello?')).toThrow(ConflictError);
@@ -238,7 +238,7 @@ describe('archives', () => {
     expect(status(t)).toBe('done');
 
     rt.archiveProject(projectId);
-    rt.sendAgentMessage(desk.id, t, 'revision', 'Add sources.');
+    rt.deliver(desk.id, t, 'revision', 'Add sources.');
     await rt.whenIdle();
     const [archived] = h.store.list({ projectId, types: ['project.archived'] });
     expect(h.store.list({ projectId, after: archived!.id, types: ['run.started'] })).toEqual([]);
@@ -298,7 +298,7 @@ describe('notices to Desk', () => {
   it('names a note that raced the final complete step as unread, and does not reopen the thread', async () => {
     const { rt, desk, thread, begin } = await setup({ Writer: () => tools(call('act'), call('complete', { summary: 'Draft written' })) });
     const t = thread('Writer');
-    during = (id) => rt.sendAgentMessage(desk.id, id, 'note', 'Also cover the footer.');
+    during = (id) => rt.deliver(desk.id, id, 'note', 'Also cover the footer.');
     begin(t);
     await rt.whenIdle();
     const note = h.store.list({ agentId: t, types: ['message.agent'] }).at(-1)!;
@@ -349,7 +349,7 @@ describe('approvals being resolved', () => {
     const [ap] = listApprovals(h.store.db, projectId, 'pending');
     const resolving = rt.resolveApproval(ap!.id, 'approved');
     await until(() => started);
-    rt.sendAgentMessage(desk.id, t, 'note', 'Also mention the changelog.');
+    rt.deliver(desk.id, t, 'note', 'Also mention the changelog.');
     await new Promise((r) => setTimeout(r, 20));
     expect(runs(t)).toHaveLength(1);
 

@@ -151,7 +151,7 @@ export class Runtime {
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
       libraryDir: (projectId) => this.libraryDir(projectId),
       publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
-      sendAgentMessage: (from, to, kind, text) => this.sendAgentMessage(from, to, kind, text),
+      deliver: (from, to, kind, text) => this.deliver(from, to, kind, text),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
       isStopping: (agentId) => this.stoppedAt.has(agentId),
@@ -338,18 +338,23 @@ export class Runtime {
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'memory.deleted', payload: { memory_id: memoryId } });
   }
 
-  /** Delivers an agent-to-agent message (or a system notice attributed to `fromAgentId`), then wakes the recipient if wakeDecision says so. */
-  sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void {
+  /**
+   * Stores a message on the recipient's stream (another agent's message, or a runtime notice attributed to
+   * `fromAgentId`), then wakes the recipient if wakeDecision says so. It never refuses because of the recipient's
+   * state. Returns the message id.
+   */
+  deliver(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): number {
     const from = this.requireAgent(fromAgentId);
     const to = this.requireAgent(toAgentId);
     const label = from.role === 'desk' ? 'Desk' : `thread "${from.title ?? 'untitled'}" (${from.id})`;
-    this.o.store.append({
+    const [message] = this.o.store.append({
       project_id: to.project_id,
       agent_id: to.id,
       type: 'message.agent',
       payload: { from_agent_id: from.id, from_label: label, kind, text },
     });
     this.wake(to.id);
+    return message!.id;
   }
 
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
@@ -430,7 +435,7 @@ export class Runtime {
         ...(skills.length ? { skills } : {}),
       },
     });
-    this.sendAgentMessage(parent.id, id, 'note', 'Begin your assignment.');
+    this.deliver(parent.id, id, 'note', 'Begin your assignment.');
     return id;
   }
 
@@ -813,7 +818,7 @@ export class Runtime {
       if (!last || now - Date.parse(last.ts) < thresholdMs || this.stallNotified.get(t.id) === last.id) continue;
       this.stallNotified.set(t.id, last.id);
       const minutes = Math.round((now - Date.parse(last.ts)) / 60_000);
-      this.sendAgentMessage(t.id, t.parent_id, 'stalled', `No activity for ${minutes} minutes (status: ${t.status}).`);
+      this.deliver(t.id, t.parent_id, 'stalled', `No activity for ${minutes} minutes (status: ${t.status}).`);
       reported.push(t.id);
     }
     return reported;
@@ -1222,7 +1227,7 @@ export class Runtime {
    */
   private notifyParent(agent: AgentRow, ended = false): void {
     if (agent.role !== 'thread' || !agent.parent_id) return;
-    const send = (kind: AgentMessageKind, text: string) => this.sendAgentMessage(agent.id, agent.parent_id!, kind, this.userWroteLine(agent, ended) + text);
+    const send = (kind: AgentMessageKind, text: string) => this.deliver(agent.id, agent.parent_id!, kind, this.userWroteLine(agent, ended) + text);
     const finished = lastEvent(this.o.store.db, agent.id, 'run.finished');
     const fin = finished?.type === 'run.finished' ? finished.payload : undefined;
     switch (agent.status) {

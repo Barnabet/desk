@@ -54,7 +54,7 @@ export const messageDeskTool = defineTool({
     'Send a message to Desk, the project coordinator: a progress `update`, a `question`, or a `blocker`. After a question or blocker, call wait_for_reply unless you can keep working meanwhile.',
   input: z.object({ kind: z.enum(['update', 'question', 'blocker']), text: z.string().min(1) }),
   async execute({ kind, text }, ctx) {
-    ctx.services.sendAgentMessage(ctx.agentId, parentOf(ctx), kind, text);
+    ctx.services.deliver(ctx.agentId, parentOf(ctx), kind, text);
     return 'Sent to Desk.';
   },
 });

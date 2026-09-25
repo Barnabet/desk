@@ -69,7 +69,7 @@ describe('agent messages', () => {
     const projectId = rt.createProject({ name: 'P', goal: 'G', settings: fakeModels });
     const desk = getDeskAgent(h.store.db, projectId)!;
     const thread = rt.createThread(projectId, { title: 'Research', brief: 'B', workspacePath: join(h.dir, 'w') });
-    rt.sendAgentMessage(thread, desk.id, 'completed', 'All done.');
+    rt.deliver(thread, desk.id, 'completed', 'All done.');
     await rt.whenIdle();
     expect(h.fake.requests[0]!.messages.at(-1)).toEqual({
       role: 'user',
@@ -84,8 +84,19 @@ describe('agent messages', () => {
     const projectId = rt.createProject({ name: 'P', goal: 'G', settings: fakeModels });
     const desk = getDeskAgent(h.store.db, projectId)!;
     const thread = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w') });
-    rt.sendAgentMessage(desk.id, thread, 'revision', 'Add tests.');
+    rt.deliver(desk.id, thread, 'revision', 'Add tests.');
     await rt.whenIdle();
     expect(h.fake.requests[0]!.messages.at(-1)).toEqual({ role: 'user', content: '[from Desk — revision] Add tests.' });
+  });
+
+  it('returns the id of the message it stored', async () => {
+    h = await createHarness({ script: [text('ack')] });
+    const rt = newRuntime(h);
+    const projectId = rt.createProject({ name: 'P', goal: 'G', settings: fakeModels });
+    const desk = getDeskAgent(h.store.db, projectId)!;
+    const thread = rt.createThread(projectId, { title: 'Research', brief: 'B', workspacePath: join(h.dir, 'w') });
+    const id = rt.deliver(thread, desk.id, 'update', 'Halfway there.');
+    await rt.whenIdle();
+    expect(h.store.list({ agentId: desk.id, types: ['message.agent'] }).map((e) => e.id)).toEqual([id]);
   });
 });

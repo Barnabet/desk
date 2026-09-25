@@ -76,7 +76,7 @@ export const messageThreadTool = defineTool({
       }
       emit(ctx, { project_id: ctx.projectId, agent_id: t.id, type: 'agent.revision', payload: { round: t.review_round + 1, feedback: text } });
     }
-    ctx.services.sendAgentMessage(ctx.agentId, t.id, kind, text);
+    ctx.services.deliver(ctx.agentId, t.id, kind, text);
     return kind === 'revision' ? `Sent revision ${t.review_round + 1} to ${thread_id}; it has been reopened.` : `Sent to ${thread_id}.`;
   },
 });

@@ -50,7 +50,8 @@ export interface RuntimeServices {
     meta: { title: string; kind: ArtifactKind; description: string; name?: string },
     origin: string,
   ): Promise<{ id: string; path: string }>;
-  sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void;
+  /** Stores a message on the recipient's stream and wakes it if it should run; returns the message id. */
+  deliver(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): number;
   spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] }): Promise<string>;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
