@@ -573,6 +573,26 @@ describe('the answer-run gate', () => {
     expect(threadRequests('Pricing').filter(answering)).toHaveLength(2);
     expect(h.store.list({ agentId: asker, types: ['message.agent'] }).filter((e) => e.type === 'message.agent' && e.payload.kind === 'question')).toEqual([]);
   });
+
+  it("denies a note to the asker's sanitised title when that is another thread's exact title", async () => {
+    const { stopped, finished } = await setup({
+      Pricing: (req) => {
+        if (!answering(req)) return tools(call('complete', { summary: 'Pricing page done' }));
+        // As the question's header names the asker; a send resolves this exact title to the sibling.
+        if (stepsTaken(req) === 0) return tools(call('message_thread', { thread_id: 'Auth API', text: 'Per seat.' }, 'n1'));
+        return text('Per seat.');
+      },
+    });
+    const t = await finished('Pricing');
+    const asker = stopped('Auth] API');
+    const sibling = stopped('Auth API');
+    const q = ask(asker, t, 'Per seat?');
+    await rt.whenIdle();
+    const denied = h.store.list({ agentId: t, types: ['tool.result'] }).find((e) => e.type === 'tool.result' && e.payload.tool_call_id === 'n1');
+    expect(denied).toMatchObject({ payload: { status: 'denied', content: DENIED } });
+    expect(h.store.list({ agentId: sibling, types: ['message.agent'] })).toEqual([]);
+    expect(answersTo(q).map((e) => [e.agent_id, e.payload.text, e.payload.auto])).toEqual([[asker, 'Per seat.', undefined]]);
+  });
 });
 
 describe('notices after answer runs', () => {

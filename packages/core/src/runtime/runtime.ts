@@ -1381,7 +1381,7 @@ export class Runtime {
             a.role === 'desk' ? project.settings.desk_reasoning_effort : (a.reasoning_effort ?? project.settings.thread_reasoning_effort),
           ),
         // An answer run only reads, and sends nothing but its answer (§4.4).
-        gate: answer ? answerGate(gate, asker) : gate,
+        gate: answer ? answerGate(gate, asker, () => listAgents(this.o.store.db, agent.project_id)) : gate,
         toolContext: (a, runId, toolCallId, sig) =>
           buildToolContext(a, runId, toolCallId, sig, {
             sandboxEnabled: sandboxAvailable,

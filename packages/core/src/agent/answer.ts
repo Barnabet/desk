@@ -56,27 +56,38 @@ export const ANSWER_DENIAL = 'Denied: not available while answering a question. 
 const APPROVAL_DENIAL = 'Denied: this call needs approval, which is not available while answering a question. You can only read; answer in plain text.';
 
 /**
- * Whether a message tool call sends the answer to the asker: message_thread to it (its id, its exact title, or the
- * sanitised title the question's header names it by), or message_desk when Desk asked, of any kind but a question or
- * a blocker. send() records it as the answer (S3).
+ * Whether a message tool call sends the answer to the asker: message_thread to it, or message_desk when Desk asked, of
+ * any kind but a question or a blocker. send() records it as the answer (S3).
  */
-function answersAsker(toolName: string, input: unknown, asker: AgentRow): boolean {
+function answersAsker(toolName: string, input: unknown, asker: AgentRow, agents: () => readonly AgentRow[]): boolean {
   const i = (input ?? {}) as { thread_id?: unknown; kind?: unknown };
   if (i.kind === 'question' || i.kind === 'blocker') return false;
   if (toolName === 'message_desk') return asker.role === 'desk';
   if (toolName !== 'message_thread' || asker.role !== 'thread') return false;
-  return i.thread_id === asker.id || i.thread_id === asker.title || i.thread_id === sanitizeLabel(asker.title ?? 'untitled');
+  return namesOnly(i.thread_id, asker, agents());
+}
+
+/**
+ * Whether `ref` reaches the asker and no one else (design spec §4.4: the `thread_id` resolves to the asker). It names
+ * the asker by its id, its exact title or the sanitised title the question's header names it by, and no other agent
+ * of the project that could receive a message goes by it: a send resolves a title to a live thread first, and one
+ * that is archived receives nothing (S3).
+ */
+function namesOnly(ref: unknown, asker: AgentRow, agents: readonly AgentRow[]): boolean {
+  const named = (a: AgentRow) => ref === a.id || ref === a.title || ref === sanitizeLabel(a.title ?? 'untitled');
+  return named(asker) && agents.every((a) => a.id === asker.id || Boolean(a.archived_at) || !named(a));
 }
 
 /**
  * The policy gate of an answer run (design spec §4.4). Read tools, and the answer sent to the asker as a message, go
  * to the policy as usual, and an `ask` becomes a denial: an answer run never creates an approval. Everything else is
  * denied without asking the policy, so an answer run changes nothing, runs no command, messages no one but its
- * asker, and never yields (complete and wait_for_reply are denied).
+ * asker, and never yields (complete and wait_for_reply are denied). `agents`: the project's agents, read when a
+ * message names a thread.
  */
-export function answerGate(gate: RunDeps['gate'], asker: AgentRow | 'user'): RunDeps['gate'] {
+export function answerGate(gate: RunDeps['gate'], asker: AgentRow | 'user', agents: () => readonly AgentRow[]): RunDeps['gate'] {
   return (tool, input, project, agent) => {
-    if (!ANSWER_TOOLS.has(tool.name) && (asker === 'user' || !answersAsker(tool.name, input, asker))) {
+    if (!ANSWER_TOOLS.has(tool.name) && (asker === 'user' || !answersAsker(tool.name, input, asker, agents))) {
       return { action: 'deny', delegateToDesk: false, reason: 'Not available while answering a question', denial: ANSWER_DENIAL };
     }
     const d: PolicyDecision = gate(tool, input, project, agent);
