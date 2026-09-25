@@ -576,3 +576,36 @@
     grid-template-columns: minmax(0, 1fr) 360px;
   }
 }
+
+/* A waiting thread's card: its wait is a line of its own, in a slot under the card's link (design spec §8 item 13). */
+.thread-card-slot {
+  position: relative;
+  display: flex;
+}
+.thread-card-slot > .thread-card {
+  flex: 1;
+  min-width: 0;
+}
+.thread-card.has-wait {
+  padding-bottom: 38px;
+}
+.thread-card-wait {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.thread-card-wait .wait-line {
+  color: var(--wait-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.thread-card-wait button.wait-line:hover {
+  text-decoration: underline;
+}

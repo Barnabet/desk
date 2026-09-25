@@ -401,4 +401,63 @@ describe('ThreadsScreen', () => {
     expect(hop.getAttribute('href')).toBe('#/attention?item=approval%3Aa1');
     expect(hop.textContent).toBe('→ needs your approval');
   });
+
+  it("gives a waiting thread's card its wait, which opens the pair sheet, and the hop to what needs you", async () => {
+    globalStore.set({
+      ...initialGlobalState(),
+      connection: { status: 'live' },
+      attention: [{ id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Onboarding', agent_id: 'f', title: 'Frontend wants to run bash', detail: '', created_at: minutesAgo(1), ref: { approval_id: 'a1', thread_id: 'f' } }],
+    });
+    setup(
+      [
+        ...base,
+        ev(6, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+        ev(7, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'question', text: 'Which subject lines?', tracked: true }, { ...f, ts: minutesAgo(4) }),
+        ev(8, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, t),
+      ],
+      {},
+      null,
+    );
+    const wait = await screen.findByRole('button', { name: 'waiting on Frontend · 4m' });
+    // The fold says what it waits on; the status reason is gone from the card.
+    expect(screen.getByRole('link', { name: /Welcome emails/ }).textContent).not.toContain('Waiting on "Frontend"');
+    expect(screen.getByRole('link', { name: 'Frontend needs your approval' }).getAttribute('href')).toBe('#/attention?item=approval%3Aa1');
+    fireEvent.click(wait);
+    const sheet = screen.getByRole('dialog', { name: 'Welcome emails ⇄ Frontend' });
+    expect(within(sheet).getByText('Which subject lines?')).toBeTruthy();
+    expect(sheet.textContent).toContain('open · 4m');
+  });
+
+  it('says "waiting on you" on the card of a thread with an attention item, as plain text', async () => {
+    globalStore.set({
+      ...initialGlobalState(),
+      connection: { status: 'live' },
+      attention: [{ id: 'approval:a2', kind: 'approval', project_id: 'p', project_name: 'Onboarding', agent_id: 't', title: 'Welcome emails wants to run bash', detail: '', created_at: minutesAgo(2), ref: { approval_id: 'a2', thread_id: 't' } }],
+    });
+    setup([...base, ev(6, 'agent.status_changed', { status: 'waiting', reason: 'Waiting for approval' }, t)], {}, null);
+    const card = await screen.findByRole('link', { name: /Welcome emails/ });
+    const line = card.parentElement!.querySelector<HTMLElement>('.thread-card-wait')!;
+    expect(line.textContent).toBe('waiting on you · 2m');
+    expect(within(line).queryByRole('button')).toBeNull();
+  });
+
+  it("keeps a stalled waiting thread's wait a button: a stall asks nothing of the user", async () => {
+    globalStore.set({
+      ...initialGlobalState(),
+      connection: { status: 'live' },
+      attention: [{ id: 'stalled:t', kind: 'stalled', project_id: 'p', project_name: 'Onboarding', agent_id: 't', title: 'Welcome emails is stalled', detail: '', created_at: minutesAgo(1), ref: { thread_id: 't' } }],
+    });
+    setup(
+      [
+        ...base,
+        ev(6, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+        ev(7, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'question', text: 'Which subject lines?', tracked: true }, { ...f, ts: minutesAgo(4) }),
+        ev(8, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, t),
+      ],
+      {},
+      null,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'waiting on Frontend · 4m' }));
+    expect(screen.getByRole('dialog', { name: 'Welcome emails ⇄ Frontend' })).toBeTruthy();
+  });
 });
