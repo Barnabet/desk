@@ -453,14 +453,22 @@
 .feed-revision {
   border-left-color: var(--run);
 }
-.feed-blocker,
+/* Vermilion only where an attention item exists (a failed thread); questions, waits and blockers are amber. */
 .feed-failed {
   border-left-color: var(--accent);
 }
-.feed-blocker .feed-chip,
 .feed-failed .feed-chip {
   background: var(--accent-tint);
   color: var(--accent);
+}
+.feed-question,
+.feed-blocker {
+  border-left-color: var(--wait);
+}
+.feed-question .feed-chip,
+.feed-blocker .feed-chip {
+  background: var(--wait-pastel);
+  color: var(--wait-text);
 }
 .feed-stalled {
   border-left-color: var(--wait);
@@ -924,4 +932,97 @@
     width: min(420px, 90%);
     z-index: 10;
   }
+}
+/* A row with nothing to show (a tool group of Desk's sends only, a digest without its view) takes no space. */
+.chat-item:empty {
+  display: none;
+}
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--rule);
+  font-size: 12.5px;
+}
+.msg-question {
+  border-left-color: var(--wait);
+}
+.msg-revision {
+  border-left-color: var(--run);
+}
+.msg-steer {
+  border-left-color: var(--ink);
+}
+.msg-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.feed-more {
+  align-self: flex-start;
+}
+.msg-state {
+  font-size: 12px;
+}
+.msg-open {
+  color: var(--wait-text);
+  font-weight: 600;
+}
+.msg-quote {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-min);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.msg-quote:hover {
+  text-decoration: underline;
+}
+.chat-feed .msg-quote,
+.chat-feed .msg-state {
+  flex-basis: 100%;
+}
+.feed-closed {
+  border-left-color: var(--muted);
+  color: var(--text-min);
+}
+.chat-digest {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px;
+  border-left: 3px dashed var(--rule);
+  font-size: 12.5px;
+}
+.digest-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.digest-pairs {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }

@@ -1,16 +1,19 @@
+import { useState } from 'react';
 import type { AttentionItem } from '@desk/protocol';
-import type { ChatItem } from '@desk/client';
+import type { ChatItem, QuestionView } from '@desk/client';
 import { Button } from '../components/Button';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { ToolGroup } from '../components/ToolGroup';
-import { clock } from '../format';
+import { clock, duration, plural } from '../format';
 import { href } from '../router';
+import type { AnswerQuote, RowView } from './rowViews';
 
 const FEED: Record<string, string> = {
   note: 'Note',
   update: 'Update',
   question: 'Question',
   blocker: 'Blocked',
+  answer: 'Answer',
   completed: 'Result',
   failed: 'Failed',
   cancelled: 'Stopped',
@@ -30,6 +33,74 @@ export function chatEventId(item: ChatItem): number {
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
 }
 
+/** Time since `iso` on the shared clock: "42s", "4m". */
+const age = (iso: string, now: number) => duration(Math.max(0, now - Date.parse(iso)));
+
+/** A runtime closure's text without its parentheses: "(Frontend was stopped before answering.)" → "Frontend was …". */
+const unwrap = (text: string) => text.replace(/^\(([\s\S]*)\)$/, '$1');
+
+/** A message's text, at most three lines until "more". Agent text always goes through SafeMarkdown. */
+function Clamped({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 280 || text.split('\n').length > 3;
+  return (
+    <>
+      <SafeMarkdown className={`feed-text${long && !open ? ' clamp-3' : ''}`} text={text} />
+      {long ? (
+        <button type="button" className="link small feed-more" onClick={() => setOpen((v) => !v)}>
+          {open ? 'less' : 'more'}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/** A tracked question's state line: amber "waiting for an answer · 4m", "answered 14:05 ↓" (jumps to the answer), or muted. */
+function QuestionState({ q, now, onJump }: { q: QuestionView; now: number | undefined; onJump(itemId: string): void }) {
+  if (q.state === 'open') return <span className="msg-state msg-open">waiting for an answer · {age(q.since, now ?? Date.now())}</span>;
+  if (q.state === 'answered' && q.answerId !== undefined && q.answeredAt) {
+    const answer = `e:${q.answerId}`;
+    return (
+      <button type="button" className="link small msg-state" onClick={() => onJump(answer)}>
+        answered {clock(q.answeredAt)} ↓
+      </button>
+    );
+  }
+  return <span className="msg-state muted">{q.state}</span>;
+}
+
+/** An answer's one-line quote of its question; it jumps to the question and flashes it. */
+function Quote({ a, onJump }: { a: AnswerQuote; onJump(itemId: string): void }) {
+  return (
+    <button type="button" className="msg-quote" onClick={() => onJump(`e:${a.question}`)}>
+      {`↩ ${a.asker}'s question: “${a.text}”`}
+    </button>
+  );
+}
+
+/** What threads said to each other during one Desk turn: counts, then one line per pair (design spec §8 item 2). */
+function Digest({ view, projectId, now }: { view: NonNullable<RowView['digest']>; projectId: string; now: number | undefined }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-digest">
+      <button type="button" className="digest-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {`Between threads · ${plural(view.messages, 'message')}${view.open ? ` · ${plural(view.open, 'open question')}` : ''}`}
+      </button>
+      {open ? (
+        <ul className="digest-pairs">
+          {view.pairs.map((p) => (
+            <li key={p.key}>
+              <a href={href({ name: 'project', id: projectId, tab: 'threads', threadId: p.to, at: p.at })}>
+                {`${p.label} · ${p.count}${p.waiting ? ` · ${p.waiting.who} waiting ${age(p.waiting.since, now ?? Date.now())}` : ''}`}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export function ChatItemView(o: {
   item: ChatItem;
   projectId: string;
@@ -37,8 +108,15 @@ export function ChatItemView(o: {
   answering: string | null;
   onAnswer(text: string): void;
   onOwnWords(): void;
+  /** What the row shows from the message fold (rowViews): a question's state, an answer's quote, a digest's counts. */
+  view?: RowView | undefined;
+  /** The shared clock, passed only to rows whose view ticks; the others never re-render for it. */
+  now?: number | undefined;
+  /** Scrolls the chat to an item and flashes it. */
+  onJump(itemId: string): void;
 }) {
-  const { item } = o;
+  const { item, view } = o;
+  const thread = (id: string) => href({ name: 'project', id: o.projectId, tab: 'threads', threadId: id });
   switch (item.kind) {
     case 'user':
       return (
@@ -64,19 +142,57 @@ export function ChatItemView(o: {
           {item.interrupted ? <span className="muted small">Cut off by an error; Desk will pick up again.</span> : null}
         </div>
       );
-    case 'tools':
-      return <ToolGroup calls={item.calls} title={`Desk ${item.calls.some((c) => c.status === 'running') ? 'is using' : 'used'} ${item.calls.length} tool${item.calls.length === 1 ? '' : 's'}`} />;
+    case 'tools': {
+      // Desk's sends to threads show as message rows; failed, denied or unfinished ones stay here (design spec §8 item 1).
+      const calls = item.calls.filter((c) => !(c.name === 'message_thread' && c.status === 'ok'));
+      if (!calls.length) return null;
+      return <ToolGroup calls={calls} title={`Desk ${calls.some((c) => c.status === 'running') ? 'is using' : 'used'} ${calls.length} tool${calls.length === 1 ? '' : 's'}`} />;
+    }
     case 'agent':
+      if (item.auto)
+        // The runtime closed Desk's question for a thread that could not answer: never shown as an answer.
+        return (
+          <div className="chat-feed feed-closed">
+            <span className="feed-closed-text">{`${agentLabel(item.fromLabel)} could not answer: ${unwrap(item.text)}`}</span>
+            <span className="muted small">{clock(item.ts)}</span>
+            {view?.answers ? <Quote a={view.answers} onJump={o.onJump} /> : null}
+          </div>
+        );
       return (
         <div className={`chat-feed feed-${item.messageKind}`}>
           <span className="feed-chip">{FEED[item.messageKind] ?? item.messageKind}</span>
-          <a className="feed-from" href={href({ name: 'project', id: o.projectId, tab: 'threads', threadId: item.fromAgentId })}>
+          <a className="feed-from" href={thread(item.fromAgentId)}>
             {agentLabel(item.fromLabel)}
           </a>
           <span className="muted small">{clock(item.ts)}</span>
+          {view?.answers ? <Quote a={view.answers} onJump={o.onJump} /> : null}
           <SafeMarkdown className="feed-text" text={item.text} />
+          {view?.question ? <QuestionState q={view.question} now={o.now} onJump={o.onJump} /> : null}
         </div>
       );
+    case 'message':
+      return (
+        <div className={`chat-msg msg-${item.messageKind}`}>
+          <span className="msg-head">
+            Desk → <a href={thread(item.to)}>{view?.toTitle ?? 'a thread'}</a> · {item.messageKind} · {clock(item.ts)}
+          </span>
+          {view?.answers ? <Quote a={view.answers} onJump={o.onJump} /> : null}
+          <Clamped text={item.text} />
+          {view?.question ? <QuestionState q={view.question} now={o.now} onJump={o.onJump} /> : null}
+        </div>
+      );
+    case 'steer':
+      return (
+        <div className="chat-msg msg-steer">
+          <span className="msg-head">
+            {item.question ? 'You asked ' : 'You → '}
+            <a href={thread(item.to)}>{view?.toTitle ?? 'a thread'}</a> · {clock(item.ts)}
+          </span>
+          <Clamped text={item.text} />
+        </div>
+      );
+    case 'digest':
+      return view?.digest ? <Digest view={view.digest} projectId={o.projectId} now={o.now} /> : null;
     case 'report':
       return (
         <article className="report-card" aria-labelledby={`report-${item.eventId}`}>

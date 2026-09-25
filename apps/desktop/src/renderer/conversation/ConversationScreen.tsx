@@ -9,6 +9,7 @@ import { useSession } from '../state/session';
 import { markSeen } from '../state/unread';
 import { useWidth } from '../state/width';
 import { ChatItemView, chatDomId, chatEventId } from './ChatItems';
+import { keepStable, rowViews, ticks, type RowView } from './rowViews';
 import { Composer } from './Composer';
 import { LineDiagram } from './LineDiagram';
 import { lineGeometry } from './lineGeometry';
@@ -67,6 +68,11 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const answerRef = useRef<(text: string) => Promise<void>>(async () => {});
   const onAnswer = useCallback((t: string) => void answerRef.current(t), []);
   const onOwnWords = useCallback(() => textareaRef.current?.focus(), []);
+  const jumpRef = useRef<(itemId: string) => void>(() => {});
+  const onJump = useCallback((itemId: string) => jumpRef.current(itemId), []);
+  /** Last render's row views: a row whose view did not change keeps its object, so ChatRow's memo skips it (design spec §7). */
+  const viewsRef = useRef<Map<string, RowView>>(new Map());
+  const views = useMemo(() => (viewsRef.current = keepStable(viewsRef.current, rowViews(s.chat.items, s.messages))), [s.chat.items, s.messages]);
 
   const attentionIds = useMemo(() => new Set(attention.filter((i) => i.project_id === projectId).map((i) => i.id)), [attention, projectId]);
   const threads = s.project?.threads;
@@ -133,13 +139,15 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
     if (el) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
     setShown((n) => n + CHAT_PAGE);
   };
-  const onStation = (st: { eventId: number }) => {
-    const index = items.findIndex((i) => chatEventId(i) >= st.eventId);
+  /** Scrolls to the item at `index` (rendering older items first when it is not shown yet) and flashes it. */
+  const jumpToIndex = (index: number) => {
     if (index < 0) return;
     pinned.current = false;
     if (index < start) setShown(items.length - index + 5);
     setJumpTo(items[index]!.id);
   };
+  const onStation = (st: { eventId: number }) => jumpToIndex(items.findIndex((i) => chatEventId(i) >= st.eventId));
+  jumpRef.current = (itemId) => jumpToIndex(items.findIndex((i) => i.id === itemId));
 
   return (
     <div className="conversation" ref={rootRef}>
@@ -173,7 +181,17 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
             ) : null}
             {(start ? items.slice(start) : items).map((item) => (
               <div key={item.id} id={chatDomId(item.id)} className="chat-item">
-                <ChatRow item={item} projectId={projectId} attentionIds={attentionIds} answering={answering} onAnswer={onAnswer} onOwnWords={onOwnWords} />
+                <ChatRow
+                  item={item}
+                  projectId={projectId}
+                  attentionIds={attentionIds}
+                  answering={answering}
+                  onAnswer={onAnswer}
+                  onOwnWords={onOwnWords}
+                  view={views.get(item.id)}
+                  now={ticks(views.get(item.id)) ? now : undefined}
+                  onJump={onJump}
+                />
               </div>
             ))}
             {pending.map((t) => (

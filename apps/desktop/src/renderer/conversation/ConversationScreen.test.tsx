@@ -2,13 +2,15 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectOverview } from '@desk/client';
-import type { StoredEvent } from '@desk/protocol';
+import type { AgentMessageKind, AttentionItem, EventOf, StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
 import { clearAttachmentCache } from '../components/ImageThumbs';
+import { clock } from '../format';
 import { installBridge } from '../test/bridge';
+import { chatDomId } from './ChatItems';
 import { CHAT_PAGE, ConversationScreen } from './ConversationScreen';
 
 afterEach(cleanup);
@@ -130,5 +132,130 @@ describe('ConversationScreen', () => {
     const dialog = await screen.findByRole('dialog', { name: 'mockup.png' });
     await waitFor(() => expect(within(dialog).getByRole('img', { name: 'mockup.png' }).getAttribute('src')).toBe('data:image/png;base64,ZnVsbA=='));
     expect(bridge.calls.filter((c) => c.channel === 'attachments.get').map((c) => c.input)).toEqual([{ sha256: image.sha256 }, { sha256: image.sha256 }]);
+  });
+});
+
+/** A time `m` minutes ago, 20 s past the minute so it reads "<m>m" on either side of the shared clock's 15 s step. */
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000 - 20_000).toISOString();
+const TITLES: Record<string, string> = { d: 'Desk', a: 'Auth API', f: 'Frontend', b: 'Billing' };
+const created = (id: number, agent: string, ts: string) =>
+  ev(
+    id,
+    'agent.created',
+    { role: agent === 'd' ? 'desk' : 'thread', model: 'm', title: TITLES[agent]!, brief: agent === 'd' ? null : `Own ${TITLES[agent]}`, workspace_path: `/w/${agent}`, parent_id: agent === 'd' ? null : 'd' },
+    { agent, ts },
+  );
+const msg = (id: number, from: string, to: string, kind: AgentMessageKind, text: string, ts: string, extra: Partial<EventOf<'message.agent'>['payload']> = {}) =>
+  ev(id, 'message.agent', { from_agent_id: from, from_label: from === 'd' ? 'Desk' : `thread "${TITLES[from]}" (${from})`, kind, text, ...extra }, { agent: to, ts });
+/** Desk d and the threads a ("Auth API") and f ("Frontend"), created in the last quarter hour (events 1–4). */
+const team = (): StoredEvent[] => [
+  ev(1, 'project.created', { name: 'Onboarding revamp', goal: 'g', instructions: '' }, { ts: minutesAgo(12) }),
+  created(2, 'd', minutesAgo(12)),
+  created(3, 'a', minutesAgo(10)),
+  created(4, 'f', minutesAgo(9)),
+];
+/** Renders the conversation over `list`, with `attention` as the app's attention list. */
+function show(list: StoredEvent[], attention: AttentionItem[] = [], extra: Record<string, (input: any) => unknown> = {}) {
+  globalStore.set({ ...initialGlobalState(), connection: { status: 'live' }, attention });
+  const bridge = installBridge({
+    'projects.get': () => overview(),
+    'broker.watch': () => {
+      for (const e of list) bridge.emit('desk:event', e);
+      return { ok: true };
+    },
+    'broker.unwatch': () => ({ ok: true }),
+    ...extra,
+  });
+  startSessionRouting();
+  render(<ConversationScreen projectId="p" />);
+  return bridge;
+}
+/** The chat row of item `id` (its wrapper, which flashes when jumped to). */
+const row = (id: string) => document.getElementById(chatDomId(id));
+
+describe('messages in the conversation', () => {
+  it("shows Desk's question to a thread as waiting, then answered, and a digest's open count, from the fold", async () => {
+    const asked = minutesAgo(4);
+    const bridge = show([
+      ...team(),
+      ev(5, 'run.started', { run_id: 'r1', model: 'm' }, { agent: 'd', ts: minutesAgo(5) }),
+      msg(6, 'd', 'a', 'question', 'Which token format?', asked, { tracked: true }),
+      msg(7, 'a', 'f', 'question', 'Is the login page ready?', minutesAgo(3), { tracked: true }),
+      // Desk's next turn freezes the digest: the answer that ends its open question lands in a later one.
+      ev(8, 'run.started', { run_id: 'r2', model: 'm' }, { agent: 'd', ts: minutesAgo(2) }),
+    ]);
+    await waitFor(() => expect(row('e:6')?.textContent).toContain('waiting for an answer · 4m'));
+    expect(row('e:6')!.textContent).toContain(`Desk → Auth API · question · ${clock(asked)}`);
+    expect(within(row('e:6')!).getByRole('link', { name: 'Auth API' }).getAttribute('href')).toBe('#/p/p/threads/a');
+    expect(within(row('e:7')!).getByRole('button', { name: 'Between threads · 1 message · 1 open question' })).toBeTruthy();
+
+    // Auth API answers Desk on Desk's stream: the question row reads "answered", and the answer quotes the question.
+    const answered = minutesAgo(1);
+    bridge.emit('desk:event', msg(9, 'a', 'd', 'answer', 'JWT, RS256.', answered, { reply_to: 6 }));
+    const done = await within(row('e:6')!).findByRole('button', { name: `answered ${clock(answered)} ↓` });
+    expect(row('e:6')!.textContent).not.toContain('waiting for an answer');
+    fireEvent.click(done);
+    await waitFor(() => expect(row('e:9')!.classList.contains('flash')).toBe(true));
+    fireEvent.click(within(row('e:9')!).getByRole('button', { name: "↩ Desk's question: “Which token format?”" }));
+    await waitFor(() => expect(row('e:6')!.classList.contains('flash')).toBe(true));
+
+    // Frontend answers Auth API on Auth API's stream: the frozen digest's item is unchanged, but its open count drops.
+    bridge.emit('desk:event', msg(10, 'f', 'a', 'answer', 'Yes, merged.', minutesAgo(0), { reply_to: 7 }));
+    expect(await within(row('e:7')!).findByRole('button', { name: 'Between threads · 1 message' })).toBeTruthy();
+    expect(within(row('e:10')!).getByRole('button', { name: 'Between threads · 1 message' })).toBeTruthy();
+  });
+
+  it('lists a digest pair by pair when expanded, each line opening the recipient of its latest message there', async () => {
+    show([...team(), msg(5, 'a', 'f', 'question', 'Is the login page ready?', minutesAgo(3), { tracked: true }), msg(6, 'f', 'a', 'note', 'Renamed the token field.', minutesAgo(2))]);
+    const toggle = await screen.findByRole('button', { name: 'Between threads · 2 messages · 1 open question' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('link', { name: /⇄/ })).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('link', { name: 'Auth API ⇄ Frontend · 2 · Auth API waiting 3m' }).getAttribute('href')).toBe('#/p/p/threads/a?at=6');
+  });
+
+  it('shows what Desk and the user sent threads, hides start, clamps long text and mutes a closure', async () => {
+    const at = { note: minutesAgo(7), steer: minutesAgo(6), ask: minutesAgo(5), q: minutesAgo(4), closed: minutesAgo(3) };
+    const long = Array.from({ length: 6 }, (_, i) => `Step ${i + 1} of the plan.`).join('\n');
+    show([
+      ...team(),
+      msg(5, 'd', 'a', 'start', 'Begin your assignment.', minutesAgo(8)),
+      msg(6, 'd', 'a', 'note', long, at.note),
+      ev(7, 'message.user', { text: 'Use the v2 API.' }, { agent: 'f', ts: at.steer }),
+      ev(8, 'message.user', { text: 'How did you price it?', question: true }, { agent: 'f', ts: at.ask }),
+      msg(9, 'd', 'f', 'question', 'Done yet?', at.q, { tracked: true }),
+      msg(10, 'f', 'd', 'answer', '(Frontend was stopped before answering.)', at.closed, { reply_to: 9, auto: true }),
+    ]);
+    await waitFor(() => expect(row('e:10')?.textContent).toContain('Frontend could not answer: Frontend was stopped before answering.'));
+    expect(row('e:5')).toBeNull();
+    expect(row('e:6')!.textContent).toContain(`Desk → Auth API · note · ${clock(at.note)}`);
+    fireEvent.click(within(row('e:6')!).getByRole('button', { name: 'more' }));
+    expect(within(row('e:6')!).getByRole('button', { name: 'less' })).toBeTruthy();
+    expect(row('e:7')!.textContent).toContain(`You → Frontend · ${clock(at.steer)}`);
+    expect(row('e:8')!.textContent).toContain(`You asked Frontend · ${clock(at.ask)}`);
+    expect(row('e:9')!.textContent).toContain('closed');
+    expect(row('e:10')!.textContent).not.toContain('Answer');
+    expect(within(row('e:10')!).getByRole('button', { name: "↩ Desk's question: “Done yet?”" })).toBeTruthy();
+  });
+
+  it("drops Desk's successful sends from its tool groups and keeps the failed ones", async () => {
+    const d = { agent: 'd' };
+    const toolCall = (id: number, callId: string, name: string, args: string) => ev(id, 'tool.call', { run_id: 'r', tool_call_id: callId, name, arguments: args }, d);
+    const toolResult = (id: number, callId: string, name: string, status: 'ok' | 'error', content: string) => ev(id, 'tool.result', { run_id: 'r', tool_call_id: callId, name, status, content }, d);
+    show([
+      ...team(),
+      toolCall(5, 'c1', 'message_thread', '{"thread_id":"a","text":"Use JWT."}'),
+      msg(6, 'd', 'a', 'note', 'Use JWT.', minutesAgo(3)),
+      toolResult(7, 'c1', 'message_thread', 'ok', 'Sent note #6 to "Auth API".'),
+      ev(8, 'assistant.message', { run_id: 'r', content: 'Told Auth API.', tool_calls: [] }, d),
+      toolCall(9, 'c2', 'message_thread', '{"thread_id":"Nobody","text":"Hi"}'),
+      toolResult(10, 'c2', 'message_thread', 'error', 'Unknown thread: Nobody'),
+      toolCall(11, 'c3', 'read_thread', '{"thread_id":"a"}'),
+      toolResult(12, 'c3', 'read_thread', 'ok', 'Auth API: running'),
+    ]);
+    await waitFor(() => expect(row('tools:9')?.textContent).toContain('Desk used 2 tools'));
+    expect(row('tools:9')!.textContent).toContain('message_thread · read_thread');
+    expect(row('tools:5')!.textContent).toBe('');
+    expect(row('e:6')!.textContent).toContain('Desk → Auth API · note');
   });
 });

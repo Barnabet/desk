@@ -233,4 +233,16 @@ describe('ThreadsScreen', () => {
     await screen.findByRole('button', { name: /^Stop 4: Using 2 tools/ });
     expect(screen.getByRole('button', { name: /^Stop 2:/ }).getAttribute('aria-pressed')).toBe('true');
   });
+
+  it("keeps a thread's own sends in its Narrative and Every-step views", async () => {
+    setup([
+      ...base,
+      ev(6, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', arguments: '{"thread_id":"Frontend","kind":"question","text":"Which currency?"}' }, t),
+      ev(7, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', status: 'ok', content: 'Sent question #9 to "Frontend".' }, t),
+    ]);
+    const tr = await screen.findByRole('complementary', { name: 'Transcript' });
+    expect(tr.querySelector('#tr-stop-2 .toolgroup-names')!.textContent).toBe('read_file · message_thread');
+    fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
+    expect(within(tr).getAllByText('message_thread').length).toBeGreaterThan(0);
+  });
 });
