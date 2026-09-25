@@ -48,4 +48,23 @@ describe('reduceTimeline', () => {
     expect(s3.lanes.find((l) => l.threadId === 'c')!.marks.at(-1)!.kind).toBe('stalled');
     expect(reduceTimeline(s3, ev(18, 'agent.archived', {}, { agent: 'a' }))).toBe(s3);
   });
+
+  it("marks a tracked question on its asker's lane, labelled with its recipient", () => {
+    const ts = (id: number) => new Date(Date.UTC(2026, 8, 24, 10, 0, id)).toISOString();
+    const thread = (id: number, t: string, title: string) => ev(id, 'agent.created', { role: 'thread', model: 'm', title, brief: 'b', workspace_path: '/w', parent_id: 'd' }, { agent: t });
+    const ask = (id: number, from: string, to: string, tracked = true) =>
+      ev(id, 'message.agent', { from_agent_id: from, from_label: from === 'd' ? 'Desk' : `thread "${from}" (${from})`, kind: 'question', text: 'q', ...(tracked ? { tracked: true as const } : {}) }, { agent: to });
+    const s = [
+      thread(1, 'a', 'Auth API'),
+      thread(2, 'f', 'Frontend'),
+      ask(3, 'a', 'f'),
+      ask(4, 'f', 'd'),
+      // Desk has no lane, and an untracked question has no state to show.
+      ask(5, 'd', 'a'),
+      ask(6, 'a', 'd', false),
+      ev(7, 'message.agent', { from_agent_id: 'a', from_label: 'thread "a" (a)', kind: 'note', text: 'n' }, { agent: 'f' }),
+    ].reduce(reduceTimeline, emptyTimeline('d'));
+    expect(s.lanes.find((l) => l.threadId === 'a')!.marks).toEqual([{ eventId: 3, ts: ts(3), kind: 'question', label: 'Frontend' }]);
+    expect(s.lanes.find((l) => l.threadId === 'f')!.marks).toEqual([{ eventId: 4, ts: ts(4), kind: 'question', label: 'Desk' }]);
+  });
 });

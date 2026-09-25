@@ -7,7 +7,8 @@ export type Station = {
   label: string;
   threadIds: string[];
 };
-export type LaneMark = { eventId: number; ts: string; kind: 'rejoin' | 'sent_back' | 'detour' | 'signal' | 'signal_cleared' | 'stalled'; label: string };
+/** A mark on a thread's lane. `question`: a tracked question the thread asked, labelled with its recipient (its state is in the message fold, by `eventId`). */
+export type LaneMark = { eventId: number; ts: string; kind: 'rejoin' | 'sent_back' | 'detour' | 'signal' | 'signal_cleared' | 'stalled' | 'question'; label: string };
 export type Lane = {
   threadId: string;
   title: string;
@@ -80,8 +81,16 @@ export function reduceTimeline(prev: TimelineState, e: StoredEvent): TimelineSta
       const lane = s.approvals[e.payload.approval_id];
       return lane ? withLane(s, lane, (l) => ({ ...l, marks: [...l.marks, mark(e, 'signal_cleared', e.payload.decision)] })) : s;
     }
-    case 'message.agent':
-      return e.payload.kind === 'stalled' ? withLane(s, e.payload.from_agent_id, (l) => ({ ...l, marks: [...l.marks, mark(e, 'stalled', 'stalled')] })) : s;
+    case 'message.agent': {
+      const p = e.payload;
+      if (p.kind === 'stalled') return withLane(s, p.from_agent_id, (l) => ({ ...l, marks: [...l.marks, mark(e, 'stalled', 'stalled')] }));
+      // A tracked question, on its asker's lane at its send time (design spec §8 item 10). Desk has no lane.
+      if (p.kind === 'question' && p.tracked) {
+        const to = e.agent_id === s.deskId ? 'Desk' : titleOf(e.agent_id);
+        return withLane(s, p.from_agent_id, (l) => ({ ...l, marks: [...l.marks, mark(e, 'question', to)] }));
+      }
+      return s;
+    }
     case 'agent.archived':
       return withLane(s, e.agent_id, (l) => ({ ...l, archived: true }));
     case 'report':
