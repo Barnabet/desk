@@ -51,3 +51,52 @@ describe('reduceTranscript', () => {
     expect(s.entries.at(-1)).toMatchObject({ kind: 'tools', calls: [{ status: 'interrupted' }] });
   });
 });
+
+describe('reduceTranscript: messages and answer runs', () => {
+  /** `ev()` stamps event `id` this many seconds after 10:00:00Z on 2026-09-24. */
+  const ts = (id: number) => new Date(Date.UTC(2026, 8, 24, 10, 0, id)).toISOString();
+  const t = { agent: 't' };
+
+  it("records a message's reply and closure, hides start, and marks the user's Ask", () => {
+    const events = [
+      ev(1, 'message.agent', { from_agent_id: 'd', from_label: 'Desk', kind: 'start', text: 'Begin your assignment.' }, t),
+      ev(2, 'message.agent', { from_agent_id: 'a', from_label: 'thread "Auth API" (a)', kind: 'answer', text: 'JWT.', reply_to: 9 }, t),
+      ev(3, 'message.agent', { from_agent_id: 'a', from_label: 'thread "Auth API" (a)', kind: 'answer', text: '(Auth API was stopped before answering.)', reply_to: 10, auto: true }, t),
+      ev(4, 'message.user', { text: 'How did you price it?', question: true }, t),
+    ];
+    const s = events.reduce(reduceTranscript, emptyTranscript('t'));
+    expect(s.entries).toEqual([
+      { kind: 'incoming', id: 'e:2', ts: ts(2), fromAgentId: 'a', fromLabel: 'thread "Auth API" (a)', messageKind: 'answer', text: 'JWT.', replyTo: 9 },
+      { kind: 'incoming', id: 'e:3', ts: ts(3), fromAgentId: 'a', fromLabel: 'thread "Auth API" (a)', messageKind: 'answer', text: '(Auth API was stopped before answering.)', replyTo: 10, auto: true },
+      { kind: 'steer', id: 'e:4', ts: ts(4), text: 'How did you price it?', question: true },
+    ]);
+  });
+
+  it('keeps an answer run as one entry from its start to its end, with its final reply', () => {
+    let s = reduceTranscript(emptyTranscript('t'), ev(1, 'run.started', { run_id: 'r1', model: 'm', answering: 7 }, t));
+    expect(s.answerRun).toBe('r1');
+    expect(s.entries).toEqual([{ kind: 'answer', id: 'e:1', ts: ts(1), runId: 'r1', question: 7 }]);
+    s = applyTranscriptDelta(s, { type: 'assistant.delta', project_id: 'p', agent_id: 't', payload: { run_id: 'r1', text: 'Let me check' } });
+    s = reduceTranscript(s, ev(2, 'assistant.message', { run_id: 'r1', content: 'Let me check the file', tool_calls: [{ id: 'c1', name: 'read_file', arguments: '{}' }] }, t));
+    s = reduceTranscript(s, ev(3, 'tool.call', { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', arguments: '{}' }, t));
+    s = reduceTranscript(s, ev(4, 'tool.result', { run_id: 'r1', tool_call_id: 'c1', name: 'read_file', status: 'ok', content: 'x' }, t));
+    // Text written next to a tool call is not the answer.
+    expect(s.entries[0]).toEqual({ kind: 'answer', id: 'e:1', ts: ts(1), runId: 'r1', question: 7 });
+    s = reduceTranscript(s, ev(5, 'assistant.message', { run_id: 'r1', content: 'Per seat.', tool_calls: [] }, t));
+    s = reduceTranscript(s, ev(6, 'run.finished', { run_id: 'r1', reason: 'no_tool_calls' }, t));
+    expect(s.answerRun).toBeNull();
+    expect(s.entries[0]).toEqual({ kind: 'answer', id: 'e:1', ts: ts(1), runId: 'r1', question: 7, text: 'Per seat.', ended: { reason: 'no_tool_calls' } });
+    expect(s.entries.map((e) => e.kind)).toEqual(['answer', 'assistant', 'tools', 'assistant']);
+    // A full run is not an answer run.
+    s = reduceTranscript(s, ev(7, 'run.started', { run_id: 'r2', model: 'm' }, t));
+    s = reduceTranscript(s, ev(8, 'run.finished', { run_id: 'r2', reason: 'error', detail: 'boom' }, t));
+    expect(s.entries).toHaveLength(4);
+    expect(s.answerRun).toBeNull();
+  });
+
+  it('records how an answer run ended without a reply', () => {
+    let s = reduceTranscript(emptyTranscript('t'), ev(1, 'run.started', { run_id: 'r1', model: 'm', answering: 7 }, t));
+    s = reduceTranscript(s, ev(2, 'run.finished', { run_id: 'r1', reason: 'error', detail: 'daemon_shutdown' }, t));
+    expect(s.entries).toEqual([{ kind: 'answer', id: 'e:1', ts: ts(1), runId: 'r1', question: 7, ended: { reason: 'error', detail: 'daemon_shutdown' } }]);
+  });
+});
