@@ -54,6 +54,7 @@ import {
   listActiveThreads,
   listAgents,
   listLiveAgents,
+  listProjects,
   findService,
   getService,
   listRunningServices,
@@ -68,7 +69,7 @@ import {
 import { reapOrphan, ServiceProcesses, tailLog } from '../services/manager';
 import { resolveInside } from '../tools/paths';
 import { scrubbedEnv, withSkillEnv } from '../tools/bash';
-import { listAttention } from '../state/attention';
+import { listAttention, pausedNotice } from '../state/attention';
 import { JobManager } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
@@ -276,13 +277,17 @@ export class Runtime {
     return id;
   }
 
-  /** Dismisses a needs_you, stalled or failed attention item. Approvals and questions leave the list when answered. */
+  /**
+   * Dismisses a needs_you, stalled, failed or paused attention item. Dismissing `paused` is the Resume action: the
+   * project's automatic wakes resume (design spec §5.4). Approvals and questions leave the list when answered.
+   */
   dismissAttention(itemId: string): void {
     const kind = itemId.split(':')[0];
     if (kind === 'approval' || kind === 'question') throw new ConflictError(`${kind} items leave the list when they are answered`);
     const item = listAttention(this.o.store.db).find((i) => i.id === itemId);
     if (!item) throw new NotFoundError(`No attention item ${itemId}`);
     this.o.store.append({ project_id: item.project_id, agent_id: null, type: 'attention.dismissed', payload: { item_id: itemId } });
+    if (item.kind === 'paused') this.resume(item.project_id);
   }
 
   projectDir(projectId: string): string {
@@ -911,7 +916,8 @@ export class Runtime {
   /**
    * The user's message to an agent. With `question`, the user's Ask to a thread: an idle, done or failed thread
    * answers it in an answer run without reopening (design spec §4.8); any other thread reads it as a message.
-   * Refused (409) for an archived thread and for any agent of an archived project, and (400) for an Ask to Desk.
+   * Refused (409) for an archived thread and for any agent of an archived project, and (400) for an Ask to Desk. The
+   * user's message ends a pause of the project's automatic wakes (design spec §5.4).
    */
   sendMessage(agentId: string, text: string, opts: { question?: boolean } = {}): void {
     const agent = this.requireAgent(agentId);
@@ -924,6 +930,8 @@ export class Runtime {
       type: 'message.user',
       payload: { text, ...(opts.question ? { question: true as const } : {}) },
     });
+    // The user is back: automatic wakes resume and every agent of the project decides again.
+    this.resume(agent.project_id);
     this.wake(agentId);
   }
 
@@ -974,12 +982,13 @@ export class Runtime {
 
   /**
    * Reports running and waiting threads with no activity for `thresholdMs` to their Desk, once per stall; a waiting
-   * thread's notice names what it waits on. Returns the reported thread ids.
+   * thread's notice names what it waits on. Paused projects are skipped: their agents wait for the user on purpose
+   * (design spec §5.4). Returns the reported thread ids.
    */
   checkStalls(now = Date.now(), thresholdMs = 15 * 60_000): string[] {
     const reported: string[] = [];
     for (const t of listActiveThreads(this.o.store.db)) {
-      if (!t.parent_id) continue;
+      if (!t.parent_id || this.paused.has(t.project_id)) continue;
       if (pendingApprovalsFor(this.o.store.db, t.id).length) continue;
       const last = lastEvent(this.o.store.db, t.id);
       if (!last || now - Date.parse(last.ts) < thresholdMs || this.stallNotified.get(t.id) === last.id) continue;
@@ -1092,10 +1101,13 @@ export class Runtime {
   }
 
   /**
-   * On startup: repairs runs and approved calls cut off by a crash (unfinished tool calls become `interrupted`), then
-   * wakes every live agent through wakeDecision. Returns the rescheduled agent ids.
+   * On startup: re-derives the projects whose automatic wakes are paused, repairs runs and approved calls cut off by a
+   * crash (unfinished tool calls become `interrupted`), then wakes every live agent through wakeDecision. Returns the
+   * rescheduled agent ids.
    */
   recover(): string[] {
+    // A pause outlives a restart until the user ends it; the wake windows start empty (design spec §5.4).
+    for (const p of listProjects(this.o.store.db)) if (pausedNotice(this.o.store.db, p.id)) this.paused.add(p.id);
     // Services still marked running were cut off by an unclean exit: reap an orphan still holding its port, mark stopped.
     for (const s of listRunningServices(this.o.store.db)) {
       if (this.serviceProcs.isRunning(s.id)) continue;
@@ -1478,6 +1490,20 @@ export class Runtime {
         message: `${what} in the last hour, so automatic wakes are paused. Their messages are kept. Write to any agent of this project, or press Resume, to continue.`,
       },
     });
+  }
+
+  /**
+   * Ends the project's pause (design spec §5.4): clears both windows and wakes every live agent of the project, Desk
+   * first, so each decides what its held items call for. Nothing happens when the project is not paused: outside a
+   * pause, the user's messages leave the windows rolling.
+   */
+  private resume(projectId: string): void {
+    if (!this.paused.delete(projectId)) return;
+    this.wakeWindows.delete(projectId);
+    const agents = listAgents(this.o.store.db, projectId)
+      .filter((a) => !a.archived_at)
+      .sort((a, b) => Number(b.role === 'desk') - Number(a.role === 'desk') || a.created_at.localeCompare(b.created_at));
+    for (const a of agents) this.wake(a.id);
   }
 
   /**

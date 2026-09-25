@@ -154,7 +154,7 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 |---|---|---|
 | GET | `/v1/overview` | One `ProjectSummary` per open project: `project`, `desk_status`, `threads` (status, `reason`, current `activity` like `bash · python3 x.py`, model, `git_branch`, `skills`, `review_round`), `latest_report`, `plan_progress { done, total }` (dropped items excluded), `attention_count` |
 | GET | `/v1/attention` | `?project_id=`. `{ items: AttentionItem[], seq }`, oldest first |
-| POST | `/v1/attention/:id/dismiss` | Only `needs_you`, `stalled`, `failed` items (409 for `approval`/`question`, 404 if not currently listed). Appends `attention.dismissed` |
+| POST | `/v1/attention/:id/dismiss` | Only `needs_you`, `stalled`, `failed` and `paused` items (409 for `approval`/`question`, 404 if not currently listed). Appends `attention.dismissed`. Dismissing `paused` is Resume: the project's automatic wakes resume and every agent decides again |
 | GET | `/v1/threads/:id/diff` | `{ base, branch, files: [{ path, status: added\|modified\|deleted, additions, deletions }], patch }` against the thread's base, including uncommitted and untracked files. 409 for non-git or archived threads |
 | GET | `/v1/threads/:id/files` | `?path=` a directory in the workspace. `[{ name, path, type: file\|dir, size }]`, directories first, `.git` hidden |
 | GET | `/v1/threads/:id/files/raw/<path>` | Raw file. 403 if the path (or a symlink) leads outside the workspace, 404 if missing, 409 once archived |
@@ -170,6 +170,7 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 | `needs_you` | `report:<event_id>:<i>` | it is in the project's latest `report`, not dismissed | `event_id` |
 | `stalled` | `stalled:<thread>:<event_id>` | the thread is running/waiting, its latest `stalled` notice has no thread activity after it, not dismissed | `thread_id`, `event_id` |
 | `failed` | `failed:<thread>` | the thread is `failed`, not archived, not dismissed | `thread_id` |
+| `paused` | `paused:<event_id>` | the project's latest `system.notice` `wakes_paused` (agents woke each other 60 times, or were woken by thread starts and notices 150 times, in the last hour) has no `message.user` of the project after it, not dismissed. While it holds, only the user's messages and already queued runs start anything; writing to any agent of the project or dismissing the item resumes | `event_id` |
 
 ## Configuration
 
@@ -231,6 +232,6 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 | Approvals | `approval.requested`, `approval.resolved` |
 | Services | `service.started`, `service.url`, `service.exited`, `service.stopped` (reason `requested`, `restart`, `thread_archived`, `project_archived`, `daemon_shutdown` or `daemon_restart`) |
 | Knowledge | `memory.written`, `memory.deleted`, `artifact.published`, `skill.saved`, `skill.deleted` |
-| System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, …; `attention.dismissed` |
+| System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, `wakes_paused`, …; `attention.dismissed` |
 
 **Agent statuses:** `idle`, `queued`, `running`, `waiting` (on a reply, an approval or threads), `done`, `failed`, `cancelled`.

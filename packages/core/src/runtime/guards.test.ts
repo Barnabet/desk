@@ -149,8 +149,22 @@ describe('wakes in the runtime', () => {
       expect(status(t)).toBe('cancelled');
       expect(runs(t)).toHaveLength(1);
 
-      next.sendMessage(t, 'Go on.');
-      await next.whenIdle();
+      // Nor does the end of a pause, which wakes every live agent of the project (design spec §5.4).
+      const [pause] = h.store.append({
+        project_id: desk.project_id,
+        agent_id: null,
+        type: 'system.notice',
+        payload: { level: 'warning', code: 'wakes_paused', message: 'Agents woke each other 60 times in the last hour.' },
+      });
+      const resumed = newRuntime(h, { toolsFor: withAct });
+      resumed.recover();
+      resumed.dismissAttention(`paused:${pause!.id}`);
+      await resumed.whenIdle();
+      expect(status(t)).toBe('cancelled');
+      expect(runs(t)).toHaveLength(1);
+
+      resumed.sendMessage(t, 'Go on.');
+      await resumed.whenIdle();
       expect(runs(t)).toHaveLength(2);
       const batch = lastText(threadRequests('Stoppable').at(-1)!);
       for (const said of ['Actually, use the v2 API.', 'Late note.', 'Go on.']) expect(batch).toContain(said);

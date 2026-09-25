@@ -132,3 +132,108 @@ describe('the wake budgets', () => {
     expect(pausedItems()).toHaveLength(1);
   });
 });
+
+/**
+ * A project paused the way agents pause it: with a budget of 2 agent-triggered wakes, Desk's notes run Writer and
+ * Editor, and the third note, to Reader, finds the hour full. Writer and Editor complete; their `completed` notices
+ * wait on Desk's stream, since a notice to Desk is a lifecycle wake and nothing automatic starts while paused.
+ */
+async function pausedProject() {
+  const s = await setup(
+    { wakeBudget: 2 },
+    {
+      Writer: () => tools(call('complete', { summary: 'Draft written' })),
+      Editor: () => tools(call('complete', { summary: 'Draft edited' })),
+      Reader: () => text('On it.'),
+    },
+  );
+  const writer = s.thread('Writer');
+  const editor = s.thread('Editor');
+  const reader = s.thread('Reader');
+  rt.deliver(s.desk.id, writer, 'note', 'Write the draft.');
+  rt.deliver(s.desk.id, editor, 'note', 'Edit the draft.');
+  rt.deliver(s.desk.id, reader, 'note', 'Read the draft.');
+  await rt.whenIdle();
+  const [notice] = pauses(s.projectId);
+  return { ...s, writer, editor, reader, notice: notice! };
+}
+
+describe('while paused', () => {
+  it('holds notices to Desk and stall reports; a user message goes through, resumes the project, and Desk reads what was held', async () => {
+    const { projectId, desk, thread, setStatus, writer, editor, reader, notice } = await pausedProject();
+    expect(notice.payload.message).toBe(agentPause(2));
+    expect([status(writer), status(editor), status(reader)]).toEqual(['done', 'done', 'idle']);
+    // A thread's completed does not wake Desk.
+    expect(unread(desk.id)).toEqual(['completed', 'completed']);
+    expect(runs(desk.id)).toHaveLength(0);
+    expect(runs(reader)).toHaveLength(0);
+    // checkStalls skips the project: a thread quiet for 16 minutes raises nothing.
+    const idler = thread('Idler');
+    setStatus(idler, 'waiting');
+    const later = Date.now() + 16 * 60_000;
+    expect(rt.checkStalls(later)).toEqual([]);
+
+    // The user's message runs Reader, resumes the project, and every agent decides again.
+    rt.sendMessage(reader, 'Start with chapter 2.');
+    await rt.whenIdle();
+    expect(pausedItems()).toEqual([]);
+    expect(runs(reader)).toHaveLength(1);
+    const readerBatch = batchOf(threadRequests('Reader')[0]!);
+    expect(readerBatch).toContain('Read the draft.');
+    expect(readerBatch).toContain('Start with chapter 2.');
+    const deskBatch = batchOf(deskRequests()[0]!);
+    expect(deskBatch).toContain('Summary: "Draft written"');
+    expect(deskBatch).toContain('Summary: "Draft edited"');
+    // Stalls are checked again.
+    expect(rt.checkStalls(later)).toEqual([idler]);
+    await rt.whenIdle();
+    expect(pauses(projectId)).toHaveLength(1);
+  });
+
+  it('resumes the same way when the user dismisses the paused item', async () => {
+    const { projectId, reader, notice } = await pausedProject();
+    rt.dismissAttention(`paused:${notice.id}`);
+    await rt.whenIdle();
+    // Reader's held note runs it and Desk reads the held notices. Both windows start over, so these wakes do not pause
+    // the project again at once.
+    expect(runs(reader)).toHaveLength(1);
+    expect(batchOf(threadRequests('Reader')[0]!)).toContain('Read the draft.');
+    const deskBatch = batchOf(deskRequests()[0]!);
+    expect(deskBatch).toContain('Summary: "Draft written"');
+    expect(deskBatch).toContain('Summary: "Draft edited"');
+    expect(pausedItems()).toEqual([]);
+    expect(h.store.list({ projectId, types: ['attention.dismissed'] }).map((e) => e.payload)).toEqual([{ item_id: `paused:${notice.id}` }]);
+    expect(pauses(projectId)).toHaveLength(1);
+  });
+
+  it('stays paused across a restart until the user writes', async () => {
+    const { projectId, desk, thread, setStatus, reader } = await pausedProject();
+    const idler = thread('Idler');
+    setStatus(idler, 'waiting');
+    const later = Date.now() + 16 * 60_000;
+
+    const next = newRuntime(h, { wakeBudget: 2 });
+    expect(next.recover()).toEqual([]);
+    await next.whenIdle();
+    expect(runs(desk.id)).toHaveLength(0);
+    expect(runs(reader)).toHaveLength(0);
+    expect(next.checkStalls(later)).toEqual([]);
+    expect(pausedItems()).toHaveLength(1);
+    expect(pauses(projectId)).toHaveLength(1);
+
+    next.sendToDesk(projectId, 'Carry on.');
+    await next.whenIdle();
+    const deskBatch = batchOf(deskRequests()[0]!);
+    expect(deskBatch).toContain('Summary: "Draft written"');
+    expect(deskBatch).toContain('Carry on.');
+    expect(runs(reader)).toHaveLength(1);
+
+    // Resumed for good: the next restart finds no pause, and Desk's note runs Reader again.
+    const third = newRuntime(h, { wakeBudget: 2 });
+    third.recover();
+    third.deliver(desk.id, reader, 'note', 'One more pass.');
+    await third.whenIdle();
+    expect(runs(reader)).toHaveLength(2);
+    expect(pauses(projectId)).toHaveLength(1);
+  });
+});
