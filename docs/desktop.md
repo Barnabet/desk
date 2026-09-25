@@ -64,7 +64,7 @@ renderer (React, sandboxed, no Node)          main process (Node)               
     - `session.ts`: each project's event log, folded into chat, timeline, transcripts and streams.
     - `global.ts`: connection, health, overview, attention and system.
   - A hash router (`useRoute`, over `@desk/ui-core`'s `parseRoute` and `href`), and one folder per place.
-  - The logic that is not React is in `@desk/ui-core` (`packages/ui-core`) and the CSS in `@desk/ui-styles` (`packages/ui-styles`), both shared with the web UI.
+  - The logic shared with the web UI is in `@desk/ui-core` (`packages/ui-core`) and the CSS in `@desk/ui-styles` (`packages/ui-styles`), both shared with the web UI.
 
 ### Security rules the app keeps
 
