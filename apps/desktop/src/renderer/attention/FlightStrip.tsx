@@ -39,7 +39,7 @@ export function FlightStrip(o: { item: AttentionItem; now: number; selected: boo
           <span className="strip-col strip-who" aria-hidden="true">
             <span className="strip-label">{who.label}</span>
             <span className="strip-name">{who.name}</span>
-            <span className={`strip-tag${i.kind === 'stalled' ? ' wait' : ''}`}>{who.tag}</span>
+            <span className={`strip-tag${i.kind === 'stalled' || i.kind === 'paused' ? ' wait' : ''}`}>{who.tag}</span>
           </span>
           <span className="strip-col strip-wait" aria-hidden="true">
             <span className="strip-label">Waiting</span>

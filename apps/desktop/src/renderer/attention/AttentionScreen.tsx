@@ -148,6 +148,9 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
           <span>
             <span className="strip-code-badge code-failed">{STRIP_CODE.failed}</span>Failed thread
           </span>
+          <span>
+            <span className="strip-code-badge code-paused">{STRIP_CODE.paused}</span>Paused project
+          </span>
           <span className="muted">Bar = wait, 0–2h</span>
         </div>
       </div>

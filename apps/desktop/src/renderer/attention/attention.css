@@ -127,7 +127,8 @@
   background: #fff;
   color: var(--ink);
 }
-.strip-stalled .strip-cap {
+.strip-stalled .strip-cap,
+.strip-paused .strip-cap {
   background: var(--wait);
 }
 .strip-code {
@@ -281,7 +282,8 @@
   background: #fff;
   color: var(--ink);
 }
-.code-stalled {
+.code-stalled,
+.code-paused {
   background: var(--wait);
 }
 .attention-right {

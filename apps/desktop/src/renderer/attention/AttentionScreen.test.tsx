@@ -122,4 +122,37 @@ describe('AttentionScreen', () => {
     setup({}, []);
     expect(screen.getByRole('heading', { name: 'All clear' })).toBeTruthy();
   });
+
+  it('racks a paused project as GND in the holding bay, and resumes it from the Inspector', async () => {
+    const paused: AttentionItem = {
+      id: 'paused:12',
+      kind: 'paused',
+      project_id: 'p',
+      project_name: 'Tax 2026',
+      agent_id: null,
+      title: 'Agents in Tax 2026 are paused: too many automatic wakes this hour',
+      detail: 'Their messages are kept. Resume, or write to any agent.',
+      created_at: recent,
+      ref: { event_id: 12 },
+    };
+    const bridge = setup({ 'attention.dismiss': () => ({ ok: true }) }, [paused]);
+    const holding = within(screen.getByRole('region', { name: 'Strip rack' })).getByRole('group', { name: 'HOLDING: Stalled, failed or paused, 1' });
+    const strip = within(holding).getByRole('button', { name: /^GND, Tax 2026: Agents in Tax 2026 are paused/ });
+    expect(strip.getAttribute('aria-label')).toContain('. Project Tax 2026. Waiting ');
+    expect(strip.querySelector('.strip-tag')!.className).toBe('strip-tag wait');
+    const insp = await screen.findByRole('article', { name: 'Selected: paused project' });
+    expect(insp.textContent).toContain('Their messages are kept. Resume, or write to any agent.');
+    expect(insp.textContent).toContain('Resuming lets agents wake each other again.');
+    expect(insp.textContent).not.toMatch(/What the thread said|Open thread|The thread is not changed/);
+    expect(within(insp).getByRole('button', { name: /^Open conversation/ })).toBeTruthy();
+    fireEvent.click(within(insp).getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'attention.dismiss')?.input).toEqual({ id: 'paused:12' }));
+    fireEvent.keyDown(window, { key: 'e' });
+    expect(window.location.hash).toBe('#/p/p/conversation');
+  });
+
+  it('explains GND in the legend', () => {
+    setup();
+    expect(document.querySelector('.strip-legend')!.textContent).toContain('GNDPaused project');
+  });
 });

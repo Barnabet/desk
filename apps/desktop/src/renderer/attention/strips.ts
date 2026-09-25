@@ -7,7 +7,7 @@ export const BAYS: Array<{ key: keyof AttentionBays; name: string; sub: string }
   { key: 'clearance', name: 'CLEARANCE', sub: 'Approvals' },
   { key: 'queries', name: 'QUERIES', sub: 'Questions' },
   { key: 'handoffs', name: 'HANDOFFS', sub: 'From reports' },
-  { key: 'holding', name: 'HOLDING', sub: 'Stalled or failed' },
+  { key: 'holding', name: 'HOLDING', sub: 'Stalled, failed or paused' },
 ];
 
 /** Items in rack order (bay by bay, oldest first within a bay), which is also the J/K order. */
@@ -35,6 +35,8 @@ export function stripWho(i: AttentionItem, threadTitle: (id: string) => string |
       return { label: 'Asked by', name: 'Desk', tag: i.ref.options?.length ? `${i.ref.options.length} options` : 'free answer' };
     case 'needs_you':
       return { label: 'From', name: "Desk's report", tag: 'needs_you' };
+    case 'paused':
+      return { label: 'Project', name: i.project_name, tag: 'paused' };
     default:
       return { label: 'Thread', name: (i.ref.thread_id && threadTitle(i.ref.thread_id)) || i.title.replace(/ (has stalled|failed)$/, ''), tag: i.kind };
   }

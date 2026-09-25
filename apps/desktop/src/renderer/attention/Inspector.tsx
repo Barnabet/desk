@@ -185,6 +185,20 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
             </Button>
           </div>
         </>
+      ) : i.kind === 'paused' ? (
+        <>
+          <h2 className="inspector-title">{i.title}</h2>
+          {i.detail ? <p>{i.detail}</p> : null}
+          <div className="inspector-actions">
+            <Button variant="primary" onClick={a.open}>
+              Open conversation <kbd>E</kbd>
+            </Button>
+            <Button pending={a.busy === 'dismiss'} disabled={a.busy !== null} onClick={a.dismiss}>
+              Resume
+            </Button>
+          </div>
+          <p className="muted small">Resuming lets agents wake each other again.</p>
+        </>
       ) : (
         <>
           <h2 className="inspector-title">{i.title}</h2>

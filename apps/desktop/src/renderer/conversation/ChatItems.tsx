@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import type { AttentionItem } from '@desk/protocol';
+import { WAKES_PAUSED, type AttentionItem } from '@desk/protocol';
 import type { ChatItem, QuestionView } from '@desk/client';
+import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { SafeMarkdown } from '../components/SafeMarkdown';
+import { toastError } from '../components/Toast';
 import { ToolGroup } from '../components/ToolGroup';
 import { clock, duration, plural } from '../format';
 import { href } from '../router';
@@ -98,6 +100,28 @@ function Digest({ view, projectId, now }: { view: NonNullable<RowView['digest']>
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Resumes a paused project from its notice (design spec §5.4): dismissing its `paused` item resumes the agents. It stays
+ * busy after success, because the row loses the button once the attention list drops the item.
+ */
+function ResumeButton({ id }: { id: string }) {
+  const [busy, setBusy] = useState(false);
+  const resume = async () => {
+    setBusy(true);
+    try {
+      await call('attention.dismiss', { id });
+    } catch (err) {
+      toastError(err);
+      setBusy(false);
+    }
+  };
+  return (
+    <Button size="sm" className="chat-notice-action" pending={busy} onClick={() => void resume()}>
+      Resume
+    </Button>
   );
 }
 
@@ -255,13 +279,17 @@ export function ChatItemView(o: {
           )}
         </section>
       );
-    case 'notice':
+    case 'notice': {
+      // The pause's own item is `paused:<notice id>`: Resume shows while it is listed (design spec §8 item 7).
+      const paused = item.code === WAKES_PAUSED ? `paused:${chatEventId(item)}` : null;
       return (
         <div className={`chat-notice notice-${item.level}`} role="status">
           <span className={`dot ${item.level === 'error' ? 'warn' : item.level === 'warning' ? 'warn' : 'ok'}`} aria-hidden="true" />
           {item.code === 'proxy_down' ? 'Paused, will resume: the model proxy is unreachable.' : item.message}
+          {paused && o.attentionIds.has(paused) ? <ResumeButton id={paused} /> : null}
         </div>
       );
+    }
     case 'compacted':
       return (
         <div className="chat-divider" role="separator">

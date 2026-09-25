@@ -601,6 +601,10 @@
   color: var(--text);
   font-size: 12.5px;
 }
+.chat-notice-action {
+  flex-shrink: 0;
+  margin-left: auto;
+}
 .chat-divider {
   display: flex;
   align-items: center;

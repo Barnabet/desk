@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectOverview } from '@desk/client';
-import type { AgentMessageKind, AttentionItem, EventOf, StoredEvent } from '@desk/protocol';
+import { WAKES_PAUSED, type AgentMessageKind, type AttentionItem, type EventOf, type StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
@@ -292,5 +292,35 @@ describe('messages in the conversation', () => {
     const panel = screen.getByRole('complementary', { name: 'Plan and Desk' });
     expect(within(panel).getByText('Login API').closest('li')!.textContent).not.toContain('waiting on you');
     expect(within(panel).getByText('Login page').closest('li')!.textContent).toContain('waiting on you');
+  });
+
+  it("offers Resume on the pause notice while the project's paused item exists", async () => {
+    const notice = ev(5, 'system.notice', {
+      level: 'warning',
+      code: WAKES_PAUSED,
+      message: 'Agents woke each other 60 times in the last hour, so automatic wakes are paused. Their messages are kept. Write to any agent of this project, or press Resume, to continue.',
+    }, { ts: minutesAgo(1) });
+    const paused: AttentionItem = {
+      id: 'paused:5',
+      kind: 'paused',
+      project_id: 'p',
+      project_name: 'Onboarding revamp',
+      agent_id: null,
+      title: 'Agents in Onboarding revamp are paused: too many automatic wakes this hour',
+      detail: 'Their messages are kept. Resume, or write to any agent.',
+      created_at: minutesAgo(1),
+      ref: { event_id: 5 },
+    };
+    const bridge = show([...team(), notice], [paused], { 'attention.dismiss': () => ({ ok: true }) });
+    const note = await waitFor(() => {
+      expect(row('e:5')).toBeTruthy();
+      return row('e:5')!;
+    });
+    fireEvent.click(within(note).getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'attention.dismiss')?.input).toEqual({ id: 'paused:5' }));
+    // Once the item is gone (resumed, or the user wrote to an agent), the notice stays as history without the button.
+    globalStore.set((g) => ({ ...g, attention: [] }));
+    await waitFor(() => expect(within(note).queryByRole('button', { name: 'Resume' })).toBeNull());
+    expect(note.textContent).toContain('automatic wakes are paused');
   });
 });
