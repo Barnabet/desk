@@ -1,4 +1,4 @@
-import type { AgentMessageKind, EphemeralEvent, StoredEvent, ToolImage, ToolResultStatus } from '@desk/protocol';
+import type { AgentMessageKind, EphemeralEvent, EventOf, StoredEvent, ToolImage, ToolResultStatus } from '@desk/protocol';
 
 /** One tool call and its result; `images` are the stored images a view_image result showed the model. */
 export type ToolCallView = { id: string; name: string; arguments: string; status: 'running' | ToolResultStatus; content: string | null; images?: ToolImage[] };
@@ -7,16 +7,42 @@ export type ChatItem =
   | { kind: 'user'; id: string; ts: string; text: string }
   | { kind: 'assistant'; id: string; ts: string; runId: string; text: string; streaming: boolean; interrupted?: boolean }
   | { kind: 'tools'; id: string; ts: string; calls: ToolCallView[] }
-  | { kind: 'agent'; id: string; ts: string; fromAgentId: string; fromLabel: string; messageKind: AgentMessageKind; text: string }
+  | { kind: 'agent'; id: string; ts: string; fromAgentId: string; fromLabel: string; messageKind: AgentMessageKind; text: string; replyTo?: number; auto?: true }
+  /** Desk's message to a thread: a note, question, revision or answer. A thread's `start` is not shown: its brief says it. */
+  | { kind: 'message'; id: string; ts: string; eventId: number; from: string; to: string; messageKind: AgentMessageKind; text: string; replyTo?: number; auto?: true }
+  /** The user's message to a thread: a steer, or an Ask (`question`). */
+  | { kind: 'steer'; id: string; ts: string; eventId: number; to: string; text: string; question?: true }
+  /** The messages threads sent each other during one Desk turn. Its counts come from the message fold at render time. */
+  | { kind: 'digest'; id: string; ts: string; eventId: number; messageIds: number[] }
   | { kind: 'report'; id: string; ts: string; eventId: number; headline: string; progress: string; needsYou: string[]; results: string[] }
   | { kind: 'question'; id: string; ts: string; eventId: number; question: string; options: string[]; answered: boolean }
   | { kind: 'notice'; id: string; ts: string; level: 'info' | 'warning' | 'error'; code: string; message: string }
   | { kind: 'compacted'; id: string; ts: string };
 
-/** The conversation of one agent (Desk): its messages, streamed replies, tool groups, reports, questions, and project notices. */
-export type ChatState = { agentId: string; items: ChatItem[]; lastSeq: number };
+/**
+ * The conversation of one agent (Desk): its messages, streamed replies, tool groups, reports, questions and project
+ * notices, plus what Desk and the user sent threads and what threads sent each other. `digest` is the id of the
+ * between-threads digest still collecting; Desk's next run.started freezes it.
+ */
+export type ChatState = { agentId: string; items: ChatItem[]; lastSeq: number; digest: string | null };
 
-export const emptyChat = (agentId: string): ChatState => ({ agentId, items: [], lastSeq: 0 });
+export const emptyChat = (agentId: string): ChatState => ({ agentId, items: [], lastSeq: 0, digest: null });
+
+/** A message's reply fields, when it has them. */
+const replyOf = (p: EventOf<'message.agent'>['payload']) => ({ ...(p.reply_to !== undefined ? { replyTo: p.reply_to } : {}), ...(p.auto ? { auto: true as const } : {}) });
+
+/** Adds a message between threads to the digest still collecting, or starts a digest with it. */
+function addToDigest(s: ChatState, e: EventOf<'message.agent'>): ChatState {
+  const i = s.digest ? s.items.findLastIndex((it) => it.id === s.digest) : -1;
+  const open = s.items[i];
+  if (open?.kind === 'digest') {
+    const items = s.items.slice();
+    items[i] = { ...open, messageIds: [...open.messageIds, e.id] };
+    return { ...s, items };
+  }
+  const id = `e:${e.id}`;
+  return { ...s, digest: id, items: [...s.items, { kind: 'digest', id, ts: e.ts, eventId: e.id, messageIds: [e.id] }] };
+}
 
 const streamId = (runId: string) => `run:${runId}`;
 
@@ -75,7 +101,11 @@ export function reduceChat(prev: ChatState, e: StoredEvent): ChatState {
   const id = `e:${e.id}`;
   switch (e.type) {
     case 'message.user':
-      if (!mine) return s;
+      if (!mine) {
+        // The user's message to a thread: a steer or an Ask. It does not answer Desk's questions.
+        if (!e.agent_id) return s;
+        return { ...s, items: [...s.items, { kind: 'steer', id, ts: e.ts, eventId: e.id, to: e.agent_id, text: e.payload.text, ...(e.payload.question ? { question: true as const } : {}) }] };
+      }
       return {
         ...s,
         items: [...s.items.map((it) => (it.kind === 'question' && !it.answered ? { ...it, answered: true } : it)), { kind: 'user', id, ts: e.ts, text: e.payload.text }],
@@ -90,11 +120,20 @@ export function reduceChat(prev: ChatState, e: StoredEvent): ChatState {
         : s;
     case 'tool.result':
       return mine ? { ...s, items: resolveToolCall(s.items, e.payload.tool_call_id, e.payload.status, e.payload.content, e.payload.images) } : s;
-    case 'message.agent':
-      // The runtime's reminders to Desk are for Desk alone.
-      return mine && e.payload.kind !== 'reminder'
-        ? { ...s, items: [...s.items, { kind: 'agent', id, ts: e.ts, fromAgentId: e.payload.from_agent_id, fromLabel: e.payload.from_label, messageKind: e.payload.kind, text: e.payload.text }] }
-        : s;
+    case 'run.started':
+      // Desk's turn begins: the digest of what threads said to each other before it is complete.
+      return mine ? { ...s, digest: null } : s;
+    case 'message.agent': {
+      const p = e.payload;
+      // The runtime's reminders to Desk are for Desk alone, and a thread's `start` says what its brief says.
+      if (p.kind === 'reminder' || p.kind === 'start') return s;
+      if (mine) return { ...s, items: [...s.items, { kind: 'agent', id, ts: e.ts, fromAgentId: p.from_agent_id, fromLabel: p.from_label, messageKind: p.kind, text: p.text, ...replyOf(p) }] };
+      if (!e.agent_id) return s;
+      if (p.from_agent_id === s.agentId) {
+        return { ...s, items: [...s.items, { kind: 'message', id, ts: e.ts, eventId: e.id, from: p.from_agent_id, to: e.agent_id, messageKind: p.kind, text: p.text, ...replyOf(p) }] };
+      }
+      return addToDigest(s, e);
+    }
     case 'report':
       return mine
         ? { ...s, items: [...s.items, { kind: 'report', id, ts: e.ts, eventId: e.id, headline: e.payload.headline, progress: e.payload.progress, needsYou: e.payload.needs_you, results: e.payload.results }] }
