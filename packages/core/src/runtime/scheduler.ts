@@ -45,7 +45,12 @@ export class Scheduler {
   }
 
   isActive(agentId: string): boolean {
-    return this.running.has(agentId) || this.queue.some((j) => j.agentId === agentId);
+    return this.jobOf(agentId) !== undefined;
+  }
+
+  /** The agent's running or queued job, if it has one. */
+  jobOf(agentId: string): Job | undefined {
+    return this.running.get(agentId)?.job ?? this.queue.find((j) => j.agentId === agentId);
   }
 
   /** Dequeues the agent's job, or aborts it if it is running. Returns where the job was, and the job. */

@@ -76,6 +76,21 @@ describe('Scheduler', () => {
     expect(s.isActive('a')).toBe(false);
   });
 
+  it("jobOf gives an agent's running or queued job", async () => {
+    const { s, started } = setup({ model: 1 });
+    s.enqueue(job('a'));
+    s.enqueue(answerJob('b', 7));
+    await tick();
+    expect(s.jobOf('a')).toEqual(job('a'));
+    expect(s.jobOf('b')).toEqual(answerJob('b', 7));
+    expect(s.jobOf('c')).toBeUndefined();
+    started[0]!.release();
+    await tick();
+    started[1]!.release();
+    await s.whenIdle();
+    expect(s.jobOf('b')).toBeUndefined();
+  });
+
   it('stops queued and running jobs', async () => {
     const { s, started } = setup({ model: 1 });
     s.enqueue(job('a'));

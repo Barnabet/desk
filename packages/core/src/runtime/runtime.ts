@@ -1310,12 +1310,17 @@ export class Runtime {
 
   /**
    * Whether the pause is what keeps the agent from running now (design spec §2.5): its project is paused, it has no
-   * queued or running job, and wakeDecision would start it for another agent or a lifecycle item.
+   * queued or running full run, and wakeDecision would start it for another agent or a lifecycle item. An answer job
+   * reads nothing past its question and closes it, so with one in flight the decision is the one that follows it.
    */
   private heldByPause(agentId: string): boolean {
     const agent = this.requireAgent(agentId);
-    if (!this.paused.has(agent.project_id) || this.scheduler.isActive(agent.id)) return false;
-    const d = wakeDecision(this.wakeState(agent));
+    if (!this.paused.has(agent.project_id)) return false;
+    const job = this.scheduler.jobOf(agent.id);
+    if (job?.kind === 'run') return false;
+    const s = this.wakeState(agent);
+    const q = job?.answering;
+    const d = wakeDecision(q === undefined ? s : { ...s, pending: s.pending.filter((i) => i.id > q), open: s.open.filter((o) => o.id !== q) });
     return d.kind !== 'none' && (d.trigger === 'agent' || d.trigger === 'lifecycle');
   }
 

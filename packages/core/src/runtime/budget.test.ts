@@ -324,4 +324,35 @@ describe('send results while paused', () => {
     await rt.whenIdle();
     expect(runs(desk.id)).toHaveLength(0);
   });
+
+  it('name the pause for what a thread busy answering another question reads only after that answer', async () => {
+    const { projectId, desk, thread, setStatus } = await setup(
+      { wakeBudget: 2 },
+      { Pricing: () => text('Per seat.'), Glossary: () => text('Terms listed.') },
+    );
+    const pricing = thread('Pricing');
+    setStatus(pricing, 'done');
+    const glossary = thread('Glossary');
+    const asker = thread('Asker');
+    // Desk's questions start two answer jobs (one running, one queued: the model takes one call at a time), the hour's
+    // two counted wakes; Desk's note to Idle then pauses the project.
+    rt.send({ from: desk.id, to: pricing, kind: 'question', text: 'Which plans?' });
+    rt.send({ from: desk.id, to: glossary, kind: 'question', text: 'Which terms?' });
+    rt.deliver(desk.id, thread('Idle'), 'note', 'Start.');
+    expect(pauses(projectId)).toHaveLength(1);
+
+    // An answer run reads nothing past its question: a thread's question and Desk's revision wait for the resume.
+    const q = rt.send({ from: asker, to: pricing, kind: 'question', text: 'Which currency?' });
+    expect(q.note).toBe(`Sent question #${q.id} to "Pricing" (${held}).`);
+    const r = rt.send({ from: desk.id, to: pricing, kind: 'revision', text: 'Add the EUR prices.' });
+    expect(r.note).toBe(`Sent revision 1 to "Pricing" (${held}).`);
+    // A sibling note to an idle thread waits for its next run, pause or not.
+    const n = rt.send({ from: asker, to: glossary, kind: 'note', text: 'See the style guide.' });
+    expect(n.note).toBe(`Sent note #${n.id} to "Glossary" (idle: it reads this when Desk or the user resumes it).`);
+
+    await rt.whenIdle();
+    expect(status(pricing)).toBe('done');
+    expect(runs(pricing)).toEqual([]);
+    expect(runs(glossary)).toHaveLength(1);
+  });
 });
