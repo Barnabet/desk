@@ -11144,11 +11144,13 @@ git commit -m "feat(web-ui): toasts, with Reveal logs for server failures" -m "C
 Spec §4.10. `toBlocks` runs `marked.lexer(text, { gfm: true })` and turns the tokens into a small view model; `SafeMarkdown` renders that model with recursive `<ng-template>`s, so every piece of agent text reaches the page through interpolation. As with the React component (`react-markdown`, `remark-gfm`, `skipHtml`, `defaultUrlTransform`):
 - `html` tokens, block and inline, are dropped; the text around them stays;
 - links become `ExternalLink`; images become an `ExternalLink` labelled `Image: <alt>` (or the alt text alone when there is no source); fenced and indented code become `CodeBlock`, with the first word of the info string as its language; inline code is `code.md-code`;
-- GFM tables (with column alignment), strikethrough, task lists (a disabled checkbox) and autolinks;
+- GFM tables (with column alignment), strikethrough, task lists (a disabled checkbox, then a space, first in the item's first paragraph, as `mdast-util-to-hast` puts it) and autolinks;
 - list items of a tight list render their text without `<p>`, loose ones with it.
 The view model reads only the token fields it needs, by name, so it does not depend on how a `marked` version groups its token types; unknown tokens (for example a separate `checkbox` token) are skipped. Entity references are decoded in text (`&amp;` shows `&`, `&lt;b&gt;` shows `<b>` as text), never in code, as CommonMark does; the result is interpolated, so it stays text.
 
 `ExternalLink`'s host is a `span` because the React component renders either a fragment (the button and its dialog) or a span: when the link is allowed the host is `display: contents` and holds the button, otherwise the host is the `md-link-disabled` span itself.
+
+**Deviation (review fix):** two fixes after review. (1) `decodeEntities` first looked names up with `NAMED[ref] ?? whole`, and `NAMED` is a plain object literal, so `&constructor;`, `&toString;`, `&valueOf;`, `&hasOwnProperty;` and the other `Object.prototype` names resolved to inherited functions and showed their source text (`Use &valueOf; here` rendered "Use function valueOf() { [native code] } here"). The lookup is now `Object.hasOwn(NAMED, ref) ? NAMED[ref]! : whole`; the entities case expects those names to stay as written. It was never an injection (the result is interpolated), only wrong text. (2) The task checkbox was rendered by `listItems` before the item's blocks, so a loose task list came out as `<li class="task-list-item"><input …> <p>a</p></li>` and the checkbox sat on its own line above the text, while react-markdown (`mdast-util-to-hast`'s `list-item.js`) puts it, then a space, inside the first paragraph: `<li class="task-list-item"><p><input …> a</p></li>` (§5, same DOM). `toBlocks` now does the same: `MdInline` gains `{ kind: 'checkbox', checked }`, and for a task item `withCheckbox` puts it, then `' '` when there is content, at the start of the item's first `paragraph` or `text` block, or adds a block holding only the checkbox when the item starts with anything else. `inlineList` renders it as `<input type="checkbox" disabled [checked]>` and `listItems` no longer has its own input. Tight lists render as before. A `markdown.spec.ts` case covers tight and loose task items, and a `safe-markdown.spec.ts` case checks the loose `li > p > input` and the tight `li > input` (17 tests).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -11174,6 +11176,24 @@ describe('toBlocks', () => {
     ]);
     expect(JSON.stringify(items[0]!.children)).toContain('done');
     expect(JSON.stringify(items[1]!.children)).toContain('todo');
+  });
+
+  it('puts a task item\'s checkbox first in its first paragraph, tight or loose, as react-markdown does', () => {
+    const box = (checked: boolean): MdInline => ({ kind: 'checkbox', checked });
+    const [tight] = toBlocks('- [x] done\n- [ ] todo');
+    expect((tight as List).items.map((i) => i.children)).toEqual([
+      [{ kind: 'text', children: [box(true), text(' done')] }],
+      [{ kind: 'text', children: [box(false), text(' todo')] }],
+    ]);
+    const [loose] = toBlocks('- [x] a\n\n- [ ] **b** tail\n\n  more');
+    expect(loose).toMatchObject({ kind: 'list', tasks: true });
+    expect((loose as List).items.map((i) => i.children)).toEqual([
+      [{ kind: 'paragraph', children: [box(true), text(' a')] }],
+      [
+        { kind: 'paragraph', children: [box(false), text(' '), { kind: 'strong', children: [text('b')] }, text(' tail')] },
+        { kind: 'paragraph', children: [text('more')] },
+      ],
+    ]);
   });
 
   it('drops raw HTML, block and inline, and keeps the text around it', () => {
@@ -11221,15 +11241,16 @@ describe('toBlocks', () => {
   });
 
   it('decodes entities in text, never in code', () => {
-    expect(toBlocks('Tom &amp; Jerry &lt;b&gt; &#169; &#x1F600; &bogus; `&amp;`')).toEqual([
-      { kind: 'paragraph', children: [text('Tom & Jerry <b> © 😀 &bogus; '), { kind: 'code', text: '&amp;' }] },
+    expect(toBlocks('Tom &amp; Jerry &lt;b&gt; &#169; &#x1F600; &bogus; &constructor; &toString; `&amp;`')).toEqual([
+      { kind: 'paragraph', children: [text('Tom & Jerry <b> © 😀 &bogus; &constructor; &toString; '), { kind: 'code', text: '&amp;' }] },
     ]);
+    expect(decodeEntities('&valueOf;&hasOwnProperty;&isPrototypeOf;')).toBe('&valueOf;&hasOwnProperty;&isPrototypeOf;');
     expect(decodeEntities('&#0;&quot;&apos;&nbsp;')).toBe('�"\' ');
   });
 });
 ```
 
-Create `apps/web-ui/src/app/components/safe-markdown.spec.ts` (the desktop's four cases, then two more):
+Create `apps/web-ui/src/app/components/safe-markdown.spec.ts` (the desktop's four cases, then three more):
 
 ```ts
 import { fireEvent, render, screen, waitFor } from '@testing-library/angular';
@@ -11244,6 +11265,21 @@ describe('SafeMarkdown', () => {
     const { container } = await renderMarkdown('**Five drafts** ready\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [x] done');
     expect(container.querySelector('strong')?.textContent).toBe('Five drafts');
     expect(container.querySelector('table')).not.toBeNull();
+  });
+
+  it('puts a task checkbox inside the item\'s paragraph in a loose list, and straight in the item in a tight one', async () => {
+    const { container } = await renderMarkdown('- [x] a\n\n- [ ] b\n\nthen\n\n- [x] tight');
+    const [loose, tight] = [...container.querySelectorAll('ul.contains-task-list')];
+    const looseItems = [...loose!.querySelectorAll(':scope > li.task-list-item')];
+    expect(looseItems.map((li) => li.firstElementChild?.tagName)).toEqual(['P', 'P']);
+    expect(looseItems.map((li) => li.querySelector(':scope > p > input[type=checkbox][disabled]') !== null)).toEqual([true, true]);
+    expect(looseItems.map((li) => li.querySelector(':scope > input'))).toEqual([null, null]);
+    expect(looseItems.map((li) => (li.querySelector('input') as HTMLInputElement).checked)).toEqual([true, false]);
+    expect(looseItems.map((li) => li.querySelector('p')?.textContent)).toEqual([' a', ' b']);
+    const tightItem = tight!.querySelector(':scope > li.task-list-item')!;
+    expect(tightItem.querySelector('p')).toBeNull();
+    expect(tightItem.firstElementChild?.tagName).toBe('INPUT');
+    expect(tightItem.textContent).toBe(' tight');
   });
 
   it('never renders raw HTML, scripts or remote images', async () => {
@@ -11367,8 +11403,11 @@ export type MdInline =
   | { kind: 'code'; text: string }
   | { kind: 'br' }
   | { kind: 'link'; href: string; children: MdInline[] }
-  | { kind: 'image'; src: string; alt: string };
+  | { kind: 'image'; src: string; alt: string }
+  /** A task item's disabled checkbox, first in its first paragraph (as react-markdown puts it). */
+  | { kind: 'checkbox'; checked: boolean };
 
+/** A task item's checkbox is already in `children`, as a `checkbox` inline. */
 export type MdListItem = { task: boolean; checked: boolean; children: MdBlock[] };
 
 /** Blocks. `text` is a tight list item's content, shown without a paragraph. */
@@ -11444,7 +11483,8 @@ export function decodeEntities(text: string): string {
       const code = ref[1] === 'x' || ref[1] === 'X' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
       return code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : '�';
     }
-    return NAMED[ref] ?? whole;
+    // Own keys only, so `&constructor;` or `&toString;` never reach Object.prototype.
+    return Object.hasOwn(NAMED, ref) ? NAMED[ref]! : whole;
   });
 }
 
@@ -11495,6 +11535,25 @@ function inline(tokens: Raw[] | undefined): MdInline[] {
   return out;
 }
 
+/**
+ * A task item's checkbox goes first in its first paragraph, then a space before any content, as mdast-util-to-hast does;
+ * an item that starts with anything else gets a paragraph holding only the checkbox.
+ */
+function withCheckbox(children: MdBlock[], checked: boolean, loose: boolean): MdBlock[] {
+  const box: MdInline = { kind: 'checkbox', checked };
+  const first = children[0];
+  if (first?.kind !== 'paragraph' && first?.kind !== 'text') return [{ kind: loose ? 'paragraph' : 'text', children: [box] }, ...children];
+  const inlines: MdInline[] = [box];
+  if (first.children.length) {
+    pushText(inlines, ' ');
+    for (const piece of first.children) {
+      if (piece.kind === 'text') pushText(inlines, piece.text);
+      else inlines.push(piece);
+    }
+  }
+  return [{ kind: first.kind, children: inlines }, ...children.slice(1)];
+}
+
 function blocks(tokens: Raw[] | undefined, loose: boolean): MdBlock[] {
   const out: MdBlock[] = [];
   for (const t of tokens ?? []) {
@@ -11519,7 +11578,11 @@ function blocks(tokens: Raw[] | undefined, loose: boolean): MdBlock[] {
         out.push({ kind: 'blockquote', children: blocks(t.tokens, true) });
         break;
       case 'list': {
-        const items = (t.items ?? []).map((i) => ({ task: i.task === true, checked: i.checked === true, children: blocks(i.tokens, i.loose === true) }));
+        const items = (t.items ?? []).map((i): MdListItem => {
+          const [task, checked, itemLoose] = [i.task === true, i.checked === true, i.loose === true];
+          const children = blocks(i.tokens, itemLoose);
+          return { task, checked, children: task ? withCheckbox(children, checked, itemLoose) : children };
+        });
         const start = t.ordered && typeof t.start === 'number' && t.start !== 1 ? t.start : null;
         out.push({ kind: 'list', ordered: t.ordered === true, start, tasks: items.some((i) => i.task), items });
         break;
@@ -11713,9 +11776,6 @@ import { toBlocks } from './markdown';
     <ng-template #listItems let-items>
       @for (item of items; track $index) {
         <li [class.task-list-item]="item.task">
-          @if (item.task) {
-            <input type="checkbox" disabled [checked]="item.checked" /><ng-container>{{ ' ' }}</ng-container>
-          }
           <ng-container *ngTemplateOutlet="blockList; context: { $implicit: item.children }" />
         </li>
       }
@@ -11730,6 +11790,7 @@ import { toBlocks } from './markdown';
           @case ('del') {<del><ng-container *ngTemplateOutlet="inlineList; context: { $implicit: i.children }" /></del>}
           @case ('code') {<code class="md-code">{{ i.text }}</code>}
           @case ('br') {<br />}
+          @case ('checkbox') {<input type="checkbox" disabled [checked]="i.checked" />}
           @case ('link') {<span deskExternalLink [href]="i.href"><ng-container *ngTemplateOutlet="inlineList; context: { $implicit: i.children }" /></span>}
           @case ('image') {
             @if (i.src) {
@@ -11759,7 +11820,7 @@ export { SafeMarkdown as SafeMarkdownComponent };
 - [ ] **Step 5: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/markdown.spec.ts --include src/app/components/safe-markdown.spec.ts --include src/app/security.spec.ts)`
-Expected: PASS (3 files, 15 tests).
+Expected: PASS (3 files, 17 tests).
 
 If a `markdown.spec.ts` expectation differs only in how `marked` 18 splits a piece of text (for example a trailing space inside a task item), fix `toBlocks` (not the expectation) so the rendered text matches what the desktop's `react-markdown` shows for the same input.
 
