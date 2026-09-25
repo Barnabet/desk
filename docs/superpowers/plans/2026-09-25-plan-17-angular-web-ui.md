@@ -5641,7 +5641,7 @@ export function findInlineCode(html: string): string[] {
     if ((m[2] ?? '').trim()) problems.push(`inline script: ${m[0].slice(0, 80)}`);
     else if (!/\bsrc\s*=/i.test(m[1] ?? '')) problems.push(`script without src: ${m[0].slice(0, 80)}`);
   }
-  for (const m of html.matchAll(/<[a-z][a-z0-9-]*\b[^>]*?\s(on[a-z]+)\s*=/gi)) problems.push(`event handler attribute: ${m[1]}`);
+  for (const m of html.matchAll(/<[a-z][a-z0-9-]*\b[^>]*?[\s/"'](on[a-z]+)\s*=/gi)) problems.push(`event handler attribute: ${m[1]}`);
   return problems;
 }
 
@@ -8135,7 +8135,7 @@ describe('the Angular build', () => {
     const html = readFileSync(join(ROOT, 'src', 'index.html'), 'utf8');
     expect(html).toContain('<desk-root></desk-root>');
     expect(html).not.toMatch(/<script\b/i);
-    expect(html).not.toMatch(/\son[a-z]+\s*=/i);
+    expect(html).not.toMatch(/[\s/"']on[a-z]+\s*=/i);
     expect(html).not.toMatch(/<base\b/i);
   });
 });

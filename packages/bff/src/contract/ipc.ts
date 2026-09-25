@@ -117,7 +117,7 @@ export const channels = {
   'daemon.start': none,
   'daemon.restart': none,
   'daemon.stop': none,
-  /** Reinstall the LaunchAgent (packaged macOS); elsewhere a restart. */
+  /** Reinstall the LaunchAgent (packaged macOS); a restart in dev; desk web answers not_offered. */
   'daemon.repair': none,
 
   'app.info': none,
