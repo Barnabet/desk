@@ -1,6 +1,6 @@
 # Angular web UI — design
 
-**Status:** approved by the user on 2026-09-25; revised after review (§12). Branch `web-ui` (worktree `~/desk-web`). Implementation: Plan 17.
+**Status:** approved by the user on 2026-09-25; revised after review (§12) and after the W0 spike (§0, §7). Branch `web-ui` (worktree `~/desk-web`), on master with inter-agent messaging (7961adb). Implementation: Plan 17.
 
 Desk gets a second frontend: an Angular app served to the browser by a new `desk web` server on this computer. It sits alongside the Electron desktop app and reaches full parity with it in phases.
 
@@ -13,7 +13,7 @@ Desk gets a second frontend: an Angular app served to the browser by a new `desk
 | Scope | **Full parity, in phases** (W0–W3, §7). |
 | Serving | **A separate `desk web` server** that holds the deskd token and proxies a curated operation set, like the Electron main process. |
 | Downloads | Approved: Angular 22 and its build tooling, `marked`, and Playwright's Chromium for e2e. (DOMPurify is no longer needed, §4.10.) |
-| Node and TypeScript | **Open: needs the user before W0.** Angular 22.x requires Node `^22.22.3 \|\| ^24.15.0 \|\| >=26` and TypeScript `>=6.0 <6.1`. This machine runs Node 22.21.0, and the repo's TypeScript 7.0.2 (the native compiler) has no compiler API for `ngc`. Default: upgrade Node to ≥22.22.3, raise the root `engines`, and give `apps/web-ui` its own devDependency `typescript ~6.0.3` (pnpm resolves it per package). If the Node upgrade is declined: Angular 21.2 (Node `^22.12`, TypeScript `>=5.9 <6.0`). Either way the Angular app is type-checked by `ngc`, not by the root `tsc`. |
+| Node and TypeScript | **Decided (the user: "do what you gotta").** Angular **22.2.0** with TypeScript **~6.0.3** as `apps/web-ui`'s own devDependency (pnpm resolves it per package; the repo stays on TypeScript 7). Node **22.23.3** is installed with nvm and is the default (22.21.0 is kept); `apps/web-ui` declares `engines.node` `^22.22.3 \|\| ^24.15.0 \|\| >=26` and the root `engines` stays as is, so the rest of the repo still runs on older Node 22. Shells spawned by the Claude app inherit 22.21.0 on PATH: web-ui commands run with `PATH=~/.nvm/versions/node/v22.23.3/bin:$PATH`. The Angular app is type-checked by `ngc`, not by the root `tsc`. |
 
 ## 1. Architecture
 
@@ -97,13 +97,11 @@ The threat model is other web pages open in the user's browser (CSRF, DNS rebind
 3. **Host check.** Every request, the WebSocket upgrade included, must carry `Host: 127.0.0.1:<port>`. Anything else gets 421, which blocks DNS rebinding. That includes `localhost`: it can resolve to `::1`, where another process may hold the same port. desk web always prints and opens `127.0.0.1`.
 4. **Origin check.** Every `POST /rpc` and every `/push` upgrade must carry `Origin: http://127.0.0.1:<port>`. Requests without it are refused (403). `/rpc` also requires `content-type: application/json`, and its `x-desk-session` header already rules out a simple cross-site request.
 5. **The deskd token never leaves the server.** The browser gets only `IpcResult` values, which already hide the token, as they do for the Electron renderer. The `CLAUDE.md` invariant "The desktop renderer never sees the daemon token" extends to the web UI.
-6. **Agents cannot reach either server.** Today a sandboxed command can read `daemon.json` and call deskd over loopback, because the profile only denies writes. It could therefore approve its own agent's unsandboxed request. W0 closes this in `packages/core/src/tools/sandbox.ts` before `desk web` ships:
-   - `SandboxSpec` gains `dataDir` and the two ports. deskd reads desk web's port from `web.json` when it builds a profile.
-   - After `(allow default)`, the profile adds `(deny file-read* (literal "<data>/daemon.json"))` and `(deny network-outbound (remote ip "localhost:<deskd port>") (remote ip "localhost:<web port>"))`. The network deny is the real control: it also covers a session secret read from the browser's profile on disk.
-   - Sandbox tests: `cat daemon.json` and `curl 127.0.0.1:<port>/v1/health` both fail inside the sandbox.
-7. **Sources cannot cover Desk's own data.** `projects.addSource` takes any path and makes it agent-writable by default, so the folder browser's confinement is a convenience, not a boundary. deskd enforces it instead, which covers Electron too:
-   - `addSource` resolves the realpath and refuses the filesystem root, the home directory, the data dir, and any path inside or containing the data dir (`ValidationError`).
-   - `writeRoots` skips existing sources that match, so older projects are covered too.
+6. **Agents cannot reach either server.** Landed on master in 105ea03 (`SandboxGuard` in `packages/core/src/tools/sandbox.ts`, see the `CLAUDE.md` invariant): sandboxed commands and file tools cannot read `daemon.json`, the database or the model credentials, cannot write the data dir outside their workspace, cannot connect to deskd's port, and deskd's own file and git access to agent folders is hardened. W0 adds what is specific to desk web:
+   - the guard's ports include desk web's port: deskd reads it from `<data>/web.json` each time it builds a profile (desk web may start after deskd), so a sandboxed `curl 127.0.0.1:<web port>` fails;
+   - `web.json`, `web-settings.json` and `web-login-*.html` are data-dir files, already unwritable to agents; `web-login-*.html` (a one-time code) is also unreadable, through a `secrets` pattern the guard gains for it;
+   - sandbox tests: a sandboxed `curl` to desk web's port fails, and the login file cannot be read.
+7. **Sources cannot cover Desk's own data.** Landed on master in 105ea03: `addSource` refuses the filesystem root, the home folder or above, and the data dir or anything inside or around it (`unsafeSource`, `ValidationError`), and older sources that match are never writable. The folder browser's confinement is therefore a convenience, not the boundary.
 8. **Validation.** Every operation's input is parsed by its schema (`channels` or `webChannels`) before a handler runs, as in Electron main. Unknown operations get 404.
 9. **Headers on every response:**
    - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:<port>; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` (Electron's `PROD_CSP`, plus `frame-ancestors` and the explicit socket origin)
@@ -161,9 +159,9 @@ Every React screen and component has an Angular counterpart in the listed phase.
 | Shell | App (+ ErrorBoundary per screen), TitleBar, ProjectSwitcher, ProjectNav, ConnectionOverlay, Toast, ConfirmDialog, Sheet, Button, Field, EmptyState, StatusChip, ExternalLink, CodeBlock, SafeMarkdown | W0 |
 | Onboarding | Onboarding, ProjectForm, EndpointPanel | W0 |
 | Map | MapScreen, MapCanvas, OrbitMap, ProjectList, TerritoryInspector | W1 |
-| Conversation | ConversationScreen, ChatItems, Composer, LineDiagram, PlanPanel, ServicesCard (+ LogsSheet), WhatsUp, ToolGroup, ImageThumbs | W1 |
-| Attention | AttentionScreen, StripRack, FlightStrip, Inspector | W1 |
-| Threads | ThreadsScreen, ThreadRoster, ThreadDetail, RouteView, Transcript, the threads/tabs (result, diff, files, skill drafts, usage), FileViewer | W2 |
+| Conversation | ConversationScreen, ChatItems (message rows, the digest, answering and closure rows, `rowViews.ts`), Composer, LineDiagram (question marks on lanes), PlanPanel, ServicesCard (+ LogsSheet), WhatsUp, ToolGroup (thread titles in tool rows), ImageThumbs; the messaging components AnsweringBadge, HopLink, PairSheet (`pairs.ts`) and the one-hop waits (`waits.ts`) | W1 |
+| Attention | AttentionScreen, StripRack, FlightStrip, Inspector, with the `paused` (GND) strip and Resume | W1 |
+| Threads | ThreadsScreen, ThreadRoster (the wait line), ThreadDetail (Ask / Reopen / Resume composer), RouteView (route cards, answer stops), Transcript (answer runs), the threads/tabs (result, diff, files, skill drafts, usage), FileViewer | W2 |
 | Knowledge | LibraryScreen (upload, preview), MemoryScreen (add, correct, remove) | W2 |
 | Settings | SettingsScreen, SettingsFields, PolicyEditor, sources with the folder browser and "Agents can write here" | W2 |
 | Skills | SkillsScreen, SkillsMapView, SkillList, SkillPanel, SkillEditor, AskDesk, SkillBadge; history, compare and restore; import (folder browser) | W3 |
@@ -181,8 +179,8 @@ Dynamic calls such as ``call(`daemon.${what}`)`` in `SystemScreen` become litera
 ## 7. Phases (each ships something usable)
 
 - **W0: foundation.**
-  - Before any code: the Node and TypeScript decision (§0), and a spike that `@angular/build` compiles the TypeScript-source workspace packages. If it reports them "missing from the TypeScript compilation", `apps/web-ui`'s tsconfig adds `paths` to their `src` entries.
-  - The sandbox and `addSource` changes in deskd (§4.6, §4.7), with their tests, land before `desk web` does.
+  - Spike (done 2026-09-25, files kept in `~/Library/Caches/desk-dev/plan17/spike`): Angular 22.2.0 with TypeScript 6.0.3 on Node 22.23.3 builds and unit-tests a zoneless app that imports `@desk/protocol` and `@desk/client` from their TypeScript sources, with no `paths` needed; `ngc -p tsconfig.app.json --noEmit` type-checks with `noUncheckedIndexedAccess`; `ng test` (Vitest 5.0.1, jsdom) needs a `development` build configuration as its `buildTarget`; the built `index.html` has only an external module script; the root Vitest globs (`*.test.{ts,tsx}`) never match Angular's `*.spec.ts`, but the root `tsconfig.json` must exclude `apps/web-ui`; the Angular CLI writes a `.angular/` cache (gitignored); pnpm skipped the build scripts of `@parcel/watcher`, `lmdb` and `msgpackr-extract` (prebuilt binaries still load; `ng build --watch` must be checked in W0); the bundle is about 570 kB before splitting.
+  - The sandbox and `addSource` changes (§4.6, §4.7) are on master (105ea03); W0 adds desk web's port and login file to the guard before `desk web` ships.
   - `@desk/bff`, `@desk/ui-core` and `@desk/ui-styles` are extracted. The Electron app and its unit and e2e tests pass unchanged.
   - `desk web` has login, the Host and Origin checks, headers, `/rpc` and `/push`.
   - The Angular shell: title bar, navigation, the connection overlay with Start deskd, onboarding with the folder browser (the project form picks a folder), and an empty map.
@@ -197,7 +195,7 @@ Dynamic calls such as ``call(`daemon.${what}`)`` in `SystemScreen` become litera
 ## 8. Testing
 
 - **`@desk/bff`**: the existing broker and handler tests move with it.
-- **`@desk/core`**: the sandbox tests of §4.6, and `addSource` refusals (root, home, data dir, inside or containing it).
+- **`@desk/core`**: the web-specific sandbox tests of §4.6 (desk web's port from `web.json`, the login file); the rest shipped with 105ea03.
 - **`@desk/web-server`** (Vitest):
   - login codes: single use, expiry, and a replayed code revoking its session;
   - no `Set-Cookie` anywhere; a missing or wrong session secret gets 401 on `/rpc` and 4401 on `/push`;
@@ -237,7 +235,7 @@ Dynamic calls such as ``call(`daemon.${what}`)`` in `SystemScreen` become litera
   - a line in `CLAUDE.md` saying that UI features ship in both apps.
 - **Merge timing.**
   - The extraction moves files that another session is editing (`handlers.ts`, `ipc.ts`). The branch rebases onto master when that work lands, and the extraction is redone mechanically if it conflicts.
-  - The messaging branch (Plan 16) adds React UI, and its Angular counterparts join the messaging UI slices.
+  - Plan 16 (inter-agent messaging) is on master, so its React UI is part of the parity inventory (§6) from the start.
 - **Size.** About 8,000 lines of UI to port. It is built in phases, with at most 2 agents at a time on this machine.
 
 ## 12. Review notes
