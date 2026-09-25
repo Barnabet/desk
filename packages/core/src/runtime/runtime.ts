@@ -14,6 +14,7 @@ import {
   sentSince,
   ServiceName,
   snippet,
+  WAKES_PAUSED,
   type AgentMessageKind,
   type ArtifactKind,
   type EventInput,
@@ -79,7 +80,7 @@ import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler, type Job } from './scheduler';
 import { toolsForRole } from './toolsets';
-import { wakeDecision, type Item, type WakeState } from './wake';
+import { takeWake, wakeDecision, type Item, type Trigger, type WakeState } from './wake';
 
 export type RuntimeOptions = {
   store: EventStore;
@@ -109,6 +110,10 @@ export type RuntimeOptions = {
   readOnly?: string[];
   /** The user's home folder (default `os.homedir()`), which can never be a source. */
   home?: string;
+  /** Wakes of one agent by another a project may have in a rolling hour before its automatic wakes pause (default 60). */
+  wakeBudget?: number;
+  /** Lifecycle wakes (thread starts, notices to Desk) a project may have in a rolling hour before it pauses (default 150). */
+  lifecycleBudget?: number;
 };
 
 /** What the send path records on a message besides its text (design spec §1.2). */
@@ -162,6 +167,10 @@ export class Runtime {
   private readonly folds = new Map<string, MessagesState>();
   /** Threads being archived: from archiveThread's first step, nothing new reaches them (design spec §3.5). */
   private readonly archiving = new Set<string>();
+  /** Per project, the times of the counted wakes of the last hour, by trigger (design spec §5.4). Empty after a restart. */
+  private readonly wakeWindows = new Map<string, { agent: number[]; lifecycle: number[] }>();
+  /** Projects whose automatic wakes are paused until the user writes to one of their agents or resumes them (§5.4). */
+  private readonly paused = new Set<string>();
   /** Those calls' abort controllers, and when each resolution has recorded its result: a shutdown aborts and awaits them. */
   private readonly resolutions = new Set<{ controller: AbortController; recorded: Promise<void> }>();
   /**
@@ -1419,19 +1428,56 @@ export class Runtime {
 
   /**
    * Starts what wakeDecision says the agent should do now (design spec §3.2, §3.4): a full run through schedule(), or
-   * an answer job for one question, which appends no status event. Returns whether it enqueued a job.
+   * an answer job for one question, which appends no status event. A wake for another agent or a lifecycle item first
+   * passes the wake budget (admit); if it does not, its items stay stored. Returns whether it enqueued a job.
    */
   private wake(agentId: string): boolean {
     if (this.shuttingDown || this.scheduler.isActive(agentId)) return false;
     const agent = this.requireAgent(agentId);
     const d = wakeDecision(this.wakeState(agent));
-    if (d.kind === 'none') return false;
+    if (d.kind === 'none' || !this.admit(agent.project_id, d.trigger)) return false;
     if (d.kind === 'answer') {
       this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role, kind: 'answer', answering: d.question });
     } else {
       this.schedule(agent);
     }
     return true;
+  }
+
+  /**
+   * The wake budgets (design spec §3.4 steps 3–4, §5.4). `user` and `queued` wakes always go through; while the
+   * project is paused nothing else does. Any other wake is counted in the project's rolling hour for its trigger:
+   * when that hour already holds the budget (wakeBudget for `agent`, lifecycleBudget for `lifecycle`), the project
+   * pauses and the wake is dropped.
+   */
+  private admit(projectId: string, trigger: Trigger): boolean {
+    if (trigger === 'user' || trigger === 'queued') return true;
+    if (this.paused.has(projectId)) return false;
+    let windows = this.wakeWindows.get(projectId);
+    if (!windows) this.wakeWindows.set(projectId, (windows = { agent: [], lifecycle: [] }));
+    const budget = trigger === 'agent' ? (this.o.wakeBudget ?? 60) : (this.o.lifecycleBudget ?? 150);
+    if (takeWake(windows[trigger], Date.now(), budget)) return true;
+    this.pause(projectId, trigger, budget);
+    return false;
+  }
+
+  /**
+   * Pauses the project's automatic wakes (design spec §5.4) and tells the user once, with the `wakes_paused` notice
+   * that core attention turns into the `paused` item. Only admit calls it, on a project that is not paused yet.
+   */
+  private pause(projectId: string, trigger: 'agent' | 'lifecycle', budget: number): void {
+    this.paused.add(projectId);
+    const what = trigger === 'agent' ? `Agents woke each other ${budget} times` : `Agents were woken by thread starts and notices ${budget} times`;
+    this.o.store.append({
+      project_id: projectId,
+      agent_id: null,
+      type: 'system.notice',
+      payload: {
+        level: 'warning',
+        code: WAKES_PAUSED,
+        message: `${what} in the last hour, so automatic wakes are paused. Their messages are kept. Write to any agent of this project, or press Resume, to continue.`,
+      },
+    });
   }
 
   /**
