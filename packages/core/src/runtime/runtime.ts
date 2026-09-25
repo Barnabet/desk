@@ -2,7 +2,25 @@ import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'no
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
-import { GLOBAL_PROJECT_ID, ServiceName, snippet, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type ServiceStopReason, type SkillScope } from '@desk/protocol';
+import {
+  emptyMessages,
+  foldMessages,
+  GLOBAL_PROJECT_ID,
+  MESSAGE_FOLD_TYPES,
+  messageById,
+  sanitizeLabel,
+  ServiceName,
+  snippet,
+  type AgentMessageKind,
+  type ArtifactKind,
+  type EventInput,
+  type MemoryKind,
+  type MessagesState,
+  type ProjectSettingsPatch,
+  type ReasoningEffort,
+  type ServiceStopReason,
+  type SkillScope,
+} from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { AttachmentStore } from '../attachments/store';
 import { uniqueLibraryName } from '../library/library';
@@ -86,6 +104,18 @@ export type RuntimeOptions = {
   home?: string;
 };
 
+/** What the send path records on a message besides its text (design spec §1.2). */
+export type DeliverOptions = {
+  /** The question this message answers. */
+  replyTo?: number;
+  /** An answer the runtime writes for a thread (a closure). */
+  auto?: boolean;
+  /** A question that gets a state (open, answered, closed, withdrawn). */
+  tracked?: boolean;
+  /** The tool call that sent it. */
+  toolCallId?: string;
+};
+
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
 /** The result recovery records for a call cut off by an unclean exit: it is never run again. */
 const INTERRUPTED_BY_RESTART = 'The daemon restarted during execution; the state of any side effects is unknown — verify before retrying.';
@@ -110,6 +140,8 @@ export class Runtime {
   private readonly stallNotified = new Map<string, number>();
   /** Approved calls resolveApproval is still running, per agent: until their results exist, nothing may run the agent. */
   private readonly resolving = new Map<string, number>();
+  /** Each project's message fold, brought up to date on every read (messages()). */
+  private readonly folds = new Map<string, MessagesState>();
   /** Those calls' abort controllers, and when each resolution has recorded its result: a shutdown aborts and awaits them. */
   private readonly resolutions = new Set<{ controller: AbortController; recorded: Promise<void> }>();
   /**
@@ -151,7 +183,7 @@ export class Runtime {
       writeMemory: (projectId, input, source) => this.writeMemory(projectId, input, source),
       libraryDir: (projectId) => this.libraryDir(projectId),
       publishToLibrary: (projectId, file, meta, origin) => this.publishToLibrary(projectId, file, meta, origin),
-      deliver: (from, to, kind, text) => this.deliver(from, to, kind, text),
+      deliver: (from, to, kind, text, opts) => this.deliver(from, to, kind, text, opts),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
       isStopping: (agentId) => this.stoppedAt.has(agentId),
@@ -339,22 +371,37 @@ export class Runtime {
   }
 
   /**
-   * Stores a message on the recipient's stream (another agent's message, or a runtime notice attributed to
+   * Stores a message on the recipient's stream (another agent's message, an answer, or a runtime notice attributed to
    * `fromAgentId`), then wakes the recipient if wakeDecision says so. It never refuses because of the recipient's
    * state. Returns the message id.
    */
-  deliver(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): number {
-    const from = this.requireAgent(fromAgentId);
-    const to = this.requireAgent(toAgentId);
-    const label = from.role === 'desk' ? 'Desk' : `thread "${from.title ?? 'untitled'}" (${from.id})`;
-    const [message] = this.o.store.append({
-      project_id: to.project_id,
-      agent_id: to.id,
-      type: 'message.agent',
-      payload: { from_agent_id: from.id, from_label: label, kind, text },
-    });
-    this.wake(to.id);
+  deliver(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string, opts: DeliverOptions = {}): number {
+    const [message] = this.o.store.append(this.messageEvent(this.requireAgent(fromAgentId), this.requireAgent(toAgentId), kind, text, opts));
+    this.wake(toAgentId);
     return message!.id;
+  }
+
+  /**
+   * Writes the one answer to a question (design spec §1.3), from its recipient to its asker, then wakes the asker.
+   * Returns null, appending nothing, when answerEvent's guard allows no answer.
+   */
+  answer(questionId: number, fromAgentId: string, text: string, opts: { auto?: boolean; toolCallId?: string } = {}): number | null {
+    const event = this.answerEvent(questionId, fromAgentId, text, opts);
+    if (!event) return null;
+    const [message] = this.o.store.append(event);
+    this.wake(message!.agent_id!);
+    return message!.id;
+  }
+
+  /**
+   * The project's messages, question states and answer runs (design spec §1.4). One fold per project is kept in
+   * memory; each call folds only the events stored since the previous one (rebuilt lazily after a restart).
+   */
+  messages(projectId: string): MessagesState {
+    const prev = this.folds.get(projectId) ?? emptyMessages();
+    const next = foldMessages(this.o.store.list({ projectId, after: prev.lastId, types: MESSAGE_FOLD_TYPES }), prev);
+    this.folds.set(projectId, next);
+    return next;
   }
 
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
@@ -1035,6 +1082,39 @@ export class Runtime {
     if (!project) throw new NotFoundError(`Unknown project: ${projectId}`);
     if (project.archived_at) throw new ConflictError(`Project ${projectId} is archived`);
     return project;
+  }
+
+  /** The `message.agent` event for a message from `from` to `to`. A thread's label carries its sanitised title. */
+  private messageEvent(from: AgentRow, to: AgentRow, kind: AgentMessageKind, text: string, opts: DeliverOptions): EventInput {
+    return {
+      project_id: to.project_id,
+      agent_id: to.id,
+      type: 'message.agent',
+      payload: {
+        from_agent_id: from.id,
+        from_label: from.role === 'desk' ? 'Desk' : `thread "${sanitizeLabel(from.title ?? 'untitled')}" (${from.id})`,
+        kind,
+        text,
+        ...(opts.replyTo !== undefined ? { reply_to: opts.replyTo } : {}),
+        ...(opts.auto ? { auto: true as const } : {}),
+        ...(opts.tracked ? { tracked: true as const } : {}),
+        ...(opts.toolCallId ? { tool_call_id: opts.toolCallId } : {}),
+      },
+    };
+  }
+
+  /**
+   * answer()'s guard, as the event to append: the answer to `questionId` from its recipient, or null when the question
+   * already has an answer, or when `auto` (a closure the runtime writes) and the question is no longer open. The fold
+   * is read and the event appended in one turn of the event loop, so no second answer can slip in between.
+   */
+  private answerEvent(questionId: number, fromAgentId: string, text: string, opts: { auto?: boolean; toolCallId?: string }): EventInput | null {
+    const from = this.requireAgent(fromAgentId);
+    const q = messageById(this.messages(from.project_id), questionId);
+    if (q?.kind !== 'question') throw new NotFoundError(`Unknown question: #${questionId}`);
+    if (q.to !== from.id) throw new ValidationError(`Question #${questionId} was not sent to ${from.id}`);
+    if (q.answerId !== undefined || (opts.auto && q.state !== 'open')) return null;
+    return this.messageEvent(from, this.requireAgent(q.from), 'answer', text, { replyTo: questionId, auto: opts.auto, toolCallId: opts.toolCallId });
   }
 
   /** Unknown models are assumed to see images; the endpoint answers for itself. */
