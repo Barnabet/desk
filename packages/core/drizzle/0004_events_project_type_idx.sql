@@ -1,0 +1,1 @@
+CREATE INDEX `events_project_type_idx` ON `events` (`project_id`,`type`,`id`);

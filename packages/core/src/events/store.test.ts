@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import type { EventInput } from '@desk/protocol';
 import { openDb } from '../db/open';
 import { getAgent, getProject, getUsageTotals, listAgents } from '../state/queries';
@@ -88,5 +89,10 @@ describe('EventStore', () => {
     unsubscribe();
     store.append(agent());
     expect(seen.map((i) => i.kind)).toEqual(['event', 'ephemeral']);
+  });
+
+  it('indexes events by project, type and id for the message fold', () => {
+    const names = store.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'`).map((r) => r.name);
+    expect(names).toContain('events_project_type_idx');
   });
 });

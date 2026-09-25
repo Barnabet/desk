@@ -12,7 +12,12 @@ export const events = sqliteTable(
     payload: text('payload', { mode: 'json' }).notNull(),
     ts: text('ts').notNull(),
   },
-  (t) => [index('events_project_idx').on(t.project_id, t.id), index('events_agent_idx').on(t.agent_id, t.id)],
+  (t) => [
+    index('events_project_idx').on(t.project_id, t.id),
+    index('events_agent_idx').on(t.agent_id, t.id),
+    // The message fold reads a project's events of a few types after an id (design spec §1.4).
+    index('events_project_type_idx').on(t.project_id, t.type, t.id),
+  ],
 );
 
 export const projects = sqliteTable('projects', {
