@@ -219,6 +219,7 @@ export class Runtime {
       send: (input) => this.send(input),
       messages: (projectId) => this.messages(projectId),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
+      heldByPause: (agentId) => this.heldByPause(agentId),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
       isStopping: (agentId) => this.stoppedAt.has(agentId),
       resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),

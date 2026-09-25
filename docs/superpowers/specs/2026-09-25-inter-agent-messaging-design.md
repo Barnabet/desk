@@ -232,6 +232,7 @@ The Desk `revision` path is unchanged: it checks the review-round limit, then ap
 - `Sent #125 to "Auth API" as the answer to its question #120.`
 - `Sent question #123 to Desk (stopped by the user: it reads this when the user resumes it).` The same wording is used for an update or a blocker.
 - While the project is paused (§5.4), the result adds: `… (automatic wakes are paused in this project; it reads this once the user resumes them).`
+- `spawn_thread`, when the pause holds the new thread's start (§5.4): `Spawned thread <id> "Frontend" (<model>). Automatic wakes are paused in this project; it starts once the user resumes them.`
 
 ---
 

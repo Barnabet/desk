@@ -355,4 +355,29 @@ describe('send results while paused', () => {
     expect(runs(pricing)).toEqual([]);
     expect(runs(glossary)).toHaveLength(1);
   });
+
+  it("tell Desk when the pause holds a new thread's start", async () => {
+    const { projectId } = await setup(
+      { lifecycleBudget: 1 },
+      { First: () => text('On it.'), Second: () => text('On it.') },
+      // Desk spawns First, then Second, one step each, and ends its turn.
+      (req) => {
+        const spawned = callsOf(req, 'spawn_thread');
+        return spawned < 2 ? tools(call('spawn_thread', { title: spawned ? 'Second' : 'First', brief: 'Do your part.' })) : text('Spawned.');
+      },
+    );
+    rt.sendToDesk(projectId, 'Split the work.');
+    await rt.whenIdle();
+
+    const [first, second] = listThreads(h.store.db, projectId).map((t) => t.id);
+    const results = deskRequests().slice(1).map((r) => String(last(r).content));
+    // First's start is the hour's one lifecycle wake; Second's finds it full and pauses the project.
+    expect(results).toEqual([
+      `Spawned thread ${first} "First" (${FAKE_MODEL.id}).`,
+      `Spawned thread ${second} "Second" (${FAKE_MODEL.id}). Automatic wakes are paused in this project; it starts once the user resumes them.`,
+    ]);
+    expect(pauses(projectId).map((e) => e.payload.message)).toEqual([lifecyclePause(1)]);
+    expect(runs(first!)).toHaveLength(1);
+    expect(runs(second!)).toHaveLength(0);
+  });
 });

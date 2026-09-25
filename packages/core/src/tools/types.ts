@@ -92,6 +92,8 @@ export interface RuntimeServices {
   /** The project's message fold: the agent directory, every message with its question state, the answer runs. */
   messages(projectId: string): MessagesState;
   spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] }): Promise<string>;
+  /** Whether the pause of the project's automatic wakes is what keeps the agent from running now (design spec §5.4). */
+  heldByPause(agentId: string): boolean;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
   isStopping(agentId: string): boolean;

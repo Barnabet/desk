@@ -46,7 +46,9 @@ export const spawnThreadTool = defineTool({
     });
     const t = getAgent(ctx.services.store.db, id)!;
     const extras = [t.reasoning_effort ? `${t.model}, ${t.reasoning_effort} effort` : t.model, ...(t.git_branch ? [`branch ${t.git_branch}`] : []), ...(skills.length ? [`skills: ${skills.join(', ')}`] : [])];
-    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).`;
+    // Its start is a lifecycle wake: while the project is paused, the thread waits for the user to resume it (§5.4).
+    const held = ctx.services.heldByPause(id) ? ' Automatic wakes are paused in this project; it starts once the user resumes them.' : '';
+    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).${held}`;
   },
 });
 
