@@ -1,11 +1,13 @@
 import { useRef } from 'react';
 import type { MessagesState } from '@desk/client';
+import { plural } from '../format';
 import { useWidth } from '../state/width';
 import { routeLayout, senderDisc, senderName, stopText, type Stop, type StopKind } from './route';
 
 const INNER: Record<StopKind, (s: Stop, m: MessagesState) => string> = {
   brief: () => 'Brief',
-  work: (s) => (s.tools.length ? `${s.tools.length} ${s.tools.length === 1 ? 'tool' : 'tools'}` : '¶'),
+  work: (s) =>
+    s.tools.length ? `${s.tools.length} ${s.tools.length === 1 ? 'tool' : 'tools'}` : s.cards.length && !s.entries.some((e) => e.kind === 'assistant') ? '✉' : '¶',
   detour: () => 'detour',
   result: () => 'Report',
   revision: (s) => {
@@ -47,7 +49,7 @@ export function RouteView(o: {
         {l.points.map((p) => {
           const t = stopText(p.stop, o.reviewRounds, o.messages);
           const above = p.stop.kind === 'detour';
-          const label = `Stop ${p.stop.n}: ${t.title}${t.sub ? `, ${t.sub}` : ''}`;
+          const label = `Stop ${p.stop.n}: ${t.title}${t.sub ? `, ${t.sub}` : ''}${p.stop.cards.length ? `, ${plural(p.stop.cards.length, 'message')}` : ''}`;
           return (
             <div key={p.stop.n}>
               <button
@@ -63,6 +65,11 @@ export function RouteView(o: {
               <span className="route-num" aria-hidden="true" style={{ left: p.x + p.r * 0.8, top: p.y - p.r * 0.8 }}>
                 {p.stop.n}
               </span>
+              {p.stop.cards.length ? (
+                <span className="route-cards" aria-hidden="true" style={{ left: p.x + p.r * 0.85, top: p.y + p.r * 0.8 }}>
+                  {p.stop.cards.length} ✉
+                </span>
+              ) : null}
               <div className={`route-label${above ? ' above' : ''}`} style={{ left: p.x, top: above ? p.y - p.r - 6 : p.y + p.r + 6 }}>
                 <span className={`route-label-title${t.muted ? ' muted' : ''}`}>
                   {p.stop.kind === 'answer' && p.stop.live ? <span className="live-dot" aria-hidden="true" /> : null}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { agentTitle, messageById, type MessagesState, type ToolCallView, type TranscriptEntry } from '@desk/client';
 import { clip } from '@desk/protocol';
 import { call } from '../bridge';
@@ -12,7 +12,7 @@ import { ToolGroup, ToolStatus } from '../components/ToolGroup';
 import { clock } from '../format';
 import { policyReason } from '../policyReason';
 import { href } from '../router';
-import { stopText, type NarrativeRow, type Stop } from './route';
+import { cardTitle, inCard, isCard, outCard, stopText, type CardView, type NarrativeRow, type Stop } from './route';
 
 export type Depth = 'narrative' | 'steps';
 
@@ -58,8 +58,52 @@ function ToolCallFull({ c }: { c: ToolCallView }) {
   );
 }
 
+/** What message cards and tool rows need from the session (design spec §8 items 9 and 12). */
+type Ctx = {
+  messages: MessagesState;
+  /** The messages this thread sent, by the tool call that sent them: those calls show as cards. */
+  sent: ReadonlyMap<string, number>;
+  /** Opens the pair sheet with a card's counterpart. */
+  onPair(other: string): void;
+  /** Names a thread by its id in tool rows. */
+  titleOf(id: string): string | undefined;
+};
+
+/** A message between this thread and another agent, as a compact card; the counterpart's name opens the pair sheet. */
+function MessageCard({ c, ctx }: { c: CardView; ctx: Ctx }) {
+  const words = cardTitle(c);
+  return (
+    <div className={`tr-card tr-card-${c.dir}${c.auto ? ' muted' : ''}`}>
+      <span className="tr-card-head">
+        {words.before}
+        <button
+          type="button"
+          className="link tr-card-who"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            ctx.onPair(c.other);
+          }}
+        >
+          {c.name}
+        </button>
+        {words.after} · {clock(c.ts)}
+      </span>
+      <SafeMarkdown className="tr-card-text" text={c.text} />
+    </div>
+  );
+}
+
+/** The cards of the calls among `calls` that sent a message, in call order. */
+function sentCards(calls: ToolCallView[], ctx: Ctx): CardView[] {
+  return calls.flatMap((c) => {
+    const id = ctx.sent.get(c.id);
+    const msg = id === undefined ? undefined : messageById(ctx.messages, id);
+    return msg ? [outCard(msg, ctx.messages)] : [];
+  });
+}
+
 /** One entry at full detail (the Every-step depth). */
-function EntryFull({ e, projectId }: { e: TranscriptEntry; projectId: string }) {
+function EntryFull({ e, projectId, ctx }: { e: TranscriptEntry; projectId: string; ctx: Ctx }) {
   switch (e.kind) {
     case 'brief':
       return (
@@ -85,8 +129,13 @@ function EntryFull({ e, projectId }: { e: TranscriptEntry; projectId: string }) 
     case 'tools':
       return (
         <div className="tr-calls">
-          {e.calls.map((c) => (
-            <ToolCallFull key={c.id} c={c} />
+          {e.calls
+            .filter((c) => !ctx.sent.has(c.id))
+            .map((c) => (
+              <ToolCallFull key={c.id} c={c} />
+            ))}
+          {sentCards(e.calls, ctx).map((c) => (
+            <MessageCard key={c.id} c={c} ctx={ctx} />
           ))}
         </div>
       );
@@ -98,6 +147,8 @@ function EntryFull({ e, projectId }: { e: TranscriptEntry; projectId: string }) 
           Woke to answer message #{e.question} · {clock(e.ts)}
         </span>
       );
+    case 'incoming':
+      return isCard(e) ? <MessageCard c={inCard(e, ctx.messages)} ctx={ctx} /> : <EntrySummary e={e} projectId={projectId} />;
     default:
       return <EntrySummary e={e} projectId={projectId} />;
   }
@@ -158,46 +209,54 @@ function EntrySummary({ e, projectId }: { e: TranscriptEntry; projectId: string 
   }
 }
 
-/** A run's text and tool groups, as a work stop shows them. */
-function RunBody({ entries }: { entries: TranscriptEntry[] }) {
+/** A run's text and tool groups, as a work stop shows them, with its message cards in place (design spec §8 item 9). */
+function RunBody({ entries, ctx }: { entries: TranscriptEntry[]; ctx: Ctx }) {
   return (
     <>
-      {entries.map((e) =>
-        e.kind === 'assistant' && e.text ? (
-          <SafeMarkdown key={e.id} className="md-voice tr-voice" text={e.text} />
-        ) : e.kind === 'tools' ? (
-          <ToolGroup key={e.id} calls={e.calls} defaultOpen={e.calls.some((c) => c.status === 'running')} />
-        ) : null,
-      )}
+      {entries.map((e) => {
+        if (e.kind === 'assistant') return e.text ? <SafeMarkdown key={e.id} className="md-voice tr-voice" text={e.text} /> : null;
+        if (isCard(e)) return <MessageCard key={e.id} c={inCard(e, ctx.messages)} ctx={ctx} />;
+        if (e.kind !== 'tools') return null;
+        // A call that sent a message shows as its card instead of a tool row.
+        const calls = e.calls.filter((c) => !ctx.sent.has(c.id));
+        return (
+          <Fragment key={e.id}>
+            {calls.length ? <ToolGroup calls={calls} defaultOpen={calls.some((c) => c.status === 'running')} titleOf={ctx.titleOf} /> : null}
+            {sentCards(e.calls, ctx).map((c) => (
+              <MessageCard key={c.id} c={c} ctx={ctx} />
+            ))}
+          </Fragment>
+        );
+      })}
     </>
   );
 }
 
 /**
- * An answer run's stop (design spec §8 item 6): the question it answers, the run's text and tools, and the runtime's
- * closure when the thread could not answer another agent. The user's Ask has no closure: its title says why.
+ * An answer run's stop (design spec §8 item 6): the question it answers, the run's text, tools and cards, and the
+ * runtime's closure when the thread could not answer another agent. The user's Ask has no closure: its title says why.
  */
-function AnswerBody({ s, messages }: { s: Stop; messages: MessagesState }) {
+function AnswerBody({ s, ctx }: { s: Stop; ctx: Ctx }) {
   const e = s.entries[0];
-  const q = e?.kind === 'answer' ? messageById(messages, e.question) : undefined;
-  const reply = q?.answerId === undefined ? undefined : messageById(messages, q.answerId);
+  const q = e?.kind === 'answer' ? messageById(ctx.messages, e.question) : undefined;
+  const reply = q?.answerId === undefined ? undefined : messageById(ctx.messages, q.answerId);
   return (
     <>
       {q ? (
         <p className="tr-asked">
-          {q.from === 'user' ? 'You' : agentTitle(messages, q.from)} asked: “{clip(q.text, 200)}”
+          {q.from === 'user' ? 'You' : agentTitle(ctx.messages, q.from)} asked: “{clip(q.text, 200)}”
         </p>
       ) : null}
-      <RunBody entries={s.entries} />
+      <RunBody entries={s.entries} ctx={ctx} />
       {reply?.auto ? <p className="tr-text muted">{reply.text}</p> : null}
     </>
   );
 }
 
-function StopBody({ s, projectId, messages }: { s: Stop; projectId: string; messages: MessagesState }) {
-  if (s.kind === 'answer') return <AnswerBody s={s} messages={messages} />;
+function StopBody({ s, projectId, ctx }: { s: Stop; projectId: string; ctx: Ctx }) {
+  if (s.kind === 'answer') return <AnswerBody s={s} ctx={ctx} />;
   if (s.kind !== 'work') return <EntrySummary e={s.entries[0]!} projectId={projectId} />;
-  return <RunBody entries={s.entries} />;
+  return <RunBody entries={s.entries} ctx={ctx} />;
 }
 
 export const stopDomId = (n: number) => `tr-stop-${n}`;
@@ -211,6 +270,10 @@ export function Transcript(o: {
   reviewRounds: number;
   /** The session's message fold: names senders and titles answer runs. */
   messages: MessagesState;
+  /** The messages this thread sent, by the tool call that sent them (sentCalls): those calls show as cards. */
+  sent: ReadonlyMap<string, number>;
+  /** Opens the pair sheet with another agent: a card's counterpart. */
+  onPair(other: string): void;
   selected: number | null;
   onSelect(n: number): void;
   depth: Depth;
@@ -226,6 +289,7 @@ export function Transcript(o: {
   const [pending, setPending] = useState<Array<{ text: string; ask: boolean }>>([]);
   const [reopening, setReopening] = useState(false);
   const ask = o.composer.kind === 'ask';
+  const ctx: Ctx = { messages: o.messages, sent: o.sent, onPair: o.onPair, titleOf: (id) => o.messages.agents[id]?.title ?? undefined };
   const stopOfEntry = new Map<string, number>();
   for (const r of o.rows) if (r.kind === 'stop') r.stop.entries.forEach((e, i) => i === 0 && stopOfEntry.set(e.id, r.stop.n));
   const inStop = new Map<string, number>();
@@ -316,7 +380,7 @@ export function Transcript(o: {
                       {r.stop.kind === 'work' || r.stop.kind === 'brief' || r.stop.kind === 'steer' ? null : ` · ${clock(r.stop.from)}`}
                       {r.stop.kind === 'work' ? <span className="muted"> · {stopText(r.stop, o.reviewRounds, o.messages).sub}</span> : null}
                     </span>
-                    <StopBody s={r.stop} projectId={o.projectId} messages={o.messages} />
+                    <StopBody s={r.stop} projectId={o.projectId} ctx={ctx} />
                   </div>
                 </div>
               ),
@@ -335,7 +399,7 @@ export function Transcript(o: {
                 >
                   {stopOfEntry.has(e.id) ? numBadge(stopOfEntry.get(e.id)!) : <span className="tr-num tr-num-blank" aria-hidden="true" />}
                   <div className="tr-body">
-                    <EntryFull e={e} projectId={o.projectId} />
+                    <EntryFull e={e} projectId={o.projectId} ctx={ctx} />
                   </div>
                 </div>
               ),

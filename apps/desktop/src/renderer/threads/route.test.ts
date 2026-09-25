@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { emptyTranscript, foldMessages, reduceTranscript } from '@desk/client';
+import { emptyTranscript, foldMessages, messageById, reduceTranscript } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AgentMessageKind, EventOf, RunFinishReason, StoredEvent } from '@desk/protocol';
 import { clock } from '../format';
-import { narrate, routeLayout, senderDisc, senderName, stopsOf, stopText } from './route';
+import { cardTitle, inCard, isCard, narrate, outCard, routeLayout, senderDisc, senderName, sentCalls, stopsOf, stopText, type CardView } from './route';
 
 const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
 const a = { agent: 't' };
@@ -198,7 +198,8 @@ describe('messages and answer runs on the route', () => {
       ev(20, 'assistant.message', { run_id: 'r2', content: 'Back to work.', tool_calls: [] }, t),
     ];
     const rows = narrate(events.reduce(reduceTranscript, emptyTranscript('t')).entries);
-    expect(rows.map((r) => (r.kind === 'stop' ? `${r.stop.n}:${r.stop.kind}` : r.kind))).toEqual(['1:brief', '2:incoming', '3:answer', '4:incoming', '5:work']);
+    // Frontend's question is a card in the stop before the run; Desk's note is a stop of its own.
+    expect(rows.map((r) => (r.kind === 'stop' ? `${r.stop.n}:${r.stop.kind}` : r.kind))).toEqual(['1:brief', '2:work', '3:answer', '4:incoming', '5:work']);
     const run = stopsOf(rows)[2]!;
     expect(run.entries.map((e) => e.kind)).toEqual(['answer', 'tools', 'assistant']);
     expect(run.tools.map((c) => c.name)).toEqual(['read_file']);
@@ -207,7 +208,7 @@ describe('messages and answer runs on the route', () => {
     expect(live.at(-1)).toMatchObject({ kind: 'answer', live: true });
   });
 
-  it("titles messages by their sender from the fold's directory, and the user's messages as steers or Asks", () => {
+  it("titles Desk's messages as stops by sender, the user's as steers or Asks, and keeps other threads' as cards", () => {
     const events = [
       ...team(),
       agentMsg(20, 't', 'd', 'start', 'Begin your assignment.'),
@@ -230,14 +231,97 @@ describe('messages and answer runs on the route', () => {
       ['brief', 'Brief from Desk', false],
       ['incoming', 'Desk: note', false],
       ['incoming', 'Desk asked', false],
-      ['incoming', 'Frontend asked', false],
-      ['incoming', 'Frontend: note', false],
-      ['incoming', 'Answer from Frontend', false],
-      ['incoming', 'Frontend could not answer', true],
+      ['work', 'Messages', false],
       ['steer', `You steered · ${clock(ts(28))}`, false],
       ['steer', `You asked · ${clock(ts(29))}`, false],
-      ['incoming', 'Old stream: update', false],
+      ['work', 'Messages', false],
     ]);
+    expect(stops.map((x) => x.cards.length)).toEqual([0, 0, 0, 4, 0, 0, 1]);
+  });
+
+  it("keeps other threads' messages as cards in the current stop, and a sent message in place of its tool row", () => {
+    const events = [
+      ...team(),
+      ev(20, 'agent.status_changed', { status: 'running' }, t),
+      call(21, 'c1', 'read_file'),
+      result(22, 'c1', 'read_file'),
+      agentMsg(23, 't', 'f', 'note', 'Renamed price_eur.'),
+      call(24, 'c2', 'message_thread'),
+      // Pricing's reply, sent by c2, is on Frontend's stream.
+      agentMsg(25, 'f', 't', 'note', 'Thanks, following it.', { tool_call_id: 'c2' }),
+      result(26, 'c2', 'message_thread'),
+      said(27, 'Updated the page.'),
+      agentMsg(28, 't', 'd', 'note', 'Use EUR.'),
+      agentMsg(29, 't', 'f', 'question', 'Which currency?', { tracked: true }),
+    ];
+    const m = foldMessages(events);
+    const entries = events.reduce(reduceTranscript, emptyTranscript('t')).entries;
+    const rows = narrate(entries, sentCalls(m, 't'));
+    expect(rows.map((r) => (r.kind === 'stop' ? `${r.stop.n}:${r.stop.kind}` : r.kind))).toEqual(['1:brief', '2:work', '3:incoming', '4:work']);
+    const [, work, , later] = stopsOf(rows);
+    expect(work!.entries.map((e) => e.kind)).toEqual(['tools', 'incoming', 'tools', 'assistant']);
+    expect(work!.tools.map((c) => c.name)).toEqual(['read_file']);
+    expect(work!.cards).toEqual([
+      { dir: 'in', message: 23 },
+      { dir: 'out', message: 25 },
+    ]);
+    expect(stopText(work!, 2, m).title).toBe('Used 1 tool');
+    expect(later!.cards).toEqual([{ dir: 'in', message: 29 }]);
+    expect(stopText(later!, 2, m).title).toBe('Messages');
+    // Without the fold's sends, the call stays a tool row.
+    const plain = stopsOf(narrate(entries))[1]!;
+    expect(plain.tools.map((c) => c.name)).toEqual(['read_file', 'message_thread']);
+    expect(plain.cards).toEqual([{ dir: 'in', message: 23 }]);
+  });
+
+  it('keeps a card in a live answer run, and starts a new stop for one that arrives after the run ended', () => {
+    const narrated = (run: StoredEvent[]) => stopsOf(narrate([...team(), question('f'), start(), ...run].reduce(reduceTranscript, emptyTranscript('t')).entries));
+    expect(narrated([agentMsg(12, 't', 'f', 'note', 'Also: EUR.')]).map((x) => [x.kind, x.cards.length])).toEqual([
+      ['brief', 0],
+      ['work', 1],
+      ['answer', 1],
+    ]);
+    expect(narrated([said(12, 'Euros.'), end(13, 'no_tool_calls'), agentMsg(14, 't', 'f', 'note', 'Thanks.')]).map((x) => [x.kind, x.cards.length])).toEqual([
+      ['brief', 0],
+      ['work', 1],
+      ['answer', 0],
+      ['work', 1],
+    ]);
+  });
+
+  it('titles message cards around the counterpart, named from the fold (else from the label)', () => {
+    const events = [
+      ...team(),
+      agentMsg(23, 't', 'f', 'question', 'Which currency?', { tracked: true }),
+      agentMsg(24, 't', 'f', 'note', 'Renamed price_eur.'),
+      agentMsg(25, 't', 'f', 'answer', 'EUR.', { reply_to: 9 }),
+      agentMsg(26, 't', 'f', 'answer', '(Frontend was stopped before answering.)', { reply_to: 8, auto: true }),
+      // Archived threads keep their titles in the fold.
+      ev(27, 'agent.archived', {}, { agent: 'f' }),
+      agentMsg(28, 't', 'x', 'update', 'Legacy.', { from_label: 'thread "Old stream" (x)' }),
+      // Pricing's own sends, stored on their recipients' streams.
+      agentMsg(31, 'f', 't', 'question', 'Is the page EU-only?', { tracked: true, tool_call_id: 'c31' }),
+      agentMsg(32, 'd', 't', 'update', 'Halfway.', { tool_call_id: 'c32' }),
+      agentMsg(33, 'f', 't', 'answer', 'Yes.', { reply_to: 23, tool_call_id: 'c33' }),
+      agentMsg(34, 'd', 't', 'blocker', 'No API key.', { tool_call_id: 'c34' }),
+    ];
+    const m = foldMessages(events);
+    const title = (c: CardView) => {
+      const w = cardTitle(c);
+      return `${w.before}${c.name}${w.after}`;
+    };
+    const incoming = events.reduce(reduceTranscript, emptyTranscript('t')).entries.filter(isCard);
+    expect(incoming.map((e) => title(inCard(e, m)))).toEqual(['Frontend asked', 'Frontend: note', 'Answer from Frontend', 'Frontend could not answer', 'Old stream: update']);
+    expect(inCard(incoming[3]!, m)).toMatchObject({ id: 26, dir: 'in', other: 'f', auto: true });
+    expect([31, 32, 33, 34].map((id) => title(outCard(messageById(m, id)!, m)))).toEqual(['Asked Frontend', 'Update to Desk', 'Answered Frontend', 'Blocker to Desk']);
+    expect(sentCalls(m, 't')).toEqual(
+      new Map([
+        ['c31', 31],
+        ['c32', 32],
+        ['c33', 33],
+        ['c34', 34],
+      ]),
+    );
   });
 });
 

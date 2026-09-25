@@ -204,7 +204,8 @@ describe('ThreadsScreen', () => {
       ev(13, 'run.finished', { run_id: 'r2', reason: 'no_tool_calls' }, t),
     ]);
     expect(await screen.findByRole('button', { name: /^Stop \d+: Answered Frontend/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Stop \d+: Frontend asked/ })).toBeTruthy();
+    // Frontend's question is a card in the stop before the run.
+    expect(screen.getByRole('button', { name: /^Stop 4: Messages, .*, 1 message$/ })).toBeTruthy();
   });
 
   it("opens an archived thread's link after a reload", async () => {
@@ -224,7 +225,7 @@ describe('ThreadsScreen', () => {
     const bridge = setup(
       [
         ...base,
-        ev(6, 'message.agent', { from_agent_id: 'x', from_label: 'thread "Frontend" (x)', kind: 'question', text: 'Which subject lines?', tracked: true }, t),
+        ev(6, 'message.agent', { from_agent_id: 'd', from_label: 'Desk', kind: 'note', text: 'Use the EU subject lines.' }, t),
         ev(7, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'read_file', arguments: '{"path":"subjects.md"}' }, t),
         ev(8, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'read_file', status: 'ok', content: 'subjects' }, t),
       ],
@@ -232,7 +233,7 @@ describe('ThreadsScreen', () => {
       't',
       6,
     );
-    const asked = await screen.findByRole('button', { name: /^Stop 3: Frontend asked/ });
+    const asked = await screen.findByRole('button', { name: /^Stop 3: Desk: note/ });
     await waitFor(() => expect(asked.getAttribute('aria-pressed')).toBe('true'));
     expect(screen.getByRole('button', { name: /^Stop 4: Used 1 tool/ }).getAttribute('aria-pressed')).toBe('false');
     expect(document.getElementById('tr-stop-3')!.className).toContain('selected');
@@ -243,16 +244,54 @@ describe('ThreadsScreen', () => {
     expect(screen.getByRole('button', { name: /^Stop 2:/ }).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it("keeps a thread's own sends in its Narrative and Every-step views", async () => {
+  it("shows messages with other threads as cards in their stop, in place of the sends' tool rows, in both depths", async () => {
     setup([
       ...base,
-      ev(6, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', arguments: '{"thread_id":"Frontend","kind":"question","text":"Which currency?"}' }, t),
-      ev(7, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', status: 'ok', content: 'Sent question #9 to "Frontend".' }, t),
+      ev(6, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+      ev(7, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', arguments: '{"thread_id":"Frontend","kind":"question","text":"Which subject lines?"}' }, t),
+      // The question is stored on Frontend's stream, with the call that sent it.
+      ev(8, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'question', text: 'Which subject lines?', tracked: true, tool_call_id: 'c2' }, f),
+      ev(9, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', status: 'ok', content: 'Sent question #8 to "Frontend".' }, t),
+      ev(10, 'message.agent', { from_agent_id: 'f', from_label: 'thread "Frontend" (f)', kind: 'answer', text: 'The EU ones.', reply_to: 8 }, t),
+      // A failed send stored nothing: it stays a tool row.
+      ev(11, 'tool.call', { run_id: 'r1', tool_call_id: 'c3', name: 'message_thread', arguments: '{"thread_id":"Nobody","text":"Hi"}' }, t),
+      ev(12, 'tool.result', { run_id: 'r1', tool_call_id: 'c3', name: 'message_thread', status: 'error', content: 'Unknown thread: Nobody' }, t),
     ]);
-    const tr = await screen.findByRole('complementary', { name: 'Transcript' });
-    expect(tr.querySelector('#tr-stop-2 .toolgroup-names')!.textContent).toBe('read_file · message_thread');
+    const stop = await screen.findByRole('button', { name: /^Stop 2: Used 2 tools, .*, 2 messages$/ });
+    expect(stop.parentElement!.querySelector('.route-cards')!.textContent).toBe('2 ✉');
+    const tr = screen.getByRole('complementary', { name: 'Transcript' });
+    const body = tr.querySelector('#tr-stop-2')!;
+    const heads = () => [...tr.querySelectorAll('.tr-card-head')].map((h) => h.textContent!.replace(/ · \d\d:\d\d$/, ''));
+    expect(heads()).toEqual(['Asked Frontend', 'Answer from Frontend']);
+    expect([...body.querySelectorAll('.toolgroup-names')].map((n) => n.textContent)).toEqual(['read_file', 'message_thread']);
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
-    expect(within(tr).getAllByText('message_thread').length).toBeGreaterThan(0);
+    expect(heads()).toEqual(['Asked Frontend', 'Answer from Frontend']);
+    expect(within(tr).getAllByText('message_thread')).toHaveLength(1);
+
+    // The counterpart's name opens the pair sheet, which links each message to where it shows.
+    fireEvent.click(within(tr).getAllByRole('button', { name: 'Frontend' })[0]!);
+    const sheet = screen.getByRole('dialog', { name: 'Welcome emails ⇄ Frontend' });
+    expect(within(sheet).getByRole('link', { name: 'show in Frontend transcript' }).getAttribute('href')).toBe('#/p/p/threads/f?at=8');
+    expect(within(sheet).getByRole('link', { name: 'show in Welcome emails transcript' }).getAttribute('href')).toBe('#/p/p/threads/t?at=10');
+  });
+
+  it('opens a thread at the stop holding a message it sent (?at=)', async () => {
+    setup(
+      [
+        ...base,
+        ev(6, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+        ev(7, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', arguments: '{"thread_id":"Frontend","text":"Renamed the field."}' }, t),
+        ev(8, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'note', text: 'Renamed the field.', tool_call_id: 'c2' }, f),
+        ev(9, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'message_thread', status: 'ok', content: 'Sent note #8 to "Frontend".' }, t),
+        ev(10, 'message.agent', { from_agent_id: 'd', from_label: 'Desk', kind: 'note', text: 'Wrap up.' }, t),
+      ],
+      {},
+      't',
+      8,
+    );
+    const sent = await screen.findByRole('button', { name: /^Stop 2: Used 1 tool, .*, 1 message$/ });
+    await waitFor(() => expect(sent.getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: /^Stop 3: Desk: note/ }).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('shows "answering" on a done thread, which keeps its status, Archive and Skill actions and gets no Stop', async () => {
@@ -339,15 +378,17 @@ describe('ThreadsScreen', () => {
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'threads.send')?.input).toEqual({ id: 't', text: 'Carry on with the footer.' }));
   });
 
-  it("puts the sender's initials on a message's disc and shows a live answer run with its question and tools", async () => {
+  it("counts a thread's question on its stop's disc and shows a live answer run with its question and tools", async () => {
     setup([
       ...base,
       ...finished,
       ...answeringFrontend(8),
       ev(11, 'tool.call', { run_id: 'r2', tool_call_id: 'c9', name: 'read_file', arguments: '{"path":"emails/01.md"}' }, t),
     ]);
-    const asked = await screen.findByRole('button', { name: /^Stop \d+: Frontend asked/ });
-    expect(asked.textContent).toBe('Fr');
+    // Frontend's question is a card in the stop before the run: its disc shows ✉, and the badge counts it.
+    const asked = await screen.findByRole('button', { name: /^Stop 4: Messages, .*, 1 message$/ });
+    expect(asked.textContent).toBe('✉');
+    expect(asked.parentElement!.querySelector('.route-cards')!.textContent).toBe('1 ✉');
     expect(screen.getByRole('button', { name: /^Stop 1: Brief from Desk/ }).textContent).toBe('Brief');
     const run = screen.getByRole('button', { name: /^Stop \d+: Answering Frontend/ });
     expect(run.className).toContain('live');

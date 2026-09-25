@@ -1,4 +1,4 @@
-import { agentTitle, emptyMessages, messageById, type MessagesState, type ToolCallView, type TranscriptEntry } from '@desk/client';
+import { agentTitle, emptyMessages, messageById, type MessagesState, type MessageView, type ToolCallView, type TranscriptEntry } from '@desk/client';
 import { clip, type RunFinishReason } from '@desk/protocol';
 import { toolNames } from '../components/ToolGroup';
 import { clock } from '../format';
@@ -12,9 +12,31 @@ export type Stop = {
   from: string;
   to: string;
   entries: TranscriptEntry[];
+  /** Tool calls, without the ones that sent a message (those are cards). */
   tools: ToolCallView[];
+  /** Messages between this thread and other agents shown as cards inside the stop, in order (design spec §8 item 9). */
+  cards: Card[];
   live: boolean;
 };
+
+/** A message shown as a card inside a stop: one another thread sent (`in`) or one this thread sent (`out`), by event id. */
+export type Card = { dir: 'in' | 'out'; message: number };
+
+type Incoming = Extract<TranscriptEntry, { kind: 'incoming' }>;
+
+/** A message from another thread: a card inside the current stop. Desk's messages stay stops, since they change the work. */
+export function isCard(e: TranscriptEntry): e is Incoming {
+  return e.kind === 'incoming' && e.fromLabel !== 'Desk';
+}
+
+/** The messages `threadId` sent with a tool call (message_thread, message_desk), by the call's id: those calls show as cards. */
+export function sentCalls(m: MessagesState, threadId: string): Map<string, number> {
+  const sent = new Map<string, number>();
+  for (const msg of m.messages) if (msg.from === threadId && msg.toolCallId) sent.set(msg.toolCallId, msg.id);
+  return sent;
+}
+
+const NO_SENT: ReadonlyMap<string, number> = new Map();
 
 export type NarrativeRow = { kind: 'stop'; stop: Stop } | { kind: 'compacted'; id: string; ts: string };
 
@@ -31,14 +53,17 @@ const OWN: Partial<Record<TranscriptEntry['kind'], StopKind>> = {
 /**
  * Groups transcript entries into numbered stops. Runs of assistant text and tool calls form one "work" stop. An answer
  * run is one "answer" stop, from its start until the thread's status next changes (a full run always starts with a
- * status change; an answer run never makes one), and a message that arrives meanwhile is its own stop without
- * splitting it. Every other entry is its own stop. Status changes are not stops; compaction becomes a divider.
+ * status change; an answer run never makes one), and a Desk message that arrives meanwhile is its own stop without
+ * splitting it. Messages between this thread and other agents are cards inside the current stop (design spec §8
+ * item 9): another thread's message, and each message this thread sent, whose tool call (in `sent`, from the fold) the
+ * card replaces. Every other entry is its own stop. Status changes are not stops; compaction becomes a divider.
  */
-export function narrate(entries: TranscriptEntry[]): NarrativeRow[] {
+export function narrate(entries: TranscriptEntry[], sent: ReadonlyMap<string, number> = NO_SENT): NarrativeRow[] {
   const rows: NarrativeRow[] = [];
   let work: Stop | null = null;
   let answer: Stop | null = null;
   let n = 0;
+  const own = (kind: StopKind, e: TranscriptEntry, live: boolean): Stop => ({ n: ++n, kind, from: e.ts, to: e.ts, entries: [e], tools: [], cards: [], live });
   for (const e of entries) {
     if (e.kind === 'status') {
       answer = null;
@@ -52,30 +77,35 @@ export function narrate(entries: TranscriptEntry[]): NarrativeRow[] {
     }
     if (e.kind === 'answer') {
       work = null;
-      answer = { n: ++n, kind: 'answer', from: e.ts, to: e.ts, entries: [e], tools: [], live: !e.ended };
+      answer = own('answer', e, !e.ended);
       rows.push({ kind: 'stop', stop: answer });
       continue;
     }
-    const own = OWN[e.kind];
-    if (own) {
+    const card = isCard(e);
+    const kind = card ? undefined : OWN[e.kind];
+    if (kind) {
       work = null;
-      rows.push({ kind: 'stop', stop: { n: ++n, kind: own, from: e.ts, to: e.ts, entries: [e], tools: [], live: e.kind === 'approval' && e.state === 'pending' } });
+      rows.push({ kind: 'stop', stop: own(kind, e, e.kind === 'approval' && e.state === 'pending') });
       continue;
     }
-    if (answer) {
-      answer.entries.push(e);
-      answer.to = e.ts;
-      if (e.kind === 'tools') answer.tools.push(...e.calls);
-      continue;
+    // An answer run that has ended takes no more cards: a message after it starts a stop of its own.
+    if (card && answer && !answer.live) answer = null;
+    let s = answer ?? work;
+    if (!s) {
+      s = work = { n: ++n, kind: 'work', from: e.ts, to: e.ts, entries: [], tools: [], cards: [], live: false };
+      rows.push({ kind: 'stop', stop: s });
     }
-    if (!work) {
-      work = { n: ++n, kind: 'work', from: e.ts, to: e.ts, entries: [], tools: [], live: false };
-      rows.push({ kind: 'stop', stop: work });
+    s.entries.push(e);
+    s.to = e.ts;
+    if (card) s.cards.push({ dir: 'in', message: Number(e.id.slice(2)) });
+    if (e.kind === 'tools') {
+      for (const c of e.calls) {
+        const message = sent.get(c.id);
+        if (message === undefined) s.tools.push(c);
+        else s.cards.push({ dir: 'out', message });
+      }
     }
-    work.entries.push(e);
-    work.to = e.ts;
-    if (e.kind === 'tools') work.tools.push(...e.calls);
-    work.live = work.entries.some((x) => (x.kind === 'assistant' && x.streaming) || (x.kind === 'tools' && x.calls.some((c) => c.status === 'running')));
+    if (s.kind === 'work') s.live = s.entries.some((x) => (x.kind === 'assistant' && x.streaming) || (x.kind === 'tools' && x.calls.some((c) => c.status === 'running')));
   }
   return rows;
 }
@@ -99,6 +129,40 @@ export function senderDisc(title: string): string {
   const [a = '?', b] = title.split(/[\s_-]+/).filter(Boolean);
   if (b) return `${Array.from(a)[0] ?? ''}${Array.from(b)[0] ?? ''}`.toUpperCase();
   return Array.from(a).slice(0, 2).join('');
+}
+
+/** A message card, ready to show. `other` is the counterpart: an `in` card's sender, an `out` card's recipient. */
+export type CardView = { id: number; ts: string; dir: 'in' | 'out'; other: string; name: string; kind: MessageView['kind']; text: string; auto?: true };
+
+/** The card of a message another thread sent this one, its sender named from the fold's directory (else its label). */
+export function inCard(e: Incoming, m: MessagesState): CardView {
+  return {
+    id: Number(e.id.slice(2)),
+    ts: e.ts,
+    dir: 'in',
+    other: e.fromAgentId,
+    name: senderName(m, e.fromAgentId, e.fromLabel),
+    kind: e.messageKind,
+    text: e.text,
+    ...(e.auto ? { auto: true as const } : {}),
+  };
+}
+
+/** The card of a message this thread sent; it replaces the send's tool row. */
+export function outCard(msg: MessageView, m: MessagesState): CardView {
+  return { id: msg.id, ts: msg.ts, dir: 'out', other: msg.to, name: agentTitle(m, msg.to), kind: msg.kind, text: msg.text };
+}
+
+/** A card's words around the counterpart's name: "<X> asked", "Answer from <X>", "<X> could not answer", "Asked <X>", "Note to <X>"… */
+export function cardTitle(c: CardView): { before: string; after: string } {
+  if (c.dir === 'in') {
+    if (c.kind === 'question') return { before: '', after: ' asked' };
+    if (c.kind === 'answer') return c.auto ? { before: '', after: ' could not answer' } : { before: 'Answer from ', after: '' };
+    return { before: '', after: `: ${c.kind}` };
+  }
+  if (c.kind === 'question') return { before: 'Asked ', after: '' };
+  if (c.kind === 'answer') return { before: 'Answered ', after: '' };
+  return { before: `${c.kind.charAt(0).toUpperCase()}${c.kind.slice(1)} to `, after: '' };
 }
 
 /** Why an answer run for the user's Ask ended without an answer. */
@@ -135,7 +199,8 @@ function answerText(e: Extract<TranscriptEntry, { kind: 'answer' }>, from: strin
  * the session's message fold, names senders and askers and tells how an answer run ended.
  */
 export function stopText(s: Stop, reviewRounds: number, messages: MessagesState = NO_MESSAGES): StopText {
-  const e = s.entries[0];
+  // A work stop can begin with a card; its words come from its run, below.
+  const e = s.kind === 'work' ? undefined : s.entries[0];
   switch (e?.kind) {
     case 'brief':
       return { title: 'Brief from Desk', sub: clock(s.from) };
@@ -158,6 +223,8 @@ export function stopText(s: Stop, reviewRounds: number, messages: MessagesState 
       return answerText(e, s.from, messages);
     default: {
       const span = clock(s.from) === clock(s.to) ? clock(s.from) : `${clock(s.from)}–${clock(s.to)}`;
+      // A stretch that holds only messages, such as a note that arrived between runs.
+      if (!s.tools.length && s.cards.length && !s.entries.some((x) => x.kind === 'assistant')) return { title: 'Messages', sub: span };
       if (!s.tools.length) return { title: s.live ? 'Writing' : 'Wrote', sub: span };
       const verb = s.live ? 'Using' : 'Used';
       return { title: `${verb} ${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`, sub: `${clip(toolNames(s.tools), 60)} · ${span}` };

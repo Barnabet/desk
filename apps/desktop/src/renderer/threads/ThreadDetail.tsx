@@ -3,6 +3,7 @@ import type { ThreadView } from '@desk/client';
 import { call } from '../bridge';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { HopLink } from '../components/HopLink';
+import { PairSheet } from '../components/PairSheet';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyState } from '../components/EmptyState';
@@ -15,7 +16,7 @@ import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { useTranscript, type SessionState } from '../state/session';
 import { answeringLabel, waitHop, waitLabel } from '../waits';
-import { narrate, stopsOf } from './route';
+import { narrate, sentCalls, stopsOf } from './route';
 import { RouteView } from './RouteView';
 import { DiffTab } from './tabs/DiffTab';
 import { FilesTab } from './tabs/FilesTab';
@@ -68,7 +69,9 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   const proxyDown = useGlobal((g) => g.system.proxy) === 'down';
   const attention = useGlobal((g) => g.attention);
   const transcript = useTranscript(s, projectId, thread.id);
-  const rows = useMemo(() => narrate(transcript.entries), [transcript.entries]);
+  // The messages it sent replace their tool calls on the route (design spec §8 item 9).
+  const sent = useMemo(() => sentCalls(s.messages, thread.id), [s.messages, thread.id]);
+  const rows = useMemo(() => narrate(transcript.entries, sent), [transcript.entries, sent]);
   const stops = useMemo(() => stopsOf(rows), [rows]);
   const [selected, setSelected] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>('route');
@@ -76,17 +79,21 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   const [depth, setDepth] = useDepth();
   const [confirm, setConfirm] = useState<'stop' | 'archive' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** The other agent of the open pair sheet (design spec §8 item 8): local state, no route. */
+  const [pairWith, setPairWith] = useState<string | null>(null);
   /** The `at` already applied: its stop is selected once, so the user's own selection is not overridden later. */
   const openedAt = useRef<number | null>(null);
   useEffect(() => {
     setSelected(null);
     setTab('route');
     setDir('');
+    setPairWith(null);
     openedAt.current = null;
   }, [thread.id]);
   useEffect(() => {
     if (at === undefined || openedAt.current === at) return;
-    const stop = stops.find((x) => x.entries.some((e) => e.id === `e:${at}`));
+    // The message is on this stream (its entry), or this thread sent it (an outgoing card).
+    const stop = stops.find((x) => x.entries.some((e) => e.id === `e:${at}`) || x.cards.some((c) => c.message === at));
     if (!stop) return;
     openedAt.current = at;
     setTab('route');
@@ -232,6 +239,8 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
         entries={transcript.entries}
         reviewRounds={rounds}
         messages={s.messages}
+        sent={sent}
+        onPair={setPairWith}
         selected={current}
         onSelect={setSelected}
         depth={depth}
@@ -239,6 +248,7 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
         actions={actions}
         composer={composer}
       />
+      {pairWith ? <PairSheet projectId={projectId} messages={s.messages} a={thread.id} b={pairWith} onClose={() => setPairWith(null)} /> : null}
       {confirm === 'stop' ? (
         <ConfirmDialog title="Stop this thread?" confirmLabel="Stop thread" danger onConfirm={() => void act('stop')} onCancel={() => setConfirm(null)}>
           It stops at once, and pending approvals are denied. Its workspace and any branch are kept, and Desk is told.
