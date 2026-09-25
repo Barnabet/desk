@@ -1754,9 +1754,10 @@ export class Runtime {
       .list({ agentId: agent.id, types: ['run.finished'] })
       .filter((e) => full(e) && (current === undefined || e.id < current))
       .at(-1);
+    // The user's Asks are questions the thread answered without changing its work: not named (design spec §3.6).
     const texts = store
       .list({ agentId: agent.id, after: previous?.id ?? 0, types: ['message.user'] })
-      .flatMap((e) => (e.type === 'message.user' ? [e.payload.text] : []));
+      .flatMap((e) => (e.type === 'message.user' && !e.payload.question ? [e.payload.text] : []));
     if (!texts.length) return '';
     return `(The user wrote to it since its last report: ${snippet(texts[0]!, 100)}${texts.length > 1 ? ` and ${texts.length - 1} more` : ''}.)\n`;
   }

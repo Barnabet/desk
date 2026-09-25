@@ -819,3 +819,20 @@ describe('stalls', () => {
     await rt.whenIdle();
   });
 });
+
+describe("the user's Asks in notices", () => {
+  it('leave an Ask out of what the user wrote to a thread since its last report', async () => {
+    const { desk, finished } = await setup({
+      Pricing: (req) => (answering(req) ? text('Per seat.') : tools(call('complete', { summary: turns(req) === 0 ? 'v1' : 'v2' }))),
+    });
+    const t = await finished('Pricing');
+    rt.sendMessage(t, 'How did you price it?', { question: true });
+    await rt.whenIdle();
+    expect(answerRuns(t)).toHaveLength(1);
+    expect(status(t)).toBe('done');
+    // The user reopens it: the next report quotes that message, not the Ask before it.
+    rt.sendMessage(t, 'Add the EU prices.');
+    await rt.whenIdle();
+    expect(notices(desk.id, t, 'completed')).toEqual(['Summary: "v1"', '(The user wrote to it since its last report: "Add the EU prices.".)\nSummary: "v2"']);
+  });
+});
