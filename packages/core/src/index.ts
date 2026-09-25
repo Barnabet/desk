@@ -83,6 +83,7 @@ export { buildToolContext, type ToolEnvironment } from './agent/context';
 export {
   buildConversation,
   buildCurrentConversation,
+  CHECKPOINT_END,
   CHECKPOINT_HEADER,
   IMAGES_HEADER,
   imagesInWindow,

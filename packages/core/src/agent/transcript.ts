@@ -23,6 +23,8 @@ export type ConversationImage = {
 export type TaggedMessage = { message: ChatMessage; eventId: number; images?: ConversationImage[] };
 
 export const CHECKPOINT_HEADER = '[Checkpoint — summary of the earlier conversation]';
+/** Closes the checkpoint, so it is told apart from raw user text merged into the same message. */
+export const CHECKPOINT_END = '[End of checkpoint]';
 /** First part of the user message that follows tool results with images (Chat Completions takes images only from users). */
 export const IMAGES_HEADER = '[Images from view_image]';
 /** Images sent as pixels: the most recent ones of the conversation. Older ones become text placeholders. */
@@ -212,10 +214,18 @@ export function pixelGroups(messages: TaggedMessage[]): ConversationImage[][] {
 }
 
 /** Applies a checkpoint: drops the messages it summarises and puts the summary in front of the rest. */
+/**
+ * A checkpoint is the model's own summary: a runtime marker at the start of one of its lines (indented or not)
+ * becomes `(marker…`, so only the runtime's own markers start lines (design spec §1.5).
+ */
+export function neutraliseMarkers(text: string): string {
+  return text.replace(/^(\s*)\[(message|Checkpoint|End of checkpoint|Desk runtime|Images from view_image)/gim, '$1($2');
+}
+
 export function applyCheckpoint(messages: TaggedMessage[], checkpoint: EventOf<'context.compacted'> | undefined): TaggedMessage[] {
   if (!checkpoint) return messages;
   const tail = messages.filter((m) => m.eventId > checkpoint.payload.up_to);
-  const summary = `${CHECKPOINT_HEADER}\n${checkpoint.payload.checkpoint}`;
+  const summary = `${CHECKPOINT_HEADER}\n${neutraliseMarkers(checkpoint.payload.checkpoint)}\n${CHECKPOINT_END}`;
   const first = tail[0];
   // An images message keeps its own shape (its parts are rebuilt by showImages); the summary goes before it.
   if (first?.message.role === 'user' && !first.images) {
