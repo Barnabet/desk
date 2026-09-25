@@ -236,12 +236,29 @@ describe('while paused', () => {
     expect(runs(reader)).toHaveLength(2);
     expect(pauses(projectId)).toHaveLength(1);
   });
+
+  it('runs an agent that was queued before a restart, and stays paused', async () => {
+    const { projectId, desk, thread, setStatus, reader } = await pausedProject();
+    const queued = thread('Queued');
+    setStatus(queued, 'queued');
+
+    // A queued decision goes through the pause; the held note to Reader and the notices to Desk stay held.
+    const next = newRuntime(h, { wakeBudget: 2 });
+    expect(next.recover()).toEqual([queued]);
+    await next.whenIdle();
+    expect(runs(queued)).toHaveLength(1);
+    expect(runs(desk.id)).toHaveLength(0);
+    expect(runs(reader)).toHaveLength(0);
+    expect(pausedItems()).toHaveLength(1);
+    expect(pauses(projectId)).toHaveLength(1);
+  });
 });
 
 describe('send results while paused', () => {
+  const held = 'automatic wakes are paused in this project; it reads this once the user resumes them';
+
   it('tell the sender when the pause holds its message, and only then', async () => {
     const { desk, thread, setStatus, drained, writer } = await pausedProject();
-    const held = 'automatic wakes are paused in this project; it reads this once the user resumes them';
     const busy = thread('Busy');
     setStatus(busy, 'running');
     const asker = thread('Asker');
@@ -266,5 +283,45 @@ describe('send results while paused', () => {
     expect(runs(desk.id)).toHaveLength(0);
     expect(runs(asker)).toHaveLength(0);
     expect(runs(writer)).toHaveLength(1);
+  });
+
+  it('tell the sender whose own send fills the window, and pause the project once', async () => {
+    const { projectId, desk, thread } = await setup({ wakeBudget: 1 }, { First: () => text('On it.'), Second: () => text('On it.') });
+    const first = thread('First');
+    const second = thread('Second');
+    const a = rt.send({ from: desk.id, to: first, kind: 'note', text: 'Start with the intro.' });
+    expect(a.note).toBe(`Sent note #${a.id} to "First" (idle: it is woken to read this).`);
+    expect(pauses(projectId)).toEqual([]);
+    // This send's own wake finds the hour full: the check runs after the delivery, so its result names the pause.
+    const b = rt.send({ from: desk.id, to: second, kind: 'note', text: 'Start with the outro.' });
+    expect(b.note).toBe(`Sent note #${b.id} to "Second" (${held}).`);
+    expect(pauses(projectId).map((e) => e.payload.message)).toEqual([agentPause(1)]);
+    await rt.whenIdle();
+    expect(runs(first)).toHaveLength(1);
+    expect(runs(second)).toHaveLength(0);
+    expect(pauses(projectId)).toHaveLength(1);
+  });
+
+  it('keep the usual result for a recipient the pause does not hold: queued, held by an approval, or a stopped Desk', async () => {
+    const { projectId, desk, thread, setStatus, reader } = await pausedProject();
+    const queued = thread('Queued');
+    setStatus(queued, 'queued');
+    const n = rt.send({ from: desk.id, to: queued, kind: 'note', text: 'Use the new outline.' });
+    expect(n.note).toBe(`Sent note #${n.id} to "Queued" (queued: it sees this when it starts).`);
+    const blocked = thread('Blocked');
+    setStatus(blocked, 'waiting');
+    h.store.append({
+      project_id: projectId,
+      agent_id: blocked,
+      type: 'approval.requested',
+      payload: { approval_id: 'ap1', run_id: 'r', tool_call_id: 'c1', tool: 'bash', arguments: '{"command":"sudo ls"}', reason: 'needs approval', delegate_to_desk: false },
+    });
+    const b = rt.send({ from: desk.id, to: blocked, kind: 'note', text: 'Also check the logs.' });
+    expect(b.note).toBe(`Sent note #${b.id} to "Blocked" (waiting on an approval: it sees this once the approval is decided).`);
+    rt.stop(desk.id);
+    const u = rt.send({ from: reader, to: desk.id, kind: 'update', text: 'Halfway.' });
+    expect(u.note).toBe(`Sent update #${u.id} to Desk (stopped by the user: it reads this when the user resumes it).`);
+    await rt.whenIdle();
+    expect(runs(desk.id)).toHaveLength(0);
   });
 });
