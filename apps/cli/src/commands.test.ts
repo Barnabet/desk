@@ -103,6 +103,17 @@ describe('desk CLI', () => {
     expect(s.code).toBe(0);
     expect(s.out).toContain(`deskd 1.0.0 on 127.0.0.1:${daemon.port}`);
   });
+
+  it('shows live threads only', async () => {
+    const id = /Created project (\S+)/.exec((await cli('project', 'new', 'Tidy', '--goal', 'g')).out)![1]!;
+    const live = daemon.runtime.createThread(id, { title: 'Live', brief: 'b', workspacePath: join(dir, 'live') });
+    const old = daemon.runtime.createThread(id, { title: 'Old', brief: 'b', workspacePath: join(dir, 'old') });
+    daemon.store.append({ project_id: id, agent_id: old, type: 'agent.status_changed', payload: { status: 'done' } });
+    await daemon.runtime.archiveThread(old);
+    const shown = (await cli('project', 'show', id)).out;
+    expect(shown).toContain(`- ${live} "Live" [idle]`);
+    expect(shown).not.toContain('"Old"');
+  });
 });
 
 describe('launchd plist', () => {

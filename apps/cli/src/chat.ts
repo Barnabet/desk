@@ -16,7 +16,8 @@ Anything else is sent to Desk.`;
 export async function runChat(client: DeskClient, project: { id: string; name: string }, io: CliIO): Promise<void> {
   const overview = await client.get(`/projects/${project.id}`);
   const render = createRenderer(io.out, { deskId: overview.desk.id });
-  io.out(`Desk for "${project.name}" — ${overview.threads.length} thread(s), ${overview.approvals.length} pending approval(s). /help for commands.\n`);
+  const live = overview.threads.filter((t: any) => !t.archived_at).length;
+  io.out(`Desk for "${project.name}" — ${live} thread(s), ${overview.approvals.length} pending approval(s). /help for commands.\n`);
   const close = await client.stream(project.id, overview.last_seq, render);
   const rl = createInterface({ input: process.stdin, terminal: false });
   try {

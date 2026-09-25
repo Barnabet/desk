@@ -241,6 +241,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     const p = await resolveProject(c, ref);
     const o = await c.get(`/projects/${p.id}`);
     const s = o.project.settings;
+    // The overview includes archived threads; the summary lists the live ones.
+    const threads = o.threads.filter((t: any) => !t.archived_at);
     say(
       [
         `${o.project.name} (${o.project.id})${o.project.archived_at ? ' [archived]' : ''}`,
@@ -252,8 +254,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         ...o.sources.map((x: any) => `- ${x.id} ${x.label} (${x.kind}) ${x.path}`),
         `Plan:${o.plan?.items?.length ? '' : ' (none)'}`,
         ...(o.plan?.items ?? []).map((i: any) => `- [${i.status}] ${i.title}`),
-        `Threads:${o.threads.length ? '' : ' (none)'}`,
-        ...o.threads.map((t: any) => `- ${t.id} "${t.title}" [${t.status}]${t.result_summary ? ` — ${t.result_summary.split('\n')[0]}` : ''}`),
+        `Threads:${threads.length ? '' : ' (none)'}`,
+        ...threads.map((t: any) => `- ${t.id} "${t.title}" [${t.status}]${t.result_summary ? ` — ${t.result_summary.split('\n')[0]}` : ''}`),
         ...(o.approvals.length ? ['Pending approvals:', ...o.approvals.map((a: any) => `- ${a.id} ${a.tool} — ${a.reason}`)] : []),
       ].join('\n'),
     );

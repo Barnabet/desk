@@ -42,7 +42,7 @@ Pass `next_after` as the next `after` to continue.
 |---|---|---|---|
 | GET | `/v1/projects` | `?all=1` includes archived | |
 | POST | `/v1/projects` | `CreateProjectRequest { name, goal?, instructions?, settings?, sources?[{path,label?}] }` | 201 with the overview. Creates the Desk agent |
-| GET | `/v1/projects/:id` | | Overview: project, desk, sources, plan, threads, pending approvals, services, `whats_up` (`{ text, ts }` or `null`: Desk's latest What's up), `last_seq` (the stream cursor to resume from) |
+| GET | `/v1/projects/:id` | | Overview: project, desk, sources, plan, threads (archived ones included, with `archived_at` set), pending approvals, services, `whats_up` (`{ text, ts }` or `null`: Desk's latest What's up), `last_seq` (the stream cursor to resume from) |
 | PATCH | `/v1/projects/:id` | `UpdateProjectRequest { name?, goal?, instructions?, settings? }` | `settings` is a partial patch |
 | POST | `/v1/projects/:id/archive` | | Archives the project first (no agent is woken after that), then stops its agents and services, and hides it |
 | POST | `/v1/projects/:id/sources` | `{ path, label?, agent_write? }` | Detects `git` vs `folder`. `agent_write` (default `true`): Desk and its threads may write there (sandboxed) and run services there. 201 |

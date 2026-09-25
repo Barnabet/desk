@@ -157,6 +157,18 @@ describe('threads and approvals', () => {
     await runtime.whenIdle();
     expect((await api('GET', `/projects/${project.id}/approvals?status=denied`)).body).toHaveLength(1);
   });
+
+  it('keeps archived threads in the project overview, with archived_at set', async () => {
+    const { api, runtime } = await setup();
+    const { project } = await newProject(api);
+    const live = runtime.createThread(project.id, { title: 'Live', brief: 'b', workspacePath: join(h.dir, 'live') });
+    const old = runtime.createThread(project.id, { title: 'Old', brief: 'b', workspacePath: join(h.dir, 'old') });
+    h.store.append({ project_id: project.id, agent_id: old, type: 'agent.status_changed', payload: { status: 'done' } });
+    expect((await api('POST', `/threads/${old}/archive`)).status).toBe(200);
+    const threads = (await api('GET', `/projects/${project.id}`)).body.threads as Array<{ id: string; archived_at: string | null }>;
+    expect(Object.fromEntries(threads.map((t) => [t.id, t.archived_at !== null]))).toEqual({ [live]: false, [old]: true });
+    expect(((await api('GET', `/projects/${project.id}/threads`)).body as Array<{ id: string }>).map((t) => t.id)).toEqual([live]);
+  });
 });
 
 describe('memory, library, usage, events, models', () => {

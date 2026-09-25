@@ -46,7 +46,8 @@ export function projectOverview(db: Db, id: string) {
     desk,
     sources: listSources(db, id),
     plan: getPlan(db, id) ?? null,
-    threads: listThreads(db, id).filter((t) => !t.archived_at),
+    // Archived threads too (archived_at set), so links to them and the roster's archived toggle work after a reload.
+    threads: listThreads(db, id),
     approvals: listApprovals(db, id, 'pending'),
     services: listServices(db, id),
     whats_up: desk ? latestWhatsUp(db, desk.id) : null,

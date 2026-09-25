@@ -197,4 +197,17 @@ describe('ThreadsScreen', () => {
     expect(await screen.findByRole('button', { name: /^Stop \d+: Answered Frontend/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Stop \d+: Frontend asked/ })).toBeTruthy();
   });
+
+  it("opens an archived thread's link after a reload", async () => {
+    const archivedAt = '2026-09-24T11:00:00.000Z';
+    // The overview includes archived threads and every event (last_seq 8): reduceProject adds nothing from the backfill.
+    setup([...base, ...finished, ev(8, 'agent.archived', {}, { ...t, ts: archivedAt })], {
+      'projects.get': () => ({ ...overview(), threads: [agent('t', { status: 'done', brief: 'Draft five emails.', archived_at: archivedAt })], last_seq: 8 }),
+    });
+    expect(await screen.findByRole('heading', { name: 'Welcome emails' })).toBeTruthy();
+    expect(screen.queryByText("This thread isn't here")).toBeNull();
+    expect(screen.getByText('Archived')).toBeTruthy();
+    expect(screen.getByText('This thread is archived.')).toBeTruthy();
+    expect(within(screen.getByRole('complementary', { name: 'Transcript' })).getByText('Draft five emails.')).toBeTruthy();
+  });
 });

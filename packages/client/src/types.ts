@@ -14,6 +14,7 @@ export type ProjectOverview = {
   desk: AgentRow | null;
   sources: SourceRow[];
   plan: PlanRow | null;
+  /** Every thread of the project, archived ones included (`archived_at` set). */
   threads: AgentRow[];
   approvals: ApprovalRow[];
   /** Project services (older daemons omit it). */
