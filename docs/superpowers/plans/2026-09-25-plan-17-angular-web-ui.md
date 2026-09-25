@@ -3009,7 +3009,7 @@ Expected: no output. Six commits since the spec commit: W0a.1 to W0a.6.
 | W0b.2 | one-time login codes and session secrets | `auth.test.ts` |
 | W0b.3 | Host (421), Origin (403), security headers, WebSocket upgrade routing; test helpers | `security.test.ts`, `upgrade.test.ts` |
 | W0b.4 | `web.json`, `web-settings.json`, the login pages and redirect file, the platform opener, the log | `files.test.ts`, `login.test.ts`, `opener.test.ts` |
-| W0b.5 | `DaemonManager` `web` mode (launchctl when the desktop app's LaunchAgent exists) | `daemon.test.ts` |
+| W0b.5 | `DaemonManager` `web` mode (launchctl when the desktop app's LaunchAgent exists and runs deskd for desk web's data dir) | `daemon.test.ts` |
 | W0b.6 | the attention notification wording moves into `@desk/bff/server`; `webNotices` | `notices.test.ts`, bff `index.test.ts`, `shell.test.ts` |
 | W0b.7 | `fs.listDirs` and its confinement | `list-dirs.test.ts` |
 | W0b.8 | the web `HandlerContext` | `web-context.test.ts` |
@@ -5429,6 +5429,8 @@ git commit -m "feat(web-server): the web HandlerContext: browser-side host opera
 
 Spec §4.9 and §9: the build must have no inline scripts or event-handler attributes (the CSP would block them), so a test checks the real `apps/web-ui/dist/browser/index.html` when it has been built; `--dev` reloads through an external script and a same-origin socket, never an inline script, and keeps every check.
 
+**Deviation (review fix):** the plan's `DevReload` first added no `'error'` listener to its reload sockets or to its watcher. ws emits `'error'` on a socket for a bad frame (over the 1 KiB `maxPayload`, unmasked, invalid UTF-8) before it closes the socket itself, and an `FSWatcher` emits `'error'` when the watched folder goes away (EPERM on Windows); with no listener either one throws and crashes desk web. `handleUpgrade` now gives each accepted socket an `'error'` listener and lets ws close it, and `start()` gives the watcher one, so reloads just stop. `dev.test.ts` builds its server in a `devServer()` helper, and the case "survives a bad frame and a failing watcher" covers both (a 2000-byte frame closes with 1009, a watcher `'error'` is emitted, then a new socket still gets `reload`).
+
 - [ ] **Step 1: Write the failing tests**
 
 Create `apps/web-server/src/static.test.ts`:
@@ -5525,7 +5527,7 @@ describe('findInlineCode', () => {
 Create `apps/web-server/src/dev.test.ts`:
 
 ```ts
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, type FSWatcher } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -5540,31 +5542,52 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
+/** A DevReload on a temp build folder, reached through attachUpgrades like desk web's /__dev/reload. */
+async function devServer(): Promise<{ dev: DevReload; uiDir: string; port: number }> {
+  const root = mkdtempSync(join(tmpdir(), 'desk-web-dev-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const uiDir = join(root, 'dist', 'browser');
+  const dev = new DevReload(uiDir, 20);
+  dev.start();
+  const server = createServer((_req, res) => res.writeHead(404).end());
+  let port = 0;
+  attachUpgrades(server, { port: () => port, routes: { '/__dev/reload': dev.handleUpgrade } });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  port = (server.address() as AddressInfo).port;
+  cleanups.push(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  // Runs before the server closes: server.close waits for the upgraded socket, which only dev.close ends.
+  cleanups.push(() => dev.close());
+  return { dev, uiDir, port };
+}
+
 describe('desk web --dev', () => {
   it('tells /__dev/reload sockets to reload once the build output changes', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'desk-web-dev-'));
-    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-    const uiDir = join(root, 'dist', 'browser');
-    const dev = new DevReload(uiDir, 20);
-    dev.start();
-    cleanups.push(() => dev.close());
-    const server = createServer((_req, res) => res.writeHead(404).end());
-    let port = 0;
-    attachUpgrades(server, { port: () => port, routes: { '/__dev/reload': dev.handleUpgrade } });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-    port = (server.address() as AddressInfo).port;
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve) => {
-          server.closeAllConnections();
-          server.close(() => resolve());
-        }),
-    );
+    const { uiDir, port } = await devServer();
     const socket = openPush(port, { path: '/__dev/reload' });
     await socket.opened;
     mkdirSync(uiDir, { recursive: true });
     writeFileSync(join(uiDir, 'main-XYZ.js'), 'console.log(2);');
     expect(await socket.next((f) => f.text === 'reload', 5000)).toEqual({ text: 'reload' });
+  });
+
+  it('survives a bad frame and a failing watcher', async () => {
+    const { dev, port } = await devServer();
+    const bad = openPush(port, { path: '/__dev/reload' });
+    await bad.opened;
+    bad.ws.on('error', () => {});
+    bad.ws.send('x'.repeat(2000));
+    expect(await bad.closed).toBe(1009);
+    (dev as unknown as { watcher: FSWatcher }).watcher.emit('error', new Error('EPERM'));
+    const socket = openPush(port, { path: '/__dev/reload' });
+    await socket.opened;
+    dev.reload();
+    expect(await socket.next((f) => f.text === 'reload')).toEqual({ text: 'reload' });
   });
 
   it('reloads through an external script on a same-origin socket', () => {
@@ -5695,6 +5718,8 @@ export class DevReload {
       clearTimeout(this.timer);
       this.timer = setTimeout(() => this.reload(), this.debounceMs);
     });
+    // Unhandled, an error (EPERM on Windows once the folder is deleted) would crash desk web; reloads just stop.
+    this.watcher.on('error', () => {});
   }
 
   reload(): void {
@@ -5702,7 +5727,11 @@ export class DevReload {
   }
 
   readonly handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
-    this.wss.handleUpgrade(req, socket, head, () => {});
+    // A bad frame (over maxPayload, unmasked, invalid UTF-8) emits 'error' before ws closes the socket itself:
+    // unhandled, it would crash desk web.
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.on('error', () => {});
+    });
   };
 
   close(): void {
@@ -5717,7 +5746,7 @@ export class DevReload {
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm vitest run apps/web-server/src/static.test.ts apps/web-server/src/dev.test.ts --maxWorkers=2`
-Expected: PASS (8 tests; the built-UI case is skipped until `apps/web-ui` has been built, and runs in the verify tasks of the Angular sections).
+Expected: PASS (9 tests; the built-UI case is skipped until `apps/web-ui` has been built, and runs in the verify tasks of the Angular sections).
 
 - [ ] **Step 5: Commit**
 
@@ -6988,7 +7017,7 @@ function listen(app: Hono, port: number): Promise<Server> {
   });
 }
 
-/** DaemonManager in web mode: the desktop app's LaunchAgent through launchctl when installed, else the repo's deskd. */
+/** DaemonManager in web mode: the desktop app's LaunchAgent through launchctl when it runs deskd for this data dir, else the repo's deskd. */
 function webDaemonManager(dataDir: string, home: string): DaemonManager {
   return new DaemonManager({
     dataDir,
@@ -34274,7 +34303,7 @@ function proxyText(s: DaemonStatusView): string {
   return s.proxy === 'up' ? 'Reachable' : s.proxy === 'down' ? 'Unreachable. Threads pause and resume when it is back.' : 'Unknown';
 }
 
-/** desk web runs the Desk app's deskd through its LaunchAgent when that is installed, else this repository's (spec §3). */
+/** desk web runs the Desk app's deskd through its LaunchAgent when that is installed for desk web's data dir, else this repository's (spec §3). */
 function modeText(s: DaemonStatusView): string {
   if (s.mode === 'packaged') return `Bundled deskd ${s.bundledVersion}`;
   if (s.mode === 'web' && s.agent === 'installed') return 'The Desk app’s deskd, through its LaunchAgent';
@@ -35853,7 +35882,7 @@ bin/desk web --no-open       # print the link without opening it
 - Only this computer can open it: desk web listens on `127.0.0.1` and answers only `http://127.0.0.1:<port>`, not `localhost`.
 - One `desk web` per data dir (`<data>/web.json`): a second one says so and exits. If the port is taken, desk web exits and names `--port`; it never moves to another port, because what the browser keeps (the session, onboarding, drafts, the last project) belongs to the address.
 - Ctrl-C stops it. Sessions live only as long as it runs: after a restart, sign in again with a new link.
-- deskd: desk web finds it through `daemon.json`, as the CLI does. When it is not running, the page shows the offline overlay with **Start Desk**. If the Desk app's LaunchAgent is installed (macOS), Start, Restart and Stop in System go through `launchctl`; otherwise desk web runs this repository's deskd and stops it by its pid. Repairing the LaunchAgent stays in the desktop app.
+- deskd: desk web finds it through `daemon.json`, as the CLI does. When it is not running, the page shows the offline overlay with **Start Desk**. If the Desk app's LaunchAgent is installed (macOS) and runs deskd for desk web's data dir, Start, Restart and Stop in System go through `launchctl` (Start also restarts that deskd when it stopped answering); otherwise, as for desk web on another data dir through `DESK_DATA_DIR`, desk web runs this repository's deskd and stops it by its pid. Repairing the LaunchAgent stays in the desktop app.
 
 ## What differs from the desktop app
 
