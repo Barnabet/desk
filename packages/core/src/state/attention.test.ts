@@ -87,4 +87,14 @@ describe('listAttention', () => {
     runtime.archiveProject(other);
     expect(listAttention(h.store.db).map((i) => i.title)).toEqual(['A?']);
   });
+
+  it("keeps Desk's question open when the user writes to a thread", async () => {
+    const { projectId, desk, thread, append } = await setup();
+    const t = thread('Signup checklist');
+    const [q] = append({ project_id: projectId, agent_id: desk.id, type: 'question.asked', payload: { question: 'EU or US?' } });
+    append({ project_id: projectId, agent_id: t, type: 'message.user', payload: { text: 'Use the new copy' } });
+    expect(listAttention(h.store.db).map((i) => i.id)).toEqual([`question:${q!.id}`]);
+    append({ project_id: projectId, agent_id: desk.id, type: 'message.user', payload: { text: 'EU' } });
+    expect(listAttention(h.store.db)).toEqual([]);
+  });
 });

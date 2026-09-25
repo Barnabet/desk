@@ -2,7 +2,6 @@ import type { AttentionItem } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { attentionDismissals } from '../db/schema';
 import {
-  hasProjectEventAfter,
   lastEvent,
   lastProjectEvent,
   lastStallFor,
@@ -42,8 +41,10 @@ export function listAttention(db: Db, opts: { projectId?: string } = {}): Attent
       });
     }
 
+    // Desk's question stays open until the user writes to Desk; a message to a thread does not answer it.
     const q = lastProjectEvent(db, p.id, 'question.asked');
-    if (q && !hasProjectEventAfter(db, p.id, 'message.user', q.id)) {
+    const reply = q?.agent_id ? lastEvent(db, q.agent_id, 'message.user') : undefined;
+    if (q && !(reply && reply.id > q.id)) {
       items.push({
         ...base,
         id: `question:${q.id}`,
