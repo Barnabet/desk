@@ -165,7 +165,7 @@ export function ThreadDetail({ s, thread }: { s: SessionState; thread: ThreadVie
         <div className="thread-tab" role="tabpanel">
           {tab === 'route' ? (
             stops.length ? (
-              <RouteView stops={stops} running={thread.status === 'running'} activity={thread.activity} reviewRounds={rounds} selected={current} onSelect={setSelected} />
+              <RouteView stops={stops} running={thread.status === 'running'} activity={thread.activity} reviewRounds={rounds} messages={s.messages} selected={current} onSelect={setSelected} />
             ) : (
               <EmptyState title="Not started yet">The route draws itself as the thread works.</EmptyState>
             )
@@ -196,6 +196,7 @@ export function ThreadDetail({ s, thread }: { s: SessionState; thread: ThreadVie
         rows={rows}
         entries={transcript.entries}
         reviewRounds={rounds}
+        messages={s.messages}
         selected={current}
         onSelect={setSelected}
         depth={depth}

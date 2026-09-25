@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { ToolCallView, TranscriptEntry } from '@desk/client';
+import type { MessagesState, ToolCallView, TranscriptEntry } from '@desk/client';
 import { clip } from '@desk/protocol';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
@@ -168,6 +168,8 @@ export function Transcript(o: {
   rows: NarrativeRow[];
   entries: TranscriptEntry[];
   reviewRounds: number;
+  /** The session's message fold: names senders and titles answer runs. */
+  messages: MessagesState;
   selected: number | null;
   onSelect(n: number): void;
   depth: Depth;
@@ -265,9 +267,9 @@ export function Transcript(o: {
                   {numBadge(r.stop.n)}
                   <div className="tr-body">
                     <span className="tr-title">
-                      {stopText(r.stop, o.reviewRounds).title}
+                      {stopText(r.stop, o.reviewRounds, o.messages).title}
                       {r.stop.kind === 'work' || r.stop.kind === 'brief' || r.stop.kind === 'steer' ? null : ` · ${clock(r.stop.from)}`}
-                      {r.stop.kind === 'work' ? <span className="muted"> · {stopText(r.stop, o.reviewRounds).sub}</span> : null}
+                      {r.stop.kind === 'work' ? <span className="muted"> · {stopText(r.stop, o.reviewRounds, o.messages).sub}</span> : null}
                     </span>
                     <StopBody s={r.stop} projectId={o.projectId} />
                   </div>

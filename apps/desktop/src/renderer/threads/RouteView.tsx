@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import type { MessagesState } from '@desk/client';
 import { useWidth } from '../state/width';
 import { routeLayout, stopText, type Stop, type StopKind } from './route';
 
@@ -14,10 +15,20 @@ const INNER: Record<StopKind, (s: Stop) => string> = {
   steer: () => 'You',
   approval: () => '!',
   incoming: () => 'Desk',
+  answer: () => '↩',
 };
 
 /** A thread's route: numbered stops on a serpentine path, the live stretch in blue, and what comes next dashed. */
-export function RouteView(o: { stops: Stop[]; running: boolean; activity: string | null; reviewRounds: number; selected: number | null; onSelect(n: number): void }) {
+export function RouteView(o: {
+  stops: Stop[];
+  running: boolean;
+  activity: string | null;
+  reviewRounds: number;
+  /** The session's message fold: names senders and titles answer runs. */
+  messages: MessagesState;
+  selected: number | null;
+  onSelect(n: number): void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const width = useWidth(ref, 900);
   const l = routeLayout(o.stops, Math.max(520, width), o.running);
@@ -31,7 +42,7 @@ export function RouteView(o: { stops: Stop[]; running: boolean; activity: string
           {l.tailPath ? <path d={l.tailPath} fill="none" stroke="#8A857B" strokeWidth={2} strokeDasharray="4 5" /> : null}
         </svg>
         {l.points.map((p) => {
-          const t = stopText(p.stop, o.reviewRounds);
+          const t = stopText(p.stop, o.reviewRounds, o.messages);
           const above = p.stop.kind === 'detour';
           const label = `Stop ${p.stop.n}: ${t.title}${t.sub ? `, ${t.sub}` : ''}`;
           return (

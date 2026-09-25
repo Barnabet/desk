@@ -180,4 +180,21 @@ describe('ThreadsScreen', () => {
     expect(await screen.findByRole('heading', { name: 'Hi' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Save a copy…' })).toBeTruthy();
   });
+
+  it("titles an answer run's stop from the session's message fold", async () => {
+    const f = { agent: 'f' };
+    setup([
+      ...base,
+      ...finished,
+      ev(8, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+      ev(9, 'message.agent', { from_agent_id: 'f', from_label: 'thread "Frontend" (f)', kind: 'question', text: 'Which currency?', tracked: true }, t),
+      ev(10, 'run.started', { run_id: 'r2', model: 'claude-opus-5-5', answering: 9 }, t),
+      ev(11, 'assistant.message', { run_id: 'r2', content: 'EUR.', tool_calls: [] }, t),
+      // The answer lands on the asker's stream: only the fold links it to the run.
+      ev(12, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'answer', text: 'EUR.', reply_to: 9 }, f),
+      ev(13, 'run.finished', { run_id: 'r2', reason: 'no_tool_calls' }, t),
+    ]);
+    expect(await screen.findByRole('button', { name: /^Stop \d+: Answered Frontend/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Stop \d+: Frontend asked/ })).toBeTruthy();
+  });
 });
