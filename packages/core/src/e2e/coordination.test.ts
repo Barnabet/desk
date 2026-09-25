@@ -167,4 +167,47 @@ describe('threads that talk to each other', () => {
       .flatMap((e) => (e.type === 'message.agent' && e.payload.from_agent_id === b.id ? [e.payload.kind] : []));
     expect(fromB).toEqual(['completed']);
   });
+
+  it("keeps Desk asleep while A asks running B and B answers, then shows the exchange under Desk's Thread traffic", async () => {
+    let deskAtAsk = -1;
+    let deskAtAnswer = -1;
+    const deskRequests = () => h.fake.requests.filter(isDesk);
+    const { a, b } = await run((req) => {
+      const convo = all(req);
+      if (titleOf(req) === 'A') {
+        if (convo.includes('— answer to your question #')) return tools(call('complete', { summary: 'Login form sends a JWT' }));
+        if (called(req, 'message_thread')) return tools(call('wait_for_reply', {}));
+        if (statusOf('B') !== 'running') return later();
+        deskAtAsk = deskRequests().length;
+        return tools(call('message_thread', { thread_id: 'B', kind: 'question', text: 'Which token format does the API return?' }), call('wait_for_reply', {}));
+      }
+      if (called(req, 'message_thread')) return tools(call('complete', { summary: 'Login API done' }));
+      if (/from thread "A" \([0-9A-Z]{26}\) — question;/.test(convo)) {
+        deskAtAnswer = deskRequests().length;
+        return tools(call('message_thread', { thread_id: 'A', text: 'A JWT, RS256.' }));
+      }
+      return later();
+    });
+    expect([a.status, b.status]).toEqual(['done', 'done']);
+    const q = firstOf(b.id, 'question');
+    const answer = firstOf(a.id, 'answer');
+    expect(answer.payload).toMatchObject({ from_agent_id: b.id, reply_to: q.id, text: 'A JWT, RS256.' });
+    expect(resultOf(a.id, 'message_thread')).toBe(
+      `Sent question #${q.id} to "B" (running: it sees this at its next step). Call wait_for_reply to pause until it answers, or keep working.`,
+    );
+    expect(resultOf(b.id, 'message_thread')).toBe(`Sent #${answer.id} to "A" as the answer to its question #${q.id}.`);
+
+    // Desk made no request from A's question to B's answer, and later ran only for completions.
+    expect(deskAtAsk).toBe(1);
+    expect(deskAtAnswer).toBe(deskAtAsk);
+    const afterwards = deskRequests().slice(1);
+    expect(afterwards.length).toBeGreaterThan(0);
+    for (const r of afterwards) expect(String(r.messages.at(-1)?.content)).toMatch(/— completed\]/);
+
+    // Desk's next system prompt lists the exchange.
+    const at = (id: number) => h.store.list({ projectId }).find((e) => e.id === id)!.ts.slice(11, 16);
+    const prompt = systemOf(afterwards[0]!);
+    expect(prompt).toContain(`- #${q.id} ${at(q.id)} "A" → "B", question, answered by #${answer.id}: "Which token format does the API return?"`);
+    expect(prompt).toContain(`- #${answer.id} ${at(answer.id)} "B" → "A", answer, answer to #${q.id}: "A JWT, RS256."`);
+  });
 });

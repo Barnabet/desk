@@ -1397,7 +1397,7 @@ export class Runtime {
     if (this.o.systemPrompt) return this.o.systemPrompt(agent, project);
     const provider = this.o.skillEnv;
     const skillNote = (s: { scope: SkillScope; name: string }) => provider?.env({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: project.id } : {}) }).note ?? null;
-    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote };
+    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote, messages: this.messages(project.id) };
     return agent.role === 'desk' ? deskSystemPrompt(ctx) : threadSystemPrompt(ctx);
   }
 
