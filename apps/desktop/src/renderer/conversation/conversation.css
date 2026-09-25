@@ -23,6 +23,8 @@
 .line-canvas {
   position: relative;
   overflow: hidden;
+  /* Keeps the question marks' z-index inside the diagram. */
+  isolation: isolate;
 }
 .line-svg {
   position: absolute;
@@ -1041,9 +1043,13 @@
   font-weight: inherit;
   text-align: left;
 }
-/* A tracked question on its asker's lane (design spec §8 item 10): a hollow amber ring while open, filled once answered, muted once settled otherwise. */
+/*
+ * A tracked question on its asker's lane (design spec §8 item 10): a hollow amber ring while open, filled once answered,
+ * muted once settled otherwise. It stays on top of the lane's train, hop dot and approval chip, so it can be clicked.
+ */
 .line-q {
   position: absolute;
+  z-index: 1;
   width: 12px;
   height: 12px;
   transform: translate(-50%, -50%);

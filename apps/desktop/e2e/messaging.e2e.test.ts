@@ -125,8 +125,8 @@ describe('messages between threads, end to end', () => {
     const mark = page.getByRole('button', { name: /^Frontend asked Auth API, \d\d:\d\d$/ });
     await expect.poll(() => mark.getAttribute('class')).toContain('line-q-answered');
     expect(await page.locator('.line-legend').textContent()).toContain('question');
-    // The ring sits on the lane among labels and chips, so the click goes to it directly.
-    await mark.dispatchEvent('click');
+    // A real click: the ring must be on top of what else sits on its lane.
+    await mark.click();
     const sheet = page.getByRole('dialog', { name: 'Frontend ⇄ Auth API' });
     await sheet.waitFor();
     // One question, with Auth API's answer nested under it.
