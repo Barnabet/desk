@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectOverview } from '@desk/client';
 import { WAKES_PAUSED, type AgentMessageKind, type AttentionItem, type EventOf, type StoredEvent } from '@desk/protocol';
@@ -93,6 +93,31 @@ describe('ConversationScreen', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'projects.send').map((c) => c.input)).toEqual([{ id: 'p', text: 'Use these notes' }]));
     await waitFor(() => expect(box.value).toBe(''));
+  });
+
+  it('attaches a pasted image under a unique name, and leaves a text paste to the textarea', async () => {
+    const bridge = setup({ 'library.upload': ({ file }: { file: { name: string } }) => ({ id: 'a1', path: `uploads/${file.name}` }) });
+    const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
+    const text = createEvent.paste(box, { clipboardData: { files: [], getData: () => 'plain words' } });
+    fireEvent(box, text);
+    expect(text.defaultPrevented).toBe(false);
+    const shot = createEvent.paste(box, { clipboardData: { files: [new File(['px'], 'image.png', { type: 'image/png' })], getData: () => '' } });
+    fireEvent(box, shot);
+    expect(shot.defaultPrevented).toBe(true);
+    await waitFor(() => expect(box.value).toMatch(/^Attached: uploads\/pasted-\d{4}-\d{2}-\d{2}-\d{6}\.png\n$/));
+    expect(bridge.calls.filter((c) => c.channel === 'library.upload')).toHaveLength(1);
+  });
+
+  it('attaches files dropped anywhere on the chat, and shows where to drop them while dragging', async () => {
+    setup({ 'library.upload': ({ file }: { file: { name: string } }) => ({ id: 'a1', path: `uploads/${file.name}` }) });
+    const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
+    const chat = screen.getByRole('region', { name: 'Conversation with Desk' });
+    fireEvent.dragEnter(chat.querySelector('.chat-list')!, { dataTransfer: { types: ['Files'], files: [] } });
+    expect(chat.classList.contains('dropping')).toBe(true);
+    expect(screen.getByText('Drop to attach to the Library')).toBeTruthy();
+    fireEvent.drop(chat, { dataTransfer: { types: ['Files'], files: [new File(['a'], 'mock.png', { type: 'image/png' }), new File(['b'], 'spec.pdf')] } });
+    expect(chat.classList.contains('dropping')).toBe(false);
+    await waitFor(() => expect(box.value).toBe('Attached: uploads/mock.png\nAttached: uploads/spec.pdf\n'));
   });
 
   it('renders a long conversation from the newest messages at once, and older ones on demand', async () => {

@@ -322,6 +322,7 @@
   width: max-content;
 }
 .conv-chat {
+  position: relative;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -631,6 +632,20 @@
   border-radius: 14px;
   background: var(--card);
   box-shadow: 0 4px 14px rgba(var(--shadow-rgb), 0.06);
+}
+/* Files dragged over the chat: the whole column is the drop target */
+.chat-drop {
+  position: absolute;
+  inset: 8px 0 0;
+  border: 1.5px dashed var(--run);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--overlay);
+  color: var(--run-text);
+  font-weight: 600;
+  pointer-events: none;
 }
 .composer label {
   font-size: 12px;

@@ -85,4 +85,31 @@ describe('desktop shell', () => {
     await appearance.getByRole('button', { name: 'System' }).click();
     await expect.poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('system');
   });
+
+  it('attaches a pasted screenshot, and files dropped on the chat, to the Library', async () => {
+    const page = await app.firstWindow();
+    const client = clientFromDataDir(join(dir, 'data'));
+    const [project] = await client.projects.list();
+    await page.evaluate((h) => (window.location.hash = h), `#/p/${project!.id}/conversation`);
+    const box = page.getByLabel('Message Desk');
+    await box.fill('');
+    await box.evaluate((el) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'image.png', { type: 'image/png' }));
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+    await expect.poll(() => box.inputValue()).toMatch(/^Attached: (\S+\/)?pasted-[\d-]+\.png\n$/);
+    await box.fill('');
+    await page.locator('.chat-list').evaluate((el) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File(['# Spec'], 'spec.md', { type: 'text/markdown' }));
+      el.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    });
+    await expect.poll(() => box.inputValue()).toMatch(/^Attached: (\S+\/)?spec\.md\n$/);
+    const names = (await client.library.list(project!.id)).map((a) => a.path);
+    expect(names.some((n) => /pasted-[\d-]+\.png$/.test(n))).toBe(true);
+    expect(names.some((n) => n.endsWith('spec.md'))).toBe(true);
+    await box.fill('');
+  });
 });

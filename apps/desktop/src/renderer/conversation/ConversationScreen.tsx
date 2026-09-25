@@ -11,7 +11,7 @@ import { markSeen } from '../state/unread';
 import { useWidth } from '../state/width';
 import { ChatItemView, chatDomId, chatEventId } from './ChatItems';
 import { keepStable, rowViews, ticks, type RowView } from './rowViews';
-import { Composer } from './Composer';
+import { Composer, useAttachments, useFileDrop } from './Composer';
 import { LineDiagram } from './LineDiagram';
 import { lineGeometry } from './lineGeometry';
 import { PlanPanel } from './PlanPanel';
@@ -60,6 +60,8 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const attachments = useAttachments(projectId, setDraft);
+  const drop = useFileDrop((files) => void attachments.attach(files));
   const pinned = useRef(true);
   const width = useWidth(rootRef);
   const [shown, setShown] = useState(CHAT_PAGE);
@@ -171,7 +173,12 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
           </button>
           {narrow ? null : <ServicesCard project={project} />}
         </div>
-        <section className="conv-chat" aria-label="Conversation with Desk">
+        <section className={`conv-chat${drop.dropping ? ' dropping' : ''}`} aria-label="Conversation with Desk" {...drop.handlers}>
+          {drop.dropping ? (
+            <div className="chat-drop" aria-hidden="true">
+              Drop to attach to the Library
+            </div>
+          ) : null}
           <div
             className="chat-list"
             ref={listRef}
@@ -215,7 +222,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
               </div>
             ))}
           </div>
-          <Composer projectId={projectId} draft={draft} setDraft={setDraft} textareaRef={textareaRef} onSent={(t) => setPending((p) => [...p, t])} />
+          <Composer projectId={projectId} draft={draft} setDraft={setDraft} textareaRef={textareaRef} onSent={(t) => setPending((p) => [...p, t])} attachments={attachments} />
         </section>
         <div className="conv-side">
           <PlanPanel project={project} proxyDown={proxy === 'down'} attention={projectAttention} />
