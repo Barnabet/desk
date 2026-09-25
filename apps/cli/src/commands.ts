@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,10 @@ export type CliIO = {
   env?: NodeJS.ProcessEnv;
   /** Asks a yes/no question on a terminal; absent when there is none (then --yes is required). */
   confirm?(question: string): Promise<boolean>;
+  /** `desk web`: settles when the server should stop (default: Ctrl-C or SIGTERM). */
+  stopped?: Promise<void>;
+  /** `desk web`: calls back on each Enter (default: the terminal, when stdin is one); returns an unsubscribe. */
+  onEnter?(cb: () => void): () => void;
 };
 
 type Project = { id: string; name: string; goal: string; settings: Record<string, unknown>; archived_at: string | null };
@@ -28,6 +33,20 @@ const FIELDS = new Set(['name', 'goal', 'instructions']);
 
 const repoRoot = () => fileURLToPath(new URL('../../..', import.meta.url));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Ctrl-C or SIGTERM: `desk web` then closes its server and removes web.json. */
+const untilStopped = () =>
+  new Promise<void>((done) => {
+    process.once('SIGINT', () => done());
+    process.once('SIGTERM', () => done());
+  });
+
+/** Enter presses on the terminal. stdin stays in line mode, so Ctrl-C still sends SIGINT. */
+function terminalEnter(cb: () => void): () => void {
+  const rl = createInterface({ input: process.stdin });
+  rl.on('line', () => cb());
+  return () => rl.close();
+}
 
 const CATEGORY_TITLES: Array<[CatalogItem['category'], string]> = [
   ['research', 'Research'],
@@ -214,6 +233,24 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       const h = await c.get('/health');
       const projects = await c.get<Project[]>('/projects');
       say(`deskd ${h.version} on 127.0.0.1:${info.port} (pid ${info.pid}) — ${projects.length} project(s)${isInstalled() ? ', LaunchAgent installed' : ''}`);
+    });
+
+  // ── web ────────────────────────────────────────────────────────────
+  program
+    .command('web')
+    .description('Serve the Desk web app on http://127.0.0.1 and sign in with a one-time link (runs until Ctrl-C)')
+    .option('--port <port>', 'port on 127.0.0.1 (remembered for next time; default 7434)')
+    .option('--no-open', 'print the login link without opening the browser')
+    .option('--dev', 'reload the page whenever apps/web-ui/dist changes (with ng build --watch)')
+    .action(async (opts: { port?: string; open: boolean; dev?: boolean }) => {
+      const port = opts.port === undefined ? undefined : Number(opts.port);
+      if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error('--port must be a whole number from 1 to 65535');
+      // Loaded here, so other commands do not pay for the server's dependencies.
+      const { runWebCommand } = await import('@desk/web-server');
+      await runWebCommand(
+        { dataDir, ...(port !== undefined ? { port } : {}), open: opts.open, dev: opts.dev ?? false },
+        { out: io.out, err: io.err, stopped: io.stopped ?? untilStopped(), ...(io.onEnter ? { onEnter: io.onEnter } : process.stdin.isTTY ? { onEnter: terminalEnter } : {}) },
+      );
     });
 
   // ── projects ───────────────────────────────────────────────────────

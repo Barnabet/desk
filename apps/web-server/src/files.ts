@@ -70,9 +70,10 @@ export class WebSettingsStore {
     return { ...this.value };
   }
 
+  /** Merges onto what is on disk, not the cached value, so a change saved through another store (the CLI's port) survives. */
   update(patch: WebSettingsPatch): WebSettings {
     const defined = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    this.value = WebSettings.parse({ ...this.value, ...defined });
+    this.value = WebSettings.parse({ ...this.load(), ...defined });
     mkdirSync(this.dataDir, { recursive: true });
     writePrivate(webPaths(this.dataDir).settings, `${JSON.stringify(this.value, null, 2)}\n`);
     return this.get();

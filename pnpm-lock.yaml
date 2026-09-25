@@ -32,6 +32,9 @@ importers:
       '@desk/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@desk/web-server':
+        specifier: workspace:*
+        version: link:../web-server
       commander:
         specifier: ^15.0.0
         version: 15.0.0

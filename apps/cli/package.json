@@ -9,6 +9,7 @@
   "dependencies": {
     "@desk/client": "workspace:*",
     "@desk/protocol": "workspace:*",
+    "@desk/web-server": "workspace:*",
     "commander": "^15.0.0"
   },
   "devDependencies": {
