@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { StoredEvent } from '@desk/protocol';
+import { WAKES_PAUSED, type StoredEvent } from '@desk/protocol';
 import { getAgent, getProject, type Db, type EventStore } from '@desk/core';
 
 export type Notification = { title: string; body: string };
@@ -30,6 +30,9 @@ export function notificationFor(ev: StoredEvent, db: Db): Notification | null {
       if (a?.role !== 'thread') return null;
       return { title, body: truncate(`${a.title ?? 'A thread'} failed${ev.payload.reason ? `: ${ev.payload.reason}` : ''}`, 200) };
     }
+    case 'system.notice':
+      // Appended once per pause (design spec §5.4); the other notices are not the user's to act on.
+      return ev.payload.code === WAKES_PAUSED ? { title, body: 'Agents are paused: too many automatic wakes this hour' } : null;
     default:
       return null;
   }
