@@ -6896,6 +6896,7 @@ EOF
   - `ANSWER_TOOLS`: `read_file`, `list_dir`, `glob`, `grep`, `view_image`, `git_status`, `git_diff`, `memory_search`, `library_list`, `library_read`, `list_threads`, `read_thread` (a thread has the git tools only in a worktree, and the thread `list_threads` and `read_thread` from S3 on).
   - `ANSWER_DENIAL = 'Denied: not available while answering a question. You can only read; answer in plain text.'`.
   - `answerGate(gate, asker: AgentRow | 'user')`: a read tool, or the answer as a message to the asker (`message_thread` whose `thread_id` is the asker's id or exact title, or `message_desk` when Desk asked; kind neither `question` nor `blocker`), goes to `gate` as usual and an `ask` becomes a denial; anything else is denied without consulting the policy. So an answer run never creates an approval, never changes anything, messages no one but its asker, and never yields.
+  - S1 review note: S1.7's question header says `answer with message_thread to "<sanitizeLabel(title)>"`, which is not the exact title when the title is over 60 characters or holds `]` or line breaks. `answersAsker` also accepts `sanitizeLabel(asker.title ?? 'untitled')` as the asker's `thread_id`, so an answer sent as the header says is not denied (S3.1 resolves that label too).
   - `PolicyDecision.denial?: string`: when set, `runAgent` returns it as the denied call's result instead of `Denied by policy. <reason>`.
   - `execute` wraps the policy gate with `answerGate` for answer jobs.
 
@@ -7985,6 +7986,8 @@ export const formatMemoryLine: (m: MemoryRow, threads?: ReadonlyMap<string, stri
 ### Task S3.1: Threads are referenced by id or exact title
 
 Desk's tools and, from S3.5, the thread tools accept a thread's id or its exact title (§2.1, §2.2). A live thread wins over an archived one of the same title; an archived thread is refused.
+
+S1 review note: S1.7's question header names the asker by `sanitizeLabel(title)`, which differs from the exact title when the title is over 60 characters or holds `]` or line breaks. `threadsByRef` also resolves that label when no title matches exactly, so a thread that answers with `message_thread` as the header says reaches the asker (and S2.8's `answersAsker` accepts it).
 
 **Files:**
 - Modify: `packages/core/src/state/queries.ts`
