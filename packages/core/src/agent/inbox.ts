@@ -1,4 +1,4 @@
-import { INBOX_EVENT_TYPES } from '@desk/protocol';
+import { INBOX_EVENT_TYPES, type StoredEvent } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import { NotFoundError } from '../errors';
 import { getAgent } from '../state/queries';
@@ -11,6 +11,11 @@ function pending(store: EventStore, agentId: string) {
 
 export function hasPendingInbox(store: EventStore, agentId: string): boolean {
   return pending(store, agentId).events.length > 0;
+}
+
+/** Inbox events stored after the agent's cursor (not yet in its conversation), oldest first. */
+export function pendingInbox(store: EventStore, agentId: string): StoredEvent[] {
+  return pending(store, agentId).events;
 }
 
 /** Marks all pending inbox events as delivered into the conversation at this point. */

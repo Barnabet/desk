@@ -10,7 +10,7 @@ import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
-import { hasPendingInbox } from '../agent/inbox';
+import { pendingInbox } from '../agent/inbox';
 import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
 import { runAgent, SHUTDOWN_REASON } from '../agent/run';
 import type { EventStore } from '../events/store';
@@ -54,6 +54,7 @@ import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler } from './scheduler';
 import { toolsForRole } from './toolsets';
+import { wakeDecision, type Item, type WakeState } from './wake';
 
 export type RuntimeOptions = {
   store: EventStore;
@@ -325,7 +326,7 @@ export class Runtime {
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'memory.deleted', payload: { memory_id: memoryId } });
   }
 
-  /** Delivers an agent-to-agent message (or a system notice attributed to `fromAgentId`) and wakes the recipient. */
+  /** Delivers an agent-to-agent message (or a system notice attributed to `fromAgentId`), then wakes the recipient if wakeDecision says so. */
   sendAgentMessage(fromAgentId: string, toAgentId: string, kind: AgentMessageKind, text: string): void {
     const from = this.requireAgent(fromAgentId);
     const to = this.requireAgent(toAgentId);
@@ -336,7 +337,7 @@ export class Runtime {
       type: 'message.agent',
       payload: { from_agent_id: from.id, from_label: label, kind, text },
     });
-    this.wake(this.requireAgent(toAgentId));
+    this.wake(to.id);
   }
 
   updateProject(projectId: string, patch: { name?: string; goal?: string; instructions?: string; settings?: ProjectSettingsPatch }): void {
@@ -743,7 +744,7 @@ export class Runtime {
   sendMessage(agentId: string, text: string): void {
     const agent = this.requireAgent(agentId);
     this.o.store.append({ project_id: agent.project_id, agent_id: agentId, type: 'message.user', payload: { text } });
-    this.wake(agent);
+    this.wake(agentId);
   }
 
   /** User-initiated stop. */
@@ -849,8 +850,8 @@ export class Runtime {
   }
 
   /**
-   * On startup: repairs runs cut off by a crash (unfinished tool calls become `interrupted`), then reschedules
-   * agents left queued or with undelivered messages. Returns the rescheduled agent ids.
+   * On startup: repairs runs cut off by a crash (unfinished tool calls become `interrupted`), then wakes every live
+   * agent through wakeDecision. Returns the rescheduled agent ids.
    */
   recover(): string[] {
     // Services still marked running were cut off by an unclean exit: reap an orphan still holding its port, mark stopped.
@@ -873,15 +874,9 @@ export class Runtime {
       });
     }
 
+    // Every live agent gets the decision it would get at any other time: queued ones resume, stopped ones wait for the user.
     const resumed: string[] = [];
-    for (const agent of listLiveAgents(this.o.store.db)) {
-      const pendingInbox = hasPendingInbox(this.o.store, agent.id);
-      if (agent.status === 'queued' || (pendingInbox && agent.status !== 'cancelled')) {
-        if (pendingApprovalsFor(this.o.store.db, agent.id).length) continue;
-        this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role });
-        resumed.push(agent.id);
-      }
-    }
+    for (const agent of listLiveAgents(this.o.store.db)) if (this.wake(agent.id)) resumed.push(agent.id);
     return resumed;
   }
 
@@ -1011,15 +1006,37 @@ export class Runtime {
     });
   }
 
-  /** Schedules the agent unless it is already active or blocked on an approval. */
-  private wake(agent: AgentRow): void {
-    if (this.shuttingDown || this.scheduler.isActive(agent.id)) return;
-    if (pendingApprovalsFor(this.o.store.db, agent.id).length) return;
+  /** Schedules the agent when wakeDecision says it should run now (design spec §3.2). Returns whether it did. */
+  private wake(agentId: string): boolean {
+    if (this.shuttingDown || this.scheduler.isActive(agentId)) return false;
+    const agent = this.requireAgent(agentId);
+    if (wakeDecision(this.wakeState(agent)).kind === 'none') return false;
     this.schedule(agent);
+    return true;
   }
 
+  /** What wakeDecision reads about an agent: its row, its project, its pending approvals and its pending inbox. */
+  private wakeState(agent: AgentRow): WakeState {
+    const { store } = this.o;
+    const roles = new Map(listAgents(store.db, agent.project_id).map((a) => [a.id, a.role]));
+    const pending = pendingInbox(store, agent.id).flatMap((e): Item[] => {
+      if (e.type === 'message.user') return [{ id: e.id, from: 'user', kind: 'user' }];
+      if (e.type === 'message.agent') return [{ id: e.id, from: roles.get(e.payload.from_agent_id) === 'desk' ? 'desk' : 'thread', kind: e.payload.kind }];
+      return [];
+    });
+    const cancel = agent.status === 'cancelled' ? lastEvent(store.db, agent.id, 'agent.status_changed') : undefined;
+    return {
+      agent: { role: agent.role, status: agent.status, archived: Boolean(agent.archived_at) },
+      ...(cancel ? { cancelledAt: cancel.id } : {}),
+      projectArchived: Boolean(getProject(store.db, agent.project_id)?.archived_at),
+      pendingApprovals: pendingApprovalsFor(store.db, agent.id).length,
+      pending,
+    };
+  }
+
+  /** Queues the agent's next run, recording `queued` unless it already is. */
   private schedule(agent: AgentRow): void {
-    this.o.store.append({ project_id: agent.project_id, agent_id: agent.id, type: 'agent.status_changed', payload: { status: 'queued' } });
+    if (agent.status !== 'queued') this.o.store.append({ project_id: agent.project_id, agent_id: agent.id, type: 'agent.status_changed', payload: { status: 'queued' } });
     // While shutting down, `queued` is recorded so the next daemon's recover() runs it.
     if (!this.shuttingDown) this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role });
   }
@@ -1066,13 +1083,13 @@ export class Runtime {
     );
   }
 
+  /** After every job: kills a finished agent's jobs, tells its Desk, reminds Desk about What's up, then decides what runs next. */
   private afterRun(agentId: string): void {
     const agent = this.requireAgent(agentId);
     if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
     this.notifyParent(agent);
-    if (agent.status === 'cancelled') return;
     this.remindWhatsUp(agent);
-    if (hasPendingInbox(this.o.store, agentId)) this.wake(this.requireAgent(agentId));
+    this.wake(agentId);
   }
 
   /** Desk ended its turn after changing things without rewriting What's up: remind it once (it runs again to do so). */
