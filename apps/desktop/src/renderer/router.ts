@@ -12,7 +12,10 @@ export type Route =
   /** The skill catalog, optionally with one entry's review open. */
   | { name: 'catalog'; review?: string }
   | { name: 'system' }
-  /** `at`: on a thread, the event id of a message to open the route at (the digest's pair lines). */
+  /**
+   * `at`: on a thread, the event id of a message to open the route at (the digest's pair lines); on the conversation,
+   * the event id of a Desk stop to scroll the chat to (a stop clicked on the Threads tab's timeline).
+   */
   | { name: 'project'; id: string; tab: ProjectTab; threadId?: string; at?: number; file?: string; q?: string };
 
 const enc = encodeURIComponent;
@@ -39,10 +42,10 @@ export function parseRoute(hash: string): Route {
       const id = parts[1];
       if (!id) return { name: 'map' };
       const tab = PROJECT_TABS.includes(parts[2] as ProjectTab) ? (parts[2] as ProjectTab) : 'conversation';
-      if (tab === 'threads' && parts[3]) {
-        const at = Number(q.get('at'));
-        return Number.isSafeInteger(at) && at > 0 ? { name: 'project', id, tab, threadId: parts[3], at } : { name: 'project', id, tab, threadId: parts[3] };
-      }
+      const at = Number(q.get('at'));
+      const atOk = Number.isSafeInteger(at) && at > 0;
+      if (tab === 'threads' && parts[3]) return atOk ? { name: 'project', id, tab, threadId: parts[3], at } : { name: 'project', id, tab, threadId: parts[3] };
+      if (tab === 'conversation' && atOk) return { name: 'project', id, tab, at };
       const file = q.get('file');
       if (tab === 'library' && file) return { name: 'project', id, tab, file };
       const search = q.get('q');

@@ -16,6 +16,7 @@ describe('router', () => {
       { name: 'system' },
       { name: 'tray' },
       { name: 'project', id: 'p1', tab: 'conversation' },
+      { name: 'project', id: 'p1', tab: 'conversation', at: 7 },
       { name: 'project', id: 'p1', tab: 'threads', threadId: 't9' },
       { name: 'project', id: 'p1', tab: 'threads', threadId: 't9', at: 42 },
       { name: 'project', id: 'p1', tab: 'settings' },

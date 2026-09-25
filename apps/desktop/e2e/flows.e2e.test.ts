@@ -77,9 +77,15 @@ afterAll(async () => {
 const hooks = <T>(fn: string) => app.evaluate((_e, f) => (globalThis as unknown as { __deskTest: Record<string, () => unknown> }).__deskTest[f]!(), fn) as Promise<T>;
 
 /** Set DESK_E2E_SHOTS=<dir> to keep screenshots of each step for visual review. */
-async function shot(page: Page, name: string) {
+/**
+ * Saves a screenshot when DESK_E2E_SHOTS is set. A test window renders few frames, so CSS transitions (the timeline's
+ * fold) crawl; they are finished first unless the shot is meant to catch one mid-way (`settle: false`).
+ */
+async function shot(page: Page, name: string, settle = true) {
   const out = process.env.DESK_E2E_SHOTS;
-  if (out) await page.screenshot({ path: join(out, `${name}.png`) });
+  if (!out) return;
+  if (settle) await page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+  await page.screenshot({ path: join(out, `${name}.png`) });
 }
 
 async function go(page: Page, hash: string) {
@@ -100,9 +106,9 @@ describe('core screens, end to end', () => {
     await composer.press('Enter');
     await page.getByText('Relaunch onboarding: start with a signup checklist.').first().waitFor();
 
-    // The thread forks on the line diagram, and Desk's question arrives.
+    // The thread forks (the conversation's timeline keeps to Desk's line and counts it), and Desk's question arrives.
     const diagram = page.getByRole('region', { name: /Line diagram/ });
-    await diagram.getByRole('link', { name: /Signup checklist/ }).first().waitFor({ timeout: 20_000 });
+    await diagram.getByRole('link', { name: /^1 thread/ }).waitFor({ timeout: 20_000 });
     await page.getByRole('button', { name: 'Data source', exact: true }).click();
     await page.getByText('Answered').waitFor({ timeout: 15_000 });
     await shot(page, '1-conversation-forked');
@@ -118,7 +124,6 @@ describe('core screens, end to end', () => {
     // The thread reports, Desk sends it back, it reports again, and Desk reports to you.
     await go(page, `#/p/${project.id}/conversation`);
     await page.getByRole('heading', { name: 'The signup checklist is in' }).waitFor({ timeout: 30_000 });
-    expect(await diagram.getByText(/^sent back/).count()).toBeGreaterThan(0);
     await page.getByRole('link', { name: 'Review the checklist copy' }).waitFor();
     await shot(page, '3-conversation-report');
 
@@ -133,8 +138,18 @@ describe('core screens, end to end', () => {
     await transcript.getByText(/^You steered/).first().waitFor({ timeout: 15_000 });
     await transcript.getByText('Will do.').waitFor({ timeout: 15_000 });
     await shot(page, '4-thread');
-    await go(page, `#/p/${project.id}/threads`);
+    // From the conversation, the Threads tab unfolds the lanes out of Desk's line: the same diagram, animated.
+    await go(page, `#/p/${project.id}/conversation`);
+    await page.getByRole('region', { name: "Line diagram: Desk's stops since the brief" }).waitFor();
+    await page.waitForTimeout(600);
+    await page.getByRole('link', { name: 'Threads', exact: true }).click();
+    await page.waitForTimeout(170);
+    await shot(page, '5a-unfolding', false);
     await page.getByRole('heading', { name: 'Threads' }).waitFor();
+    const full = page.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' });
+    await full.getByRole('link', { name: /Signup checklist/ }).first().waitFor();
+    await full.getByText(/^sent back/).first().waitFor();
+    await page.waitForTimeout(600);
     await shot(page, '5-roster');
     await go(page, '#/map');
     await page.getByRole('heading', { name: 'Projects', exact: true }).waitFor();

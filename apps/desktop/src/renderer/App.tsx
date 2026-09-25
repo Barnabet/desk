@@ -9,6 +9,7 @@ import { Toaster } from './components/Toast';
 import { navigate, useRoute, type Route } from './router';
 import { AttentionScreen } from './attention/AttentionScreen';
 import { ConversationScreen } from './conversation/ConversationScreen';
+import { ProjectFrame } from './conversation/ProjectFrame';
 import { LibraryScreen } from './knowledge/LibraryScreen';
 import { MemoryScreen } from './knowledge/MemoryScreen';
 import { MapScreen } from './map/MapScreen';
@@ -40,7 +41,7 @@ function Screen({ route }: { route: Route }) {
     case 'system':
       return <SystemScreen />;
     case 'project':
-      if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} />;
+      if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} {...(route.at !== undefined ? { at: route.at } : {})} />;
       if (route.tab === 'library') return <LibraryScreen key={route.id} projectId={route.id} {...(route.file ? { file: route.file } : {})} />;
       if (route.tab === 'settings') return <SettingsScreen key={route.id} projectId={route.id} />;
       if (route.tab === 'memory') return <MemoryScreen key={route.id} projectId={route.id} {...(route.q ? { q: route.q } : {})} />;
@@ -81,9 +82,18 @@ function Shell() {
       <TitleBar route={route} />
       {route.name === 'project' ? <ProjectNav projectId={route.id} tab={route.tab} /> : null}
       <main className="screen">
-        <ErrorBoundary key={screenKey(route)}>
-          <Screen route={route} />
-        </ErrorBoundary>
+        {route.name === 'project' && (route.tab === 'conversation' || route.tab === 'threads') ? (
+          // One frame for both tabs, outside the screen's boundary, so switching tabs folds or unfolds its timeline.
+          <ProjectFrame key={route.id} projectId={route.id} mode={route.tab === 'threads' ? 'full' : 'desk'} {...(route.threadId ? { focus: route.threadId } : {})}>
+            <ErrorBoundary key={screenKey(route)}>
+              <Screen route={route} />
+            </ErrorBoundary>
+          </ProjectFrame>
+        ) : (
+          <ErrorBoundary key={screenKey(route)}>
+            <Screen route={route} />
+          </ErrorBoundary>
+        )}
         <ConnectionOverlay />
       </main>
       <CommandPalette />

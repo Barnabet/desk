@@ -1182,3 +1182,119 @@
     display: none;
   }
 }
+
+/* The Conversation and Threads tabs' frame: the timeline on top, the tab below it scrolling on its own */
+.project-frame {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.project-frame-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/*
+ * The fold. On the conversation the lanes flatten up into Desk's line (--trunk-y) and fade at the end; on Threads they
+ * unfold out of it, row by row (each lane's transition-delay is set inline). Only a mode switch animates.
+ */
+.line-diagram,
+.line-scroll {
+  transition: height 420ms cubic-bezier(0.3, 0, 0.2, 1);
+}
+.line-diagram.collapsed {
+  overflow-y: hidden;
+}
+.line-fold {
+  transform-box: view-box;
+  transform-origin: 0 var(--trunk-y);
+  transition:
+    transform 420ms cubic-bezier(0.3, 0, 0.2, 1),
+    opacity 160ms;
+}
+.collapsed .line-fold {
+  transform: scaleY(0);
+  opacity: 0;
+  transition:
+    transform 380ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 140ms 260ms;
+}
+.line-fold-html {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-origin: 0 var(--trunk-y);
+  transition:
+    transform 420ms cubic-bezier(0.3, 0, 0.2, 1),
+    opacity 220ms 160ms;
+}
+.line-fold-html > * {
+  pointer-events: auto;
+}
+.collapsed .line-fold-html {
+  transform: scaleY(0);
+  opacity: 0;
+  transition:
+    transform 380ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 120ms;
+}
+.collapsed .line-fold-html > * {
+  pointer-events: none;
+}
+.line-legend {
+  transition: opacity 200ms 200ms;
+}
+.collapsed .line-legend {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 120ms,
+    visibility 0s 120ms;
+}
+/* Collapsed: how many threads there are, and the way to them */
+.line-threads-link {
+  position: absolute;
+  right: 20px;
+  padding: 3px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 120ms,
+    visibility 0s 120ms;
+}
+.collapsed .line-threads-link {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 200ms 260ms;
+}
+.line-threads-link:hover {
+  border-color: var(--run);
+  color: var(--run-text);
+}
+/* A thread's page: its lane stays lit, the others step back */
+.line-dim {
+  opacity: 0.35;
+}
+.line-label.line-dim:hover,
+.line-label.line-dim:focus-visible {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .line-diagram,
+  .line-scroll,
+  .line-fold,
+  .line-fold-html,
+  .line-legend,
+  .line-threads-link {
+    transition: none !important;
+  }
+}

@@ -12,6 +12,7 @@ import { clock } from '../format';
 import { installBridge } from '../test/bridge';
 import { chatDomId } from './ChatItems';
 import { CHAT_PAGE, ConversationScreen } from './ConversationScreen';
+import { ProjectFrame } from './ProjectFrame';
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -40,6 +41,13 @@ const events = [
   ev(6, 'question.asked', { question: 'Data source or teammate invite first?', options: ['Connect a data source', 'Invite a teammate'] }, { agent: 'd' }),
 ];
 
+/** The conversation in its frame; `full` unfolds the timeline's lanes (the Threads tab's view) so their details can be checked. */
+const framed = (mode: 'desk' | 'full' = 'full', at?: number) => (
+  <ProjectFrame projectId="p" mode={mode}>
+    <ConversationScreen projectId="p" {...(at !== undefined ? { at } : {})} />
+  </ProjectFrame>
+);
+
 function setup(extra: Record<string, (input: any) => unknown> = {}, list: StoredEvent[] = events) {
   globalStore.set({ ...initialGlobalState(), connection: { status: 'live' }, attention: [{ id: 'report:5:0', kind: 'needs_you', project_id: 'p', project_name: 'Onboarding revamp', agent_id: 'd', title: 'Approve installing bun', detail: '', created_at: '', ref: { event_id: 5 } }] });
   const bridge = installBridge({
@@ -53,7 +61,7 @@ function setup(extra: Record<string, (input: any) => unknown> = {}, list: Stored
     ...extra,
   });
   startSessionRouting();
-  render(<ConversationScreen projectId="p" />);
+  render(framed());
   return bridge;
 }
 
@@ -195,7 +203,7 @@ function show(list: StoredEvent[], attention: AttentionItem[] = [], extra: Recor
     ...extra,
   });
   startSessionRouting();
-  render(<ConversationScreen projectId="p" />);
+  render(framed());
   return bridge;
 }
 /** The chat row of item `id` (its wrapper, which flashes when jumped to). */
@@ -500,3 +508,54 @@ describe('messages in the conversation', () => {
     expect(screen.getByRole('link', { name: 'Frontend needs your approval' }).getAttribute('href')).toBe('#/attention?item=approval%3Ax1');
   });
 });
+
+describe('the timeline frame', () => {
+  it("folds the lanes into Desk's line on the conversation and unfolds them on Threads, in place", async () => {
+    show([...team(), ev(5, 'agent.status_changed', { status: 'running' }, { agent: 'a', ts: minutesAgo(8) })]);
+    cleanup();
+    const r = render(framed('desk'));
+    const diagram = await screen.findByRole('region', { name: "Line diagram: Desk's stops since the brief" });
+    expect(diagram.classList.contains('collapsed')).toBe(true);
+    // The lanes, their marks and their labels are folded away and out of reach; Desk's stops stay.
+    const folds = diagram.querySelectorAll('.line-fold-html');
+    expect(folds).toHaveLength(2);
+    for (const f of folds) expect(f.hasAttribute('inert')).toBe(true);
+    expect(within(diagram).getByRole('button', { name: /^\d\d:\d\d, 2 threads$/ })).toBeTruthy();
+    const link = within(diagram).getByRole('link', { name: /^2 threads · 1 running/ });
+    expect(link.getAttribute('href')).toBe('#/p/p/threads');
+
+    r.rerender(framed('full'));
+    // The same diagram unfolds (so the switch animates), with its lanes back within reach.
+    expect(screen.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' })).toBe(diagram);
+    expect(diagram.classList.contains('collapsed')).toBe(false);
+    for (const f of diagram.querySelectorAll('.line-fold-html')) expect(f.hasAttribute('inert')).toBe(false);
+  });
+
+  it('opens the chat at a Desk stop: from Threads as a new page, and in place on the conversation', async () => {
+    window.location.hash = '#/p/p/threads';
+    setup();
+    fireEvent.click(await screen.findByRole('button', { name: /Relaunch onboarding/ }));
+    expect(window.location.hash).toBe('#/p/p/conversation?at=2');
+
+    cleanup();
+    render(framed('desk', 5));
+    const report = (await screen.findByRole('heading', { name: 'Research is in' })).closest('.chat-item')!;
+    await waitFor(() => expect(report.classList.contains('flash')).toBe(true));
+    // Handled once: the stop can be clicked again.
+    expect(window.location.hash).toBe('#/p/p/conversation');
+  });
+
+  it("dims every lane but the open thread's", async () => {
+    show(team());
+    cleanup();
+    render(
+      <ProjectFrame projectId="p" mode="full" focus="a">
+        <div />
+      </ProjectFrame>,
+    );
+    const label = async (title: string) => (await screen.findByText(title, { selector: '.line-label-title' })).closest('.line-label')!;
+    expect((await label('Frontend')).classList.contains('line-dim')).toBe(true);
+    expect((await label('Auth API')).classList.contains('line-dim')).toBe(false);
+  });
+});
+

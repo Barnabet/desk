@@ -93,9 +93,15 @@ afterAll(async () => {
 });
 
 /** Set DESK_E2E_SHOTS=<dir> to keep screenshots of each step for visual review. */
-async function shot(page: Page, name: string) {
+/**
+ * Saves a screenshot when DESK_E2E_SHOTS is set. A test window renders few frames, so CSS transitions (the timeline's
+ * fold) crawl; they are finished first unless the shot is meant to catch one mid-way (`settle: false`).
+ */
+async function shot(page: Page, name: string, settle = true) {
   const out = process.env.DESK_E2E_SHOTS;
-  if (out) await page.screenshot({ path: join(out, `${name}.png`) });
+  if (!out) return;
+  if (settle) await page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+  await page.screenshot({ path: join(out, `${name}.png`) });
 }
 
 async function go(page: Page, hash: string) {
@@ -122,7 +128,10 @@ describe('messages between threads, end to end', () => {
     const auth = threads.find((t) => t.title === 'Auth API')!;
     const front = threads.find((t) => t.title === 'Frontend')!;
 
-    // Frontend's lane marks its question to Auth API, filled once answered, and the legend explains the ring.
+    // On Threads, Frontend's lane marks its question to Auth API, filled once answered, and the legend explains the ring.
+    await page.getByRole('link', { name: 'Threads', exact: true }).click();
+    await page.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' }).waitFor();
+    await page.waitForTimeout(600);
     const mark = page.getByRole('button', { name: /^Frontend asked Auth API, \d\d:\d\d$/ });
     await expect.poll(() => mark.getAttribute('class')).toContain('line-q-answered');
     expect(await page.locator('.line-legend').textContent()).toContain('question');
@@ -146,7 +155,10 @@ describe('messages between threads, end to end', () => {
     await sheet.getByRole('button', { name: 'Close' }).click();
     await sheet.waitFor({ state: 'detached' });
 
-    // The digest's pair line opens the same sheet; the answer's link opens Frontend where it received it.
+    // Back on the conversation, the digest's pair line opens the same sheet; the answer's link opens Frontend where it received it.
+    await page.getByRole('link', { name: 'Conversation', exact: true }).click();
+    await page.waitForTimeout(170);
+    await shot(page, 'messaging-2c-folding', false);
     await digest.click();
     await page.getByRole('button', { name: /^Frontend ⇄ Auth API · 2/ }).click();
     const inFront = sheet.getByRole('link', { name: 'show in Frontend transcript' });
