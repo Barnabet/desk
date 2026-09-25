@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@desk/protocol';
-import { initialGlobalState } from '../../shared/state';
+import { initialGlobalState } from '@desk/bff/contract';
 import { globalStore } from '../state/global';
 import { resetLastProject } from '../state/lastProject';
 import { markSeen, resetSeen } from '../state/unread';

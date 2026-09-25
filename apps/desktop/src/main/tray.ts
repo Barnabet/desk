@@ -1,5 +1,5 @@
 import { Menu, nativeImage, Tray, type Rectangle } from 'electron';
-import type { GlobalState } from '../shared/state';
+import type { GlobalState } from '@desk/bff/contract';
 import { trayIconBitmap } from './trayIcon';
 import { trayModel } from './trayModel';
 

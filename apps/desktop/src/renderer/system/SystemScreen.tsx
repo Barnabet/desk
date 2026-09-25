@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RuntimesReport, UsageResponse } from '@desk/protocol';
-import type { ChannelOutput } from '../../main/handlers';
+import type { ChannelOutput } from '@desk/bff/contract';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';

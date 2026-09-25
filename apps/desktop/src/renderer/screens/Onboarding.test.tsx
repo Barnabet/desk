@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { initialGlobalState } from '../../shared/state';
+import { initialGlobalState } from '@desk/bff/contract';
 import { globalStore } from '../state/global';
 import { installBridge } from '../test/bridge';
 import { isOnboarded, Onboarding } from './Onboarding';

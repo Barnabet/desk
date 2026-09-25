@@ -1,0 +1,15 @@
+{
+  "name": "@desk/bff",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./contract": "./src/contract/index.ts"
+  },
+  "dependencies": {
+    "@desk/client": "workspace:*",
+    "@desk/protocol": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

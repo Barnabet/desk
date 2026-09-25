@@ -12,6 +12,7 @@
     "icon": "node scripts/icon.mjs"
   },
   "dependencies": {
+    "@desk/bff": "workspace:*",
     "@desk/client": "workspace:*",
     "@desk/protocol": "workspace:*",
     "@fontsource-variable/geist": "^5.3.0",

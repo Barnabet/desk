@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AttentionItem, ProjectSummary } from '@desk/protocol';
-import { initialGlobalState } from '../../shared/state';
+import { initialGlobalState } from '@desk/bff/contract';
 import { globalStore } from '../state/global';
 import { installBridge } from '../test/bridge';
 import { TrayPopover } from './TrayPopover';

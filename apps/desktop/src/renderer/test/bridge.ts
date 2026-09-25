@@ -1,5 +1,4 @@
-import type { PushChannel } from '../../shared/channels';
-import type { Channel, IpcError } from '../../shared/ipc';
+import type { Channel, IpcError, PushChannel } from '@desk/bff/contract';
 
 type Handler = (input: any) => unknown;
 

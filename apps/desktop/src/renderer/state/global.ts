@@ -1,4 +1,4 @@
-import { initialGlobalState, type GlobalState } from '../../shared/state';
+import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import { call, onPush } from '../bridge';
 import { createStore, useStore } from '../store';
 

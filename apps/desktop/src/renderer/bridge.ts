@@ -1,6 +1,4 @@
-import type { PushChannel } from '../shared/channels';
-import type { Channel, ChannelInput, IpcError, IpcResult } from '../shared/ipc';
-import type { ChannelOutput } from '../main/handlers';
+import type { Channel, ChannelInput, ChannelOutput, IpcError, IpcResult, PushChannel } from '@desk/bff/contract';
 
 export type DeskBridge = {
   invoke(channel: string, input: unknown): Promise<IpcResult<unknown>>;

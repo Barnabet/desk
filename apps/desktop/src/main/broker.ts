@@ -1,8 +1,7 @@
 import { affectsAttention, affectsOverview, DaemonNotRunning, DeskStream, ProtocolMismatch, reduceSystem, systemFromHealth, type Credentials, type DeskClient, type StreamOptions } from '@desk/client';
 import { checkDaemon } from '@desk/client/node';
 import type { AttentionItem, EphemeralEvent, StoredEvent } from '@desk/protocol';
-import type { PushChannel } from '../shared/channels';
-import { initialGlobalState, runtimeKey, type GlobalState } from '../shared/state';
+import { initialGlobalState, runtimeKey, type GlobalState, type PushChannel } from '@desk/bff/contract';
 
 type StreamLike = { start(): void; close(): void };
 

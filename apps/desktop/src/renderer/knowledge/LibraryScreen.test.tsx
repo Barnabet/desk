@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectOverview } from '@desk/client';
 import type { StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
-import { initialGlobalState } from '../../shared/state';
+import { initialGlobalState } from '@desk/bff/contract';
 import { useRoute } from '../router';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';

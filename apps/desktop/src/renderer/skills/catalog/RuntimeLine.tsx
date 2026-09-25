@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import type { CatalogEntry, CatalogInstall } from '@desk/protocol';
+import { runtimeKey } from '@desk/bff/contract';
 import { call } from '../../bridge';
 import { Button } from '../../components/Button';
 import { toast, toastError } from '../../components/Toast';
 import { useGlobal } from '../../state/global';
-import { runtimeKey } from '../../../shared/state';
 import { scopeArg } from '../data';
 import { installRef, runtimeWords } from './data';
 

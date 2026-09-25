@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import { INVOKE_CHANNEL, PUSH_CHANNELS } from '../shared/channels';
+import { INVOKE_CHANNEL, pushChannels } from '@desk/bff/contract';
 
-const push = new Set<string>(PUSH_CHANNELS);
+const push = new Set<string>(pushChannels);
 
 /** The only surface the renderer gets: validated calls into main and a few push channels. */
 const bridge = {

@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { CatalogService, SkillRuntimes, treeDigest } from '@desk/core';
 import { createHarness, encodePng, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
-import { channels } from '../shared/ipc';
-import { initialGlobalState } from '../shared/state';
+import { channels, initialGlobalState, type Channel, type ChannelOutput } from '@desk/bff/contract';
 import { dispatch, handlers, MAX_ATTACHMENT_BYTES, type HandlerContext } from './handlers';
+
+/** True only when A and B are the same type. */
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 let h: Harness;
 let server: RunningServer | undefined;
@@ -62,6 +64,14 @@ async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = fals
 describe('IPC dispatch', () => {
   it('has a handler for every channel', () => {
     expect(Object.keys(handlers).sort()).toEqual(Object.keys(channels).sort());
+  });
+
+  it('returns what the contract declares, for every operation', () => {
+    // An operation whose handler returns another type makes its property `false`, and the typecheck names it.
+    const agree: { [C in Channel]: Equal<Awaited<ReturnType<(typeof handlers)[C]>>, ChannelOutput<C>> } = Object.fromEntries(Object.keys(channels).map((c) => [c, true])) as {
+      [C in Channel]: true;
+    };
+    expect(Object.values(agree).every(Boolean)).toBe(true);
   });
 
   it('runs validated operations against deskd', async () => {

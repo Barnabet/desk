@@ -79,6 +79,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@desk/bff':
+        specifier: workspace:*
+        version: link:../../packages/bff
       '@desk/client':
         specifier: workspace:*
         version: link:../../packages/client
@@ -149,6 +152,18 @@ importers:
       vite:
         specifier: ^8.3.0
         version: 8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
+
+  packages/bff:
+    dependencies:
+      '@desk/client':
+        specifier: workspace:*
+        version: link:../client
+      '@desk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   packages/client:
     dependencies:

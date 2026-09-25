@@ -2,26 +2,11 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readDaemonInfo } from '@desk/client/node';
 import type { HealthResponse } from '@desk/protocol';
+import type { DaemonMode, DaemonStatus } from '@desk/bff/contract';
 import { UserFacingError } from './errors';
 import { LAUNCHD_LABEL, launchdPlist, plistPath } from './launchd';
 
-export type DaemonMode = 'dev' | 'packaged';
 export type ExecResult = { code: number; stdout: string; stderr: string };
-
-export type DaemonStatus = {
-  running: boolean;
-  version: string | null;
-  pid: number | null;
-  uptime_s: number | null;
-  proxy: 'up' | 'down' | 'unknown' | null;
-  mode: DaemonMode;
-  bundledVersion: string;
-  /** The running daemon's build id: null from source, undefined from a daemon older than build ids. */
-  build: string | null | undefined;
-  /** The bundled deskd's build id (Resources/deskd/build-id); null in dev. */
-  bundledBuild: string | null;
-  agent: 'installed' | 'missing' | 'unsupported';
-};
 
 export type DaemonManagerOptions = {
   dataDir: string;

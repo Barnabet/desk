@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, webContents } from 'electron';
 import { clientFromDataDir, defaultDataDir, readDaemonInfo } from '@desk/client/node';
 import type { AttentionItem } from '@desk/protocol';
-import { INVOKE_CHANNEL } from '../shared/channels';
+import { INVOKE_CHANNEL } from '@desk/bff/contract';
 import { Broker } from './broker';
 import { DaemonManager } from './daemon';
 import { UserFacingError } from './errors';

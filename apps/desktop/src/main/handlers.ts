@@ -1,11 +1,20 @@
 import { z } from 'zod';
 import { ApiError, DaemonNotRunning, DaemonUnavailable, ProtocolMismatch, type DeskClient } from '@desk/client';
-import { channels, type AppSettings, type AppSettingsPatch, type Channel, type IpcError, type IpcResult } from '../shared/ipc';
-import type { GlobalState } from '../shared/state';
-import type { DaemonStatus } from './daemon';
+import {
+  channels,
+  safeExternalUrl,
+  UnsafeUrlError,
+  type AppInfo,
+  type AppSettings,
+  type AppSettingsPatch,
+  type Channel,
+  type ChannelOutput,
+  type DaemonStatus,
+  type GlobalState,
+  type IpcError,
+  type IpcResult,
+} from '@desk/bff/contract';
 import { UserFacingError } from './errors';
-
-export type AppInfo = { version: string; platform: NodeJS.Platform; packaged: boolean; dataDir: string };
 
 /** What a handler can reach. Built per call in main; faked in tests. */
 export type HandlerContext = {
@@ -30,20 +39,19 @@ export type HandlerContext = {
 };
 
 type In<C extends Channel> = z.output<(typeof channels)[C]>;
-type HandlerMap = { [C in Channel]: (input: In<C>, ctx: HandlerContext) => unknown };
+/** Each handler returns what the contract declares for its operation (`ChannelOutputs`). */
+type HandlerMap = { [C in Channel]: (input: In<C>, ctx: HandlerContext) => ChannelOutput<C> | Promise<ChannelOutput<C>> };
 
 const scope = (i: { projectId?: string | undefined }) => (i.projectId ? { projectId: i.projectId } : {});
 const ok = { ok: true as const };
 
-function safeExternalUrl(raw: string): string {
-  let url: URL;
+/** `safeExternalUrl`, its refusal shown to the user as it is. */
+function externalUrl(raw: string): string {
   try {
-    url = new URL(raw);
-  } catch {
-    throw new UserFacingError('invalid_url', 'That is not a valid link.');
+    return safeExternalUrl(raw);
+  } catch (err) {
+    throw err instanceof UnsafeUrlError ? new UserFacingError(err.code, err.message) : err;
   }
-  if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) throw new UserFacingError('invalid_url', 'Only web and mail links can be opened.');
-  return url.toString();
 }
 
 /** Largest attachment turned into a data URL for the renderer (view_image allows 3.75 MB per image). */
@@ -169,7 +177,7 @@ export const handlers = {
 
   'app.info': (_i, c) => c.app.info(),
   'app.openExternal': async (i, c) => {
-    await c.app.openExternal(safeExternalUrl(i.url));
+    await c.app.openExternal(externalUrl(i.url));
     return ok;
   },
   'app.pickFolder': (i, c) => c.app.pickFolder(i.purpose),
@@ -185,8 +193,6 @@ export const handlers = {
   'app.settings': (_i, c) => c.app.settings(),
   'app.updateSettings': (i, c) => c.app.updateSettings(i),
 } satisfies HandlerMap;
-
-export type ChannelOutput<C extends Channel> = Awaited<ReturnType<(typeof handlers)[C]>>;
 
 /** Maps any failure to what the renderer may see: daemon codes pass through, internals become a generic message. */
 export function toIpcError(err: unknown, log?: (err: unknown) => void): IpcError {

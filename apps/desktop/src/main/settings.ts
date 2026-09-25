@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { AppSettings, type AppSettingsPatch } from '../shared/ipc';
+import { AppSettings, type AppSettingsPatch } from '@desk/bff/contract';
 
 const DEFAULTS: AppSettings = { notifications: true };
 

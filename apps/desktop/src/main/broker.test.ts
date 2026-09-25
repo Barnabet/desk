@@ -4,7 +4,7 @@ import { createHarness, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
 import { WAKES_PAUSED, type StoredEvent } from '@desk/protocol';
 import { text } from '@desk/fake-model';
-import type { GlobalState } from '../shared/state';
+import type { GlobalState } from '@desk/bff/contract';
 import { Broker, type BrokerDeps } from './broker';
 
 let h: Harness;

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CatalogItem, ProjectSummary } from '@desk/protocol';
-import { initialGlobalState } from '../../../shared/state';
+import { initialGlobalState } from '@desk/bff/contract';
 import { useRoute } from '../../router';
 import { globalStore } from '../../state/global';
 import { installBridge } from '../../test/bridge';
