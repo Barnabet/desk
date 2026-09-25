@@ -51,18 +51,20 @@ renderer (React, sandboxed, no Node)          main process (Node)               
 ```
 
 - **`src/main`**
-  - `index.ts`: app lifecycle and the single-instance lock.
-  - `daemon.ts`: `DaemonManager` (start, restart, stop, repair; launchd when packaged, `tsx` in dev).
-  - `broker.ts`: the only stream subscriber. It fans out per-window watches, resumes from the last sequence and backs off with jitter.
-  - `handlers.ts`: one handler per IPC channel.
+  - `index.ts`: app lifecycle, the single-instance lock, and the Electron `HandlerContext` (dialogs, shell, windows, settings).
   - `tray.ts`, `popover.ts`, `notify.ts`, `menu.ts`, and `windows.ts` (the `desk-app://` scheme, CSP, navigation lock).
-- **`src/shared/ipc.ts`**: every channel's zod input schema. `handlers.test.ts` checks that every channel has a handler.
+- **`@desk/bff`** (`packages/bff`), which `desk web` runs too:
+  - `server/daemon.ts`: `DaemonManager` (start, restart, stop, repair; launchd when packaged, `tsx` in dev).
+  - `server/broker.ts`: the only stream subscriber. It fans out per-window watches, resumes from the last sequence and backs off with jitter.
+  - `server/handlers.ts`: one handler per IPC channel.
+  - `contract/ipc.ts`: every channel's zod input schema, and `contract/types.ts` each channel's result (`ChannelOutput`). `handlers.test.ts` checks that every channel has a handler that returns that type.
 - **`src/preload`**: exposes only `invoke`, `on` and `platform`.
 - **`src/renderer`**
   - `state/`:
     - `session.ts`: each project's event log, folded into chat, timeline, transcripts and streams.
     - `global.ts`: connection, health, overview, attention and system.
-  - A hash router, and one folder per place.
+  - A hash router (`useRoute`, over `@desk/ui-core`'s `parseRoute` and `href`), and one folder per place.
+  - The logic that is not React is in `@desk/ui-core` (`packages/ui-core`) and the CSS in `@desk/ui-styles` (`packages/ui-styles`), both shared with the web UI.
 
 ### Security rules the app keeps
 
