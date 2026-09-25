@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'no
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
-import { GLOBAL_PROJECT_ID, ServiceName, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type ServiceStopReason, type SkillScope } from '@desk/protocol';
+import { GLOBAL_PROJECT_ID, ServiceName, snippet, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type ServiceStopReason, type SkillScope } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { AttachmentStore } from '../attachments/store';
 import { uniqueLibraryName } from '../library/library';
@@ -1097,7 +1097,7 @@ export class Runtime {
   private afterRun(agentId: string): void {
     const agent = this.requireAgent(agentId);
     if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
-    this.notifyParent(agent);
+    this.notifyParent(agent, true);
     // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
     this.silentStops.delete(agentId);
     this.remindWhatsUp(agent);
@@ -1117,10 +1117,13 @@ export class Runtime {
     });
   }
 
-  /** Tells a thread's Desk about the outcome of its latest run. */
-  private notifyParent(agent: AgentRow): void {
+  /**
+   * Tells a thread's Desk about the outcome of its latest run (`ended`: that run has just ended) or of a stop. Every
+   * notice opens with what the user wrote to the thread since its last report.
+   */
+  private notifyParent(agent: AgentRow, ended = false): void {
     if (agent.role !== 'thread' || !agent.parent_id) return;
-    const send = (kind: AgentMessageKind, text: string) => this.sendAgentMessage(agent.id, agent.parent_id!, kind, text);
+    const send = (kind: AgentMessageKind, text: string) => this.sendAgentMessage(agent.id, agent.parent_id!, kind, this.userWroteLine(agent, ended) + text);
     const finished = lastEvent(this.o.store.db, agent.id, 'run.finished');
     const fin = finished?.type === 'run.finished' ? finished.payload : undefined;
     switch (agent.status) {
@@ -1128,12 +1131,15 @@ export class Runtime {
         const artifacts = agent.result_artifacts ?? [];
         const result = lastEvent(this.o.store.db, agent.id, 'agent.result');
         const drafts = (result?.type === 'agent.result' && result.payload.skill_drafts) || [];
+        // Messages that raced the completion stay pending (a done thread is not reopened for them): Desk decides.
+        const unread = pendingInbox(this.o.store, agent.id).map((e) => `#${e.id}`);
         send(
           'completed',
           [
             `Summary: ${agent.result_summary ?? '(none)'}`,
             ...(artifacts.length ? [`Artifacts: ${artifacts.join(', ')}`] : []),
             ...(drafts.length ? [`Skill drafts to review and install (skill_write from_dir): ${drafts.join(', ')}`] : []),
+            ...(unread.length ? [`Unread messages that arrived after it finished: ${unread.join(', ')}`] : []),
           ].join('\n'),
         );
         return;
@@ -1174,5 +1180,21 @@ export class Runtime {
       default:
         return;
     }
+  }
+
+  /**
+   * `(The user wrote to it since its last report: "…"[ and N more].)` and a newline, or '' when the user did not write
+   * to the thread after its previous run finished (the run before the one that just ended, or the latest run when
+   * the notice is about a stop outside a run).
+   */
+  private userWroteLine(agent: AgentRow, ended: boolean): string {
+    const { store } = this.o;
+    const current = ended ? lastEvent(store.db, agent.id, 'run.started')?.id : undefined;
+    const previous = store.list({ agentId: agent.id, types: ['run.finished'] }).filter((e) => current === undefined || e.id < current).at(-1);
+    const texts = store
+      .list({ agentId: agent.id, after: previous?.id ?? 0, types: ['message.user'] })
+      .flatMap((e) => (e.type === 'message.user' ? [e.payload.text] : []));
+    if (!texts.length) return '';
+    return `(The user wrote to it since its last report: ${snippet(texts[0]!, 100)}${texts.length > 1 ? ` and ${texts.length - 1} more` : ''}.)\n`;
   }
 }

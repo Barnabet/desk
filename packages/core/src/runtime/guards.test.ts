@@ -241,3 +241,30 @@ describe('silent stops', () => {
     expect(cancelled[0]).toMatch(/Stopped by the user\.$/);
   });
 });
+
+describe('notices to Desk', () => {
+  it('names a note that raced the final complete step as unread, and does not reopen the thread', async () => {
+    const { rt, desk, thread, begin } = await setup({ Writer: () => tools(call('act'), call('complete', { summary: 'Draft written' })) });
+    const t = thread('Writer');
+    during = (id) => rt.sendAgentMessage(desk.id, id, 'note', 'Also cover the footer.');
+    begin(t);
+    await rt.whenIdle();
+    const note = h.store.list({ agentId: t, types: ['message.agent'] }).at(-1)!;
+    expect(status(t)).toBe('done');
+    expect(runs(t)).toHaveLength(1);
+    expect(notices(desk.id, t, 'completed')).toEqual([`Summary: Draft written\nUnread messages that arrived after it finished: #${note.id}`]);
+  });
+
+  it('opens the notice after the user reopened a done thread with what the user wrote', async () => {
+    const { rt, desk, thread, begin } = await setup({ Report: (req) => tools(call('complete', { summary: turns(req) === 0 ? 'v1' : 'v2' })) });
+    const t = thread('Report');
+    begin(t);
+    await rt.whenIdle();
+    rt.sendMessage(t, 'Please add a summary table.');
+    await rt.whenIdle();
+    expect(notices(desk.id, t, 'completed')).toEqual([
+      'Summary: v1',
+      '(The user wrote to it since its last report: "Please add a summary table.".)\nSummary: v2',
+    ]);
+  });
+});
