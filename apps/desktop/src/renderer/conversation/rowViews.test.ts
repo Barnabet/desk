@@ -55,4 +55,21 @@ describe('rowViews', () => {
     expect(next.get('e:4')).not.toBe(first.get('e:4'));
     expect([ticks(first.get('e:4')), ticks(next.get('e:4')), ticks(first.get('e:6')), ticks(first.get('e:5')), ticks(undefined)]).toEqual([true, false, true, false, false]);
   });
+
+  it("names the threads Desk's tool calls point at, and gives other tool rows no view", () => {
+    const d = { agent: 'd' };
+    const toolCall = (id: number, name: string, args: string) => ev(id, 'tool.call', { run_id: 'r', tool_call_id: `c${id}`, name, arguments: args }, d);
+    const all = [
+      ...events,
+      toolCall(10, 'read_thread', '{"thread_id":"a","mode":"full"}'),
+      toolCall(11, 'stop_thread', '{"thread_id":"f","reason":"Duplicate"}'),
+      toolCall(12, 'review_diff', '{"thread_id":"nobody"}'),
+      toolCall(13, 'bash', 'not json'),
+      ev(14, 'assistant.message', { run_id: 'r', content: 'Checked.', tool_calls: [] }, d),
+      toolCall(15, 'read_file', '{"path":"a.md"}'),
+    ];
+    const views = rowViews(chatOf(all), foldMessages(all));
+    expect(views.get('tools:10')).toEqual({ titles: { a: 'Auth API', f: 'Frontend' } });
+    expect(views.has('tools:15')).toBe(false);
+  });
 });

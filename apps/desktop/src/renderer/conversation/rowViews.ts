@@ -1,4 +1,4 @@
-import { agentTitle, digestView, messageById, questionView, type ChatItem, type MessagesState, type QuestionView } from '@desk/client';
+import { agentTitle, digestView, messageById, questionView, type ChatItem, type MessagesState, type QuestionView, type ToolCallView } from '@desk/client';
 import { clip } from '@desk/protocol';
 import { chatEventId } from './ChatItems';
 
@@ -22,7 +22,24 @@ export type RowView = {
   answers?: AnswerQuote;
   /** A digest's counts and pair lines. */
   digest?: { messages: number; open: number; pairs: PairLine[] };
+  /** A tool row: the titles of the threads its calls name by id (ToolGroup's titleOf). */
+  titles?: Record<string, string>;
 };
+
+/** The titles of the known threads that tool calls name in a `thread_id` argument (read_thread, stop_thread, review_diff…). */
+function threadTitles(calls: readonly ToolCallView[], m: MessagesState): Record<string, string> | undefined {
+  const titles: Record<string, string> = {};
+  for (const c of calls) {
+    let id: unknown;
+    try {
+      id = (JSON.parse(c.arguments) as { thread_id?: unknown } | null)?.thread_id;
+    } catch {
+      continue;
+    }
+    if (typeof id === 'string' && m.agents[id]) titles[id] = agentTitle(m, id);
+  }
+  return Object.keys(titles).length ? titles : undefined;
+}
 
 const oneLine = (text: string) => clip(text.replace(/\s+/g, ' ').trim(), 120);
 
@@ -46,6 +63,10 @@ function rowView(item: ChatItem, m: MessagesState): RowView | undefined {
     }
     case 'steer':
       return { toTitle: agentTitle(m, item.to) };
+    case 'tools': {
+      const titles = threadTitles(item.calls, m);
+      return titles ? { titles } : undefined;
+    }
     case 'digest': {
       const d = digestView(m, item.messageIds);
       return {

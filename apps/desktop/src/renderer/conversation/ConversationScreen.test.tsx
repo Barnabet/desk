@@ -328,4 +328,14 @@ describe('messages in the conversation', () => {
     await waitFor(() => expect(within(note).queryByRole('button', { name: 'Resume' })).toBeNull());
     expect(note.textContent).toContain('automatic wakes are paused');
   });
+
+  it("names threads by title in Desk's tool rows", async () => {
+    const d = { agent: 'd' };
+    show([
+      ...team(),
+      ev(5, 'tool.call', { run_id: 'r', tool_call_id: 'c1', name: 'read_thread', arguments: '{"thread_id":"a"}' }, d),
+      ev(6, 'tool.result', { run_id: 'r', tool_call_id: 'c1', name: 'read_thread', status: 'ok', content: 'Auth API: running' }, d),
+    ]);
+    await waitFor(() => expect(row('tools:5')?.textContent).toContain('read_thread Auth API'));
+  });
 });

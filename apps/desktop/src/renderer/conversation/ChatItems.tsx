@@ -183,7 +183,13 @@ export function ChatItemView(o: {
       // Desk's sends to threads show as message rows; failed, denied or unfinished ones stay here (design spec §8 item 1).
       const calls = item.calls.filter((c) => !(c.name === 'message_thread' && c.status === 'ok'));
       if (!calls.length) return null;
-      return <ToolGroup calls={calls} title={`Desk ${calls.some((c) => c.status === 'running') ? 'is using' : 'used'} ${calls.length} tool${calls.length === 1 ? '' : 's'}`} />;
+      return (
+        <ToolGroup
+          calls={calls}
+          title={`Desk ${calls.some((c) => c.status === 'running') ? 'is using' : 'used'} ${calls.length} tool${calls.length === 1 ? '' : 's'}`}
+          titleOf={(id) => view?.titles?.[id]}
+        />
+      );
     }
     case 'agent':
       if (item.auto)
