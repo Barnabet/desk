@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem, ProjectSummary } from '@desk/protocol';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { installBridge } from '../test/bridge';
 import { MapScreen } from './MapScreen';
+import { projectSummaryLine } from './OrbitMap';
 
 afterEach(cleanup);
 beforeEach(() => localStorage.clear());
@@ -62,5 +63,26 @@ describe('MapScreen', () => {
     render(<MapScreen newProject={false} />);
     fireEvent.click(screen.getByRole('button', { name: /New project/ }));
     expect(screen.getByRole('dialog', { name: 'New project' })).toBeTruthy();
+  });
+
+  it('labels the amber disc "Waiting": only attention items wait on you', () => {
+    seed();
+    installBridge({ 'projects.plan': () => null });
+    render(<MapScreen newProject={false} />);
+    const legend = document.querySelector<HTMLElement>('.map-legend')!;
+    expect(legend.textContent).not.toContain('Waiting on you');
+    expect(within(legend).getAllByText('Waiting')).toHaveLength(2);
+  });
+});
+
+describe('projectSummaryLine', () => {
+  it('says Desk is waiting on you only when Desk has an attention item', () => {
+    const quiet = { ...project('p3', 'Quiet', []), desk_status: 'waiting' as const };
+    const deskAsks: AttentionItem = { id: 'question:7', kind: 'question', project_id: 'p3', project_name: 'Quiet', agent_id: 'd3', title: 'EU or US?', detail: '', created_at: '2026-09-24T11:00:00.000Z', ref: { event_id: 7 } };
+    expect(projectSummaryLine(quiet)).toBe('Desk is waiting');
+    expect(projectSummaryLine(quiet, [deskAsks])).toBe('Desk is waiting on you');
+    // A thread's item, or another project's, is not this Desk's.
+    expect(projectSummaryLine(quiet, [{ ...approval, project_id: 'p3' }])).toBe('Desk is waiting');
+    expect(projectSummaryLine(quiet, [{ ...deskAsks, project_id: 'p1' }])).toBe('Desk is waiting');
   });
 });

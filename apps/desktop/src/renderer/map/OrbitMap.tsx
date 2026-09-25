@@ -13,7 +13,12 @@ export function projectTone(p: ProjectSummary): Tone {
   return 'idle';
 }
 
-export function projectSummaryLine(p: ProjectSummary): string {
+/** Whether Desk itself needs the user in this project: an item of Desk's (its question, a report's hand-off, its approval). */
+const deskNeedsYou = (p: ProjectSummary, attention: readonly AttentionItem[]) =>
+  attention.some((i) => i.project_id === p.project.id && i.agent_id !== null && !i.ref.thread_id);
+
+/** One line about a project. It says "Desk is waiting on you" only when Desk has an attention item (design spec §8 item 4). */
+export function projectSummaryLine(p: ProjectSummary, attention: readonly AttentionItem[] = []): string {
   const c = (...s: AgentStatus[]) => p.threads.filter((t) => s.includes(t.status)).length;
   const parts = [
     c('running') ? `${c('running')} running` : '',
@@ -22,7 +27,7 @@ export function projectSummaryLine(p: ProjectSummary): string {
     c('failed') ? `${c('failed')} failed` : '',
   ].filter(Boolean);
   if (parts.length) return parts.join(' · ');
-  if (p.desk_status === 'waiting') return 'Desk is waiting on you';
+  if (p.desk_status === 'waiting') return deskNeedsYou(p, attention) ? 'Desk is waiting on you' : 'Desk is waiting';
   if (p.desk_status === 'running') return 'Desk is working';
   return p.plan_progress.total && p.plan_progress.done === p.plan_progress.total ? 'Idle · all plan items done' : 'Idle';
 }
@@ -49,7 +54,7 @@ const CALLOUT: Record<AttentionItem['kind'], { label: string; glyph: string }> =
   paused: { label: 'Agents paused', glyph: '' },
 };
 
-function ProjectLabel({ p, t }: { p: ProjectSummary; t: Territory }) {
+function ProjectLabel({ p, t, items }: { p: ProjectSummary; t: Territory; items: readonly AttentionItem[] }) {
   const unread = useUnread(p);
   const tone = TONE[projectTone(p)];
   return (
@@ -58,7 +63,7 @@ function ProjectLabel({ p, t }: { p: ProjectSummary; t: Territory }) {
         {p.project.name}
         {unread ? <span className="unread-dot" aria-label="unread" /> : null}
       </span>
-      <span className="orbit-label-sub">{projectSummaryLine(p)}</span>
+      <span className="orbit-label-sub">{projectSummaryLine(p, items)}</span>
     </div>
   );
 }
@@ -114,7 +119,7 @@ export function OrbitMap(o: {
         const first = items[0];
         return (
           <div key={t.id}>
-            <ProjectLabel p={p} t={t} />
+            <ProjectLabel p={p} t={t} items={items} />
             <button
               type="button"
               className={`orbit-desk orbit-desk-${tone}`}

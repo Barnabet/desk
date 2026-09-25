@@ -27,7 +27,7 @@ function Legend() {
   return (
     <div className="map-legend">
       <span><span className="legend-disc legend-running" />Running</span>
-      <span><span className="legend-disc legend-waiting" />Waiting on you</span>
+      <span><span className="legend-disc legend-waiting" />Waiting</span>
       <span><span className="legend-disc legend-idle" />Idle</span>
       <span><span className="legend-dot legend-dot-running" />Thread running</span>
       <span><span className="legend-dot legend-dot-waiting" />Waiting</span>

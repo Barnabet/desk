@@ -47,7 +47,7 @@ export function TerritoryInspector({ p, items, now }: { p: ProjectSummary; items
     <article className="card territory" aria-label="Territory" role="region" aria-live="polite">
       <div className="territory-head">
         <span className="eyebrow">Territory</span>
-        <span className={`chip ${BADGE[tone]}`}>{projectSummaryLine(p)}</span>
+        <span className={`chip ${BADGE[tone]}`}>{projectSummaryLine(p, items)}</span>
       </div>
       <h2 className="territory-name">{p.project.name}</h2>
       {p.latest_report ? (
