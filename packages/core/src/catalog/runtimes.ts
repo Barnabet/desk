@@ -184,13 +184,16 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
         this.progress(ref, `Installing ${rt.python.packages.length} Python package${rt.python.packages.length === 1 ? '' : 's'}`);
         await this.run(
           this.o.uv,
-          ['pip', 'install', '--no-config', '--python', join(py, 'bin', 'python'), '--only-binary', ':all:', '--exclude-newer', `${updated}T23:59:59Z`, ...rt.python.packages],
+          // --compile-bytecode: skills run with PYTHONDONTWRITEBYTECODE=1, so packages compiled here are never recompiled per run.
+          ['pip', 'install', '--no-config', '--python', join(py, 'bin', 'python'), '--only-binary', ':all:', '--compile-bytecode', '--exclude-newer', `${updated}T23:59:59Z`, ...rt.python.packages],
           uvEnv,
           15 * 60_000,
         );
       }
       env.bins.push(join(py, 'bin'));
       env.vars.VIRTUAL_ENV = py;
+      // UTF-8 for open(), read_text() and pipes whatever the locale (Windows would use its ANSI code page).
+      env.vars.PYTHONUTF8 = '1';
     }
 
     if (rt.node) {

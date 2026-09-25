@@ -93,11 +93,11 @@ describe('SkillRuntimes', () => {
     const dir = r.dir(ref);
     expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual([
       `venv --no-config --python 3.12 ${dir}/py | pref=only-managed key=none`,
-      `pip install --no-config --python ${dir}/py/bin/python --only-binary :all: --exclude-newer 2026-09-24T23:59:59Z requests==2.32.5 | pref=only-managed key=none`,
+      `pip install --no-config --python ${dir}/py/bin/python --only-binary :all: --compile-bytecode --exclude-newer 2026-09-24T23:59:59Z requests==2.32.5 | pref=only-managed key=none`,
     ]);
     const env = r.env(ref);
     expect(env.bins).toEqual([join(dir, 'bin'), join(dir, 'py', 'bin')]);
-    expect(env.vars).toMatchObject({ VIRTUAL_ENV: join(dir, 'py'), PYTHONDONTWRITEBYTECODE: '1' });
+    expect(env.vars).toMatchObject({ VIRTUAL_ENV: join(dir, 'py'), PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1' });
     expect(h.store.list({ types: ['skill.runtime_changed'] }).map((e) => e.type === 'skill.runtime_changed' && e.payload.state)).toEqual(['preparing', 'ready']);
     expect(env.note).toMatch(/^Desk set up this skill's runtime: Python 3\.12 with requests==2\.32\.5 \(run scripts with python3\)\. Skip any install steps/);
   });
