@@ -1,6 +1,6 @@
 import { imageLabel, type EventOf, type StoredEvent, type ToolImage } from '@desk/protocol';
 import type { ChatMessage, ContentPart } from '../model/types';
-import { oneLine, renderInboxItem } from '../coordination/render';
+import { answerModeLine, oneLine, renderInboxItem } from '../coordination/render';
 
 /** Why an image goes as text after the endpoint refused a request with it: its answer, and how many images were withheld together. */
 export type Withheld = { reason: string; count: number };
@@ -73,6 +73,9 @@ export function buildTaggedConversation(events: StoredEvent[]): TaggedMessage[] 
 
   const out: TaggedMessage[] = [];
   const pending: Array<EventOf<'message.user'> | EventOf<'message.agent'>> = [];
+  /** Every inbox item by id, and each answer run's question by run id: an answer run's drain ends with its runtime line. */
+  const items = new Map<number, EventOf<'message.user'> | EventOf<'message.agent'>>();
+  const answering = new Map<string, number>();
   /** Images of the current run of tool results, and the last result's event id. */
   let shown: ConversationImage[] = [];
   let shownAt = 0;
@@ -93,10 +96,22 @@ export function buildTaggedConversation(events: StoredEvent[]): TaggedMessage[] 
       case 'message.user':
       case 'message.agent':
         pending.push(ev);
+        items.set(ev.id, ev);
+        break;
+      case 'run.started':
+        if (ev.payload.answering !== undefined) answering.set(ev.payload.run_id, ev.payload.answering);
         break;
       case 'inbox.drained': {
         const batch: string[] = [];
-        while (pending.length && pending[0]!.id <= ev.payload.up_to) batch.push(renderInboxItem(pending.shift()!));
+        const drained = new Set<number>();
+        while (pending.length && pending[0]!.id <= ev.payload.up_to) {
+          const item = pending.shift()!;
+          drained.add(item.id);
+          batch.push(renderInboxItem(item));
+        }
+        // An answer run drains once, at its start: the runtime's line closes that batch (design spec §1.5, §6.3).
+        const question = items.get(answering.get(ev.payload.run_id) ?? -1);
+        if (question) batch.push(answerModeLine(question, drained.has(question.id)));
         if (batch.length) push({ message: { role: 'user', content: batch.join('\n\n') }, eventId: ev.id });
         break;
       }
