@@ -138,6 +138,12 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
     signal.reason === SHUTDOWN_REASON ? finish('error', 'queued', SHUTDOWN_REASON) : finish('stopped', 'cancelled');
   /** The user or Desk stopped this run (a daemon shutdown is not a stop: it keeps the run's yield). */
   const stopped = () => signal.aborted && signal.reason !== SHUTDOWN_REASON;
+  /** The result of a call that a stop kept from running or from asking for approval. */
+  const deniedByStop = (tc: { id: string; name: string }): EventInput => ({
+    ...base,
+    type: 'tool.result',
+    payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: 'denied', content: 'Denied: the agent was stopped' },
+  });
 
   const workspace = agent.workspace_path;
   if (!workspace) return finish('error', 'failed', 'Agent has no workspace');
@@ -309,6 +315,11 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
           (tc): EventInput => ({ ...base, type: 'tool.call', payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, arguments: tc.arguments } }),
         ),
       );
+      // A stop that landed as the model replied runs none of the calls: each gets a denial, so every call keeps a result.
+      if (stopped()) {
+        store.append(result.toolCalls.map(deniedByStop));
+        return interrupted();
+      }
       const freshProject = getProject(store.db, agent.project_id) ?? project;
       type Outcome = { result: ToolResult; pending?: undefined } | { result?: undefined; pending: PolicyDecision };
       const outcomes: Outcome[] = await Promise.all(
@@ -336,15 +347,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       // A stop during the tool phase ends the run cancelled: no approval is requested and no yield is honoured. Calls
       // that would have asked get a denial, so every call keeps its result.
       if (stopped()) {
-        store.append(
-          pending.map(
-            ({ tc }): EventInput => ({
-              ...base,
-              type: 'tool.result',
-              payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: 'denied', content: 'Denied: the agent was stopped' },
-            }),
-          ),
-        );
+        store.append(pending.map(({ tc }) => deniedByStop(tc)));
         return interrupted();
       }
       if (pending.length) {

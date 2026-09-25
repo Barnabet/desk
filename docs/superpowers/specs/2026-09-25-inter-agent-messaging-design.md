@@ -371,7 +371,7 @@ This table follows from §3.2. The unit test for `wakeDecision` is generated fro
 
 ### 3.6 Other lifecycle fixes in this work
 - **A stopped run ends cancelled** (`agent/run.ts`). Today a stop that lands during the tool phase lets the run end in the yield of `complete` or `wait_for_reply` (done or waiting), because nothing checks `signal.aborted` between the tools and the yield.
-  - `runAgent` now checks `signal.aborted` after the tool results are appended, before it requests approvals or honours a yield. It also checks before `finish('no_tool_calls')`.
+  - `runAgent` now checks `signal.aborted` after the tool results are appended, before it requests approvals or honours a yield. It also checks before `finish('no_tool_calls')`, and before it runs the calls of a reply that has some: a stop that lands as the model replies runs none of them, and each gets the denial below.
   - On a stop (any abort reason except shutdown), calls that would have asked for approval get a `denied` result ("Denied: the agent was stopped"), so the conversation stays well formed. The run then returns `interrupted()`, which appends `cancelled`, or the closure in answer mode.
   - A `complete` recorded in that step keeps its `agent.result`, but the thread is cancelled, as the user asked.
   - A shutdown still honours the yield, so a thread that completed is not run again after the restart.

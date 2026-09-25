@@ -225,4 +225,35 @@ describe('runAgent stopped in the middle of a step', () => {
     };
     expect(await runAgent(deps({ adapter }), agentId, controller.signal)).toEqual({ reason: 'stopped', status: 'cancelled' });
   });
+
+  it('runs none of the calls when the stop lands as the model replies with them', async () => {
+    h = await createHarness({ script: () => tools(call('push', {}, 'c1')) });
+    const { agentId, projectId } = await seedThread(h.store, h.dir);
+    say(agentId, projectId, 'go');
+    let pushed = false;
+    const push = defineTool({
+      name: 'push',
+      description: 'Push (ignores the signal)',
+      input: z.object({}),
+      async execute() {
+        pushed = true;
+        return 'pushed';
+      },
+    });
+    const controller = new AbortController();
+    const adapter: ModelAdapter = {
+      complete: (req, opts) =>
+        h.adapter.complete(req, opts).then((result) => {
+          controller.abort();
+          return result;
+        }),
+    };
+    expect(await runAgent(deps({ adapter, tools: [push] }), agentId, controller.signal)).toEqual({ reason: 'stopped', status: 'cancelled' });
+    expect(pushed).toBe(false);
+    const results = h.store.list({ agentId, types: ['tool.call', 'tool.result'] }).map((e) => [e.type, e.type === 'tool.result' ? e.payload.status : '']);
+    expect(results).toEqual([
+      ['tool.call', ''],
+      ['tool.result', 'denied'],
+    ]);
+  });
 });
