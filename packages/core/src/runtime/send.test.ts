@@ -43,7 +43,7 @@ async function setup() {
 
 describe('send refusals (design spec §2.4)', () => {
   it('refuses with the exact texts, in order, and stores nothing', async () => {
-    const { projectId, desk, thread } = await setup();
+    const { projectId, desk, thread, setStatus } = await setup();
     const a = thread('Auth API', 'running');
     const f = thread('Frontend', 'running');
     const send = (from: string, to: string, kind: SendInput['kind'] = 'note', body = 'Hello.') => () => rt.send({ from, to, kind, text: body });
@@ -79,8 +79,27 @@ describe('send refusals (design spec §2.4)', () => {
     expect(send(a, desk.id, 'update', 'x'.repeat(4001))).toThrow(long);
     expect(send(desk.id, f, 'question', 'x'.repeat(4001))).toThrow(long);
 
+    // A message that fails several checks gets the first one's text.
+    expect(send(a, a, 'note', 'x'.repeat(4001))).toThrow('That is you.');
+    expect(send(a, 'Nobody', 'note', 'x'.repeat(4001))).toThrow('Unknown thread: Nobody');
+    expect(send(a, old, 'question', 'x'.repeat(4001))).toThrow('"Old" is archived.');
+    expect(send(desk.id, 'Old', 'note', 'x'.repeat(4001))).toThrow('"Old" is archived.');
+    expect(send(a, scout, 'note', 'x'.repeat(4001))).toThrow('"Scout" was stopped; it cannot receive messages.');
+    expect(send(a, pricing, 'note', 'x'.repeat(4001))).toThrow(sibling('Pricing'));
+    expect(send(desk.id, deploy, 'note', 'x'.repeat(4001))).toThrow(fromDesk('Deploy'));
+
     expect(h.store.list({ projectId, types: ['message.agent', 'agent.revision'] })).toEqual([]);
     expect(rt.send({ from: a, to: f, kind: 'note', text: 'x'.repeat(4000) }).kind).toBe('note');
+
+    // With a question open to the recipient, its being archived, its state and the size each come before the pair cap.
+    const q = rt.send({ from: a, to: f, kind: 'question', text: 'Which token format?' });
+    expect(send(a, f, 'question', 'x'.repeat(4001))).toThrow(long);
+    setStatus(f, 'cancelled');
+    expect(send(a, f, 'question')).toThrow('"Frontend" was stopped; it cannot receive messages.');
+    h.store.append({ project_id: projectId, agent_id: f, type: 'agent.archived', payload: {} });
+    expect(send(a, f, 'question')).toThrow('"Frontend" is archived.');
+    expect(messageById(rt.messages(projectId), q.id)).toMatchObject({ state: 'open' });
+    await rt.whenIdle();
   });
 
   it('refuses a thread that is being archived, and every agent of an archived project', async () => {
@@ -125,6 +144,9 @@ describe('send refusals (design spec §2.4)', () => {
     const capped = 'You have sent 20 questions or notes to other threads this hour. Stop and ask Desk (message_desk) to coordinate, or keep working with what you have.';
     expect(() => rt.send({ from: a, to: c, kind: 'note', text: 'One more.' })).toThrow(capped);
     expect(() => rt.send({ from: a, to: c, kind: 'question', text: 'One more?' })).toThrow(capped);
+    // The size and the pair cap come before the sender cap.
+    expect(() => rt.send({ from: a, to: c, kind: 'note', text: 'x'.repeat(4001) })).toThrow(/^Messages are limited to 4000 characters/);
+    expect(() => rt.send({ from: a, to: f, kind: 'question', text: 'And the expiry?' })).toThrow(/^You already asked "Frontend" #\d+ and it has not answered/);
     expect(rt.send({ from: a, to: desk.id, kind: 'update', text: 'Halfway.' }).kind).toBe('update');
     expect(rt.send({ from: desk.id, to: c, kind: 'note', text: 'Carry on.' }).kind).toBe('note');
     await rt.whenIdle();
