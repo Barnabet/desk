@@ -49,6 +49,8 @@ describe('Desk prompt', () => {
     expect(p).toContain('baseline.md — Baseline');
     expect(p).toContain('(no plan yet)');
     expect(p).toMatch(/never merge/i);
+    expect(p).toContain("A finished thread's result is final: to learn more about its work, send it a question (it answers from its context without reopening); if the work fell short of its brief, send a revision; for new work that builds on it, spawn a new thread whose brief points at its result or branch.");
+    expect(p).toContain('Route follow-up work to a thread that is still working (message_thread note) instead of spawning duplicates.');
     expect(p).toContain(SEE_FILES);
   });
 });
