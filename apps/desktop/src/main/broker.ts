@@ -99,6 +99,7 @@ export class Broker {
       this.lastSeq = attention.seq;
       this.set({ health, overview, attention: attention.items, system: { ...systemFromHealth(health), notices: this.state.system.notices, lastSeq: attention.seq } });
       this.openStream(attention.seq);
+      this.rewatch();
     } catch (err) {
       if (gen !== this.generation) return;
       if (err instanceof ProtocolMismatch) {
@@ -154,6 +155,18 @@ export class Broker {
     });
     this.stream = stream;
     stream.start();
+  }
+
+  /**
+   * Re-runs every existing watch from its own cursor after a (re)connect. The stream resumes at the daemon's current
+   * seq, so without this an open window would never get what was appended while the app was disconnected: a graceful
+   * shutdown's run.finished, restart closures and recover()'s repairs (design spec §7). Live events that arrive
+   * meanwhile wait in the new watch's `pending`, as in any watch.
+   */
+  private rewatch(): void {
+    for (const [sender, watches] of this.watchers) {
+      for (const [projectId, w] of watches) void this.watch(sender, projectId, w.cursor).catch((err) => this.d.log?.('re-watch failed', err));
+    }
   }
 
   private onEvent(e: StoredEvent): void {

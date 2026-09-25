@@ -120,6 +120,38 @@ describe('Broker', () => {
     expect(sent.filter(([id]) => id === 9)).toHaveLength(forwarded.length);
   });
 
+  it('backfills every watch from its own cursor after a reconnect, so events appended offline arrive once', async () => {
+    const { runtime, sent, stream, store, deps } = await setup();
+    const p = runtime.createProject({ name: 'Launch', goal: 'g' });
+    const deskId = store.list({ projectId: p, types: ['agent.created'] })[0]!.agent_id!;
+    await broker!.start();
+    await broker!.watch(9, p, 0);
+    const delivered = () =>
+      sent
+        .filter(([id]) => id === 9)
+        .flatMap(([, ch, x]) => (ch === 'desk:events' ? (x as StoredEvent[]) : ch === 'desk:event' ? [x as StoredEvent] : []))
+        .map((e) => e.id);
+
+    // The daemon goes away (daemon.json is gone), so the stream's reconnect sends the broker offline.
+    let online = false;
+    const { connect, credentials } = deps;
+    deps.connect = () => (online ? connect() : null);
+    deps.credentials = () => (online ? credentials() : null);
+    stream().onStatus?.('reconnecting');
+    expect(broker!.snapshot().connection.status).toBe('offline');
+    // What a graceful shutdown appends after the server has closed.
+    const [finished] = store.append({ project_id: p, agent_id: deskId, type: 'run.finished', payload: { run_id: 'r1', reason: 'error', detail: 'daemon_shutdown' } });
+
+    online = true;
+    await until(() => delivered().includes(finished!.id));
+    // The new stream starts after the daemon's seq; a replay of the same event is still dropped.
+    stream().onEvent(finished as StoredEvent);
+    const [live] = store.append({ project_id: p, agent_id: null, type: 'message.user', payload: { text: 'back' } });
+    stream().onEvent(live as StoredEvent);
+    expect(delivered().filter((id) => id === finished!.id)).toHaveLength(1);
+    expect(delivered().at(-1)).toBe(live!.id);
+  });
+
   it('tracks skill runtime progress for every window and bumps a counter when a runtime changes state', async () => {
     const { stream, store } = await setup();
     await broker!.start();
