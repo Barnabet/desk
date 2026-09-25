@@ -25,7 +25,11 @@ export const UpdateSourceRequest = z.object({ agent_write: z.boolean() });
 export type UpdateSourceRequest = z.input<typeof UpdateSourceRequest>;
 export type AddSourceRequest = z.input<typeof AddSourceRequest>;
 
-export const MessageRequest = z.object({ text: z.string().min(1) });
+export const MessageRequest = z.object({
+  text: z.string().min(1),
+  /** The user's Ask, on POST /threads/:id/messages only: an idle, done or failed thread answers it without reopening (design spec §4.8). */
+  question: z.boolean().optional(),
+});
 export type MessageRequest = z.input<typeof MessageRequest>;
 
 export const ResolveApprovalRequest = z.object({ decision: z.enum(['approved', 'denied']), note: z.string().optional() });

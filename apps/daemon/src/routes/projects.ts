@@ -114,6 +114,8 @@ export function projectRoutes({ runtime, store }: AppDeps): Hono {
 
   r.post('/projects/:id/messages', async (c) => {
     const req = await body(c, MessageRequest);
+    // Desk is never asked: an Ask is answered from a thread's own context (design spec §4.8).
+    if (req.question) throw new ValidationError('Only a thread can be asked a question; write to Desk instead');
     runtime.sendToDesk(c.req.param('id'), req.text);
     return c.json({ ok: true }, 202);
   });

@@ -48,7 +48,7 @@ Pass `next_after` as the next `after` to continue.
 | POST | `/v1/projects/:id/sources` | `{ path, label?, agent_write? }` | Detects `git` vs `folder`. `agent_write` (default `true`): Desk and its threads may write there (sandboxed) and run services there. 201 |
 | PATCH | `/v1/projects/:id/sources/:sid` | `{ agent_write }` | Turns agents' write access to the folder on or off (`source.updated`) |
 | DELETE | `/v1/projects/:id/sources/:sid` | | |
-| POST | `/v1/projects/:id/messages` | `{ text }` | Message to Desk. 202; Desk wakes |
+| POST | `/v1/projects/:id/messages` | `{ text }` | Message to Desk. 202; Desk wakes. 400 with `question: true`: only a thread can be asked |
 | GET | `/v1/projects/:id/chat` | paging | Desk conversation events: user and agent messages, assistant messages, reports, questions, notices |
 | GET | `/v1/projects/:id/plan` | | `{ items: PlanItem[] }` or `null` |
 | GET | `/v1/projects/:id/usage` | | `{ rows (per model), totals }` |
@@ -86,7 +86,7 @@ Project services are long-lived processes (dev servers, APIs, workers) that Desk
 | GET | `/v1/projects/:id/threads` | `?all=1` includes archived |
 | GET | `/v1/threads/:id` | Thread row: status, brief, result, git info, `active_skills`, … |
 | GET | `/v1/threads/:id/transcript` | paging; every event of the thread |
-| POST | `/v1/threads/:id/messages` | `{ text }`: steer the thread directly. 202. 409 when the thread or its project is archived |
+| POST | `/v1/threads/:id/messages` | `{ text, question? }`: steer the thread directly. With `question: true`, the user's Ask: an idle, done or failed thread answers it in a short read-only run and keeps its status, result and branch; any other thread reads it as a message. 202. 409 when the thread or its project is archived |
 | POST | `/v1/threads/:id/stop` | Cancels the thread; Desk is notified |
 | POST | `/v1/threads/:id/archive` | Finished threads only. Removes the workspace and keeps the git branch |
 | GET | `/v1/projects/:id/approvals` | `?status=pending\|approved\|denied` |

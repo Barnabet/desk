@@ -36,7 +36,7 @@ export function agentRoutes({ runtime, store }: AppDeps): Hono {
   r.post('/threads/:id/messages', async (c) => {
     const t = requireThread(db, c.req.param('id'));
     const req = await body(c, MessageRequest);
-    runtime.sendMessage(t.id, req.text);
+    runtime.sendMessage(t.id, req.text, { question: req.question ?? false });
     return c.json({ ok: true }, 202);
   });
 

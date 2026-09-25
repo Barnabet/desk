@@ -169,6 +169,36 @@ describe('threads and approvals', () => {
     expect(Object.fromEntries(threads.map((t) => [t.id, t.archived_at !== null]))).toEqual({ [live]: false, [old]: true });
     expect(((await api('GET', `/projects/${project.id}/threads`)).body as Array<{ id: string }>).map((t) => t.id)).toEqual([live]);
   });
+
+  it("answers the user's Ask to a done thread in an answer run, and refuses an Ask to Desk", async () => {
+    const { api, runtime } = await setup((req) => {
+      if (String(req.messages[0]?.content ?? '').startsWith('You are Desk')) {
+        return req.messages.some((m) => m.role === 'tool') ? text('Dispatched.') : tools(call('spawn_thread', { title: 'Pricing', brief: 'Price the plans' }));
+      }
+      // A thread in an answer run: its latest user turn ends with the runtime's answer-mode line.
+      const latest = String(req.messages.findLast((m) => m.role === 'user')?.content ?? '');
+      return latest.includes('[Desk runtime — answer mode]') ? text('Per seat, billed monthly.') : tools(call('complete', { summary: 'Pricing page done' }));
+    });
+    const { project } = await newProject(api);
+    await api('POST', `/projects/${project.id}/messages`, { text: 'go' });
+    await runtime.whenIdle();
+    const [pricing] = (await api('GET', `/projects/${project.id}/threads`)).body as Array<{ id: string; status: string }>;
+    expect(pricing!.status).toBe('done');
+
+    expect((await api('POST', `/threads/${pricing!.id}/messages`, { text: 'How did you price it?', question: true })).status).toBe(202);
+    await runtime.whenIdle();
+    const events = ((await api('GET', `/threads/${pricing!.id}/transcript`)).body as { events: Array<{ id: number; type: string; payload: any }> }).events;
+    const ask = events.find((e) => e.type === 'message.user');
+    expect(ask).toMatchObject({ payload: { text: 'How did you price it?', question: true } });
+    expect(events.filter((e) => e.type === 'run.started').at(-1)).toMatchObject({ payload: { answering: ask!.id } });
+    expect(events.filter((e) => e.type === 'assistant.message').at(-1)).toMatchObject({ payload: { content: 'Per seat, billed monthly.' } });
+    expect(events.filter((e) => e.type === 'agent.status_changed' && e.id > ask!.id)).toEqual([]);
+    expect((await api('GET', `/threads/${pricing!.id}`)).body).toMatchObject({ status: 'done' });
+
+    const toDesk = await api('POST', `/projects/${project.id}/messages`, { text: 'Anything else?', question: true });
+    expect(toDesk.status).toBe(400);
+    expect(toDesk.body.error.message).toBe('Only a thread can be asked a question; write to Desk instead');
+  });
 });
 
 describe('memory, library, usage, events, models', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CreateProjectRequest, LibraryUploadRequest, ModelsPutRequest, ResolveApprovalRequest, StreamClientMessage } from '@desk/protocol';
+import { CreateProjectRequest, LibraryUploadRequest, MessageRequest, ModelsPutRequest, ResolveApprovalRequest, StreamClientMessage } from '@desk/protocol';
 
 describe('API schemas', () => {
   it('validates project creation', () => {
@@ -18,6 +18,12 @@ describe('API schemas', () => {
   it('validates stream subscriptions', () => {
     expect(StreamClientMessage.parse({ subscribe: { project_id: '*', after_seq: 0 } })).toEqual({ subscribe: { project_id: '*', after_seq: 0 } });
     expect(() => StreamClientMessage.parse({ subscribe: { project_id: 'p', after_seq: -1 } })).toThrow();
+  });
+
+  it("validates messages and the user's Ask", () => {
+    expect(MessageRequest.parse({ text: 'How did you price it?', question: true })).toEqual({ text: 'How did you price it?', question: true });
+    expect(MessageRequest.parse({ text: 'Carry on.' })).toEqual({ text: 'Carry on.' });
+    expect(() => MessageRequest.parse({ text: 'x', question: 'yes' })).toThrow();
   });
 });
 
