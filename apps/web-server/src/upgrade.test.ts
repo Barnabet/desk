@@ -3,7 +3,7 @@ import { connect, type AddressInfo, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
-import { openPush, refusedUpgrade, until } from './testing';
+import { openPush, refusedUpgrade, sleep, until } from './testing';
 import { attachUpgrades } from './upgrade';
 
 /** A server whose only route, /ok, accepts the upgrade and closes the socket with 1000. */
@@ -25,25 +25,39 @@ async function serve(): Promise<{ server: Server; port: number; close(): Promise
   };
 }
 
+type UpgradeHeaders = { host?: string; origin?: string; path?: string };
+
+/** A raw WebSocket upgrade request (Host and Origin are the server's own unless given). */
+const upgradeRequest = (port: number, o: UpgradeHeaders) =>
+  [
+    `GET ${o.path ?? '/ok'} HTTP/1.1`,
+    `Host: ${o.host ?? `127.0.0.1:${port}`}`,
+    `Origin: ${o.origin ?? `http://127.0.0.1:${port}`}`,
+    'Connection: Upgrade',
+    'Upgrade: websocket',
+    'Sec-WebSocket-Version: 13',
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+    '',
+    '',
+  ].join('\r\n');
+
 /** An upgrade over a raw socket that stays half-open when the server ends it; resolves with the response's status line. */
-function halfOpenUpgrade(port: number, o: { host?: string; origin?: string; path?: string } = {}): Promise<{ socket: Socket; status: string }> {
+function halfOpenUpgrade(port: number, o: UpgradeHeaders = {}): Promise<{ socket: Socket; status: string }> {
   return new Promise((resolve, reject) => {
     const socket = connect({ host: '127.0.0.1', port, allowHalfOpen: true });
     socket.once('error', reject);
     socket.once('data', (data) => resolve({ socket, status: String(data).split('\r\n')[0] ?? '' }));
-    socket.write(
-      [
-        `GET ${o.path ?? '/ok'} HTTP/1.1`,
-        `Host: ${o.host ?? `127.0.0.1:${port}`}`,
-        `Origin: ${o.origin ?? `http://127.0.0.1:${port}`}`,
-        'Connection: Upgrade',
-        'Upgrade: websocket',
-        'Sec-WebSocket-Version: 13',
-        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-        '',
-        '',
-      ].join('\r\n'),
-    );
+    socket.write(upgradeRequest(port, o));
+  });
+}
+
+/** Sends an upgrade and resets the socket on the next tick, before the refusal is read: the server's write then fails. */
+function resetBeforeRead(port: number, o: UpgradeHeaders): void {
+  const socket = connect({ host: '127.0.0.1', port, allowHalfOpen: true });
+  socket.on('error', () => {});
+  socket.on('connect', () => {
+    socket.write(upgradeRequest(port, o));
+    setImmediate(() => socket.resetAndDestroy());
   });
 }
 
@@ -76,6 +90,11 @@ describe('attachUpgrades', () => {
         expect(c.status).toBe(status);
         c.socket.resetAndDestroy();
       }
+      expect(await openPush(port, { path: '/ok' }).closed).toBe(1000);
+      // A reset before the refusal is read reaches a socket still writing it: only the socket's 'error' listener
+      // keeps that EPIPE or ECONNRESET from crashing the server.
+      for (const { o } of refusals) resetBeforeRead(port, o);
+      await sleep(100);
       expect(await openPush(port, { path: '/ok' }).closed).toBe(1000);
     } finally {
       await close();

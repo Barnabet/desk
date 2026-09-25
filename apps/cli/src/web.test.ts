@@ -67,7 +67,9 @@ describe('desk web', () => {
   it('refuses a port that is not a whole number from 1 to 65535', async () => {
     for (const bad of ['abc', '0', '70000', '80.5']) {
       let err = '';
-      expect(await runCli(['web', '--port', bad], { out: () => {}, err: (s) => void (err += s), dataDir: dir }), bad).toBe(1);
+      // --no-open and a settled `stopped`: were the check to regress, the run would end at once and open no browser.
+      const io = { out: () => {}, err: (s: string) => void (err += s), dataDir: dir, stopped: Promise.resolve() };
+      expect(await runCli(['web', '--port', bad, '--no-open'], io), bad).toBe(1);
       expect(err).toContain('--port must be a whole number from 1 to 65535');
     }
     expect(existsSync(join(dir, 'web.json'))).toBe(false);

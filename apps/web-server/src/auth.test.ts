@@ -73,4 +73,20 @@ describe('LoginCodes', () => {
     expect(other.ok && sessions.valid(other.secret)).toBe(true);
     expect(codes.redeem(code)).toEqual({ ok: false, reason: 'replayed' });
   });
+
+  it('remembers the newest 256 spent codes: an older one comes back as unknown and leaves its session alone', () => {
+    const { sessions, codes } = setup();
+    const spent = Array.from({ length: 257 }, () => {
+      const code = codes.issue();
+      const r = codes.redeem(code);
+      if (!r.ok) throw new Error('expected a session');
+      return { code, secret: r.secret };
+    });
+    codes.issue(); // spent codes are trimmed when a code is issued
+    const [first, second] = [spent[0]!, spent[1]!];
+    expect(codes.redeem(first.code)).toEqual({ ok: false, reason: 'unknown' });
+    expect(sessions.valid(first.secret)).toBe(true);
+    expect(codes.redeem(second.code)).toEqual({ ok: false, reason: 'replayed' });
+    expect(sessions.valid(second.secret)).toBe(false);
+  });
 });
