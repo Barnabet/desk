@@ -303,4 +303,39 @@ describe('ThreadsScreen', () => {
     setup([...base, ev(6, 'agent.status_changed', { status: 'waiting', reason: 'Waiting for approval' }, t)]);
     expect(await screen.findByText('Waiting on you · 2m')).toBeTruthy();
   });
+
+  it('asks a done thread, or reopens it with a message after confirming', async () => {
+    const bridge = setup([...base, ...finished], { 'threads.send': () => ({ ok: true }) });
+    const tr = await screen.findByRole('complementary', { name: 'Transcript' });
+    const box = await within(tr).findByLabelText('Ask this thread');
+    expect(within(tr).queryByRole('button', { name: 'Steer' })).toBeNull();
+    expect(within(tr).getByText('It answers from its context; its result stays as it is.')).toBeTruthy();
+    fireEvent.change(box, { target: { value: 'How long are the emails?' } });
+    fireEvent.click(within(tr).getByRole('button', { name: 'Ask' }));
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'threads.send').map((c) => c.input)).toEqual([{ id: 't', text: 'How long are the emails?', question: true }]));
+    expect(await within(tr).findByText('You · asking…')).toBeTruthy();
+    bridge.emit('desk:event', ev(8, 'message.user', { text: 'How long are the emails?', question: true }, t));
+    await waitFor(() => expect(within(tr).queryByText('You · asking…')).toBeNull());
+    expect(screen.getByRole('button', { name: /^Stop \d+: You asked/ })).toBeTruthy();
+
+    fireEvent.change(box, { target: { value: 'Add a sixth email.' } });
+    fireEvent.click(within(tr).getByRole('button', { name: 'Reopen with this…' }));
+    const dialog = screen.getByRole('dialog', { name: 'Reopen this thread?' });
+    expect(dialog.textContent).toContain('Reopening lets it change its work; its result and branch may change.');
+    expect(bridge.calls.filter((c) => c.channel === 'threads.send')).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reopen' }));
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'threads.send').at(-1)?.input).toEqual({ id: 't', text: 'Add a sixth email.' }));
+    expect(await within(tr).findByText('You · steering…')).toBeTruthy();
+  });
+
+  it('resumes an idle thread with a message after confirming', async () => {
+    const bridge = setup([...base, ev(6, 'agent.status_changed', { status: 'idle' }, t)], { 'threads.send': () => ({ ok: true }) });
+    const tr = await screen.findByRole('complementary', { name: 'Transcript' });
+    fireEvent.change(await within(tr).findByLabelText('Ask this thread'), { target: { value: 'Carry on with the footer.' } });
+    fireEvent.click(within(tr).getByRole('button', { name: 'Resume with this…' }));
+    const dialog = screen.getByRole('dialog', { name: 'Resume this thread?' });
+    expect(dialog.textContent).toContain('Resuming lets it change its work; its result and branch may change.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'threads.send')?.input).toEqual({ id: 't', text: 'Carry on with the footer.' }));
+  });
 });

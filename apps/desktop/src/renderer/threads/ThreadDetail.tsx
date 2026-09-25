@@ -21,7 +21,7 @@ import { FilesTab } from './tabs/FilesTab';
 import { ResultTab } from './tabs/ResultTab';
 import { SkillDraftsTab } from './tabs/SkillDraftsTab';
 import { tokens, usageByModel, UsageTab } from './tabs/UsageTab';
-import { Transcript, type Depth } from './Transcript';
+import { Transcript, type ComposerMode, type Depth } from './Transcript';
 
 type Tab = 'route' | 'result' | 'diff' | 'files' | 'drafts' | 'usage';
 const TABS: Array<[Tab, string]> = [
@@ -35,6 +35,8 @@ const TABS: Array<[Tab, string]> = [
 
 const LIVE = new Set(['running', 'waiting', 'queued']);
 const FINISHED = new Set(['done', 'failed', 'cancelled']);
+/** Statuses whose box asks first: the thread answers from its context without reopening (design spec §4.8, §8 item 5). */
+const ASKABLE = new Set(['done', 'failed', 'idle']);
 
 function useDepth(): [Depth, (d: Depth) => void] {
   const [d, setD] = useState<Depth>(() => {
@@ -105,6 +107,12 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   const label = statusLabel(thread.status, thread.reason, proxyDown);
   const current = selected ?? stops.at(-1)?.n ?? null;
   const archived = !!thread.archived_at;
+  // A cancelled thread keeps Steer: an Ask to it would only be an ordinary message (design spec §3.2, rule 4.1).
+  const composer: ComposerMode = archived
+    ? { kind: 'off', hint: 'This thread is archived.' }
+    : ASKABLE.has(thread.status)
+      ? { kind: 'ask', reopen: thread.status === 'idle' ? 'Resume' : 'Reopen' }
+      : { kind: 'steer', hint: thread.status === 'cancelled' ? 'The thread wakes up to read this. For new work, message Desk.' : 'For new work, message Desk.' };
   // What it waits on, and whether it is answering, come from the message fold, never the status reason (design spec §8).
   const wait = thread.status === 'waiting' ? waitLabel(s.messages, thread.id, attention, now) : null;
   const answering = answeringLabel(s.messages, thread.id);
@@ -221,8 +229,7 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
         depth={depth}
         onDepth={setDepth}
         actions={actions}
-        canSteer={!archived}
-        steerHint={archived ? 'This thread is archived.' : FINISHED.has(thread.status) ? 'The thread wakes up to read this. For new work, message Desk.' : 'For new work, message Desk.'}
+        composer={composer}
       />
       {confirm === 'stop' ? (
         <ConfirmDialog title="Stop this thread?" confirmLabel="Stop thread" danger onConfirm={() => void act('stop')} onCancel={() => setConfirm(null)}>

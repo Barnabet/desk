@@ -4,6 +4,7 @@ import { clip } from '@desk/protocol';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ImageThumbs } from '../components/ImageThumbs';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
@@ -14,6 +15,13 @@ import { href } from '../router';
 import { stopText, type NarrativeRow, type Stop } from './route';
 
 export type Depth = 'narrative' | 'steps';
+
+/**
+ * The box under the transcript (design spec §8 item 5): `steer` a working or stopped thread; `ask` a done, failed or
+ * idle one (the user's Ask), whose secondary action reopens (`Reopen`) or resumes (`Resume`, idle) it after a confirm;
+ * `off` for an archived thread.
+ */
+export type ComposerMode = { kind: 'steer'; hint: string } | { kind: 'ask'; reopen: 'Reopen' | 'Resume' } | { kind: 'off'; hint: string };
 
 const MAX_OUTPUT = 6000;
 
@@ -175,14 +183,16 @@ export function Transcript(o: {
   depth: Depth;
   onDepth(d: Depth): void;
   actions: React.ReactNode;
-  canSteer: boolean;
-  steerHint: string;
+  /** The box under the transcript: steer a working thread, ask (or reopen) a finished one, or nothing. */
+  composer: ComposerMode;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [steer, setSteer] = useState('');
-  const [sending, setSending] = useState(false);
-  const [pending, setPending] = useState<string[]>([]);
+  const [sending, setSending] = useState<'ask' | 'steer' | null>(null);
+  const [pending, setPending] = useState<Array<{ text: string; ask: boolean }>>([]);
+  const [reopening, setReopening] = useState(false);
+  const ask = o.composer.kind === 'ask';
   const stopOfEntry = new Map<string, number>();
   for (const r of o.rows) if (r.kind === 'stop') r.stop.entries.forEach((e, i) => i === 0 && stopOfEntry.set(e.id, r.stop.n));
   const inStop = new Map<string, number>();
@@ -191,7 +201,7 @@ export function Transcript(o: {
   useEffect(() => {
     if (!pending.length) return;
     const steered = new Set(o.entries.flatMap((e) => (e.kind === 'steer' ? [e.text] : [])));
-    setPending((p) => p.filter((t) => !steered.has(t)));
+    setPending((p) => p.filter((t) => !steered.has(t.text)));
   }, [o.entries, pending.length]);
   useEffect(() => {
     const el = listRef.current;
@@ -202,24 +212,25 @@ export function Transcript(o: {
     document.getElementById(stopDomId(o.selected))?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
   }, [o.selected]);
 
-  const send = async () => {
+  /** Sends the box's text: an Ask (`question`), or a plain message that steers the thread or reopens a finished one. */
+  const send = async (how: 'ask' | 'steer') => {
     const text = steer.trim();
-    if (!text || sending) return;
-    setSending(true);
+    if (!text || sending || o.composer.kind === 'off') return;
+    setSending(how);
     try {
-      await call('threads.send', { id: o.threadId, text });
+      await call('threads.send', { id: o.threadId, text, ...(how === 'ask' ? { question: true } : {}) });
       setSteer('');
-      setPending((p) => [...p, text]);
+      setPending((p) => [...p, { text, ask: how === 'ask' }]);
     } catch (err) {
       toastError(err);
     } finally {
-      setSending(false);
+      setSending(null);
     }
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      void send();
+      void send(ask ? 'ask' : 'steer');
     }
   };
 
@@ -296,33 +307,57 @@ export function Transcript(o: {
               ),
             )}
         {pending.map((t) => (
-          <div key={t} className="tr-entry pending">
+          <div key={t.text} className="tr-entry pending">
             <span className="tr-num tr-num-blank" aria-hidden="true" />
             <div className="tr-body">
-              <span className="tr-title">You · steering…</span>
-              <p className="tr-text">{t}</p>
+              <span className="tr-title">{`You · ${t.ask ? 'asking' : 'steering'}…`}</span>
+              <p className="tr-text">{t.text}</p>
             </div>
           </div>
         ))}
       </div>
       <div className="steer">
-        <label htmlFor={`steer-${o.threadId}`}>Steer this thread</label>
+        <label htmlFor={`steer-${o.threadId}`}>{ask ? 'Ask this thread' : 'Steer this thread'}</label>
         <textarea
           id={`steer-${o.threadId}`}
           rows={2}
           value={steer}
-          disabled={!o.canSteer}
+          disabled={o.composer.kind === 'off'}
           onChange={(e) => setSteer(e.target.value)}
           onKeyDown={onKey}
-          placeholder="Steer this thread. It reads this at its next step."
+          placeholder={ask ? 'Ask about its work. It answers from its context.' : 'Steer this thread. It reads this at its next step.'}
         />
         <div className="steer-bar">
-          <span className="grow muted small">{o.steerHint}</span>
-          <Button variant="primary" size="sm" pending={sending} disabled={!o.canSteer || !steer.trim()} onClick={() => void send()}>
-            Steer
+          <span className="grow muted small">{o.composer.kind === 'ask' ? 'It answers from its context; its result stays as it is.' : o.composer.hint}</span>
+          {o.composer.kind === 'ask' ? (
+            <Button size="sm" pending={sending === 'steer'} disabled={!steer.trim() || sending !== null} onClick={() => setReopening(true)}>
+              {o.composer.reopen} with this…
+            </Button>
+          ) : null}
+          <Button
+            variant="primary"
+            size="sm"
+            pending={sending === (ask ? 'ask' : 'steer')}
+            disabled={o.composer.kind === 'off' || !steer.trim() || sending !== null}
+            onClick={() => void send(ask ? 'ask' : 'steer')}
+          >
+            {ask ? 'Ask' : 'Steer'}
           </Button>
         </div>
       </div>
+      {reopening && o.composer.kind === 'ask' ? (
+        <ConfirmDialog
+          title={`${o.composer.reopen} this thread?`}
+          confirmLabel={o.composer.reopen}
+          onConfirm={() => {
+            setReopening(false);
+            void send('steer');
+          }}
+          onCancel={() => setReopening(false)}
+        >
+          {o.composer.reopen === 'Reopen' ? 'Reopening' : 'Resuming'} lets it change its work; its result and branch may change.
+        </ConfirmDialog>
+      ) : null}
     </aside>
   );
 }
