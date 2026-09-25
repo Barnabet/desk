@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, max, sql } from 'drizzle-orm';
-import { resolveSettings, type EventOf, type EventType, type StoredEvent, type ToolImage } from '@desk/protocol';
+import { resolveSettings, sanitizeLabel, type EventOf, type EventType, type StoredEvent, type ToolImage } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, services, sources, usageTotals } from '../db/schema';
 
@@ -50,6 +50,24 @@ export const listThreads = (db: Db, projectId: string, status?: AgentRow['status
     .where(and(eq(agents.project_id, projectId), eq(agents.role, 'thread'), status ? eq(agents.status, status) : undefined))
     .orderBy(asc(agents.created_at), asc(agents.id))
     .all();
+
+/**
+ * The project's threads that `ref` names: the thread with that id, else the threads titled exactly `ref`, else the
+ * threads a message header names `ref` (`sanitizeLabel` of the title). Of the threads named, the live ones when there
+ * are any (a live thread wins over an archived one of the same title), oldest first.
+ */
+export function threadsByRef(db: Db, projectId: string, ref: string): AgentRow[] {
+  const threads = listThreads(db, projectId);
+  const byId = threads.find((t) => t.id === ref);
+  if (byId) return [byId];
+  const liveFirst = (named: AgentRow[]) => {
+    const live = named.filter((t) => !t.archived_at);
+    return live.length ? live : named;
+  };
+  const titled = threads.filter((t) => t.title === ref);
+  if (titled.length) return liveFirst(titled);
+  return liveFirst(threads.filter((t) => sanitizeLabel(t.title ?? 'untitled') === ref));
+}
 
 export const listSources = (db: Db, projectId: string): SourceRow[] =>
   db.select().from(sources).where(eq(sources.project_id, projectId)).orderBy(asc(sources.created_at), asc(sources.id)).all();

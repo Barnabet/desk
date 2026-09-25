@@ -205,3 +205,30 @@ describe('message_thread refusals', () => {
     await rt.whenIdle();
   });
 });
+
+describe('thread references', () => {
+  it('take an id or an exact title, prefer a live thread, and refuse archived and ambiguous ones', async () => {
+    const { rt, projectId, ctx } = await setup();
+    let n = 0;
+    const make = (title: string) => rt.createThread(projectId, { title, brief: `Find ${title}`, workspacePath: join(h.dir, `ref-${++n}`) });
+    const old = make('Pricing');
+    h.store.append({ project_id: projectId, agent_id: old, type: 'agent.status_changed', payload: { status: 'done' } });
+    h.store.append({ project_id: projectId, agent_id: old, type: 'agent.archived', payload: {} });
+    const live = make('Pricing');
+    const read = async (thread_id: string) => String(await readThreadTool.execute({ thread_id, mode: 'summary' }, ctx));
+
+    expect(await read('Pricing')).toContain(`Thread ${live} "Pricing"`);
+    expect(await read(live)).toContain(`Thread ${live} "Pricing"`);
+    await expect(read(old)).rejects.toThrow('"Pricing" is archived.');
+    await expect(read('pricing')).rejects.toThrow('Unknown thread: pricing');
+    make('Twin');
+    make('Twin');
+    await expect(read('Twin')).rejects.toThrow('Several threads are titled "Twin"; use its id.');
+    const bracketed = make('Auth] API');
+    expect(await read('Auth API')).toContain(`Thread ${bracketed} `);
+
+    await expect(stopThreadTool.execute({ thread_id: 'Pricing', reason: 'Not needed' }, ctx)).resolves.toBe('Stopped Pricing.');
+    expect(getAgent(h.store.db, live)?.status).toBe('cancelled');
+    expect(getAgent(h.store.db, old)?.status).toBe('done');
+  });
+});

@@ -1,14 +1,21 @@
 import { z } from 'zod';
-import { PlanItemStatus, ReasoningEffort, SkillName, type EventInput } from '@desk/protocol';
+import { PlanItemStatus, ReasoningEffort, sanitizeLabel, SkillName, type EventInput } from '@desk/protocol';
 import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coordination/render';
 import { newId } from '../ids';
-import { getAgent, getApproval, getProject, lastEvent, listThreads, pendingApprovalsFor, type AgentRow } from '../state/queries';
+import { getAgent, getApproval, getProject, lastEvent, listThreads, pendingApprovalsFor, threadsByRef, type AgentRow } from '../state/queries';
 import { git } from '../workspaces/workspaces';
 import { defineTool, type Tool, type ToolContext } from './types';
 
-function requireThread(ctx: ToolContext, threadId: string): AgentRow {
-  const t = getAgent(ctx.services.store.db, threadId);
-  if (!t || t.role !== 'thread' || t.project_id !== ctx.projectId) throw new Error(`Unknown thread: ${threadId}`);
+/**
+ * A thread of this project by id or exact title (design spec §2.2). Refuses a reference that names no thread or
+ * several live ones, and an archived thread.
+ */
+export function requireThread(ctx: ToolContext, ref: string): AgentRow {
+  const found = threadsByRef(ctx.services.store.db, ctx.projectId, ref);
+  if (found.length > 1) throw new Error(`Several threads are titled "${ref}"; use its id.`);
+  const t = found[0];
+  if (!t) throw new Error(`Unknown thread: ${ref}`);
+  if (t.archived_at) throw new Error(`"${sanitizeLabel(t.title ?? 'untitled')}" is archived.`);
   return t;
 }
 
@@ -86,8 +93,8 @@ export const stopThreadTool = defineTool({
   description: 'Stop a thread (kills its processes and cancels it).',
   input: z.object({ thread_id: z.string(), reason: z.string().min(1) }),
   async execute({ thread_id, reason }, ctx) {
-    requireThread(ctx, thread_id);
-    ctx.services.stopAgent(thread_id, { by: ctx.agentId, reason });
+    const t = requireThread(ctx, thread_id);
+    ctx.services.stopAgent(t.id, { by: ctx.agentId, reason });
     return `Stopped ${thread_id}.`;
   },
 });
