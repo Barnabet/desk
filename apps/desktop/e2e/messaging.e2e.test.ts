@@ -117,24 +117,44 @@ describe('messages between threads, end to end', () => {
     const digest = page.getByRole('button', { name: 'Between threads · 2 messages', exact: true });
     await digest.waitFor({ timeout: 45_000 });
     await shot(page, 'messaging-1-digest');
-    await digest.click();
     const threads = await client.threads.list(project.id);
     const auth = threads.find((t) => t.title === 'Auth API')!;
     const front = threads.find((t) => t.title === 'Frontend')!;
-    const pair = page.getByRole('link', { name: /^Frontend ⇄ Auth API · 2/ });
-    expect(await pair.getAttribute('href')).toMatch(new RegExp(`/threads/${front.id}\\?at=\\d+$`));
 
-    // The pair line opens the asker, which received the latest message, at the answer.
-    await pair.click();
-    const answer = page.getByRole('button', { name: /^Stop \d+: Answer from Auth API/ });
-    await answer.waitFor({ timeout: 15_000 });
-    await expect.poll(() => answer.getAttribute('aria-pressed')).toBe('true');
-    await shot(page, 'messaging-2-asker');
+    // Frontend's lane marks its question to Auth API, filled once answered, and the legend explains the ring.
+    const mark = page.getByRole('button', { name: /^Frontend asked Auth API, \d\d:\d\d$/ });
+    await expect.poll(() => mark.getAttribute('class')).toContain('line-q-answered');
+    expect(await page.locator('.line-legend').textContent()).toContain('question');
+    // The ring sits on the lane among labels and chips, so the click goes to it directly.
+    await mark.dispatchEvent('click');
+    const sheet = page.getByRole('dialog', { name: 'Frontend ⇄ Auth API' });
+    await sheet.waitFor();
+    // One question, with Auth API's answer nested under it.
+    expect(await sheet.locator('.pair-rows > li').count()).toBe(1);
+    await sheet.locator('.pair-rows > li .pair-answers').getByText('A JWT signed with RS256').waitFor();
+    await shot(page, 'messaging-2-pair');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await sheet.waitFor({ state: 'detached' });
 
-    // The answerer's route shows its answer run as one stop.
+    // The digest's pair line opens the same sheet; the answer's link opens Frontend where it received it.
+    await digest.click();
+    await page.getByRole('button', { name: /^Frontend ⇄ Auth API · 2/ }).click();
+    const inFront = sheet.getByRole('link', { name: 'show in Frontend transcript' });
+    expect(await inFront.getAttribute('href')).toMatch(new RegExp(`/threads/${front.id}\\?at=\\d+$`));
+    await inFront.click();
+    // Frontend's question and Auth API's answer are two cards in one stop, which the link selected.
+    const both = page.getByRole('button', { name: /^Stop \d+: .*, 2 messages$/ });
+    await both.waitFor({ timeout: 15_000 });
+    await expect.poll(() => both.getAttribute('aria-pressed')).toBe('true');
+    const tr = page.getByRole('complementary', { name: 'Transcript' });
+    await tr.locator('.tr-card', { hasText: 'Answer from Auth API' }).first().waitFor();
+    expect(await tr.locator('.tr-card', { hasText: 'Asked Auth API' }).count()).toBe(1);
+    await shot(page, 'messaging-3-asker');
+
+    // The answerer's route: Frontend's question is a card, and the answer run is one stop.
     await go(page, `#/p/${project.id}/threads/${auth.id}`);
     await page.getByRole('button', { name: /^Stop \d+: Answered Frontend/ }).waitFor({ timeout: 15_000 });
-    expect(await page.getByRole('button', { name: /^Stop \d+: Frontend asked/ }).count()).toBe(1);
+    expect(await tr.locator('.tr-card', { hasText: 'Frontend asked' }).count()).toBe(1);
 
     // The user asks the done thread; it answers from its context and stays Done.
     const transcript = page.getByRole('complementary', { name: 'Transcript' });
@@ -145,6 +165,6 @@ describe('messages between threads, end to end', () => {
     await transcript.getByText('Tokens last 15 minutes.').first().waitFor();
     await expect.poll(() => page.locator('.thread-status-line').first().textContent()).toMatch(/^Done/);
     expect((await client.threads.list(project.id)).find((t) => t.id === auth.id)?.status).toBe('done');
-    await shot(page, 'messaging-3-ask');
+    await shot(page, 'messaging-4-ask');
   });
 });
