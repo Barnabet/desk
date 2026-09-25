@@ -24,6 +24,9 @@
   --radius-card: 16px;
   --code-bg: #1c1b18;
   --code-fg: #f3f0e8;
+  /* The checkerboard behind images, so transparent areas show */
+  --checker-a: #f4f1ea;
+  --checker-b: #ffffff;
   --font-serif: 'Newsreader Variable', Newsreader, Georgia, serif;
   --font-sans: 'Geist Variable', Geist, system-ui, sans-serif;
   --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
@@ -887,7 +890,44 @@ pre {
   object-fit: contain;
   align-self: flex-start;
   border-radius: 6px;
-  background: repeating-conic-gradient(#f4f1ea 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 16px 16px;
+}
+
+/* Images an agent looked at (view_image): thumbnails under the tool result, larger in a sheet */
+.image-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.image-thumb {
+  width: 76px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px;
+  cursor: zoom-in;
+}
+.image-thumb:hover,
+.image-thumb:focus-visible {
+  border-color: var(--run);
+}
+.image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.image-caption {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.image-large {
+  max-height: 72vh;
 }
 
 .icon-btn {

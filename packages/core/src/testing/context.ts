@@ -10,6 +10,15 @@ export const NO_SERVICES = new Proxy({} as RuntimeServices, {
   },
 });
 
+/** Runtime services for unit tests: the given members, and NO_SERVICES' behaviour for everything else. */
+export function testServices(partial: Partial<RuntimeServices>): RuntimeServices {
+  return new Proxy(partial as RuntimeServices, {
+    get(t, prop) {
+      return prop in t ? t[prop as keyof RuntimeServices] : (NO_SERVICES as unknown as Record<PropertyKey, unknown>)[prop];
+    },
+  });
+}
+
 /** A ToolContext for unit tests: unsandboxed, workspace doubles as the only read root. */
 export function testToolContext(workspace: string, overrides: Partial<ToolContext> = {}): ToolContext {
   return {

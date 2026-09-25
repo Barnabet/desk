@@ -46,6 +46,22 @@ function safeExternalUrl(raw: string): string {
   return url.toString();
 }
 
+/** Largest attachment turned into a data URL for the renderer (view_image allows 3.75 MB per image). */
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+/**
+ * Fetches an attachment and returns it as a data URL, only for raster image types and within the size cap. The bytes
+ * are passed through untouched: images may come from the web, so only the sandboxed renderer decodes them.
+ */
+async function attachmentDataUrl(c: HandlerContext, sha256: string): Promise<string> {
+  const { data, mediaType } = await c.client().attachments.get(sha256);
+  const type = mediaType.split(';')[0]!.trim().toLowerCase();
+  if (!IMAGE_TYPES.has(type)) throw new UserFacingError('unsupported_attachment', 'This attachment is not an image Desk can show.');
+  if (data.byteLength > MAX_ATTACHMENT_BYTES) throw new UserFacingError('attachment_too_large', 'This image is too large to show here.');
+  return `data:${type};base64,${Buffer.from(data).toString('base64')}`;
+}
+
 export const handlers = {
   health: (_i, c) => c.client().health(),
   overview: (_i, c) => c.client().overview(),
@@ -94,6 +110,8 @@ export const handlers = {
   'memory.add': (i, c) => c.client().memory.add(i.projectId, i.entry),
   'memory.correct': (i, c) => c.client().memory.correct(i.projectId, i.memoryId, i.update),
   'memory.remove': (i, c) => c.client().memory.remove(i.projectId, i.memoryId),
+
+  'attachments.get': (i, c) => attachmentDataUrl(c, i.sha256),
 
   'library.list': (i, c) => c.client().library.list(i.projectId),
   'library.upload': (i, c) => c.client().library.upload(i.projectId, i.file),

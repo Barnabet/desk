@@ -35,6 +35,31 @@ describe('renderer', () => {
     expect(out).toContain('? Which date? [Mon / Fri]');
   });
 
+  it('shows the images a tool result carried, for Desk and in verbose mode', () => {
+    let out = '';
+    const image = { sha256: 'a'.repeat(64), media_type: 'image/png' as const, width: 1240, height: 1754, bytes: 9, name: 'page-1.png' };
+    const result = (agent: string) => ev(agent, { type: 'tool.result', payload: { run_id: 'r', tool_call_id: 'c', name: 'view_image', status: 'ok', content: 'page-1.png', images: [image] } });
+    const render = createRenderer((s) => (out += s), { deskId: 'D' });
+    render(ev('D', { type: 'assistant.message', payload: { run_id: 'r', content: null, tool_calls: [{ id: 'c', name: 'view_image', arguments: '{"paths":["page-1.png","page-2.png"]}' }] } }));
+    render(result('D'));
+    render(result('T1'));
+    expect(out).toContain('⚙ view_image page-1.png page-2.png');
+    expect(out.match(/\[image: page-1\.png 1240×1754\]/g)).toHaveLength(1);
+    let verbose = '';
+    createRenderer((s) => (verbose += s), { deskId: 'D', verbose: true })(result('T1'));
+    expect(verbose).toBe('    [image: page-1.png 1240×1754]\n');
+  });
+
+  it('says when images are no longer sent to the model because the endpoint refused them', () => {
+    let out = '';
+    const render = createRenderer((s) => (out += s), { deskId: 'D' });
+    const withheld = (agent: string) =>
+      ev(agent, { type: 'images.withheld', payload: { run_id: 'r', reason: '400 Could not process image', images: [{ tool_call_id: 'c', sha256: 'a'.repeat(64), name: 'page-3.png' }] } });
+    render(withheld('D'));
+    render(withheld('T1'));
+    expect(out).toBe('  ⚠ no longer sent to the model: page-3.png (400 Could not process image)\n');
+  });
+
   it('prints non-streamed assistant messages', () => {
     let out = '';
     const render = createRenderer((s) => (out += s), { deskId: 'D' });

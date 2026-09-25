@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createHarness, newRuntime, type Harness } from '@desk/core/testing';
+import { createHarness, encodePng, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
 import { ApiError, DaemonUnavailable, DeskClient } from './index';
 import { checkDaemon, clientFromDataDir, defaultDataDir, readDaemonInfo } from './node';
@@ -42,6 +42,12 @@ describe('DeskClient', () => {
     expect((await client.threads.list(id)).map((x) => x.id)).toEqual([t]);
     expect(await client.threads.files(t)).toEqual([{ name: 'out.txt', path: 'out.txt', type: 'file', size: 6 }]);
     expect(new TextDecoder().decode(await client.threads.file(t, 'out.txt'))).toBe('bytes!');
+    const png = encodePng(2, 2);
+    const sha = await runtime.attachments.put(png, 'image/png');
+    expect(client.attachments.url(sha)).toBe(`${client.baseUrl}/v1/attachments/${sha}`);
+    const att = await client.attachments.get(sha);
+    expect([att.mediaType, Buffer.from(att.data).equals(png)]).toEqual(['image/png', true]);
+    await expect(client.attachments.get('f'.repeat(64))).rejects.toMatchObject({ status: 404 });
 
     await client.skills.save({}, 'weekly-report', { description: 'Weekly', instructions: 'v1' });
     await client.skills.save({ projectId: id }, 'weekly-report', { description: 'Project flavour', instructions: 'p1' });

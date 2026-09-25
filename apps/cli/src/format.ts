@@ -1,4 +1,4 @@
-import type { StoredEvent, StreamServerMessage } from '@desk/protocol';
+import { imageLabel, type StoredEvent, type StreamServerMessage } from '@desk/protocol';
 
 const clip = (s: string, n: number) => {
   const flat = s.replace(/\s+/g, ' ').trim();
@@ -33,6 +33,8 @@ function summarizeArgs(name: string, raw: string): string {
     case 'web_search':
     case 'memory_search':
       return `"${s('query')}"`;
+    case 'view_image':
+      return Array.isArray(args.paths) ? clip(args.paths.filter((p) => typeof p === 'string').join(' '), 80) : '';
     default:
       return clip(raw === '{}' ? '' : raw, 80);
   }
@@ -75,6 +77,15 @@ export function createRenderer(write: (s: string) => void, opts: RenderOptions):
         if (e.payload.content && !streamedRuns.has(e.payload.run_id)) line(`${isDesk ? speaker : `"${title(e.agent_id)}"`} › ${e.payload.content}`);
         else if (streaming) line('');
         for (const tc of e.payload.tool_calls) line(`  ⚙ ${tc.name} ${summarizeArgs(tc.name, tc.arguments)}`.trimEnd());
+        return;
+      case 'tool.result':
+        // Tool calls print with the assistant message; a result adds only the images the agent looked at.
+        if (!isDesk && !opts.verbose) return;
+        for (const image of e.payload.images ?? []) line(`    [image: ${imageLabel(image)}]`);
+        return;
+      case 'images.withheld':
+        if (!isDesk && !opts.verbose) return;
+        line(`  ⚠ no longer sent to the model: ${e.payload.images.map((i) => i.name).join(', ')} (${clip(e.payload.reason, 120)})`);
         return;
       case 'approval.requested': {
         let detail = e.payload.arguments;

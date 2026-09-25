@@ -10,6 +10,8 @@ describe('format', () => {
   it('summarises tool arguments by their first string value', () => {
     expect(summarizeToolArgs('{"path":"emails/04.md","content":"x"}')).toBe('emails/04.md');
     expect(summarizeToolArgs('{"n":1}')).toBe('');
+    expect(summarizeToolArgs('{"paths":["a.png","b.png"]}')).toBe('a.png b.png');
+    expect(summarizeToolArgs('{"paths":["a.png"],"purpose":"check the chart"}')).toBe('check the chart');
     expect(summarizeToolArgs('not json')).toBe('not json');
     expect(summarizeToolArgs(JSON.stringify({ command: 'a\n  b' }))).toBe('a b');
     expect(summarizeToolArgs(JSON.stringify({ command: 'x'.repeat(200) }), 10)).toBe('xxxxxxxxx…');

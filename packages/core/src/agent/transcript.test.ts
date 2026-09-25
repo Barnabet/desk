@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { EventBody, StoredEvent } from '@desk/protocol';
-import { buildConversation } from './transcript';
+import type { EventBody, EventOf, StoredEvent, ToolImage } from '@desk/protocol';
+import {
+  applyCheckpoint,
+  buildConversation,
+  buildCurrentConversation,
+  CHECKPOINT_HEADER,
+  IMAGES_HEADER,
+  imagesInWindow,
+  MAX_IMAGE_BYTES_SHOWN,
+  occurrenceOf,
+  pixelGroups,
+  showImages,
+  withholdMore,
+  type ImageLoader,
+} from './transcript';
 
 let seq = 0;
 const ev = (body: EventBody): StoredEvent => ({ ...body, id: ++seq, project_id: 'p', agent_id: 'a', ts: 't' }) as StoredEvent;
@@ -50,3 +63,193 @@ describe('buildConversation', () => {
     expect(buildConversation(events)).toEqual([{ role: 'user', content: 'a' }]);
   });
 });
+
+const img = (name: string, n: number, width = 10, height = 10): ToolImage => ({ sha256: String(n % 10).repeat(64), media_type: 'image/png', width, height, bytes: 100, name });
+const url = (i: ToolImage) => `data:${i.media_type};base64,${i.name}`;
+const loadAll: ImageLoader = (i) => url(i);
+
+/** One view_image call (tool call + result with images). */
+function viewCall(id: string, images: ToolImage[]): StoredEvent[] {
+  return [
+    ev({ type: 'assistant.message', payload: { run_id: 'r', content: null, tool_calls: [{ id, name: 'view_image', arguments: '{}' }] } }),
+    ev({ type: 'tool.result', payload: { run_id: 'r', tool_call_id: id, name: 'view_image', status: 'ok', content: images.map((i) => i.name).join('\n'), images } }),
+  ];
+}
+
+describe('images in the conversation', () => {
+  it('puts the images of a batch of tool results in one user message after the batch', () => {
+    seq = 0;
+    const [a, b] = [img('page-1.png', 1, 1240, 1754), img('page-2.png', 2, 1240, 1754)];
+    const events = [
+      ev({ type: 'message.user', payload: { text: 'look' } }),
+      ev({ type: 'inbox.drained', payload: { run_id: 'r', up_to: 1 } }),
+      ev({
+        type: 'assistant.message',
+        payload: { run_id: 'r', content: null, tool_calls: [{ id: 'c1', name: 'view_image', arguments: '{}' }, { id: 'c2', name: 'read_file', arguments: '{}' }] },
+      }),
+      ev({ type: 'tool.result', payload: { run_id: 'r', tool_call_id: 'c1', name: 'view_image', status: 'ok', content: 'page-1.png\npage-2.png', images: [a, b] } }),
+      ev({ type: 'tool.result', payload: { run_id: 'r', tool_call_id: 'c2', name: 'read_file', status: 'ok', content: 'text' } }),
+      ev({ type: 'assistant.message', payload: { run_id: 'r', content: 'They are blank.', tool_calls: [] } }),
+    ];
+    const pixels = buildConversation(events, { images: loadAll });
+    expect(pixels.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user', 'assistant']);
+    expect(pixels[4]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: IMAGES_HEADER },
+        { type: 'image_url', image_url: { url: url(a) } },
+        { type: 'image_url', image_url: { url: url(b) } },
+      ],
+    });
+    // Without a loader (compaction, a model without vision): text references only, as plain text.
+    expect(buildConversation(events)[4]).toEqual({ role: 'user', content: `${IMAGES_HEADER}\n[image: page-1.png 1240×1754]\n[image: page-2.png 1240×1754]` });
+    // The last batch of a conversation gets its message too, and output is stable (prompt caching).
+    expect(buildConversation(events.slice(0, 5), { images: loadAll }).at(-1)).toEqual(pixels[4]);
+    expect(buildConversation(events, { images: loadAll })).toEqual(pixels);
+  });
+
+  it('sends only the 8 most recent images as pixels; older and missing ones become placeholders', () => {
+    seq = 0;
+    const first = [1, 2, 3, 4].map((n) => img(`a-${n}.png`, n));
+    const second = [5, 6, 7, 8].map((n) => img(`b-${n}.png`, n));
+    const third = [img('c-9.png', 9), img('c-10.png', 0, 640, 480)];
+    const events = [...viewCall('c1', first), ...viewCall('c2', second), ...viewCall('c3', third)];
+    const load: ImageLoader = (i) => (i.name === 'b-6.png' ? null : url(i));
+    const conv = buildConversation(events, { images: load });
+    const partsOf = (i: number) => conv[i]!.content as Array<{ type: string; text?: string; image_url?: { url: string } }>;
+    expect(partsOf(2)).toEqual([
+      { type: 'text', text: IMAGES_HEADER },
+      { type: 'text', text: '[image no longer shown: a-1.png 10×10 — view it again if needed]' },
+      { type: 'text', text: '[image no longer shown: a-2.png 10×10 — view it again if needed]' },
+      { type: 'image_url', image_url: { url: url(first[2]!) } },
+      { type: 'image_url', image_url: { url: url(first[3]!) } },
+    ]);
+    expect(partsOf(5)[2]).toEqual({ type: 'text', text: '[image no longer available: b-6.png 10×10 — view it again if needed]' });
+    expect(partsOf(8).map((p) => p.type)).toEqual(['text', 'image_url', 'image_url']);
+    expect(buildConversation(events, { images: load, maxImages: 1 }).flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((p) => p.type === 'image_url')).toEqual([
+      { type: 'image_url', image_url: { url: url(third[1]!) } },
+    ]);
+  });
+
+  it('merges a checkpoint into a first user message with parts, and keeps an images message whole', () => {
+    const checkpoint = { id: 9, project_id: 'p', agent_id: 'a', ts: 't', type: 'context.compacted', payload: { run_id: 'r', checkpoint: 'Earlier work.', up_to: 4, trigger: 'threshold' } } as EventOf<'context.compacted'>;
+    const summary = `${CHECKPOINT_HEADER}\nEarlier work.`;
+    const parts = applyCheckpoint([{ eventId: 5, message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }], checkpoint);
+    expect(parts).toEqual([{ eventId: 5, message: { role: 'user', content: [{ type: 'text', text: summary }, { type: 'text', text: 'hi' }] } }]);
+    const images = applyCheckpoint([{ eventId: 5, images: [{ image: img('x.png', 1), toolCallId: 'c1' }], message: { role: 'user', content: [{ type: 'text', text: IMAGES_HEADER }] } }], checkpoint);
+    expect(images.map((m) => [m.eventId, m.message.content])).toEqual([
+      [4, summary],
+      [5, [{ type: 'text', text: IMAGES_HEADER }]],
+    ]);
+  });
+
+  it('keeps the pixels within 20 MB together: the window is the most recent images that fit, never an older small one', () => {
+    seq = 0;
+    const mb = 1024 * 1024;
+    const sized = (name: string, n: number, bytes: number): ToolImage => ({ ...img(name, n), bytes });
+    const events = [
+      ...viewCall('c1', [sized('tiny.png', 1, 1000)]),
+      ...viewCall('c2', [sized('a.png', 2, 3.7 * mb), sized('b.png', 3, 3.7 * mb), sized('c.png', 4, 3.7 * mb)]),
+      ...viewCall('c3', [sized('d.png', 5, 3.7 * mb), sized('e.png', 6, 3.7 * mb), sized('f.png', 7, 3.7 * mb)]),
+    ];
+    const conv = buildCurrentConversation(events, { images: loadAll });
+    const sent = conv.flatMap((m) => m.images ?? []).filter((c) => c.pixels);
+    expect(sent.map((c) => c.image.name)).toEqual(['b.png', 'c.png', 'd.png', 'e.png', 'f.png']);
+    expect(sent.reduce((n, c) => n + c.image.bytes, 0)).toBeLessThanOrEqual(MAX_IMAGE_BYTES_SHOWN);
+    expect(conv[2]!.message.content).toBe(`${IMAGES_HEADER}\n[image no longer shown: tiny.png 10×10 — view it again if needed]`);
+    // A lower budget (after an endpoint refused a request as too large) shows fewer.
+    expect([...imagesInWindow(buildCurrentConversation(events), { maxBytes: 8 * mb })].map((c) => c.image.name)).toEqual(['f.png', 'e.png']);
+  });
+
+  it('sends withheld images as text: they keep their place and their bytes in the window', () => {
+    seq = 0;
+    const [a, b, c, d] = [img('a.png', 1), img('b.png', 2), img('c.png', 3), img('d.png', 4)];
+    const events = [
+      ...viewCall('c1', [a]),
+      ...viewCall('c2', [b, c]),
+      ...viewCall('c3', [d]),
+      ev({ type: 'images.withheld', payload: { run_id: 'r', reason: '400 Could not process image', images: [{ tool_call_id: 'c3', sha256: d.sha256, name: 'd.png' }] } }),
+      ev({
+        type: 'images.withheld',
+        payload: {
+          run_id: 'r',
+          reason: '400 The image data you provided does not represent a valid image.',
+          images: [
+            { tool_call_id: 'c2', sha256: b.sha256, name: 'b.png' },
+            { tool_call_id: 'c2', sha256: c.sha256, name: 'c.png' },
+          ],
+        },
+      }),
+    ];
+    const conv = buildCurrentConversation(events, { images: loadAll, maxImages: 3 });
+    const text = (i: number) => conv[i]!.message.content as string;
+    expect(text(8)).toBe(
+      `${IMAGES_HEADER}\n[image not shown: d.png 10×10, the model provider refused it (400 Could not process image); re-render it or convert it to PNG (images skill img_convert.py) before viewing it again]`,
+    );
+    expect(text(5).split('\n')[1]).toBe(
+      '[image not shown: b.png 10×10, the model provider refused one of the 2 images withheld together (400 The image data you provided does not represent a valid image.); view them again one at a time]',
+    );
+    // Three places: d, c and b (withheld); a is out of the window although no pixels were sent.
+    expect(text(2)).toBe(`${IMAGES_HEADER}\n[image no longer shown: a.png 10×10 — view it again if needed]`);
+    expect(pixelGroups(conv)).toEqual([]);
+    // Withheld images keep their bytes too: withholding never brings an older image back into the window.
+    expect([...imagesInWindow(buildCurrentConversation(events), { maxBytes: 300 })]).toEqual([]);
+    // The same image viewed again in a later call is a new occurrence, sent as pixels.
+    const again = buildCurrentConversation([...events, ...viewCall('c4', [b])], { images: loadAll });
+    expect(pixelGroups(again).map((g) => g.map((x) => [x.toolCallId, x.image.name]))).toEqual([[['c4', 'b.png']], [['c1', 'a.png']]]);
+    // Without pixels (a model without vision, compaction), withheld images are plain references.
+    expect(buildConversation(events)[8]).toEqual({ role: 'user', content: `${IMAGES_HEADER}\n[image: d.png 10×10]` });
+  });
+
+  it('withholds more images for a retry without changing the window', () => {
+    seq = 0;
+    const [a, b, c] = [img('a.png', 1), img('b.png', 2), img('c.png', 3)];
+    const events = [...viewCall('c1', [a]), ...viewCall('c2', [b, c])];
+    const base = buildCurrentConversation(events);
+    const trial = withholdMore(base, new Map([[occurrenceOf({ image: c, toolCallId: 'c2' }), { reason: '400 Could not process image', count: 1 }]]));
+    const shown = showImages(trial, loadAll, { maxImages: 2 });
+    expect(pixelGroups(shown).map((g) => g.map((x) => x.image.name))).toEqual([['b.png']]);
+    expect(shown[5]!.message.content).toEqual([
+      { type: 'text', text: IMAGES_HEADER },
+      { type: 'image_url', image_url: { url: url(b) } },
+      { type: 'text', text: expect.stringContaining('[image not shown: c.png 10×10, the model provider refused it') },
+    ]);
+    // a stays out: c keeps its place although it is withheld.
+    expect(shown[2]!.message.content).toBe(`${IMAGES_HEADER}\n[image no longer shown: a.png 10×10 — view it again if needed]`);
+    expect(withholdMore(base, new Map())).toBe(base);
+  });
+
+  it('says so when a step showed more images than the window: those were never seen, so not "view it again"', () => {
+    seq = 0;
+    // Two parallel view_image calls of 6 images each: 12 images after one step, 8 of them sent.
+    const first = [1, 2, 3, 4, 5, 6].map((n) => img(`a-${n}.png`, n));
+    const second = [7, 8, 9, 10, 11, 12].map((n) => img(`b-${n}.png`, n));
+    const events = [
+      ev({
+        type: 'assistant.message',
+        payload: { run_id: 'r', content: null, tool_calls: [{ id: 'c1', name: 'view_image', arguments: '{}' }, { id: 'c2', name: 'view_image', arguments: '{}' }] },
+      }),
+      ev({ type: 'tool.result', payload: { run_id: 'r', tool_call_id: 'c1', name: 'view_image', status: 'ok', content: 'a', images: first } }),
+      ev({ type: 'tool.result', payload: { run_id: 'r', tool_call_id: 'c2', name: 'view_image', status: 'ok', content: 'b', images: second } }),
+    ];
+    const conv = buildCurrentConversation(events, { images: loadAll });
+    const parts = conv[3]!.message.content as Array<{ type: string; text?: string }>;
+    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(8);
+    expect(parts.slice(1, 5).map((p) => p.text)).toEqual(
+      first.slice(0, 4).map((i) => `[image not shown: ${i.name} 10×10 — more images than the model is shown at once; view fewer or smaller images at a time]`),
+    );
+    // Once a later step shows more images, earlier ones that were shown say "no longer shown".
+    const later = buildCurrentConversation([...events, ...viewCall('c3', [img('c.png', 13)])], { images: loadAll });
+    const laterParts = later[3]!.message.content as Array<{ type: string; text?: string }>;
+    expect(laterParts[5]?.text).toBe('[image no longer shown: a-5.png 10×10 — view it again if needed]');
+    expect(laterParts[1]?.text).toContain('more images than the model is shown at once');
+  });
+
+  it('marks what it sends as pixels, one group per images message, the most recent first', () => {
+    seq = 0;
+    const events = [...viewCall('c1', [img('a.png', 1)]), ...viewCall('c2', [img('b.png', 2), img('c.png', 3)])];
+    const shown = showImages(buildCurrentConversation(events), (i) => (i.name === 'c.png' ? null : url(i)));
+    expect(pixelGroups(shown).map((g) => g.map((x) => x.image.name))).toEqual([['b.png'], ['a.png']]);
+  });
+});
+

@@ -37,7 +37,7 @@ export function reduceTranscript(prev: TranscriptState, e: StoredEvent): Transcr
     case 'tool.call':
       return { ...s, entries: pushToolCall(s.entries, { id: e.payload.tool_call_id, name: e.payload.name, arguments: e.payload.arguments, status: 'running', content: null }, e.ts, e.id) };
     case 'tool.result':
-      return { ...s, entries: resolveToolCall(s.entries, e.payload.tool_call_id, e.payload.status, e.payload.content) };
+      return { ...s, entries: resolveToolCall(s.entries, e.payload.tool_call_id, e.payload.status, e.payload.content, e.payload.images) };
     case 'agent.model_switched':
       return push({ kind: 'detour', id, ts: e.ts, from: e.payload.from, to: e.payload.to, reason: e.payload.reason });
     case 'context.compacted':

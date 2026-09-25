@@ -3,6 +3,7 @@ import { copyFile, realpath } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
 import { GLOBAL_PROJECT_ID, ServiceName, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type ServiceStopReason, type SkillScope } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
+import { AttachmentStore } from '../attachments/store';
 import { uniqueLibraryName } from '../library/library';
 import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
@@ -85,7 +86,11 @@ export class Runtime {
   /** Project services' processes (long-lived, outlive their thread's runs). */
   readonly serviceProcs: ServiceProcesses;
   readonly skills: SkillStore;
+  /** Images shown to models (`<data>/attachments`), served by GET /v1/attachments/:sha256. */
+  readonly attachments: AttachmentStore;
   private readonly proxy: ProxyGate | undefined;
+  /** Bytes of images per request, by model, lowered after an endpoint refused a request as too large (until restart). */
+  private readonly imageBudgets = new Map<string, number>();
   /** Threads stopped by their Desk: their cancellation is not reported back to it. */
   private readonly silentStops = new Set<string>();
   /** Last event id already reported as stalled, per thread. */
@@ -107,9 +112,15 @@ export class Runtime {
         )
       : undefined;
     this.skills = new SkillStore(o.dataDir);
+    this.attachments = new AttachmentStore(join(o.dataDir, 'attachments'));
     this.services = {
       store: o.store,
       skills: this.skills,
+      attachments: this.attachments,
+      agentModel: (agentId, model) => {
+        const id = model ?? this.requireAgent(agentId).model;
+        return { id, vision: this.modelSeesImages(id) };
+      },
       activateSkills: (agentId, names) => this.activateSkills(agentId, names),
       saveSkill: (input, meta) => this.saveSkill(input, meta),
       deleteSkill: (scope, name, projectId, meta) => this.deleteSkill(scope, name, projectId, meta),
@@ -790,7 +801,14 @@ export class Runtime {
     store.append({
       ...base,
       type: 'tool.result',
-      payload: { run_id: ap.run_id, tool_call_id: ap.tool_call_id, name: ap.tool, status: result.status, content: result.content },
+      payload: {
+        run_id: ap.run_id,
+        tool_call_id: ap.tool_call_id,
+        name: ap.tool,
+        status: result.status,
+        content: result.content,
+        ...(result.images?.length ? { images: result.images } : {}),
+      },
     });
 
     const current = this.requireAgent(ap.agent_id);
@@ -899,6 +917,11 @@ export class Runtime {
     return project;
   }
 
+  /** Unknown models are assumed to see images; the endpoint answers for itself. */
+  private modelSeesImages(model: string): boolean {
+    return this.o.models.has(model) ? this.o.models.get(model).vision : true;
+  }
+
   private toolsFor(agent: AgentRow): Tool[] {
     return this.o.toolsFor?.(agent) ?? toolsForRole(agent);
   }
@@ -965,6 +988,12 @@ export class Runtime {
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),
         contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),
+        images: {
+          load: (images) => this.attachments.dataUrls(images),
+          vision: (model) => this.modelSeesImages(model),
+          maxBytes: (model) => this.imageBudgets.get(model),
+          lowerMaxBytes: (model, bytes) => this.imageBudgets.set(model, Math.min(bytes, this.imageBudgets.get(model) ?? Infinity)),
+        },
         reasoningEffort: (agent, project, model) =>
           effortFor(
             this.o.models.has(model) ? this.o.models.get(model) : undefined,

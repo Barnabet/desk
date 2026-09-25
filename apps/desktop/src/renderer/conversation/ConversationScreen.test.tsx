@@ -1,16 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectOverview } from '@desk/client';
+import type { StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
+import { clearAttachmentCache } from '../components/ImageThumbs';
 import { installBridge } from '../test/bridge';
 import { CHAT_PAGE, ConversationScreen } from './ConversationScreen';
 
 afterEach(cleanup);
 beforeEach(() => {
+  clearAttachmentCache();
   resetSessions();
   setReleaseDelay(0);
   localStorage.clear();
@@ -35,12 +38,12 @@ const events = [
   ev(6, 'question.asked', { question: 'Data source or teammate invite first?', options: ['Connect a data source', 'Invite a teammate'] }, { agent: 'd' }),
 ];
 
-function setup(extra: Record<string, (input: any) => unknown> = {}) {
+function setup(extra: Record<string, (input: any) => unknown> = {}, list: StoredEvent[] = events) {
   globalStore.set({ ...initialGlobalState(), connection: { status: 'live' }, attention: [{ id: 'report:5:0', kind: 'needs_you', project_id: 'p', project_name: 'Onboarding revamp', agent_id: 'd', title: 'Approve installing bun', detail: '', created_at: '', ref: { event_id: 5 } }] });
   const bridge = installBridge({
     'projects.get': () => overview(),
     'broker.watch': () => {
-      for (const e of events) bridge.emit('desk:event', e);
+      for (const e of list) bridge.emit('desk:event', e);
       return { ok: true };
     },
     'broker.unwatch': () => ({ ok: true }),
@@ -109,5 +112,23 @@ describe('ConversationScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: /Show earlier messages/ }));
     expect(screen.getByText('Message 1')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Show earlier messages/ })).toBeNull();
+  });
+
+  it('shows thumbnails of the images Desk looked at under its tool calls, and opens one larger', async () => {
+    const image = { sha256: 'b'.repeat(64), media_type: 'image/png' as const, width: 800, height: 600, bytes: 52_000, name: 'library/mockup.png' };
+    const viewed: StoredEvent[] = [
+      ...events,
+      ev(7, 'assistant.message', { run_id: 'r', content: null, tool_calls: [{ id: 'v1', name: 'view_image', arguments: '{"paths":["library/mockup.png"]}' }] }, { agent: 'd' }),
+      ev(8, 'tool.call', { run_id: 'r', tool_call_id: 'v1', name: 'view_image', arguments: '{"paths":["library/mockup.png"]}' }, { agent: 'd' }),
+      ev(9, 'tool.result', { run_id: 'r', tool_call_id: 'v1', name: 'view_image', status: 'ok', content: 'library/mockup.png · 800x600 · PNG · 51 KB', images: [image] }, { agent: 'd' }),
+    ];
+    const bridge = setup({ 'attachments.get': () => 'data:image/png;base64,ZnVsbA==' }, viewed);
+    const chat = await screen.findByRole('region', { name: 'Conversation with Desk' });
+    const thumb = await within(chat).findByRole('button', { name: 'Open mockup.png' });
+    await waitFor(() => expect(within(thumb).getByRole('img', { name: 'mockup.png' }).getAttribute('src')).toBe('data:image/png;base64,ZnVsbA=='));
+    fireEvent.click(thumb);
+    const dialog = await screen.findByRole('dialog', { name: 'mockup.png' });
+    await waitFor(() => expect(within(dialog).getByRole('img', { name: 'mockup.png' }).getAttribute('src')).toBe('data:image/png;base64,ZnVsbA=='));
+    expect(bridge.calls.filter((c) => c.channel === 'attachments.get').map((c) => c.input)).toEqual([{ sha256: image.sha256 }, { sha256: image.sha256 }]);
   });
 });

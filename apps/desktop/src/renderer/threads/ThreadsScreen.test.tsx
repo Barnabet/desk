@@ -7,11 +7,13 @@ import { ev } from '@desk/client/testing';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
+import { clearAttachmentCache } from '../components/ImageThumbs';
 import { installBridge } from '../test/bridge';
 import { ThreadsScreen } from './ThreadsScreen';
 
 afterEach(cleanup);
 beforeEach(() => {
+  clearAttachmentCache();
   resetSessions();
   setReleaseDelay(0);
   localStorage.clear();
@@ -108,6 +110,33 @@ describe('ThreadsScreen', () => {
     expect(await within(tr).findByText('You · steering…')).toBeTruthy();
     bridge.emit('desk:event', ev(8, 'message.user', { text: 'Keep it short' }, t));
     await waitFor(() => expect(within(tr).queryByText('You · steering…')).toBeNull());
+  });
+
+  it('shows thumbnails of the images a thread looked at, and opens one larger', async () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    const image = { sha256: 'a'.repeat(64), media_type: 'image/png' as const, width: 1240, height: 1754, bytes: 312_000, name: 'renders/page-1.png' };
+    const viewed = [
+      ...base,
+      ev(6, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'view_image', arguments: '{"paths":["renders/page-1.png"]}' }, t),
+      ev(7, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'view_image', status: 'ok', content: 'renders/page-1.png · 1240x1754 · PNG · 305 KB', images: [image] }, t),
+    ];
+    const bridge = setup(viewed, { 'attachments.get': () => png });
+    const tr = await screen.findByRole('complementary', { name: 'Transcript' });
+    const thumb = await within(tr).findByRole('button', { name: 'Open page-1.png' });
+    await waitFor(() => expect(within(thumb).getByRole('img', { name: 'page-1.png' }).getAttribute('src')).toBe(png));
+    // The thumbnail is scaled in the renderer (here, without a canvas, it is the image itself); opening loads the image.
+    const loads = () => bridge.calls.filter((c) => c.channel === 'attachments.get').map((c) => c.input);
+    expect(loads()).toEqual([{ sha256: image.sha256 }]);
+    fireEvent.click(thumb);
+    const dialog = await screen.findByRole('dialog', { name: 'page-1.png' });
+    expect(loads()).toEqual([{ sha256: image.sha256 }, { sha256: image.sha256 }]);
+    expect(dialog.textContent).toContain('1240×1754');
+    expect(within(dialog).getByRole('img', { name: 'page-1.png' }).getAttribute('src')).toBe(png);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // Every step shows them under the result too.
+    fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
+    expect(await within(tr).findByRole('button', { name: 'Open page-1.png' })).toBeTruthy();
   });
 
   it('stops a running thread after confirming', async () => {

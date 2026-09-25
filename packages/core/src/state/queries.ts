@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, max, sql } from 'drizzle-orm';
-import { resolveSettings, type EventOf, type EventType, type StoredEvent } from '@desk/protocol';
+import { resolveSettings, type EventOf, type EventType, type StoredEvent, type ToolImage } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { agents, approvals, events, projects, services, sources, usageTotals } from '../db/schema';
 
@@ -148,6 +148,34 @@ export function lastStallFor(db: Db, projectId: string, threadId: string): Event
     .limit(1)
     .get();
   return row ? ({ ...row } as unknown as EventOf<'message.agent'>) : undefined;
+}
+
+/** How many of a project's latest tool results findToolImage searches: bounded, since it reads their payloads. */
+export const RECENT_TOOL_RESULTS = 5000;
+
+/**
+ * An image some agent of the project looked at (a `tool.result` image with this sha256), with the name it was last
+ * shown under; only the project's `within` latest tool results are searched, so an unknown digest costs a bounded scan.
+ */
+export function findToolImage(db: Db, projectId: string, sha256: string, within = RECENT_TOOL_RESULTS): ToolImage | undefined {
+  if (!/^[0-9a-f]{64}$/.test(sha256)) return undefined;
+  const recent = db
+    .select({ id: events.id, payload: events.payload })
+    .from(events)
+    .where(and(eq(events.project_id, projectId), eq(events.type, 'tool.result')))
+    .orderBy(desc(events.id))
+    .limit(within)
+    .as('recent');
+  const row = db
+    .select({ payload: recent.payload })
+    .from(recent)
+    .where(sql`instr(${recent.payload}, ${`"sha256":"${sha256}"`}) > 0`)
+    .orderBy(desc(recent.id))
+    .limit(1)
+    .get();
+  const raw: unknown = row?.payload;
+  const payload = (typeof raw === 'string' ? JSON.parse(raw) : raw) as EventOf<'tool.result'>['payload'] | undefined;
+  return payload?.images?.find((i) => i.sha256 === sha256);
 }
 
 /** Token usage per project and model, optionally from `sinceDay` (YYYY-MM-DD) on. */

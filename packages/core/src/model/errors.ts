@@ -51,3 +51,23 @@ export function classifyModelError(err: unknown): ModelError {
   }
   return new ModelError('fatal', err instanceof Error ? err.message : String(err), undefined, { cause: err });
 }
+
+const TOO_LARGE = /too large|exceeds the maximum (request )?size|maximum (request|payload|body) size/i;
+/**
+ * "image" as a word ("Could not process image", "image MIME type"), or the `image_url` content part; not inside
+ * another name such as the view_image tool or an `image_count` field.
+ */
+const IMAGE = /(?<![\w-])images?(?![\w-])|(?<![\w-])image_url(?![\w-])/i;
+
+/**
+ * Whether the endpoint refused a request because of the images in it: an image it cannot decode or take
+ * (`image`, e.g. "400 Could not process image"), or a body over its size limit (`too_large`, 413). Null otherwise.
+ * A wrong guess costs retries only: the agent loop records nothing until a retry goes through.
+ */
+export function imageRefusal(err: ModelError): 'image' | 'too_large' | null {
+  if (err.kind !== 'fatal') return null;
+  if (err.status === 413) return 'too_large';
+  if (err.status !== 400 && err.status !== 422) return null;
+  if (IMAGE.test(err.message)) return 'image';
+  return TOO_LARGE.test(err.message) ? 'too_large' : null;
+}

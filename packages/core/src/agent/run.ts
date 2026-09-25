@@ -1,7 +1,7 @@
-import type { AgentStatus, EventInput, ReasoningEffort, RunFinishReason } from '@desk/protocol';
+import type { AgentStatus, EventInput, ReasoningEffort, RunFinishReason, ToolImage } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
-import { classifyModelError } from '../model/errors';
+import { classifyModelError, imageRefusal, type ModelError } from '../model/errors';
 import { withRetry, type RetryOptions } from '../model/retry';
 import type { ChatMessage, CompletionResult, ModelAdapter } from '../model/types';
 import { getAgent, getProject, lastEvent, type AgentRow, type ProjectRow } from '../state/queries';
@@ -10,7 +10,7 @@ import type { PolicyDecision } from '../policy/evaluate';
 import type { Tool, ToolContext, ToolResult } from '../tools/types';
 import { drainInbox } from './inbox';
 import { chooseSplit, compactionPrompt, DEFAULT_KEEP_MESSAGES, shouldCompact } from './compaction';
-import { buildConversation, buildCurrentConversation } from './transcript';
+import { buildCurrentConversation, imagesInWindow, occurrenceOf, pixelGroups, showImages, withholdMore, type ConversationImage, type Withheld } from './transcript';
 
 export type RunDeps = {
   store: EventStore;
@@ -32,7 +32,73 @@ export type RunDeps = {
   /** The model's context window in tokens; without it only a context overflow triggers compaction. */
   contextWindow?: (model: string) => number | undefined;
   compaction?: { keepMessages?: number };
+  /** Stored images (view_image) as pixels; without it, or for a model without vision, images are text references. */
+  images?: {
+    /** Data URLs of stored images by sha256; missing attachments are left out. */
+    load(images: ToolImage[]): Promise<Map<string, string>>;
+    vision(model: string): boolean;
+    /** Bytes of images a request to the model may carry, together; lowered after the endpoint refuses a request as too large. */
+    maxBytes?(model: string): number | undefined;
+    lowerMaxBytes?(model: string, bytes: number): void;
+  };
 };
+
+/** A request's messages, and the images it sends as pixels (one group per images message, the most recent first). */
+type Built = { messages: ChatMessage[]; pixels: ConversationImage[][] };
+
+/**
+ * How a request's images change while retrying after the endpoint refused it because of them. Nothing is recorded
+ * until a retry succeeds, so a refusal that was not about the images after all leaves no trace.
+ */
+type ImageTrial = {
+  /** Groups of images sent as text, each blamed by one refusal: at least one image of each is refused. */
+  withheld: Array<{ images: ConversationImage[]; reason: string }>;
+  /** A lower byte budget for pixels, after a request was refused as too large. */
+  maxBytes?: number;
+  /**
+   * Finding the images an endpoint refuses, from the request first refused: its newest group, then the older ones.
+   * Step 1 withholds the newest, step 2 only the older, step 3 both; whichever succeeds names the guilty groups
+   * (a step that failed with some group shown means that group holds a refused image).
+   */
+  search?: { newest: ConversationImage[]; older: ConversationImage[]; step: 1 | 2 | 3; reasons: string[] };
+};
+
+/** The images a trial sends as text, by occurrence, as images.withheld will record them. */
+function trialWithheld(trial: ImageTrial | undefined): Map<string, Withheld> {
+  const out = new Map<string, Withheld>();
+  for (const g of trial?.withheld ?? []) for (const c of g.images) out.set(occurrenceOf(c), { reason: g.reason, count: g.images.length });
+  return out;
+}
+
+/** The next change to try after the endpoint refused `built` because of its images; null when nothing is left to try. */
+function nextImageTrial(err: ModelError, built: Built, trial: ImageTrial | undefined): ImageTrial | null {
+  const refusal = imageRefusal(err);
+  if (!refusal) return null;
+  if (refusal === 'too_large') {
+    const sent = built.pixels.flat().reduce((n, c) => n + c.image.bytes, 0);
+    return sent ? { ...(trial ?? { withheld: [] }), maxBytes: Math.floor(sent / 2) } : null;
+  }
+  const s = trial?.search;
+  let search: NonNullable<ImageTrial['search']>;
+  if (!s) {
+    const [newest, ...older] = built.pixels;
+    if (!newest) return null;
+    search = { newest, older: older.flat(), step: 1, reasons: [err.message] };
+  } else if (s.step === 1 && s.older.length) search = { ...s, step: 2, reasons: [...s.reasons, err.message] };
+  else if (s.step === 2) search = { ...s, step: 3, reasons: [...s.reasons, err.message] };
+  else return null;
+  const [first, second, third] = search.reasons as [string, string?, string?];
+  const withheld =
+    search.step === 1
+      ? [{ images: search.newest, reason: first }]
+      : search.step === 2
+        ? [{ images: search.older, reason: second! }]
+        : [
+            { images: search.newest, reason: third! },
+            { images: search.older, reason: second! },
+          ];
+  return { ...(trial?.maxBytes !== undefined ? { maxBytes: trial.maxBytes } : {}), withheld, search };
+}
 
 /** Budget used to render a compaction request when the model's window is unknown. */
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -80,14 +146,34 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
 
   /** Set once sustained rate limiting switched this run to the project's fallback model. */
   let fallbackModel: string | undefined;
-  const callModel = async (model: string, messages: ChatMessage[]): Promise<CompletionResult> => {
+
+  /** Records what made a refused request go through: the images sent as text from now on, and a lower byte budget. */
+  const commitImageTrial = (model: string, trial: ImageTrial) => {
+    if (trial.withheld.length) {
+      store.append(
+        trial.withheld.map(
+          (g): EventInput => ({
+            ...base,
+            type: 'images.withheld',
+            payload: { run_id: runId, reason: g.reason, images: g.images.map((c) => ({ tool_call_id: c.toolCallId, sha256: c.image.sha256, name: c.image.name })) },
+          }),
+        ),
+      );
+    }
+    if (trial.maxBytes !== undefined) deps.images?.lowerMaxBytes?.(model, trial.maxBytes);
+  };
+
+  /** `build` makes the messages for the model that answers (the fallback may not take images). */
+  const callModel = async (model: string, build: (model: string, trial?: ImageTrial) => Promise<Built>): Promise<CompletionResult> => {
     const effort = effortFor(model);
+    let trial: ImageTrial | undefined;
+    let built = await build(model);
     for (;;) {
       try {
-        return await withRetry(
+        const result = await withRetry(
           () =>
             deps.adapter.complete(
-              { model, messages, tools: specs, ...(effort ? { reasoningEffort: effort } : {}) },
+              { model, messages: built.messages, tools: specs, ...(effort ? { reasoningEffort: effort } : {}) },
               {
                 signal,
                 onText: (text) =>
@@ -96,6 +182,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
             ),
           { ...deps.retry, signal },
         );
+        if (trial) commitImageTrial(model, trial);
+        return result;
       } catch (e) {
         const err = classifyModelError(e);
         if (err.kind === 'proxy_down' && deps.proxy) {
@@ -107,7 +195,14 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         if (err.kind === 'rate_limited' && !fallbackModel && fallback && fallback !== model) {
           fallbackModel = fallback;
           store.append({ ...base, type: 'agent.model_switched', payload: { from: model, to: fallback, reason: err.message, scope: 'run' } });
-          return callModel(fallback, messages);
+          return callModel(fallback, build);
+        }
+        // An image the endpoint cannot take would otherwise fail every later call the same way.
+        const next = deps.images ? nextImageTrial(err, built, trial) : null;
+        if (next) {
+          trial = next;
+          built = await build(model, trial);
+          continue;
         }
         throw err;
       }
@@ -175,16 +270,26 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       if (compactNext && !thresholdCompactionFailed) {
         if (!(await compact(fallbackModel ?? current.model, 'threshold'))) thresholdCompactionFailed = true;
       }
-      const conversation = (): ChatMessage[] => [{ role: 'system', content: system }, ...buildConversation(store.list({ agentId }))];
+      const conversation = async (model: string, trial?: ImageTrial): Promise<Built> => {
+        let tagged = buildCurrentConversation(store.list({ agentId }));
+        if (deps.images?.vision(model)) {
+          tagged = withholdMore(tagged, trialWithheld(trial));
+          const budget = deps.images.maxBytes?.(model);
+          const window = { maxBytes: trial?.maxBytes !== undefined ? Math.min(trial.maxBytes, budget ?? Infinity) : budget };
+          const urls = await deps.images.load([...imagesInWindow(tagged, window)].map((c) => c.image));
+          tagged = showImages(tagged, (image) => urls.get(image.sha256) ?? null, window);
+        }
+        return { messages: [{ role: 'system', content: system }, ...tagged.map((m) => m.message)], pixels: pixelGroups(tagged) };
+      };
 
       let result: CompletionResult;
       try {
-        result = await callModel(fallbackModel ?? current.model, conversation());
+        result = await callModel(fallbackModel ?? current.model, conversation);
       } catch (e) {
         const err = classifyModelError(e);
         // Forced compaction, once per call; a second overflow fails the run.
         if (err.kind !== 'context_overflow' || !(await compact(fallbackModel ?? current.model, 'overflow'))) throw err;
-        result = await callModel(fallbackModel ?? current.model, conversation());
+        result = await callModel(fallbackModel ?? current.model, conversation);
       }
       // The call may have switched to the fallback model; attribute usage to the model that answered.
       const model = fallbackModel ?? current.model;
@@ -211,7 +316,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
           const decision = deps.gate(prepared.tool, prepared.input, freshProject, current);
           if (decision.action === 'deny') return { result: { status: 'denied', content: `Denied by policy. ${decision.reason}` } };
           if (decision.action === 'ask') return { pending: decision };
-          return { result: await runPreparedTool(prepared.tool, prepared.input, deps.toolContext(current, runId, tc.id, signal)) };
+          // The model that asked for the call (the fallback after a switch): view_image checks that it sees images.
+          return { result: await runPreparedTool(prepared.tool, prepared.input, { ...deps.toolContext(current, runId, tc.id, signal), model }) };
         }),
       );
       const done = result.toolCalls.flatMap((tc, i) => (outcomes[i]!.result ? [{ tc, r: outcomes[i]!.result! }] : []));
@@ -220,7 +326,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
           ({ tc, r }): EventInput => ({
             ...base,
             type: 'tool.result',
-            payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: r.status, content: r.content },
+            payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: r.status, content: r.content, ...(r.images?.length ? { images: r.images } : {}) },
           }),
         ),
       );

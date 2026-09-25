@@ -1,4 +1,4 @@
-import type { StoredEvent } from '@desk/protocol';
+import { imageLabel, type StoredEvent } from '@desk/protocol';
 import type { AgentRow, ApprovalRow, ServiceRow } from '../state/queries';
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -62,6 +62,11 @@ export function renderTranscript(events: StoredEvent[]): string {
         break;
       case 'tool.result':
         lines.push(`#${ev.id} ← ${ev.payload.name} [${ev.payload.status}]: ${clip(ev.payload.content, 600)}`);
+        // Desk cannot read thread workspaces, so each image carries the reference view_image takes.
+        for (const image of ev.payload.images ?? []) lines.push(`#${ev.id}   [image: ${imageLabel(image)}, view_image attachment:${image.sha256}]`);
+        break;
+      case 'images.withheld':
+        lines.push(`#${ev.id} (images no longer sent to the model: ${ev.payload.images.map((i) => i.name).join(', ')}; ${clip(ev.payload.reason, 200)})`);
         break;
       case 'agent.status_changed':
         lines.push(`#${ev.id} (status → ${ev.payload.status}${ev.payload.reason ? `: ${clip(ev.payload.reason, 200)}` : ''})`);

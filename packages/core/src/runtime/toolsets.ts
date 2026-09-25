@@ -9,16 +9,18 @@ import { memoryTools } from '../tools/memory';
 import { serviceTools } from '../tools/services';
 import { skillAuthoringTools, skillUseTools } from '../tools/skills';
 import { threadCoordinationTools } from '../tools/thread';
+import { viewImageTool } from '../tools/vision';
 import type { Tool } from '../tools/types';
 import { webTools } from '../tools/web';
 
-/** Desk: read anything in the project, draft in its own scratch dir, read-only shell, skills (use + authoring), coordination. */
+/** Desk: read (and look at) anything in the project, draft in its own scratch dir, read-only shell, skills (use + authoring), coordination. */
 export function deskToolsFor(_agent: AgentRow): Tool[] {
   return [
     readFileTool,
     listDirTool,
     globTool,
     grepTool,
+    viewImageTool,
     writeFileTool,
     editFileTool,
     bashReadonlyTool,
@@ -36,6 +38,7 @@ export function deskToolsFor(_agent: AgentRow): Tool[] {
 export function threadToolsFor(agent: AgentRow): Tool[] {
   return [
     ...fileTools,
+    viewImageTool,
     bashTool,
     ...jobTools,
     ...serviceTools,

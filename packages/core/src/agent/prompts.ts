@@ -140,7 +140,7 @@ export function deskSystemPrompt(ctx: PromptContext): string {
         '1. Scope — understand the request using the goal, memory, library and sources (read-only tools). Ask the user (ask_user) only when you are genuinely blocked; otherwise make reasonable assumptions and state them.',
         '2. Plan & dispatch — keep the plan current with update_plan. Delegate work to threads with spawn_thread. Each brief must stand alone: objective, relevant context and file paths, constraints, definition of done, and what to return. Split independent work into parallel threads; route follow-ups to an existing relevant thread (message_thread) instead of spawning duplicates. Pass git_source_id for work on a repository.',
         '3. Supervise — thread questions, blockers, approvals and completions arrive as messages tagged [from thread …]. Answer from your knowledge and memory when you can; escalate to the user only when you cannot. Redirect stalled or drifting threads.',
-        `4. Review — when a thread completes, check its result against the brief (read_thread, library_read, review_diff for code). If it falls short, send it back with specific feedback (message_thread kind "revision"; at most ${s.review_rounds} rounds per thread), otherwise accept it.`,
+        `4. Review — when a thread completes, check its result against the brief (read_thread, library_read, review_diff for code). If it falls short, send it back with specific feedback (message_thread kind "revision"; at most ${s.review_rounds} rounds per thread), otherwise accept it. To see a document, page, slide, sheet, video frame or image, render it with its file skill and look at it with view_image.`,
         '5. Assemble & report — combine accepted results into what the user asked for; draft combined documents in your workspace and publish them with library_publish. Send a report with the outcome. For code, list the branches/PRs and the order to merge them, and describe any conflicts. You never merge branches yourself.',
         '6. Curate memory — record durable decisions, facts, preferences and contacts with memory_write; supersede outdated entries instead of contradicting them.',
         '7. Skills — skills are reusable procedures (SKILL.md instructions + prepared scripts) at project scope or global scope (every project of the user). They are how this system gets better at recurring work:',
@@ -239,6 +239,7 @@ export function threadSystemPrompt(ctx: PromptContext): string {
       'Working rules',
       [
         '- Work step by step with your tools and verify your work (run it, test it, re-read it) before finishing.',
+        '- To see a document, page, slide, sheet, video frame or image, render it with its file skill and look at it with view_image.',
         '- Stay within your assignment. If something consequential is ambiguous, ask Desk (message_desk kind "question", then wait_for_reply) instead of guessing.',
         '- Publish deliverables the user or Desk should see with library_publish.',
         '- Record durable facts you discover with memory_write.',

@@ -3,11 +3,11 @@ import { DaemonNotRunning, DeskClient } from '@desk/client';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CatalogService, SkillRuntimes, treeDigest } from '@desk/core';
-import { createHarness, newRuntime, type Harness } from '@desk/core/testing';
+import { createHarness, encodePng, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
 import { channels } from '../shared/ipc';
 import { initialGlobalState } from '../shared/state';
-import { dispatch, handlers, type HandlerContext } from './handlers';
+import { dispatch, handlers, MAX_ATTACHMENT_BYTES, type HandlerContext } from './handlers';
 
 let h: Harness;
 let server: RunningServer | undefined;
@@ -135,5 +135,25 @@ describe('IPC dispatch', () => {
     expect(file.ok && new TextDecoder().decode(file.value as Uint8Array)).toBe('hi');
     await dispatch('broker.watch', { projectId: value.project.id, afterSeq: 0 }, ctx);
     expect(watched).toEqual([[7, value.project.id, 0]]);
+  });
+
+  it('returns attachments as image data URLs, validating the id and capping the size', async () => {
+    const { ctx, runtime } = await setup();
+    const png = encodePng(2, 2);
+    const sha = await runtime.attachments.put(png, 'image/png');
+    expect(await dispatch('attachments.get', { sha256: sha }, ctx)).toEqual({ ok: true, value: `data:image/png;base64,${png.toString('base64')}` });
+    expect(await dispatch('attachments.get', { sha256: '../x' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await dispatch('attachments.get', { sha256: 'f'.repeat(64) }, ctx)).toMatchObject({ ok: false, error: { code: 'not_found', status: 404 } });
+    const big = await runtime.attachments.put(Buffer.concat([png, Buffer.alloc(MAX_ATTACHMENT_BYTES)]), 'image/png');
+    expect(await dispatch('attachments.get', { sha256: big }, ctx)).toMatchObject({ ok: false, error: { code: 'attachment_too_large' } });
+  });
+
+  it('passes attachment bytes through without decoding them in main (the sandboxed renderer decodes images)', async () => {
+    const { ctx, runtime } = await setup();
+    // Not a decodable PNG past its signature: main never looks inside, it only checks the type and the size.
+    const opaque = Buffer.concat([encodePng(1, 1).subarray(0, 8), Buffer.from('arbitrary bytes from the web')]);
+    const sha = await runtime.attachments.put(opaque, 'image/png');
+    expect(await dispatch('attachments.get', { sha256: sha }, ctx)).toEqual({ ok: true, value: `data:image/png;base64,${opaque.toString('base64')}` });
+    expect(Object.keys(ctx.app)).not.toContain('thumbnail');
   });
 });

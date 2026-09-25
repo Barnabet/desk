@@ -19,7 +19,7 @@ beforeEach(() => {
 });
 
 const status = { running: true, version: '1.0.0', pid: 42, uptime_s: 3700, proxy: 'down', mode: 'packaged', bundledVersion: '1.0.0', build: 'b1', bundledBuild: 'b1', agent: 'installed' };
-const model = (id: string): ModelInfo => ({ id, family: 'claude', context_window: 200000, max_output_tokens: 32000, reasoning_efforts: ['low', 'medium', 'high'], default_reasoning_effort: null, concurrency: 4 });
+const model = (id: string): ModelInfo => ({ id, family: 'claude', context_window: 200000, max_output_tokens: 32000, reasoning_efforts: ['low', 'medium', 'high'], default_reasoning_effort: null, concurrency: 4, vision: true });
 
 function setup(extra: Record<string, (input: any) => unknown> = {}) {
   const bridge = installBridge({
@@ -101,12 +101,15 @@ describe('SystemScreen', () => {
     fireEvent.click(within(levels3).getByRole('button', { name: 'max' }));
     expect((within(reg).getByLabelText('Model 3 default reasoning effort') as HTMLSelectElement).value).toBe('');
     fireEvent.change(within(reg).getByLabelText('Model 3 default reasoning effort'), { target: { value: 'high' } });
+    // Vision: on for new models; turning it off makes view_image refuse for that model.
+    expect((within(reg).getByLabelText('Model 3 sees images') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(reg).getByLabelText('Model 3 sees images'));
     fireEvent.click(within(reg).getByRole('button', { name: 'Remove model 2' }));
     fireEvent.click(within(reg).getByRole('button', { name: 'Save registry' }));
     await waitFor(() =>
-      expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: ModelInfo[] }).models.map((m) => [m.id, m.reasoning_efforts, m.default_reasoning_effort])).toEqual([
-        ['claude-opus-5-5', ['low', 'medium', 'high'], null],
-        ['gpt-6-sol', ['high'], 'high'],
+      expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: ModelInfo[] }).models.map((m) => [m.id, m.reasoning_efforts, m.default_reasoning_effort, m.vision])).toEqual([
+        ['claude-opus-5-5', ['low', 'medium', 'high'], null, true],
+        ['gpt-6-sol', ['high'], 'high', false],
       ]),
     );
   });

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { imageTokens, readDataUrlInfo } from '../attachments/image';
 import type { ToolCall } from '@desk/protocol';
 import { newId } from '../ids';
 import type { ModelConfig } from './config';
@@ -6,9 +7,23 @@ import { classifyModelError } from './errors';
 import type { ModelRegistry } from './registry';
 import type { ChatMessage, CompletionUsage, ModelAdapter } from './types';
 
+/** Tokens for an image part: W×H/750 from the data URL's header (a typical page when it cannot be read). */
+function imagePartTokens(url: string): number {
+  const info = readDataUrlInfo(url);
+  return info ? imageTokens(info.width, info.height) : imageTokens(1240, 1754);
+}
+
+/** A rough count when the endpoint reports no usage: 4 characters per token, images by their pixel size. */
 export function estimateUsage(messages: ChatMessage[], content: string, toolCalls: ToolCall[]): CompletionUsage {
+  let images = 0;
+  const text = JSON.stringify(messages, (key, value: unknown) => {
+    if (key !== 'image_url' || typeof (value as { url?: unknown })?.url !== 'string') return value;
+    const url = (value as { url: string }).url;
+    if (url) images += imagePartTokens(url);
+    return {};
+  });
   return {
-    prompt_tokens: Math.ceil(JSON.stringify(messages).length / 4),
+    prompt_tokens: Math.ceil(text.length / 4) + images,
     completion_tokens: Math.ceil((content.length + JSON.stringify(toolCalls).length) / 4),
     estimated: true,
   };

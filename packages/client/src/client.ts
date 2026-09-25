@@ -92,7 +92,8 @@ export class DeskClient {
     return changed;
   }
 
-  async request<T = unknown>(method: string, path: string, body?: unknown, opts: { raw?: boolean } = {}): Promise<T> {
+  /** `raw` returns the body's bytes; `'typed'` also returns its content type. */
+  async request<T = unknown>(method: string, path: string, body?: unknown, opts: { raw?: boolean | 'typed' } = {}): Promise<T> {
     const send = async (): Promise<Response | null> => {
       try {
         return await (this.o.fetch ?? fetch)(`${this.creds.baseUrl}/v1${path}`, {
@@ -108,7 +109,10 @@ export class DeskClient {
     // The daemon may have restarted with a new token or port: re-read credentials once and retry.
     if ((!res || res.status === 401) && (await this.refresh())) res = await send();
     if (!res) throw new DaemonUnavailable(this.creds.baseUrl);
-    if (opts.raw && res.ok) return new Uint8Array(await res.arrayBuffer()) as T;
+    if (opts.raw && res.ok) {
+      const data = new Uint8Array(await res.arrayBuffer());
+      return (opts.raw === 'typed' ? { data, mediaType: res.headers.get('content-type') ?? 'application/octet-stream' } : data) as T;
+    }
     const isJson = (res.headers.get('content-type') ?? '').includes('json');
     const data: unknown = isJson ? await res.json() : await res.text();
     if (!res.ok) {
@@ -179,6 +183,13 @@ export class DeskClient {
     diff: (id: string) => this.get<ThreadDiff>(`/threads/${enc(id)}/diff`),
     files: (id: string, path = '') => this.get<WorkspaceEntry[]>(`/threads/${enc(id)}/files${path ? `?path=${enc(path)}` : ''}`),
     file: (id: string, path: string) => this.raw(`/threads/${enc(id)}/files/raw/${encPath(path)}`),
+  };
+
+  /** Images agents looked at (view_image), by sha256. They never change, so callers may cache them. */
+  attachments = {
+    /** Where the image is served; the route needs the bearer token like every other. */
+    url: (sha256: string) => `${this.creds.baseUrl}/v1/attachments/${enc(sha256)}`,
+    get: (sha256: string) => this.request<{ data: Uint8Array; mediaType: string }>('GET', `/attachments/${enc(sha256)}`, undefined, { raw: 'typed' }),
   };
 
   services = {

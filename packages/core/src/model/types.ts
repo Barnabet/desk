@@ -2,9 +2,12 @@ import type { ReasoningEffort, ToolCall } from '@desk/protocol';
 
 export type ChatToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
+/** A part of a user message: text, or an image as a (base64 data) URL. */
+export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export type ChatMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | ContentPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: ChatToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 

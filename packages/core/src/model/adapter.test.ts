@@ -2,12 +2,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, error, hang, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
-import { createModelAdapter } from './adapter';
+import { encodePng, imageHeaders } from '../testing/png';
+import { createModelAdapter, estimateUsage } from './adapter';
 import { ModelError } from './errors';
 import { ModelRegistry } from './registry';
 
 const registry = new ModelRegistry([
-  { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4 },
+  { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true },
 ]);
 const req = { model: 'fake-model', messages: [{ role: 'user' as const, content: 'hi' }], tools: [] };
 
@@ -33,8 +34,8 @@ describe('model adapter', () => {
   it('sends reasoning_effort only when the registry lists that level for the model', async () => {
     fake = await startFakeModel(() => text('ok'));
     const r = new ModelRegistry([
-      { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4 },
-      { id: 'thinker', family: 'gpt', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: ['low', 'xhigh'], default_reasoning_effort: null, concurrency: 4 },
+      { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true },
+      { id: 'thinker', family: 'gpt', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: ['low', 'xhigh'], default_reasoning_effort: null, concurrency: 4, vision: true },
     ]);
     const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 't' }, r);
     await adapter.complete({ ...req, model: 'thinker', reasoningEffort: 'xhigh' });
@@ -63,6 +64,29 @@ describe('model adapter', () => {
     const r = await adapter.complete(req);
     expect(r.usage.estimated).toBe(true);
     expect(r.usage.prompt_tokens).toBeGreaterThan(0);
+  });
+
+  it('sends image parts as they are, and estimates an image as W×H/750 tokens, not its base64 length', async () => {
+    fake = await startFakeModel([text('a cat', { usage: 'omit' })]);
+    const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 't' }, registry);
+    const png = encodePng(750, 200, (x, y) => [(x * 7) % 256, (y * 13) % 256, (x * y) % 256]);
+    const url = `data:image/png;base64,${png.toString('base64')}`;
+    const messages = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'What is it?' }, { type: 'image_url' as const, image_url: { url } }] }];
+    const r = await adapter.complete({ ...req, messages });
+    expect(fake.requests[0]?.messages[0]).toEqual(messages[0]);
+    const textOnly = estimateUsage([{ role: 'user', content: [{ type: 'text', text: 'What is it?' }, { type: 'image_url', image_url: { url: '' } }] }], '', []);
+    expect(r.usage.prompt_tokens).toBe(textOnly.prompt_tokens + 200);
+    expect(url.length / 4).toBeGreaterThan(r.usage.prompt_tokens);
+  });
+
+  it('estimates a JPEG from its frame header even behind large metadata, and an unreadable image as a typical page', () => {
+    const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, 0xff, 0xff]), Buffer.alloc(0xfffd)]);
+    const jpeg = imageHeaders.jpeg(1500, 750);
+    const withExif = Buffer.concat([jpeg.subarray(0, 2), app1, app1, app1, app1, app1, jpeg.subarray(2)]);
+    const tokens = (url: string) => estimateUsage([{ role: 'user', content: [{ type: 'image_url', image_url: { url } }] }], '', []).prompt_tokens;
+    const base = tokens('');
+    expect(tokens(`data:image/jpeg;base64,${withExif.toString('base64')}`) - base).toBe(Math.ceil((1500 * 750) / 750));
+    expect(tokens('data:image/png;base64,AAAA') - base).toBe(Math.ceil((1240 * 1754 * (1568 / 1754) ** 2) / 750));
   });
 
   it.each([

@@ -1,6 +1,7 @@
-import type { AgentMessageKind, EphemeralEvent, StoredEvent, ToolResultStatus } from '@desk/protocol';
+import type { AgentMessageKind, EphemeralEvent, StoredEvent, ToolImage, ToolResultStatus } from '@desk/protocol';
 
-export type ToolCallView = { id: string; name: string; arguments: string; status: 'running' | ToolResultStatus; content: string | null };
+/** One tool call and its result; `images` are the stored images a view_image result showed the model. */
+export type ToolCallView = { id: string; name: string; arguments: string; status: 'running' | ToolResultStatus; content: string | null; images?: ToolImage[] };
 
 export type ChatItem =
   | { kind: 'user'; id: string; ts: string; text: string }
@@ -26,12 +27,12 @@ export function pushToolCall<T extends { kind: string; id: string }>(items: T[],
   return [...items, { kind: 'tools', id: `tools:${eventId}`, ts, calls: [call] } as unknown as T];
 }
 
-export function resolveToolCall<T extends { kind: string }>(items: T[], id: string, status: ToolResultStatus, content: string): T[] {
+export function resolveToolCall<T extends { kind: string }>(items: T[], id: string, status: ToolResultStatus, content: string, images?: ToolImage[]): T[] {
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i] as T & { calls?: ToolCallView[] };
     if (it.kind !== 'tools' || !it.calls?.some((c) => c.id === id)) continue;
     const next = items.slice();
-    next[i] = { ...it, calls: it.calls.map((c) => (c.id === id ? { ...c, status, content } : c)) } as T;
+    next[i] = { ...it, calls: it.calls.map((c) => (c.id === id ? { ...c, status, content, ...(images?.length ? { images } : {}) } : c)) } as T;
     return next;
   }
   return items;
@@ -88,7 +89,7 @@ export function reduceChat(prev: ChatState, e: StoredEvent): ChatState {
         ? { ...s, items: pushToolCall(s.items, { id: e.payload.tool_call_id, name: e.payload.name, arguments: e.payload.arguments, status: 'running', content: null }, e.ts, e.id) }
         : s;
     case 'tool.result':
-      return mine ? { ...s, items: resolveToolCall(s.items, e.payload.tool_call_id, e.payload.status, e.payload.content) } : s;
+      return mine ? { ...s, items: resolveToolCall(s.items, e.payload.tool_call_id, e.payload.status, e.payload.content, e.payload.images) } : s;
     case 'message.agent':
       // The runtime's reminders to Desk are for Desk alone.
       return mine && e.payload.kind !== 'reminder'

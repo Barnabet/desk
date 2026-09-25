@@ -33,7 +33,7 @@ Pass `next_after` as the next `after` to continue.
 |---|---|---|
 | GET | `/v1/health` | Unauthenticated. `{ version, protocol_version, build, proxy: up\|down\|unknown, uptime_s }`. `build` is the bundled deskd's build id, or `null` when running from source |
 | GET | `/v1/usage` | `?since=YYYY-MM-DD`. `{ rows: [{ project_id, model, prompt_tokens, completion_tokens }], totals }` across projects |
-| GET | `/v1/models` | The model registry (`ModelInfo[]`: id, family, context_window, max_output_tokens, reasoning_efforts, default_reasoning_effort, concurrency). `reasoning_efforts` lists the levels the model accepts (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`); an empty list means Desk never sends a level. `default_reasoning_effort` is `null` (the endpoint's default) or one of those levels |
+| GET | `/v1/models` | The model registry (`ModelInfo[]`: id, family, context_window, max_output_tokens, reasoning_efforts, default_reasoning_effort, concurrency, vision). `reasoning_efforts` lists the levels the model accepts (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`); an empty list means Desk never sends a level. `default_reasoning_effort` is `null` (the endpoint's default) or one of those levels. `vision` (default `true`) says whether the model takes images: without it, `view_image` refuses and earlier images reach the model as text references |
 | PUT | `/v1/models` | Replace the registry (`ModelInfo[]`, validated). The registry is persisted to `models.json` |
 
 ## Projects
@@ -182,6 +182,18 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 
 Model access resolves in this order: `DESK_OPENAI_BASE_URL`/`DESK_OPENAI_API_KEY`, then `~/.config/cliproxyapi.env`, then `config.json`'s `base_url` with the Keychain key. Without any of them the daemon starts anyway; model calls behave like a proxy outage (agents pause) until an endpoint is set.
 
+## Attachments
+
+Images that agents looked at with `view_image`. Each one is copied to `<dataDir>/attachments/<sha256>.<ext>` when viewed, so transcripts keep showing what the agent saw even after the workspace file changes. A `tool.result` event lists its images in `payload.images: [{ sha256, media_type, width, height, bytes, name }]`; `name` is the path the agent used (relative to its workspace when inside it).
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/v1/attachments/:sha256` | The image bytes (streamed), with its `Content-Type` (`image/png`, `image/jpeg`, `image/gif` or `image/webp`) and `Cache-Control: private, max-age=31536000, immutable` (content-addressed, so it never changes). 400 unless the id is 64 lowercase hex characters; 404 when no such attachment is stored |
+
+An agent can also view an image another agent of its project looked at: `view_image` takes `attachment:<sha256>` as a path (Desk's `read_thread` shows these references). Only images shown in the project's 5,000 most recent tool results are found this way.
+
+When the model endpoint refuses a request because of an image in it (for example `400 Could not process image`), the agent loop retries with some of its images sent as text: first the newest group, then only the older ones, then both. It records nothing until a retry goes through. It then appends `images.withheld { run_id, images: [{ tool_call_id, sha256, name }], reason }` for each group that held a refused image. Those showings are sent as text from then on, and `view_image` refuses an image that was withheld on its own. After a `413` or "too large" answer, the loop halves the bytes of images it sends instead. A lower budget that went through is kept for that model until the daemon restarts.
+
 ## Event stream (WebSocket)
 
 Connect to `ws://127.0.0.1:<port>/v1/stream?token=<token>`. A bad token closes the socket with code 4401.
@@ -214,7 +226,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 | Projects | `project.created`, `project.updated`, `project.archived`, `source.added`, `source.updated`, `source.removed` |
 | Agents | `agent.created`, `agent.status_changed`, `agent.result`, `agent.revision`, `agent.model_switched`, `agent.skills_changed`, `agent.archived` |
 | Coordination | `plan.updated`, `report`, `question.asked`, `whats_up.updated` (Desk's What's up, written with `update_whats_up`; when Desk ends a turn after changing things without rewriting it, the runtime sends Desk a `message.agent` of kind `reminder`, which clients do not show) |
-| Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result`, `context.compacted`, `usage` |
+| Messages and runs | `message.user`, `message.agent`, `inbox.drained`, `run.started`, `run.finished`, `assistant.message`, `tool.call`, `tool.result` (with `images` for `view_image`, see Attachments), `images.withheld`, `context.compacted`, `usage` |
 | Approvals | `approval.requested`, `approval.resolved` |
 | Services | `service.started`, `service.url`, `service.exited`, `service.stopped` (reason `requested`, `restart`, `thread_archived`, `project_archived`, `daemon_shutdown` or `daemon_restart`) |
 | Knowledge | `memory.written`, `memory.deleted`, `artifact.published`, `skill.saved`, `skill.deleted` |

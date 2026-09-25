@@ -296,6 +296,7 @@ All tools are defined once with a zod input schema (converted to JSON Schema for
 | `list_dir(path)`, `glob(pattern, root?)`, `grep(pattern, root?, glob?)` | Readable roots only. `grep` uses ripgrep if present, else a JS fallback. |
 | `bash(command, timeout_s?=120)` | cwd = workspace; sandboxed (§7.4); stdout/stderr streamed as tool progress events and captured. |
 | `bash_background(command)` → job id; `bash_output(job_id)`; `bash_kill(job_id)` | For servers/long builds. Killed when the thread ends. |
+| `view_image(paths[1–8], purpose?)` | Readable roots only. PNG, JPEG, GIF, WebP (≤ 3.75 MB and 8000 px per image, 20 MB per call); other formats get a hint naming the file skill that renders them. Images are stored content-addressed and shown to the model in a user message after the results (the 8 most recent as pixels). Added by the file-type skills spec (2026-09-24). |
 | `web_fetch(url)` | Fetch + HTML→Markdown (Readability + Turndown), 100k char cap. |
 | `web_search(query)` | Pluggable provider: Brave Search API if `BRAVE_API_KEY` is set, else DuckDuckGo HTML endpoint. |
 | `git_status`, `git_diff(ref?)`, `git_commit(message, paths?)`, `git_push()`, `open_pr(title, body, base?)` | Only when workspace is a worktree. `open_pr` uses `gh`. |
@@ -321,7 +322,7 @@ All tools are defined once with a zod input schema (converted to JSON Schema for
 | `report(headline, progress, needs_you[], results[])` | Emits a `report` event. |
 | `update_settings(patch)` | Changes `check_in` / `autonomy` / models on user request; emits `project.updated`. |
 | `memory_*`, `library_*` | As threads. |
-| Read-only: `read_file`, `list_dir`, `glob`, `grep`, `bash_readonly`, `web_fetch`, `web_search` | `bash_readonly` runs under a sandbox profile with **no writable paths** except temp. |
+| Read-only: `read_file`, `list_dir`, `glob`, `grep`, `view_image`, `bash_readonly`, `web_fetch`, `web_search` | `bash_readonly` runs under a sandbox profile with **no writable paths** except temp. |
 
 ---
 

@@ -4,6 +4,7 @@ import { clip } from '@desk/protocol';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
+import { ImageThumbs } from '../components/ImageThumbs';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
 import { ToolGroup, ToolStatus } from '../components/ToolGroup';
@@ -44,6 +45,7 @@ function ToolCallFull({ c }: { c: ToolCallView }) {
           ) : null}
         </>
       ) : null}
+      {c.images?.length ? <ImageThumbs images={c.images} /> : null}
     </div>
   );
 }

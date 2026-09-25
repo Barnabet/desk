@@ -6,7 +6,7 @@ import { createHarness, newRuntime, noSleep, seedThread, type Harness } from '..
 import { fileTools } from '../tools/fs';
 import { JobManager } from '../tools/jobs';
 import { threadCoordinationTools } from '../tools/thread';
-import { chooseSplit, shouldCompact } from './compaction';
+import { chooseSplit, renderForCompaction, shouldCompact } from './compaction';
 import { buildToolContext } from './context';
 import { runAgent, type RunDeps } from './run';
 import { buildConversation, buildTaggedConversation } from './transcript';
@@ -50,6 +50,27 @@ describe('chooseSplit', () => {
     expect(tagged.slice(split.index).map((m) => m.message.role)).toEqual(['assistant', 'tool', 'tool', 'assistant']);
     expect(split.upTo).toBe(2);
     expect(chooseSplit(tagged, 10)).toBeNull();
+  });
+
+  it('never separates the images message from the tool results it follows', () => {
+    seq = 0;
+    const image = { sha256: 'a'.repeat(64), media_type: 'image/png' as const, width: 1240, height: 1754, bytes: 9, name: 'page-3.png' };
+    const events = [
+      ev({ type: 'message.user', payload: { text: 'u1' } }),
+      ev({ type: 'inbox.drained', payload: { run_id: 'r', up_to: 1 } }),
+      ev({ type: 'assistant.message', payload: { run_id: 'r', content: null, tool_calls: [{ id: 'c1', name: 'view_image', arguments: '{}' }] } }),
+      ev({ type: 'tool.result', payload: { run_id: 'r', tool_call_id: 'c1', name: 'view_image', status: 'ok', content: 'page-3.png', images: [image] } }),
+      ev({ type: 'assistant.message', payload: { run_id: 'r', content: 'done', tool_calls: [] } }),
+    ];
+    const tagged = buildTaggedConversation(events);
+    expect(tagged.map((m) => m.message.role)).toEqual(['user', 'assistant', 'tool', 'user', 'assistant']);
+    // keep 2 → the tail would start at the images message; the split moves back to the tool call.
+    const split = chooseSplit(tagged, 2)!;
+    expect(tagged.slice(split.index).map((m) => m.message.role)).toEqual(['assistant', 'tool', 'user', 'assistant']);
+    // Summaries show images as references, never pixels.
+    const rendered = renderForCompaction(tagged.map((m) => m.message), 100_000);
+    expect(rendered).toContain('[image: page-3.png 1240×1754]');
+    expect(renderForCompaction([{ role: 'user', content: [{ type: 'text', text: 'see' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] }], 100_000)).toBe('USER:\nsee\n[image]');
   });
 
   it('triggers at 70% of the context window', () => {

@@ -55,6 +55,17 @@ describe('fake model server', () => {
     ).rejects.toMatchObject({ status: 429 });
   });
 
+  it('takes text and image parts in user messages, and refuses images elsewhere like the real endpoints', async () => {
+    fake = await startFakeModel(() => text('ok'));
+    const image = { type: 'image_url' as const, image_url: { url: 'data:image/png;base64,AAAA' } };
+    await client().chat.completions.create({ model: 'fake-model', messages: [{ role: 'user', content: [{ type: 'text', text: 'see' }, image] }] });
+    expect(fake.requests[0]?.messages[0]?.content).toEqual([{ type: 'text', text: 'see' }, image]);
+    const bad = [{ role: 'assistant', content: [image] }, { role: 'user', content: [{ type: 'video' }] }];
+    for (const m of bad) {
+      await expect(client().chat.completions.create({ model: 'fake-model', messages: [m as never] })).rejects.toMatchObject({ status: 400 });
+    }
+  });
+
   it('answers 500 when the script is exhausted', async () => {
     fake = await startFakeModel([]);
     await expect(

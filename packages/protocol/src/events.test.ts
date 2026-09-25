@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EventBody, EphemeralEvent, INBOX_EVENT_TYPES } from '@desk/protocol';
+import { EventBody, EphemeralEvent, INBOX_EVENT_TYPES, ModelInfo } from '@desk/protocol';
 
 describe('EventBody', () => {
   it('parses a tool.result event', () => {
@@ -8,6 +8,26 @@ describe('EventBody', () => {
       payload: { run_id: 'r1', tool_call_id: 'toolu_1', name: 'read_file', status: 'ok', content: 'hi' },
     });
     expect(parsed.type).toBe('tool.result');
+  });
+
+  it('parses a tool.result carrying images, and rejects a malformed digest', () => {
+    const image = { sha256: 'a'.repeat(64), media_type: 'image/png', width: 1240, height: 1754, bytes: 312_000, name: 'page-1.png' };
+    const parsed = EventBody.parse({
+      type: 'tool.result',
+      payload: { run_id: 'r1', tool_call_id: 'c1', name: 'view_image', status: 'ok', content: 'page-1.png', images: [image] },
+    });
+    expect(parsed.type === 'tool.result' && parsed.payload.images).toEqual([image]);
+    const bad = { type: 'tool.result', payload: { run_id: 'r1', tool_call_id: 'c1', name: 'view_image', status: 'ok', content: '', images: [{ ...image, sha256: '../x' }] } };
+    expect(() => EventBody.parse(bad)).toThrow();
+    expect(() => EventBody.parse({ ...bad, payload: { ...bad.payload, images: [{ ...image, media_type: 'image/svg+xml' }] } })).toThrow();
+  });
+
+  it('parses images.withheld, which names at least one image by its tool result and digest', () => {
+    const images = [{ tool_call_id: 'c1', sha256: 'b'.repeat(64), name: 'page-3.png' }];
+    const parsed = EventBody.parse({ type: 'images.withheld', payload: { run_id: 'r1', images, reason: '400 Could not process image' } });
+    expect(parsed.type === 'images.withheld' && parsed.payload.images).toEqual(images);
+    expect(() => EventBody.parse({ type: 'images.withheld', payload: { run_id: 'r1', images: [], reason: 'x' } })).toThrow();
+    expect(() => EventBody.parse({ type: 'images.withheld', payload: { run_id: 'r1', images: [{ ...images[0], sha256: 'x' }], reason: 'x' } })).toThrow();
   });
 
   it('parses an assistant.message with tool calls', () => {
@@ -48,5 +68,13 @@ describe('attention.dismissed', () => {
   it('is a valid event body', () => {
     expect(EventBody.parse({ type: 'attention.dismissed', payload: { item_id: 'report:12:0' } })).toMatchObject({ type: 'attention.dismissed' });
     expect(() => EventBody.parse({ type: 'attention.dismissed', payload: { item_id: '' } })).toThrow();
+  });
+});
+
+describe('ModelInfo', () => {
+  it('defaults vision to true and keeps an explicit false', () => {
+    const base = { id: 'm', family: 'gpt', context_window: 1000, max_output_tokens: 100, concurrency: 1 };
+    expect(ModelInfo.parse(base).vision).toBe(true);
+    expect(ModelInfo.parse({ ...base, vision: false }).vision).toBe(false);
   });
 });

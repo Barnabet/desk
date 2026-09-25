@@ -72,6 +72,9 @@ export const channels = {
   'memory.correct': z.object({ projectId: id, memoryId: id, update: MemoryUpdateRequest }),
   'memory.remove': z.object({ projectId: id, memoryId: id }),
 
+  /** An image an agent looked at (view_image), as a data URL (the renderer scales thumbnails itself). */
+  'attachments.get': z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/) }),
+
   'library.list': z.object({ projectId: id }),
   'library.upload': z.object({ projectId: id, file: LibraryUploadRequest }),
   'library.file': z.object({ projectId: id, path: relPath }),

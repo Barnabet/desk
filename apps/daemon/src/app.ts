@@ -10,6 +10,7 @@ import {
 import type { CatalogService, EventStore, ModelRegistry, Runtime, SkillRuntimes } from '@desk/core';
 import { bearerAuth, errorResponse } from './http';
 import { agentRoutes } from './routes/agents';
+import { attachmentRoutes } from './routes/attachments';
 import { catalogRoutes } from './routes/catalog';
 import { serviceRoutes } from './routes/services';
 import { configRoutes } from './routes/config';
@@ -58,6 +59,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/v1', projectRoutes(deps));
   app.route('/v1', agentRoutes(deps));
   app.route('/v1', knowledgeRoutes(deps));
+  app.route('/v1', attachmentRoutes(deps));
   app.route('/v1', uiRoutes(deps));
   app.route('/v1', skillRoutes(deps));
   app.route('/v1', catalogRoutes(deps));

@@ -42,15 +42,18 @@ export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, normalizeBase
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
 export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';
 export { DEFAULT_MODEL_ID, effortFor, ModelRegistry, SEED_MODELS, STANDARD_EFFORTS } from './model/registry';
-export { classifyModelError, ModelError, type ModelErrorKind } from './model/errors';
+export { classifyModelError, imageRefusal, ModelError, type ModelErrorKind } from './model/errors';
 export { createModelAdapter } from './model/adapter';
 export { abortableSleep, withRetry, type RetryOptions } from './model/retry';
-export type { ChatMessage, CompletionRequest, CompletionResult, CompletionUsage, ModelAdapter, ToolSpec } from './model/types';
+export type { ChatMessage, ContentPart, CompletionRequest, CompletionResult, CompletionUsage, ModelAdapter, ToolSpec } from './model/types';
 export { defineTool, ToolDenied, type PolicySubject, type Tool, type ToolContext, type ToolGate, type ToolOutput, type ToolResult } from './tools/types';
 export { executeToolCall, MAX_TOOL_OUTPUT_CHARS, prepareToolCall, runPreparedTool, toToolSpecs, type PreparedCall } from './tools/registry';
 export { resolveInside } from './tools/paths';
 export { runProcess, type ProcessResult } from './tools/process';
 export { fileTools } from './tools/fs';
+export { MAX_CALL_BYTES, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, viewImageTool, visionTools } from './tools/vision';
+export { AttachmentStore } from './attachments/store';
+export { imageProblem, imageTokens, readDataUrlInfo, readImageInfo, sniffImageType, type ImageInfo } from './attachments/image';
 export { bashTool, scrubbedEnv, withSkillEnv } from './tools/bash';
 export { completeTool } from './tools/thread';
 export { buildSandboxProfile, detectSandbox, NO_SANDBOX, shellInvocation, type SandboxSpec } from './tools/sandbox';
@@ -71,7 +74,21 @@ export {
 } from './tools/web';
 export { evaluatePolicy, globToRegExp, type PolicyDecision } from './policy/evaluate';
 export { buildToolContext, type ToolEnvironment } from './agent/context';
-export { buildConversation, buildCurrentConversation, CHECKPOINT_HEADER } from './agent/transcript';
+export {
+  buildConversation,
+  buildCurrentConversation,
+  CHECKPOINT_HEADER,
+  IMAGES_HEADER,
+  imagesInWindow,
+  MAX_IMAGE_BYTES_SHOWN,
+  MAX_IMAGES_SHOWN,
+  pixelGroups,
+  showImages,
+  type ConversationImage,
+  type ConversationOptions,
+  type ImageLoader,
+  type ImageWindow,
+} from './agent/transcript';
 export { chooseSplit, compactionPrompt, shouldCompact } from './agent/compaction';
 export { drainInbox, hasPendingInbox } from './agent/inbox';
 export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agent/prompts';

@@ -11,6 +11,8 @@ import { deskSystemPrompt, threadSystemPrompt } from './prompts';
 let h: Harness;
 afterEach(async () => h?.cleanup());
 
+const SEE_FILES = 'To see a document, page, slide, sheet, video frame or image, render it with its file skill and look at it with view_image.';
+
 async function setup() {
   h = await createHarness({ script: (req) => (req.model === FAKE_MODEL.id ? tools(call('wait_for_reply', {})) : text('noted')) });
   const rt = newRuntime(h);
@@ -47,6 +49,7 @@ describe('Desk prompt', () => {
     expect(p).toContain('baseline.md — Baseline');
     expect(p).toContain('(no plan yet)');
     expect(p).toMatch(/never merge/i);
+    expect(p).toContain(SEE_FILES);
   });
 });
 
@@ -64,6 +67,7 @@ describe('thread prompt', () => {
     expect(p).toMatch(/revision round 1/i);
     expect(p).toContain('Release moved to Friday');
     expect(p).toContain('API (git)');
+    expect(p).toContain(SEE_FILES);
   });
 
   it('marks the thread’s own library artifacts', async () => {
@@ -89,7 +93,8 @@ describe('tool sets', () => {
     expect(names(threadToolsFor(gitThread))).toEqual(expect.arrayContaining(['git_commit', 'git_push', 'bash', 'complete', 'message_desk']));
     expect(names(threadToolsFor(plain))).not.toContain('git_push');
     const deskNames = names(deskToolsFor(desk));
-    expect(deskNames).toEqual(expect.arrayContaining(['spawn_thread', 'bash_readonly', 'read_file', 'write_file', 'library_publish', 'memory_write']));
+    expect(deskNames).toEqual(expect.arrayContaining(['spawn_thread', 'bash_readonly', 'read_file', 'view_image', 'write_file', 'library_publish', 'memory_write']));
+    expect(names(threadToolsFor(plain))).toContain('view_image');
     expect(deskNames).not.toContain('bash');
     expect(deskNames).not.toContain('complete');
   });

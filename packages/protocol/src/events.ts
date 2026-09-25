@@ -16,6 +16,7 @@ import {
   SkillScope,
   SourceKind,
   ToolCall,
+  ToolImage,
   ToolResultStatus,
 } from './domain';
 import { ProjectSettingsPatch } from './settings';
@@ -124,6 +125,8 @@ export const EventBody = z.discriminatedUnion('type', [
       name: z.string(),
       status: ToolResultStatus,
       content: z.string(),
+      /** Images shown to the model after the result (view_image). */
+      images: z.array(ToolImage).optional(),
     }),
   ),
   event(
@@ -203,6 +206,19 @@ export const EventBody = z.discriminatedUnion('type', [
       checkpoint: z.string(),
       up_to: z.number().int().nonnegative(),
       trigger: z.enum(['threshold', 'overflow']),
+    }),
+  ),
+  /**
+   * The model endpoint refused a request because of images in it (an image it cannot decode): these image
+   * occurrences (the tool result that showed each) are sent as text from now on, so one bad image never wedges the agent.
+   */
+  event(
+    'images.withheld',
+    z.object({
+      run_id: z.string(),
+      images: z.array(z.object({ tool_call_id: z.string(), sha256: ToolImage.shape.sha256, name: z.string() })).min(1),
+      /** The endpoint's answer, e.g. "400 Could not process image". */
+      reason: z.string(),
     }),
   ),
   event(

@@ -4,7 +4,7 @@ import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { describeError, toast, toastError } from '../components/Toast';
 
-const blank = (): ModelInfo => ({ id: '', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4 });
+const blank = (): ModelInfo => ({ id: '', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true });
 
 /** Turns one level on or off for a model, keeping levels in order and clearing a default that is no longer offered. */
 export function toggleEffort(m: ModelInfo, level: ReasoningEffort): Pick<ModelInfo, 'reasoning_efforts' | 'default_reasoning_effort'> {
@@ -135,6 +135,10 @@ export function ModelsEditor() {
                       </select>
                     </label>
                     {!m.reasoning_efforts.length ? <span className="small muted">None selected: Desk never sends a level to this model.</span> : null}
+                    <label className="models-effort-default">
+                      <input type="checkbox" aria-label={`Model ${i + 1} sees images`} checked={m.vision} onChange={(e) => set(i, { vision: e.target.checked })} />
+                      Sees images
+                    </label>
                   </div>
                 </td>
               </tr>

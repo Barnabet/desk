@@ -9,12 +9,13 @@ export const STANDARD_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'xh
 /**
  * Conservative defaults; exact context windows are confirmed in Plan 5 and edited in the registry, not elsewhere.
  * Reasoning levels are what the proxy accepts per model (claude-fable-5-1 rejects `none`); no default is sent unless chosen.
+ * All four take images (verified through the proxy for claude-opus-5-5 and gpt-6-sol on 2026-09-24).
  */
 export const SEED_MODELS: ModelInfo[] = [
-  { id: 'claude-opus-5-5', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: ['none', ...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 4 },
-  { id: 'claude-fable-5-1', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: [...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 2 },
-  { id: 'gpt-6-astra', family: 'gpt', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: ['none', ...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 4 },
-  { id: 'gpt-6-sol', family: 'gpt', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: ['none', ...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 4 },
+  { id: 'claude-opus-5-5', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: ['none', ...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 4, vision: true },
+  { id: 'claude-fable-5-1', family: 'claude', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: [...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 2, vision: true },
+  { id: 'gpt-6-astra', family: 'gpt', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: ['none', ...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 4, vision: true },
+  { id: 'gpt-6-sol', family: 'gpt', context_window: 200_000, max_output_tokens: 32_000, reasoning_efforts: ['none', ...STANDARD_EFFORTS], default_reasoning_effort: null, concurrency: 4, vision: true },
 ];
 
 /**

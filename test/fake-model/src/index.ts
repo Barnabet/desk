@@ -73,6 +73,26 @@ function split(s: string, size: number): string[] {
   return out;
 }
 
+/**
+ * Checks message content the way Chat Completions endpoints do: a string, or parts (`text`, and `image_url` only
+ * in user messages). Returns the problem, or null.
+ */
+export function contentProblem(messages: Array<Record<string, any>>): string | null {
+  for (const [i, m] of messages.entries()) {
+    if (typeof m.content === 'string' || m.content === null || m.content === undefined) continue;
+    if (!Array.isArray(m.content)) return `messages[${i}].content must be a string or an array of parts`;
+    for (const part of m.content as Array<Record<string, any>>) {
+      if (part?.type === 'text' && typeof part.text === 'string') continue;
+      if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
+        if (m.role !== 'user') return `messages[${i}]: image_url parts are only allowed in user messages`;
+        continue;
+      }
+      return `messages[${i}]: unknown content part ${JSON.stringify(part).slice(0, 80)}`;
+    }
+  }
+  return null;
+}
+
 export async function startFakeModel(initial: Script | FakeReply[] = [], opts: { port?: number } = {}): Promise<FakeModelServer> {
   let script = toScript(initial);
   const requests: ChatRequest[] = [];
@@ -95,6 +115,8 @@ export async function startFakeModel(initial: Script | FakeReply[] = [], opts: {
       return json(res, 400, { error: { type: 'invalid_request_error', message: 'bad json' } });
     }
     requests.push(body);
+    const problem = contentProblem(body.messages ?? []);
+    if (problem) return json(res, 400, { error: { type: 'invalid_request_error', message: problem } });
     inFlight++;
     maxInFlight = Math.max(maxInFlight, inFlight);
     res.on('close', () => {

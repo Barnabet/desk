@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../model/types';
+import type { ChatMessage, ContentPart } from '../model/types';
 import type { TaggedMessage } from './transcript';
 
 /** Fraction of the model's context window at which the conversation is compacted. */
@@ -16,12 +16,13 @@ export function shouldCompact(promptTokens: number, contextWindow: number): bool
 
 /**
  * Where to cut: keep (at least) the last `keep` messages, moving the cut back so the kept part never starts
- * with tool results separated from the assistant message that requested them. `upTo` is the id of the last
+ * with tool results (or their images) separated from the assistant message that requested them. `upTo` is the id of the last
  * event summarised. Null when there is nothing before the cut.
  */
 export function chooseSplit(messages: TaggedMessage[], keep: number): { index: number; upTo: number } | null {
   let index = messages.length - keep;
-  while (index > 0 && messages[index]?.message.role === 'tool') index--;
+  // Tool results, and the images message that follows them, stay with the assistant message that asked for them.
+  while (index > 0 && (messages[index]?.message.role === 'tool' || messages[index]?.images)) index--;
   if (index <= 0) return null;
   return { index, upTo: messages[index - 1]!.eventId };
 }
@@ -30,12 +31,17 @@ function clip(text: string, max = MAX_MESSAGE_CHARS): string {
   return text.length <= max ? text : `${text.slice(0, max)}\n[… ${text.length - max} characters omitted]`;
 }
 
+/** Plain text of a user message; images are references (the conversation is built without pixels for compaction). */
+function textOf(content: string | ContentPart[]): string {
+  return typeof content === 'string' ? content : content.map((p) => (p.type === 'text' ? p.text : '[image]')).join('\n');
+}
+
 function renderMessage(m: ChatMessage): string {
   switch (m.role) {
     case 'system':
       return `SYSTEM:\n${clip(m.content)}`;
     case 'user':
-      return `USER:\n${clip(m.content)}`;
+      return `USER:\n${clip(textOf(m.content))}`;
     case 'assistant': {
       const calls = (m.tool_calls ?? []).map((tc) => `→ called ${tc.function.name}(${clip(tc.function.arguments, 1_000)}) [${tc.id}]`);
       return ['ASSISTANT:', ...(m.content ? [clip(m.content)] : []), ...calls].join('\n');

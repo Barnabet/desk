@@ -48,6 +48,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `state/attention.ts`, `state/overview.ts`: what needs the user, and the cross-project summary (desktop app).
   - `workspaces/inspect.ts`: thread diff and confined workspace browsing.
   - `services/manager.ts`: project services' processes (spawn, capped logs, loopback URL detection, orphan reaping); `tools/services.ts` holds the agent tools.
+  - `attachments/`: images agents looked at, content-addressed in `<data>/attachments` (`tools/vision.ts` is `view_image`; `agent/transcript.ts` shows the 8 most recent as pixels).
   - `catalog/`: the skill catalog. `catalog.json` holds the 20 pinned entries; `service.ts` fetches, verifies, stages and installs them; `runtimes.ts` builds Desk-managed environments (uv Python, npm lock, node shim, compat shims); `tar.ts`, `digest.ts`, `review.ts`; `curation.ts` holds helpers for `scripts/catalog.ts`.
   - `model/endpoint.ts`, `model/switchable.ts`: endpoint resolution (env → file → Keychain) and a runtime-configurable adapter.
   - `testing/`: the harness, exported as `@desk/core/testing`.

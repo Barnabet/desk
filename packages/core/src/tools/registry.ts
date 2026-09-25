@@ -50,7 +50,7 @@ export async function runPreparedTool(tool: Tool, input: unknown, ctx: ToolConte
     const out = await tool.execute(input, ctx);
     const res = typeof out === 'string' ? { content: out } : out;
     const content = await truncateOutput(res.content, ctx);
-    return res.yield ? { status: 'ok', content, yield: res.yield } : { status: 'ok', content };
+    return { status: 'ok', content, ...(res.yield ? { yield: res.yield } : {}), ...(res.images?.length ? { images: res.images } : {}) };
   } catch (err) {
     if (err instanceof ToolDenied) return { status: 'denied', content: err.message };
     return { status: 'error', content: err instanceof Error ? err.message : String(err) };

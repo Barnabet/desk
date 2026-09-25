@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type FakeReply, type Script } from '@desk/fake-model';
-import { createHarness, FAKE_MODEL, newRuntime, seedThread, type Harness } from '@desk/core/testing';
+import { createHarness, encodePng, FAKE_MODEL, newRuntime, seedThread, type Harness } from '@desk/core/testing';
 import { createApp } from './app';
 
 let h: Harness;
@@ -166,6 +166,21 @@ describe('memory, library, usage, events, models', () => {
     expect(dl.status).toBe(200);
     expect(Buffer.from(await dl.res.arrayBuffer())).toEqual(bytes);
     expect((await api('GET', `/projects/${project.id}/library/file/..%2F..%2Fdesk.db`)).status).toBe(403);
+  });
+
+  it('serves attachments by sha256 with their type and long caching; validates the id; 404 when missing', async () => {
+    const { app, api, runtime } = await setup();
+    const png = encodePng(3, 2);
+    const sha = await runtime.attachments.put(png, 'image/png');
+    const got = await api('GET', `/attachments/${sha}`);
+    expect(got.status).toBe(200);
+    expect(got.res.headers.get('content-type')).toBe('image/png');
+    expect(got.res.headers.get('cache-control')).toContain('immutable');
+    expect(got.res.headers.get('content-length')).toBe(String(png.length));
+    expect(Buffer.from(await got.res.arrayBuffer())).toEqual(png);
+    expect((await api('GET', `/attachments/${'0'.repeat(64)}`)).status).toBe(404);
+    for (const bad of ['abc', 'A'.repeat(64), `..%2F${'0'.repeat(61)}`]) expect((await api('GET', `/attachments/${bad}`)).status).toBe(400);
+    expect((await app.request(`/v1/attachments/${sha}`)).status).toBe(401);
   });
 
   it('reports usage and pages events', async () => {

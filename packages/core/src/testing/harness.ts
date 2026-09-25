@@ -20,6 +20,7 @@ export const FAKE_MODEL: ModelInfo = {
   reasoning_efforts: ['low', 'medium', 'high'],
   default_reasoning_effort: null,
   concurrency: 4,
+  vision: true,
 };
 
 export const noSleep: RetryOptions = { sleep: async () => {}, random: () => 0 };

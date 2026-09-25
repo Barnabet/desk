@@ -1,5 +1,6 @@
 import type { z } from 'zod';
-import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, ReasoningEffort, SkillScope, ToolResultStatus } from '@desk/protocol';
+import type { AgentMessageKind, AgentStatus, ArtifactKind, MemoryKind, ProjectSettingsPatch, ReasoningEffort, SkillScope, ToolImage, ToolResultStatus } from '@desk/protocol';
+import type { AttachmentStore } from '../attachments/store';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import type { ServiceRow } from '../state/queries';
@@ -21,12 +22,18 @@ export type ToolContext = {
   services: RuntimeServices;
   /** Set when the workspace is a git worktree. */
   git: { branch: string; base: string } | null;
+  /** The model that asked for this call (a run's fallback model after a switch); unset outside a model step, e.g. after an approval. */
+  model?: string;
 };
 
 /** Runtime capabilities available to tools (implemented by Runtime). */
 export interface RuntimeServices {
   readonly store: EventStore;
   readonly skills: SkillStore;
+  /** Content-addressed images shown to models (`<data>/attachments`). */
+  readonly attachments: AttachmentStore;
+  /** The model a tool call runs under (`model`, else the agent's own), and whether it accepts images. */
+  agentModel(agentId: string, model?: string): { id: string; vision: boolean };
   activateSkills(agentId: string, names: string[]): SkillSummary[];
   saveSkill(
     input: SkillSaveInput,
@@ -61,8 +68,9 @@ export interface RuntimeServices {
 }
 
 export type ToolYield = { status: AgentStatus; reason?: string };
-export type ToolOutput = string | { content: string; yield?: ToolYield };
-export type ToolResult = { status: ToolResultStatus; content: string; yield?: ToolYield };
+/** `images` are stored attachments shown to the model after the result (view_image). */
+export type ToolOutput = string | { content: string; yield?: ToolYield; images?: ToolImage[] };
+export type ToolResult = { status: ToolResultStatus; content: string; yield?: ToolYield; images?: ToolImage[] };
 
 export type PolicySubject = { branch?: string; command?: string; domain?: string };
 

@@ -15,6 +15,22 @@ export type ToolResultStatus = z.infer<typeof ToolResultStatus>;
 export const ToolCall = z.object({ id: z.string(), name: z.string(), arguments: z.string() });
 export type ToolCall = z.infer<typeof ToolCall>;
 
+/** Image formats that view_image accepts (and models take in chat messages). */
+export const ImageMediaType = z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+export type ImageMediaType = z.infer<typeof ImageMediaType>;
+
+/** An image a tool showed the model, stored content-addressed as `<data>/attachments/<sha256>.<ext>`. */
+export const ToolImage = z.object({
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  media_type: ImageMediaType,
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  bytes: z.number().int().nonnegative(),
+  /** How the agent referred to the file (workspace-relative path or base name). */
+  name: z.string(),
+});
+export type ToolImage = z.infer<typeof ToolImage>;
+
 /** Reasoning effort levels, lowest first (what `reasoning_effort` may carry on a chat completion). */
 /** A project service's name: lowercase, digits and dashes (`backend`, `web-2`). */
 export const ServiceName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/, 'Use lowercase letters, digits and dashes (max 32)');
@@ -40,6 +56,8 @@ export const ModelInfo = z
     /** Sent when neither the project nor the thread picks a level; null leaves it to the endpoint. */
     default_reasoning_effort: ReasoningEffort.nullable().default(null),
     concurrency: z.number().int().min(1),
+    /** Whether the model accepts images (view_image). */
+    vision: z.boolean().default(true),
   })
   .refine((m) => m.default_reasoning_effort === null || m.reasoning_efforts.includes(m.default_reasoning_effort), {
     message: 'The default reasoning effort must be one of the model’s levels',

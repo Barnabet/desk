@@ -31,6 +31,16 @@ describe('reduceTranscript', () => {
     expect(s.entries.find((e) => e.kind === 'tools')).toMatchObject({ calls: [{ id: 'c1', status: 'ok' }] });
   });
 
+  it('exposes the images a tool result showed the model', () => {
+    const image = { sha256: 'a'.repeat(64), media_type: 'image/png' as const, width: 1240, height: 1754, bytes: 9, name: 'page-1.png' };
+    let s = emptyTranscript('t');
+    s = reduceTranscript(s, ev(1, 'tool.call', { run_id: 'r', tool_call_id: 'c', name: 'view_image', arguments: '{"paths":["page-1.png"]}' }, { agent: 't' }));
+    s = reduceTranscript(s, ev(2, 'tool.call', { run_id: 'r', tool_call_id: 'd', name: 'read_file', arguments: '{}' }, { agent: 't' }));
+    s = reduceTranscript(s, ev(3, 'tool.result', { run_id: 'r', tool_call_id: 'c', name: 'view_image', status: 'ok', content: 'page-1.png · 1240x1754', images: [image] }, { agent: 't' }));
+    s = reduceTranscript(s, ev(4, 'tool.result', { run_id: 'r', tool_call_id: 'd', name: 'read_file', status: 'ok', content: 'x' }, { agent: 't' }));
+    expect(s.entries).toEqual([expect.objectContaining({ kind: 'tools', calls: [expect.objectContaining({ id: 'c', status: 'ok', images: [image] }), expect.not.objectContaining({ images: expect.anything() })] })]);
+  });
+
   it('streams text for the thread and marks interrupted tool calls', () => {
     let s = emptyTranscript('t');
     s = applyTranscriptDelta(s, { type: 'assistant.delta', project_id: 'p', agent_id: 't', payload: { run_id: 'r', text: 'Rewri' } });
