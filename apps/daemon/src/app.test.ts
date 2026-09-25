@@ -125,6 +125,25 @@ describe('threads and approvals', () => {
     expect((await api('GET', `/threads/${project.id}`)).status).toBe(404);
   });
 
+  it('returns 409 for messages to an archived thread or to a thread of an archived project', async () => {
+    const { api, runtime } = await setup((req) => {
+      const system = String(req.messages[0]?.content ?? '');
+      if (!system.startsWith('You are Desk')) return tools(call('complete', { summary: 'Scouted' }));
+      return req.messages.some((m) => m.role === 'tool') ? text('Dispatched.') : tools(call('spawn_thread', { title: 'Scout', brief: 'Look around' }));
+    });
+    const { project } = await newProject(api);
+    await api('POST', `/projects/${project.id}/messages`, { text: 'go' });
+    await runtime.whenIdle();
+    const [scout] = (await api('GET', `/projects/${project.id}/threads`)).body as Array<{ id: string; status: string }>;
+    expect(scout!.status).toBe('done');
+    expect((await api('POST', `/threads/${scout!.id}/archive`)).status).toBe(200);
+    expect((await api('POST', `/threads/${scout!.id}/messages`, { text: 'One more thing' })).status).toBe(409);
+
+    const live = runtime.createThread(project.id, { title: 'Live', brief: 'b', workspacePath: join(h.dir, 'live') });
+    expect((await api('POST', `/projects/${project.id}/archive`)).status).toBe(200);
+    expect((await api('POST', `/threads/${live}/messages`, { text: 'Hello?' })).status).toBe(409);
+  });
+
   it('lists and resolves approvals', async () => {
     const { api, runtime } = await setup(routed([tools(call('bash', { command: 'sudo true' })), text('ok')], [tools(call('spawn_thread', { title: 'Risky', brief: 'b' })), text('noted')]));
     const { project } = await newProject(api);

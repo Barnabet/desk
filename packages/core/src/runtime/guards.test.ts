@@ -173,3 +173,49 @@ describe('wakes in the runtime', () => {
     expect(batch).toContain('What happened?');
   });
 });
+
+describe('archives', () => {
+  it("never runs an archived thread, and refuses the user's messages to archived threads and projects", async () => {
+    const { rt, projectId, desk, thread, begin } = await setup({ Old: () => tools(call('complete', { summary: 'Done' })) });
+    const old = thread('Old');
+    begin(old);
+    await rt.whenIdle();
+    await rt.archiveThread(old);
+    rt.sendAgentMessage(desk.id, old, 'note', 'Anything else?');
+    await rt.whenIdle();
+    expect(runs(old)).toHaveLength(1);
+    expect(() => rt.sendMessage(old, 'Hello?')).toThrow(ConflictError);
+
+    const live = thread('Live');
+    rt.archiveProject(projectId);
+    await rt.whenIdle();
+    expect(() => rt.sendMessage(live, 'Hello?')).toThrow(ConflictError);
+    expect(h.store.list({ agentId: live, types: ['message.user'] })).toEqual([]);
+  });
+
+  it('archiving a project with a waiting and a running thread schedules nothing afterwards', async () => {
+    const { rt, projectId, thread, begin } = await setup({
+      Waiter: () => tools(call('wait_for_reply', {})),
+      Runner: () => tools(call('act'), call('complete', { summary: 'Finished' })),
+    });
+    const waiter = thread('Waiter');
+    begin(waiter);
+    await rt.whenIdle();
+    expect(status(waiter)).toBe('waiting');
+
+    // The user archives the project while Runner is in its tool phase.
+    during = () => rt.archiveProject(projectId);
+    const runner = thread('Runner');
+    begin(runner);
+    await rt.whenIdle();
+
+    const [archived] = h.store.list({ projectId, types: ['project.archived'] });
+    const after = h.store.list({ projectId, after: archived!.id });
+    expect(after.filter((e) => e.type === 'run.started')).toEqual([]);
+    expect(after.filter((e) => e.type === 'agent.status_changed' && e.payload.status === 'queued')).toEqual([]);
+    const cancels = h.store.list({ projectId, types: ['agent.status_changed'] }).filter((e) => e.type === 'agent.status_changed' && e.payload.status === 'cancelled');
+    expect(cancels.length).toBeGreaterThan(0);
+    expect(cancels.every((e) => e.id > archived!.id)).toBe(true);
+    expect([status(waiter), status(runner)]).toEqual(['cancelled', 'cancelled']);
+  });
+});

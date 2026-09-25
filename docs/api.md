@@ -44,7 +44,7 @@ Pass `next_after` as the next `after` to continue.
 | POST | `/v1/projects` | `CreateProjectRequest { name, goal?, instructions?, settings?, sources?[{path,label?}] }` | 201 with the overview. Creates the Desk agent |
 | GET | `/v1/projects/:id` | | Overview: project, desk, sources, plan, threads, pending approvals, services, `whats_up` (`{ text, ts }` or `null`: Desk's latest What's up), `last_seq` (the stream cursor to resume from) |
 | PATCH | `/v1/projects/:id` | `UpdateProjectRequest { name?, goal?, instructions?, settings? }` | `settings` is a partial patch |
-| POST | `/v1/projects/:id/archive` | | Stops every agent and hides the project |
+| POST | `/v1/projects/:id/archive` | | Archives the project first (no agent is woken after that), then stops its agents and services, and hides it |
 | POST | `/v1/projects/:id/sources` | `{ path, label?, agent_write? }` | Detects `git` vs `folder`. `agent_write` (default `true`): Desk and its threads may write there (sandboxed) and run services there. 201 |
 | PATCH | `/v1/projects/:id/sources/:sid` | `{ agent_write }` | Turns agents' write access to the folder on or off (`source.updated`) |
 | DELETE | `/v1/projects/:id/sources/:sid` | | |
@@ -86,7 +86,7 @@ Project services are long-lived processes (dev servers, APIs, workers) that Desk
 | GET | `/v1/projects/:id/threads` | `?all=1` includes archived |
 | GET | `/v1/threads/:id` | Thread row: status, brief, result, git info, `active_skills`, … |
 | GET | `/v1/threads/:id/transcript` | paging; every event of the thread |
-| POST | `/v1/threads/:id/messages` | `{ text }`: steer the thread directly. 202 |
+| POST | `/v1/threads/:id/messages` | `{ text }`: steer the thread directly. 202. 409 when the thread or its project is archived |
 | POST | `/v1/threads/:id/stop` | Cancels the thread; Desk is notified |
 | POST | `/v1/threads/:id/archive` | Finished threads only. Removes the workspace and keeps the git branch |
 | GET | `/v1/projects/:id/approvals` | `?status=pending\|approved\|denied` |

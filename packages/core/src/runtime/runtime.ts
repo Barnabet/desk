@@ -345,14 +345,14 @@ export class Runtime {
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.updated', payload: patch });
   }
 
-  /** Stops every agent of the project and archives it (data is kept). */
+  /** Archives the project (data is kept), then stops its agents and services. Archived first, so no stop wakes anyone. */
   archiveProject(projectId: string): void {
     this.requireOpenProject(projectId);
+    this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
     for (const agent of listAgents(this.o.store.db, projectId)) {
       if (!TERMINAL.has(agent.status) || this.scheduler.isActive(agent.id)) this.stopAgent(agent.id, { by: agent.id, reason: 'Project archived' });
     }
     this.stopServicesOf(projectId, 'project_archived').catch((err) => this.reportError(err, `stopping services of ${projectId}`));
-    this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
   }
 
   /** Validates model ids, and reasoning levels against the model they apply to, then applies a settings patch. */
@@ -741,8 +741,11 @@ export class Runtime {
     return t;
   }
 
+  /** The user's message to an agent. Refused (409) for an archived thread and for any agent of an archived project. */
   sendMessage(agentId: string, text: string): void {
     const agent = this.requireAgent(agentId);
+    if (agent.archived_at) throw new ConflictError(`Thread ${agentId} is archived`);
+    this.requireOpenProject(agent.project_id);
     this.o.store.append({ project_id: agent.project_id, agent_id: agentId, type: 'message.user', payload: { text } });
     this.wake(agentId);
   }
