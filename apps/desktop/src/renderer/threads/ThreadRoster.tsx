@@ -1,21 +1,39 @@
 import { useState } from 'react';
-import type { ProjectState, ThreadView } from '@desk/client';
+import type { MessagesState, ProjectState, ThreadView } from '@desk/client';
+import { AnsweringBadge } from '../components/AnsweringBadge';
 import { EmptyState } from '../components/EmptyState';
 import { SkillBadge } from '../components/SkillBadge';
 import { StatusChip } from '../components/StatusChip';
 import { ago } from '../format';
 import { href } from '../router';
 import { useGlobal } from '../state/global';
+import { answeringLabel } from '../waits';
 
 const ORDER: Record<string, number> = { waiting: 0, running: 1, queued: 2, idle: 3, failed: 4, done: 5, cancelled: 6 };
 
-export function ThreadCard({ projectId, t, reviewRounds, now, proxyDown }: { projectId: string; t: ThreadView; reviewRounds: number; now: number; proxyDown: boolean }) {
+export function ThreadCard({
+  projectId,
+  t,
+  reviewRounds,
+  now,
+  proxyDown,
+  answering,
+}: {
+  projectId: string;
+  t: ThreadView;
+  reviewRounds: number;
+  now: number;
+  proxyDown: boolean;
+  /** "answering Desk" while the thread's answer run is in progress; its status chip does not change. */
+  answering: string | null;
+}) {
   return (
     <a className={`card thread-card${t.archived_at ? ' archived' : ''}`} href={href({ name: 'project', id: projectId, tab: 'threads', threadId: t.id })}>
       <div className="thread-card-head">
         <h2>{t.title ?? 'Untitled thread'}</h2>
         <StatusChip status={t.status} reason={t.reason} proxyDown={proxyDown} />
       </div>
+      {answering ? <AnsweringBadge label={answering} /> : null}
       {t.reason && t.status !== 'running' ? <span className="small muted">{t.reason}</span> : null}
       {t.activity ? <span className="mono small thread-activity">{t.activity}</span> : null}
       <dl className="thread-facts">
@@ -56,7 +74,7 @@ export function ThreadCard({ projectId, t, reviewRounds, now, proxyDown }: { pro
 }
 
 /** Every thread in the project as cards, busiest first. */
-export function ThreadRoster({ project, now }: { project: ProjectState; now: number }) {
+export function ThreadRoster({ project, messages, now }: { project: ProjectState; messages: MessagesState; now: number }) {
   const [showArchived, setShowArchived] = useState(false);
   const proxyDown = useGlobal((g) => g.system.proxy) === 'down';
   const all = project.threads;
@@ -79,7 +97,15 @@ export function ThreadRoster({ project, now }: { project: ProjectState; now: num
       {list.length ? (
         <div className="roster-grid">
           {list.map((t) => (
-            <ThreadCard key={t.id} projectId={project.project.id} t={t} reviewRounds={project.project.settings.review_rounds} now={now} proxyDown={proxyDown} />
+            <ThreadCard
+              key={t.id}
+              projectId={project.project.id}
+              t={t}
+              reviewRounds={project.project.settings.review_rounds}
+              now={now}
+              proxyDown={proxyDown}
+              answering={answeringLabel(messages, t.id)}
+            />
           ))}
         </div>
       ) : (

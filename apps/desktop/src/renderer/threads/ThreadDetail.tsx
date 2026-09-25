@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ThreadView } from '@desk/client';
 import { call } from '../bridge';
+import { AnsweringBadge } from '../components/AnsweringBadge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyState } from '../components/EmptyState';
@@ -12,6 +13,7 @@ import { href } from '../router';
 import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { useTranscript, type SessionState } from '../state/session';
+import { answeringLabel, waitLabel } from '../waits';
 import { narrate, stopsOf } from './route';
 import { RouteView } from './RouteView';
 import { DiffTab } from './tabs/DiffTab';
@@ -61,6 +63,7 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   const projectId = project.project.id;
   const now = useNow();
   const proxyDown = useGlobal((g) => g.system.proxy) === 'down';
+  const attention = useGlobal((g) => g.attention);
   const transcript = useTranscript(s, projectId, thread.id);
   const rows = useMemo(() => narrate(transcript.entries), [transcript.entries]);
   const stops = useMemo(() => stopsOf(rows), [rows]);
@@ -102,6 +105,9 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   const label = statusLabel(thread.status, thread.reason, proxyDown);
   const current = selected ?? stops.at(-1)?.n ?? null;
   const archived = !!thread.archived_at;
+  // What it waits on, and whether it is answering, come from the message fold, never the status reason (design spec §8).
+  const wait = thread.status === 'waiting' ? waitLabel(s.messages, thread.id, attention, now) : null;
+  const answering = answeringLabel(s.messages, thread.id);
 
   const act = async (what: 'stop' | 'archive' | 'skill') => {
     setConfirm(null);
@@ -144,8 +150,8 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
           </a>
           <h1>{thread.title ?? 'Untitled thread'}</h1>
           <p className="thread-status-line">
-            <span className={`tone-${label.tone}`}>{label.label}</span>
-            {thread.reason && thread.status !== 'running' ? ` · ${thread.reason}` : ''}
+            <span className={`tone-${label.tone}`}>{wait ? `${wait[0]!.toUpperCase()}${wait.slice(1)}` : label.label}</span>
+            {thread.reason && thread.status !== 'running' && thread.status !== 'waiting' ? ` · ${thread.reason}` : ''}
             {thread.review_round ? ` · revision round ${thread.review_round} of ${rounds}` : ''} · <span className="mono">
               {thread.model_override ?? thread.model}
               {thread.effort ? ` (${thread.effort} effort)` : ''}
@@ -154,6 +160,7 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
             {usage.length ? <> · {usage.map((u) => `${u.model.replace(/^claude-/, '')} ${tokens(u.prompt + u.completion)}`).join(' · ')}</> : null}
           </p>
           <div className="thread-chips">
+            {answering ? <AnsweringBadge label={answering} /> : null}
             {thread.active_skills.map((sk) => (
               <SkillBadge key={sk} name={sk} />
             ))}

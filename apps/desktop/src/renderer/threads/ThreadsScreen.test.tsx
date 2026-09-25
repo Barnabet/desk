@@ -68,6 +68,15 @@ const finished: StoredEvent[] = [
   ev(6, 'agent.result', { summary: 'Five drafts published', artifacts: ['emails/01.md'], skill_drafts: ['drafts/email-sequence'] }, t),
   ev(7, 'agent.status_changed', { status: 'done' }, t),
 ];
+/** A time `m` minutes ago, 20 s past the minute so it reads "<m>m" on either side of the shared clock's 15 s step. */
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000 - 20_000).toISOString();
+const f = { agent: 'f' };
+/** Frontend (f) asks the thread t a tracked question (event `from + 1`), and t starts an answer run for it. */
+const answeringFrontend = (from: number): StoredEvent[] => [
+  ev(from, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+  ev(from + 1, 'message.agent', { from_agent_id: 'f', from_label: 'thread "Frontend" (f)', kind: 'question', text: 'Which currency?', tracked: true }, t),
+  ev(from + 2, 'run.started', { run_id: 'r2', model: 'claude-opus-5-5', answering: from + 1 }, t),
+];
 
 function setup(events = base, extra: Record<string, (input: any) => unknown> = {}, threadId: string | null = 't', at?: number) {
   const bridge = installBridge({
@@ -244,5 +253,54 @@ describe('ThreadsScreen', () => {
     expect(tr.querySelector('#tr-stop-2 .toolgroup-names')!.textContent).toBe('read_file · message_thread');
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
     expect(within(tr).getAllByText('message_thread').length).toBeGreaterThan(0);
+  });
+
+  it('shows "answering" on a done thread, which keeps its status, Archive and Skill actions and gets no Stop', async () => {
+    setup([...base, ...finished, ...answeringFrontend(8)]);
+    const head = (await screen.findByRole('heading', { name: 'Welcome emails', level: 1 })).closest('.thread-head') as HTMLElement;
+    expect(within(head).getByText('answering Frontend')).toBeTruthy();
+    expect(head.querySelector('.thread-status-line')!.textContent).toMatch(/^Done/);
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Turn into a skill' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
+
+  it('marks an answering thread on its roster card', async () => {
+    setup([...base, ...finished, ...answeringFrontend(8)], {}, null);
+    const card = await screen.findByRole('link', { name: /Welcome emails/ });
+    expect(within(card).getByText('answering Frontend')).toBeTruthy();
+    expect(card.textContent).toContain('Done');
+  });
+
+  it('keeps Stop on a waiting thread while it answers, and its dialog says Desk is told', async () => {
+    const bridge = setup([...base, ev(6, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on Desk or the user' }, t), ...answeringFrontend(7)], {
+      'threads.stop': () => ({ ok: true }),
+    });
+    await screen.findByText('answering Frontend');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(screen.getByRole('dialog', { name: 'Stop this thread?' }).textContent).toContain('Desk is told');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop thread' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'threads.stop')).toBe(true));
+  });
+
+  it('says what a waiting thread waits on, from the fold rather than the status reason', async () => {
+    setup([
+      ...base,
+      ev(6, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+      ev(7, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'question', text: 'Which subject lines?', tracked: true }, { ...f, ts: minutesAgo(4) }),
+      ev(8, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, t),
+    ]);
+    const line = (await screen.findByText('Waiting on Frontend · 4m')).closest('.thread-status-line')!;
+    expect(line.textContent).not.toContain('Waiting on "Frontend"');
+  });
+
+  it('says a waiting thread waits on you only when it has an attention item', async () => {
+    globalStore.set({
+      ...initialGlobalState(),
+      connection: { status: 'live' },
+      attention: [{ id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Onboarding', agent_id: 't', title: 'Welcome emails wants to run bash', detail: '', created_at: minutesAgo(2), ref: { approval_id: 'a1', thread_id: 't' } }],
+    });
+    setup([...base, ev(6, 'agent.status_changed', { status: 'waiting', reason: 'Waiting for approval' }, t)]);
+    expect(await screen.findByText('Waiting on you · 2m')).toBeTruthy();
   });
 });

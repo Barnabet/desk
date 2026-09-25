@@ -19,7 +19,7 @@ export function ThreadsScreen({ projectId, threadId, at }: { projectId: string; 
         </EmptyState>
       </div>
     );
-  if (!threadId) return <ThreadRoster project={s.project} now={now} />;
+  if (!threadId) return <ThreadRoster project={s.project} messages={s.messages} now={now} />;
   const thread = s.project.threads.find((t) => t.id === threadId);
   if (!thread)
     return (
