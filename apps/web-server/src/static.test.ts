@@ -76,6 +76,10 @@ describe('findInlineCode', () => {
     expect(findInlineCode('<script type="module"></script>')).toHaveLength(1);
     expect(findInlineCode('<link rel="stylesheet" href="styles.css" media="print" onload="this.media=\'all\'">')).toEqual(['event handler attribute: onload']);
     expect(findInlineCode('<img src=x onerror=alert(1)>')).toEqual(['event handler attribute: onerror']);
+    // HTML also separates attributes with "/" or after a quoted value.
+    expect(findInlineCode('<svg/onload=x>')).toEqual(['event handler attribute: onload']);
+    expect(findInlineCode('<a href="x"onclick="y">')).toEqual(['event handler attribute: onclick']);
+    expect(findInlineCode("<a href='x'onclick='y'>")).toEqual(['event handler attribute: onclick']);
     expect(findInlineCode('<div data-onboard="x" title="turn on=off"></div>')).toEqual([]);
   });
 

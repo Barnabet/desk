@@ -11,6 +11,14 @@ export type ListDirsDeps = {
   platform?: NodeJS.Platform;
 };
 
+/** The folder vanished, or stopped being readable, after listDirs checked it: say which rather than fail with `internal`. */
+function unavailable(err: unknown): UserFacingError {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR'
+    ? new UserFacingError('not_found', 'That folder does not exist.')
+    : new UserFacingError('unreadable', 'Desk cannot read that folder.');
+}
+
 async function real(path: string): Promise<string | null> {
   try {
     return await realpath(path);
@@ -25,6 +33,7 @@ async function real(path: string): Promise<string | null> {
  */
 export async function listDirs(input: { path?: string | undefined; hidden?: boolean | undefined }, d: ListDirsDeps): Promise<DirListing> {
   const platform = d.platform ?? process.platform;
+  // Defense in depth: realpath already gives the on-disk case, but not for a path that does not exist (a missing data dir).
   const fold = platform === 'darwin' || platform === 'win32' ? (p: string) => p.toLowerCase() : (p: string) => p;
   const within = (path: string, root: string) => {
     const p = fold(path);
@@ -45,10 +54,13 @@ export async function listDirs(input: { path?: string | undefined; hidden?: bool
   if (!target) throw new UserFacingError('not_found', 'That folder does not exist.');
   if (within(target, dataDir)) throw new UserFacingError('not_allowed', 'Desk cannot browse its own data folder.');
   if (!roots.some((r) => within(target, r))) throw new UserFacingError('not_allowed', "Desk can browse your home folder and your projects' sources only.");
-  if (!(await stat(target)).isDirectory()) throw new UserFacingError('not_a_folder', 'That is a file, not a folder.');
+  const info = await stat(target).catch((err: unknown) => {
+    throw unavailable(err);
+  });
+  if (!info.isDirectory()) throw new UserFacingError('not_a_folder', 'That is a file, not a folder.');
 
-  const entries = await readdir(target, { withFileTypes: true }).catch(() => {
-    throw new UserFacingError('unreadable', 'Desk cannot read that folder.');
+  const entries = await readdir(target, { withFileTypes: true }).catch((err: unknown) => {
+    throw unavailable(err);
   });
   const dirs: DirListing['dirs'] = [];
   for (const e of entries) {

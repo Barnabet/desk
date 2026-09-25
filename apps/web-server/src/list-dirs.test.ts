@@ -1,12 +1,30 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listDirs, type ListDirsDeps } from './list-dirs';
+
+/** Runs once just before listDirs stats a path: the folder can change between its realpath and its stat. */
+const race = vi.hoisted(() => ({ beforeStat: null as ((path: string) => void) | null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>();
+  const stat = (async (path: string, opts?: object) => {
+    const hook = race.beforeStat;
+    race.beforeStat = null;
+    hook?.(path);
+    return fs.stat(path, opts);
+  }) as typeof fs.stat;
+  return { ...fs, stat, default: { ...fs, stat } };
+});
+/** POSIX permissions do not stop root, and Windows ignores chmod on folders. */
+const permissionsApply = process.platform !== 'win32' && process.getuid?.() !== 0;
 
 let root: string;
 beforeEach(() => void (root = realpathSync(mkdtempSync(join(tmpdir(), 'desk-dirs-')))));
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  race.beforeStat = null;
+  rmSync(root, { recursive: true, force: true });
+});
 
 /** home (with the data dir inside, as on macOS), a source outside home, and a folder outside both. */
 function layout(extra: Partial<ListDirsDeps> = {}) {
@@ -78,7 +96,33 @@ describe('fs.listDirs', () => {
     await expect(listDirs({ path: source }, deps)).rejects.toMatchObject({ code: 'not_allowed' });
   });
 
-  it.runIf(process.platform === 'darwin')('refuses the data dir typed in another case (macOS folders ignore case)', async () => {
+  it('says not_found when the folder is removed between its realpath and its stat', async () => {
+    const { home, deps } = layout();
+    const app = join(home, 'code', 'app');
+    race.beforeStat = (path) => void (path === app && rmSync(app, { recursive: true }));
+    await expect(listDirs({ path: app }, deps)).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it.runIf(permissionsApply)('says unreadable for a folder it cannot list or reach', async () => {
+    const { home, deps } = layout();
+    const docs = join(home, 'Documents');
+    chmodSync(docs, 0o000);
+    try {
+      await expect(listDirs({ path: docs }, deps)).rejects.toMatchObject({ code: 'unreadable' });
+    } finally {
+      chmodSync(docs, 0o755);
+    }
+    // Its parent stops being searchable between the realpath and the stat.
+    const code = join(home, 'code');
+    race.beforeStat = (path) => void (path === join(code, 'app') && chmodSync(code, 0o000));
+    try {
+      await expect(listDirs({ path: join(code, 'app') }, deps)).rejects.toMatchObject({ code: 'unreadable' });
+    } finally {
+      chmodSync(code, 0o755);
+    }
+  });
+
+  it.runIf(process.platform === 'darwin')('refuses the data dir typed in another case (realpath gives the on-disk case on macOS)', async () => {
     const { home, deps } = layout();
     await expect(listDirs({ path: join(home, 'library', 'application support', 'desk') }, deps)).rejects.toMatchObject({ code: 'not_allowed' });
   });
