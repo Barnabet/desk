@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { CatalogService, SkillRuntimes, treeDigest } from '@desk/core';
 import { createHarness, encodePng, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
-import { channels, initialGlobalState, type Channel, type ChannelOutput } from '@desk/bff/contract';
+import { channels, initialGlobalState, type Channel, type ChannelOutput } from '../contract';
 import { dispatch, handlers, MAX_ATTACHMENT_BYTES, type HandlerContext } from './handlers';
 
 /** True only when A and B are the same type. */

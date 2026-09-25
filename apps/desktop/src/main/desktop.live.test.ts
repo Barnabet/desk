@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { DeskClient } from '@desk/client';
 import { startDaemon } from '@desk/daemon';
 import { initialGlobalState } from '@desk/bff/contract';
-import { dispatch, type HandlerContext } from './handlers';
+import { dispatch, type HandlerContext } from '@desk/bff/server';
 
 /** The desktop app's IPC layer against a real deskd and the configured model endpoint (`pnpm test:live`). */
 describe('live: desktop IPC against deskd and the model endpoint', () => {

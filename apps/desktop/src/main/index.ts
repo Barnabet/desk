@@ -7,10 +7,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, webCont
 import { clientFromDataDir, defaultDataDir, readDaemonInfo } from '@desk/client/node';
 import type { AttentionItem } from '@desk/protocol';
 import { INVOKE_CHANNEL } from '@desk/bff/contract';
-import { Broker } from './broker';
-import { DaemonManager } from './daemon';
-import { UserFacingError } from './errors';
-import { dispatch, type HandlerContext } from './handlers';
+import { Broker, DaemonManager, dispatch, UserFacingError, type HandlerContext } from '@desk/bff/server';
 import { createLog } from './log';
 import { buildAppMenu } from './menu';
 import { attentionRoute, notificationFor } from './notify';

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readDaemonInfo } from '@desk/client/node';
 import type { HealthResponse } from '@desk/protocol';
-import type { DaemonMode, DaemonStatus } from '@desk/bff/contract';
+import type { DaemonMode, DaemonStatus } from '../contract';
 import { UserFacingError } from './errors';
 import { LAUNCHD_LABEL, launchdPlist, plistPath } from './launchd';
 

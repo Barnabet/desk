@@ -13,7 +13,7 @@ import {
   type GlobalState,
   type IpcError,
   type IpcResult,
-} from '@desk/bff/contract';
+} from '../contract';
 import { UserFacingError } from './errors';
 
 /** What a handler can reach. Built per call in main; faked in tests. */
