@@ -86,7 +86,7 @@ async function go(page: Page, hash: string) {
 }
 
 describe('core screens, end to end', () => {
-  it('briefs Desk, forks a thread, answers, approves, loops a revision, steers, and updates the tray', async () => {
+  it('briefs Desk, forks a thread, answers, approves, loops a revision, reopens the thread with a message, and updates the tray', async () => {
     const client = clientFromDataDir(join(dir, 'data'));
     const { project } = await client.projects.create({ name: 'Onboarding revamp', goal: 'Relaunch onboarding next month' });
     const page = await app.firstWindow();
@@ -121,13 +121,14 @@ describe('core screens, end to end', () => {
     await page.getByRole('link', { name: 'Review the checklist copy' }).waitFor();
     await shot(page, '3-conversation-report');
 
-    // The thread's route shows the revision; steer it.
+    // The thread's route shows the revision. The thread is done, so its box asks; reopen it with a message instead.
     const [t] = await client.threads.list(project.id);
     await go(page, `#/p/${project.id}/threads/${t!.id}`);
     await page.getByRole('button', { name: /Desk sent it back/ }).waitFor();
     const transcript = page.getByRole('complementary', { name: 'Transcript' });
-    await transcript.getByLabel('Steer this thread').fill('Keep it short');
-    await transcript.getByRole('button', { name: 'Steer' }).click();
+    await transcript.getByLabel('Ask this thread').fill('Keep it short');
+    await transcript.getByRole('button', { name: 'Reopen with this…' }).click();
+    await page.getByRole('dialog', { name: 'Reopen this thread?' }).getByRole('button', { name: 'Reopen', exact: true }).click();
     await transcript.getByText(/^You steered/).first().waitFor({ timeout: 15_000 });
     await transcript.getByText('Will do.').waitFor({ timeout: 15_000 });
     await shot(page, '4-thread');
