@@ -363,4 +363,44 @@ describe('approvals being resolved', () => {
     expect(sent.at(-2)).toMatchObject({ role: 'tool', tool_call_id: 'c1', content: 'Posted "Weekly"' });
     expect(String(sent.at(-1)?.content)).toContain('Also mention the changelog.');
   });
+
+  it('a shutdown aborts an approved call still running and records its result; the next start resumes the agent', async () => {
+    let started = false;
+    const build = defineTool({
+      name: 'build',
+      description: 'Build (runs until aborted)',
+      input: z.object({}),
+      gate: { subject: () => ({}), unmatched: 'ask' },
+      async execute(_input, ctx) {
+        started = true;
+        await new Promise<void>((resolve) => ctx.signal.addEventListener('abort', () => resolve(), { once: true }));
+        return 'Build aborted.';
+      },
+    });
+    const toolsFor = (a: AgentRow) => (a.role === 'thread' ? [build, completeTool] : toolsForRole(a));
+    const { rt, projectId, thread, begin } = await setup(
+      { Builder: (req) => (turns(req) === 0 ? tools(call('build', {}, 'c1')) : text('The build was cut short.')) },
+      { toolsFor },
+    );
+    const t = thread('Builder');
+    begin(t);
+    await rt.whenIdle();
+    expect(status(t)).toBe('waiting');
+
+    const [ap] = listApprovals(h.store.db, projectId, 'pending');
+    const resolving = rt.resolveApproval(ap!.id, 'approved');
+    await until(() => started);
+    await rt.shutdown();
+    const results = h.store.list({ agentId: t, types: ['tool.result'] });
+    expect(results.map((e) => e.type === 'tool.result' && [e.payload.tool_call_id, e.payload.content])).toEqual([['c1', 'Build aborted.']]);
+    await resolving;
+    expect(status(t)).toBe('queued');
+    expect(runs(t)).toHaveLength(1);
+
+    const next = newRuntime(h, { toolsFor });
+    expect(next.recover()).toContain(t);
+    await next.whenIdle();
+    expect(runs(t)).toHaveLength(2);
+    expect(status(t)).toBe('idle');
+  });
 });

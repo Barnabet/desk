@@ -57,6 +57,38 @@ describe('crash recovery', () => {
     expect(h.store.list({ projectId, types: ['system.notice'] })).toHaveLength(1);
   });
 
+  it('marks an approved call cut off by the crash interrupted, then resumes the agent with a pending note', async () => {
+    h = await createHarness({ script: [text('I will check whether the deploy ran before retrying.')] });
+    const rt = newRuntime(h);
+    const projectId = rt.createProject({ name: 'P', goal: 'G' });
+    const t = rt.createThread(projectId, { title: 'T', brief: 'B', workspacePath: join(h.dir, 'w'), model: FAKE_MODEL.id });
+    simulateCrash(projectId, t, { withApproval: true });
+    // The run yielded on the approval; the user approved it, and the daemon died while the approved call ran.
+    const base = { project_id: projectId, agent_id: t };
+    h.store.append([
+      { ...base, type: 'run.finished', payload: { run_id: 'r1', reason: 'yielded', detail: 'Awaiting approval: bash' } },
+      { ...base, type: 'agent.status_changed', payload: { status: 'waiting', reason: 'Awaiting approval: bash' } },
+      { ...base, type: 'approval.resolved', payload: { approval_id: 'ap1', decision: 'approved', resolved_by: 'user' } },
+    ]);
+    const deskId = getAgent(h.store.db, t)!.parent_id!;
+    h.store.append({ ...base, type: 'message.agent', payload: { from_agent_id: deskId, from_label: 'Desk', kind: 'note', text: 'Deploy to staging only.' } });
+
+    const next = newRuntime(h);
+    expect(next.recover()).toContain(t);
+    await next.whenIdle();
+
+    const results = h.store.list({ agentId: t, types: ['tool.result'] }).map((e) => (e.type === 'tool.result' ? [e.payload.tool_call_id, e.payload.status] : []));
+    expect(results).toEqual([
+      ['c1', 'ok'],
+      ['c2', 'interrupted'],
+    ]);
+    const sent = h.fake.requests.find((r) => r.messages.some((m) => m.role === 'tool' && m.tool_call_id === 'c2'))!.messages;
+    expect(sent.find((m) => m.role === 'tool' && m.tool_call_id === 'c2')).toMatchObject({ content: expect.stringContaining('verify before retrying') });
+    expect(String(sent.at(-1)?.content)).toContain('Deploy to staging only.');
+    expect(getAgent(h.store.db, t)?.status).toBe('idle');
+    expect(h.store.list({ projectId, types: ['system.notice'] })).toHaveLength(1);
+  });
+
   it('keeps approval-held calls pending and leaves the agent waiting', async () => {
     h = await createHarness();
     const rt = newRuntime(h);

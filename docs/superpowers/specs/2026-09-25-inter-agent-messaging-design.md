@@ -327,6 +327,7 @@ This table follows from §3.2. The unit test for `wakeDecision` is generated fro
   - `wakeDecision` adds the count to `pendingApprovals`, so rule 1 decides `none` while the approved call runs. No run and no answer run can start on a conversation whose last assistant message has a tool call without a result, which the provider rejects.
   - It is a counter rather than a set because two approvals from one step can be resolved at the same time.
   - When the count reaches 0: if the agent is still `waiting`, has no pending approval and is not active in the scheduler, `resolveApproval` calls `schedule()`, the direct resume it does today. Otherwise it calls `wake(agent)`, so any message that arrived during the call is decided then.
+  - The count lives in memory. `shutdown()` aborts the approved calls still running (with the shutdown reason, like a run's calls) and awaits their `tool.result`. After an unclean exit, `recover()` first gives every resolved approval whose call has no `tool.result` an `interrupted` result (a `denied` one for a denial), then resumes that agent the same way.
 - **`execute(job)`.** An answer job recomputes the decision first. If the decision is no longer `answer` for the same question, it returns at once without appending anything, and `afterRun` enqueues the right kind of job. (That happens when the question was answered or withdrawn, or when a revision or user message is now pending.) A run job runs as today.
 - **`afterRun(job)`:**
   1. `killAll` if the agent is terminal.

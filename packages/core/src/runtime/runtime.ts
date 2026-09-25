@@ -87,6 +87,8 @@ export type RuntimeOptions = {
 };
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
+/** The result recovery records for a call cut off by an unclean exit: it is never run again. */
+const INTERRUPTED_BY_RESTART = 'The daemon restarted during execution; the state of any side effects is unknown — verify before retrying.';
 
 export class Runtime {
   readonly scheduler: Scheduler;
@@ -108,6 +110,8 @@ export class Runtime {
   private readonly stallNotified = new Map<string, number>();
   /** Approved calls resolveApproval is still running, per agent: until their results exist, nothing may run the agent. */
   private readonly resolving = new Map<string, number>();
+  /** Those calls' abort controllers, and when each resolution has recorded its result: a shutdown aborts and awaits them. */
+  private readonly resolutions = new Set<{ controller: AbortController; recorded: Promise<void> }>();
   /**
    * Running jobs stopped by stopAgent, until their afterRun: the agent's last event id at the stop. The run appends
    * `cancelled` only when it winds down, and a user message sent in between still counts as sent after the stop.
@@ -818,6 +822,7 @@ export class Runtime {
   /**
    * Resolves a pending approval: runs (or denies) the held tool call, then resumes the agent. Until the call's
    * `tool.result` exists the agent's conversation ends in a call without a result, so `resolving` holds every wake.
+   * A shutdown aborts the call; recover() records `interrupted` for one an unclean exit cut off.
    */
   async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string } = {}): Promise<void> {
     const { store } = this.o;
@@ -826,6 +831,10 @@ export class Runtime {
     if (ap.status !== 'pending') throw new ConflictError(`Approval ${approvalId} is already resolved (${ap.status})`);
     const by = opts.by ?? 'user';
     const base = { project_id: ap.project_id, agent_id: ap.agent_id };
+    let recorded!: () => void;
+    const resolution = { controller: new AbortController(), recorded: new Promise<void>((r) => (recorded = r)) };
+    if (this.shuttingDown) resolution.controller.abort(SHUTDOWN_REASON);
+    this.resolutions.add(resolution);
     this.resolving.set(ap.agent_id, (this.resolving.get(ap.agent_id) ?? 0) + 1);
     try {
       store.append({ ...base, type: 'approval.resolved', payload: { approval_id: ap.id, decision, resolved_by: by, ...(opts.note ? { note: opts.note } : {}) } });
@@ -835,7 +844,7 @@ export class Runtime {
       if (decision === 'approved') {
         const prepared = prepareToolCall(this.toolsFor(agent), { id: ap.tool_call_id, name: ap.tool, arguments: ap.arguments });
         result = prepared.ok
-          ? await runPreparedTool(prepared.tool, prepared.input, await this.toolContext(agent, ap.run_id, ap.tool_call_id, new AbortController().signal))
+          ? await runPreparedTool(prepared.tool, prepared.input, await this.toolContext(agent, ap.run_id, ap.tool_call_id, resolution.controller.signal))
           : prepared.result;
       } else {
         result = { status: 'denied', content: `Denied by ${by}${opts.note ? `: ${opts.note}` : ''}` };
@@ -856,33 +865,49 @@ export class Runtime {
       const left = (this.resolving.get(ap.agent_id) ?? 1) - 1;
       if (left > 0) this.resolving.set(ap.agent_id, left);
       else this.resolving.delete(ap.agent_id);
+      this.resolutions.delete(resolution);
+      recorded();
     }
     // Two approvals of one step can resolve at once: the last to finish resumes the agent.
     if (this.resolving.has(ap.agent_id)) return;
-    const current = this.requireAgent(ap.agent_id);
-    if (current.status === 'waiting' && pendingApprovalsFor(store.db, ap.agent_id).length === 0 && !this.scheduler.isActive(ap.agent_id)) this.schedule(current);
-    else this.wake(ap.agent_id);
+    this.resumeAfterApproval(ap.agent_id);
+  }
+
+  /**
+   * Once an approval's call has its result: resumes an agent still waiting with no approval left (the direct resume),
+   * otherwise decides as any wake, so a message that arrived during the call is decided then. Returns whether it scheduled.
+   */
+  private resumeAfterApproval(agentId: string): boolean {
+    const agent = this.requireAgent(agentId);
+    if (agent.status !== 'waiting' || pendingApprovalsFor(this.o.store.db, agentId).length > 0 || this.scheduler.isActive(agentId)) return this.wake(agentId);
+    this.schedule(agent);
+    return true;
   }
 
   whenIdle(): Promise<void> {
     return this.scheduler.whenIdle();
   }
 
-  /** Stops scheduling, interrupts running agents resumably, kills background jobs and stops services. */
+  /**
+   * Stops scheduling, interrupts running agents resumably, kills background jobs and stops services. Approved calls
+   * still running are aborted like a run's calls, and their results recorded, so no call is left without one.
+   */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.scheduler.stopAll(SHUTDOWN_REASON);
+    const resolutions = [...this.resolutions];
+    for (const r of resolutions) r.controller.abort(SHUTDOWN_REASON);
     this.jobs.killEverything();
     for (const s of listRunningServices(this.o.store.db)) {
       this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.stopped', payload: { service_id: s.id, by: 'system', reason: 'daemon_shutdown' } });
     }
-    await Promise.all([this.serviceProcs.stopAll(), this.scheduler.whenIdle()]);
+    await Promise.all([this.serviceProcs.stopAll(), this.scheduler.whenIdle(), ...resolutions.map((r) => r.recorded)]);
     this.proxy?.close();
   }
 
   /**
-   * On startup: repairs runs cut off by a crash (unfinished tool calls become `interrupted`), then wakes every live
-   * agent through wakeDecision. Returns the rescheduled agent ids.
+   * On startup: repairs runs and approved calls cut off by a crash (unfinished tool calls become `interrupted`), then
+   * wakes every live agent through wakeDecision. Returns the rescheduled agent ids.
    */
   recover(): string[] {
     // Services still marked running were cut off by an unclean exit: reap an orphan still holding its port, mark stopped.
@@ -892,9 +917,17 @@ export class Runtime {
       this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.stopped', payload: { service_id: s.id, by: 'system', reason: 'daemon_restart' } });
     }
     const repairedByProject = new Map<string, number>();
+    const repaired = (projectId: string) => repairedByProject.set(projectId, (repairedByProject.get(projectId) ?? 0) + 1);
+    // First the calls resolveApproval was running (their run had already finished), then the runs themselves.
+    const approvalsRepaired = new Set<string>();
+    for (const agent of listLiveAgents(this.o.store.db)) {
+      if (!this.repairResolvedApprovals(agent)) continue;
+      approvalsRepaired.add(agent.id);
+      repaired(agent.project_id);
+    }
     for (const agent of listLiveAgents(this.o.store.db, ['running'])) {
       this.repairCrashedRun(agent);
-      repairedByProject.set(agent.project_id, (repairedByProject.get(agent.project_id) ?? 0) + 1);
+      repaired(agent.project_id);
     }
     for (const [projectId, count] of repairedByProject) {
       this.o.store.append({
@@ -905,10 +938,49 @@ export class Runtime {
       });
     }
 
-    // Every live agent gets the decision it would get at any other time: queued ones resume, stopped ones wait for the user.
+    // Every live agent gets the decision it would get at any other time: queued ones resume, stopped ones wait for the
+    // user, and one whose approved call was repaired resumes as resolveApproval would have resumed it.
     const resumed: string[] = [];
-    for (const agent of listLiveAgents(this.o.store.db)) if (this.wake(agent.id)) resumed.push(agent.id);
+    for (const agent of listLiveAgents(this.o.store.db)) {
+      if (approvalsRepaired.has(agent.id) ? this.resumeAfterApproval(agent.id) : this.wake(agent.id)) resumed.push(agent.id);
+    }
     return resumed;
+  }
+
+  /**
+   * Gives a result to each call whose approval was resolved but whose `tool.result` was never appended: the daemon
+   * exited while resolveApproval ran it. An approved call's outcome is unknown, so it is recorded `interrupted`, never
+   * run again. Returns whether it repaired anything.
+   */
+  private repairResolvedApprovals(agent: AgentRow): boolean {
+    const { store } = this.o;
+    // An approval is resolved after the run that requested it finished, and nothing runs the agent before its result.
+    const after = lastEvent(store.db, agent.id, 'run.finished')?.id ?? 0;
+    const since = store.list({ agentId: agent.id, after, types: ['approval.resolved', 'tool.result'] });
+    const settled = new Set(since.flatMap((e) => (e.type === 'tool.result' ? [e.payload.tool_call_id] : [])));
+    const missing = since.flatMap((e) => {
+      if (e.type !== 'approval.resolved') return [];
+      const ap = getApproval(store.db, e.payload.approval_id);
+      if (!ap || settled.has(ap.tool_call_id)) return [];
+      const { decision, resolved_by, note } = e.payload;
+      return [
+        {
+          project_id: agent.project_id,
+          agent_id: agent.id,
+          type: 'tool.result' as const,
+          payload: {
+            run_id: ap.run_id,
+            tool_call_id: ap.tool_call_id,
+            name: ap.tool,
+            ...(decision === 'approved'
+              ? { status: 'interrupted' as const, content: INTERRUPTED_BY_RESTART }
+              : { status: 'denied' as const, content: `Denied by ${resolved_by}${note ? `: ${note}` : ''}` }),
+          },
+        },
+      ];
+    });
+    if (missing.length) store.append(missing);
+    return missing.length > 0;
   }
 
   /** Closes a run that has `run.started` but no `run.finished`: never re-executes calls whose outcome is unknown. */
@@ -931,7 +1003,7 @@ export class Runtime {
                 tool_call_id: e.payload.tool_call_id,
                 name: e.payload.name,
                 status: 'interrupted' as const,
-                content: 'The daemon restarted during execution; the state of any side effects is unknown — verify before retrying.',
+                content: INTERRUPTED_BY_RESTART,
               },
             },
           ]
