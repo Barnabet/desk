@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, posix, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { GLOBAL_PROJECT_ID, type CatalogEntry, type NodeLockEntry, type RuntimeState, type RuntimesReport, type SkillScope } from '@desk/protocol';
 import type { EventStore } from '../events/store';
@@ -34,6 +35,8 @@ export type SkillRuntimesOptions = {
   exec?: Exec;
   platform?: NodeJS.Platform;
   arch?: string;
+  /** Installed browsers the `browser` extra may use, best first; defaults to {@link findBrowsers} on this machine (stubbed in tests). */
+  findBrowsers?: () => InstalledBrowser[];
 };
 
 type EnvFile = { bins: string[]; vars: Record<string, string>; digest: string; note?: string };
@@ -81,6 +84,7 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
   private readonly root: string;
   private readonly exec: Exec;
   private readonly fetch: typeof fetch;
+  private readonly findBrowsers: () => InstalledBrowser[];
   private queue: Promise<void> = Promise.resolve();
   private readonly pending = new Map<string, Promise<void>>();
 
@@ -88,6 +92,7 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
     this.root = join(o.dataDir, 'runtimes');
     this.exec = o.exec ?? defaultExec;
     this.fetch = o.fetch ?? fetch;
+    this.findBrowsers = o.findBrowsers ?? (() => findBrowsers({ platform: o.platform ?? process.platform, env: process.env, home: homedir() }));
   }
 
   /** The environment directory of a skill. */
@@ -96,19 +101,14 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
   }
 
   state(ref: SkillRef): { state: RuntimeState; reason: string | null } {
-    const last = this.lastEvent(ref);
-    if (!last || last.state === 'removed') return { state: 'none', reason: null };
-    if (last.state === 'ready' && !existsSync(join(this.dir(ref), 'desk-env.json'))) {
-      return { state: 'failed', reason: 'The environment is missing from disk. Retry to rebuild it.' };
-    }
-    return { state: last.state, reason: last.reason };
+    const { state, reason } = this.current(ref);
+    return { state, reason };
   }
 
   env(ref: SkillRef): SkillEnv {
-    const s = this.state(ref);
-    if (s.state !== 'ready') return { ...s, bins: [], vars: {}, note: null };
-    const file = JSON.parse(readFileSync(join(this.dir(ref), 'desk-env.json'), 'utf8')) as EnvFile;
-    return { ...s, bins: file.bins, vars: file.vars, note: file.note ?? null };
+    const { state, reason, file } = this.current(ref);
+    if (!file) return { state, reason, bins: [], vars: {}, note: null };
+    return { state, reason, bins: file.bins, vars: file.vars, note: file.note ?? null };
   }
 
   /** Builds (or rebuilds) a skill's environment in the background; entries without runtime needs get none. */
@@ -203,15 +203,39 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 
     this.writeCompatShims(dir, entry);
 
-    if (rt.extras?.includes('playwright-chromium')) {
+    const extras = rt.extras ?? [];
+    let browser: InstalledBrowser | null = null;
+    if (extras.includes('browser')) {
+      if (!rt.python) throw new Error('browser needs the Python runtime with playwright');
+      browser = await this.startableBrowser(ref);
+      if (browser) env.vars.DESK_BROWSER = browser.path;
+    }
+    // Without an installed browser, `browser` falls back to exactly what `playwright-chromium` does.
+    if (extras.includes('playwright-chromium') || (extras.includes('browser') && !browser)) {
       if (!rt.python) throw new Error('playwright-chromium needs the Python runtime with playwright');
       this.progress(ref, 'Downloading Chromium for Playwright');
       const browsers = join(dir, 'browsers');
       await this.run(join(dir, 'py', 'bin', 'python'), ['-m', 'playwright', 'install', 'chromium'], { ...this.baseEnv(), PLAYWRIGHT_BROWSERS_PATH: browsers }, 20 * 60_000);
       env.vars.PLAYWRIGHT_BROWSERS_PATH = browsers;
     }
-    env.note = runtimeNote(entry);
+    env.note = runtimeNote(entry, browser);
     writeFileSync(join(dir, 'desk-env.json'), JSON.stringify(env, null, 2));
+  }
+
+  /**
+   * The first installed browser that starts (`--version` answers with a version), so a blocked or broken one falls
+   * through to the next, then to the Chromium download. On Windows `chrome.exe --version` opens a window instead of
+   * printing, so there the file's presence is the check.
+   */
+  private async startableBrowser(ref: SkillRef): Promise<InstalledBrowser | null> {
+    const windows = (this.o.platform ?? process.platform) === 'win32';
+    for (const b of this.findBrowsers()) {
+      if (windows) return b;
+      this.progress(ref, `Checking ${b.name}`);
+      const r = await this.exec(b.path, ['--version'], { env: this.baseEnv(), timeoutMs: 30_000 });
+      if (r.code === 0 && /\d+\.\d+/.test(r.stdout)) return b;
+    }
+    return null;
   }
 
   /**
@@ -384,6 +408,20 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 
   // ── state ────────────────────────────────────────────────────────────
 
+  /** The recorded state checked against the disk: a ready environment whose files or browser are gone has failed. */
+  private current(ref: SkillRef): { state: RuntimeState; reason: string | null; file: EnvFile | null } {
+    const last = this.lastEvent(ref);
+    if (!last || last.state === 'removed') return { state: 'none', reason: null, file: null };
+    if (last.state !== 'ready') return { state: last.state, reason: last.reason, file: null };
+    const file = readEnvFile(join(this.dir(ref), 'desk-env.json'));
+    if (!file) return { state: 'failed', reason: 'The environment is missing from disk. Retry to rebuild it.', file: null };
+    const browser = file.vars.DESK_BROWSER;
+    if (browser && !existsSync(browser)) {
+      return { state: 'failed', reason: `The browser this skill used is no longer installed (${browser}). Retry to find another one or download Chromium.`, file: null };
+    }
+    return { state: 'ready', reason: null, file };
+  }
+
   private key(ref: SkillRef): string {
     return `${ref.scope}/${ref.projectId ?? ''}/${ref.name}`;
   }
@@ -437,8 +475,8 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 
 const base = (name: string) => name.split('/').pop()!;
 
-/** What agents are told about a ready runtime, next to the skill's instructions. */
-export function runtimeNote(entry: CatalogEntry): string | undefined {
+/** What agents are told about a ready runtime, next to the skill's instructions; `browser` is the one the `browser` extra found. */
+export function runtimeNote(entry: CatalogEntry, browser: InstalledBrowser | null = null): string | undefined {
   const rt = entry.runtime;
   const parts: string[] = [];
   if (rt.python) parts.push(`Python ${rt.python.version}${rt.python.packages.length ? ` with ${rt.python.packages.join(', ')}` : ''} (run scripts with python3)`);
@@ -447,8 +485,81 @@ export function runtimeNote(entry: CatalogEntry): string | undefined {
     parts.push(`Node packages ${top.join(', ')} (import them from scripts run with node; their commands are on PATH)`);
   }
   if (rt.extras?.includes('playwright-chromium')) parts.push('a Chromium browser for Playwright');
+  if (rt.extras?.includes('browser')) {
+    parts.push(`a browser for Playwright: ${browser ? `the installed ${browser.name} (its executable is in DESK_BROWSER; launch it with executable_path)` : 'Chromium, downloaded by Desk'}`);
+  }
   if (!parts.length) return undefined;
   return `Desk set up this skill's runtime: ${parts.join('; ')}. Skip any install steps in the instructions (pip, uv, npm or npx installs): everything listed is already installed, and \`uv run\`, \`pip install\` and \`npm install\` are harmless stand-ins here.`;
+}
+
+/** An installed Chrome, Edge or Chromium: its name for people and the executable Playwright launches. */
+export type InstalledBrowser = { name: string; path: string };
+
+export type FindBrowserOptions = {
+  platform: NodeJS.Platform;
+  env: Record<string, string | undefined>;
+  home: string;
+  /** Whether an executable file exists at a path; defaults to the file system. */
+  isExecutable?: (path: string) => boolean;
+};
+
+/** The best installed browser (see {@link findBrowsers}), or null. */
+export function findBrowser(o: FindBrowserOptions): InstalledBrowser | null {
+  return findBrowsers(o)[0] ?? null;
+}
+
+/**
+ * The installed browsers the `browser` extra may use instead of downloading Chromium (web-research spec §4.3), best
+ * first: Chrome, Edge or Chromium in /Applications or ~/Applications on macOS; Chrome or Edge under %ProgramFiles%,
+ * %ProgramFiles(x86)% or %LOCALAPPDATA% on Windows; google-chrome, chromium or microsoft-edge on PATH elsewhere.
+ */
+export function findBrowsers(o: FindBrowserOptions): InstalledBrowser[] {
+  const ok = o.isExecutable ?? isExecutableFile;
+  const candidates: InstalledBrowser[] = [];
+  if (o.platform === 'darwin') {
+    for (const name of ['Google Chrome', 'Microsoft Edge', 'Chromium']) {
+      for (const dir of ['/Applications', posix.join(o.home, 'Applications')]) candidates.push({ name, path: posix.join(dir, `${name}.app`, 'Contents', 'MacOS', name) });
+    }
+  } else if (o.platform === 'win32') {
+    // Windows variables are case-insensitive; unset ones are skipped.
+    const vars = new Map(Object.entries(o.env).map(([k, v]) => [k.toLowerCase(), v]));
+    const roots = ['programfiles', 'programfiles(x86)', 'localappdata'].map((k) => vars.get(k)).filter((v): v is string => !!v);
+    for (const [name, sub, exe] of [
+      ['Google Chrome', 'Google\\Chrome', 'chrome.exe'],
+      ['Microsoft Edge', 'Microsoft\\Edge', 'msedge.exe'],
+    ] as const) {
+      for (const root of roots) candidates.push({ name, path: win32.join(root, sub, 'Application', exe) });
+    }
+  } else {
+    // Relative entries would resolve against the daemon's directory here and the script's when the browser starts.
+    const dirs = (o.env.PATH ?? '').split(':').filter((d) => posix.isAbsolute(d));
+    for (const [name, cmd] of [
+      ['Google Chrome', 'google-chrome'],
+      ['Chromium', 'chromium'],
+      ['Microsoft Edge', 'microsoft-edge'],
+    ] as const) {
+      for (const dir of dirs) candidates.push({ name, path: posix.join(dir, cmd) });
+    }
+  }
+  return candidates.filter((c) => ok(c.path));
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A built environment's `desk-env.json`, or null when it is missing or unreadable. */
+function readEnvFile(path: string): EnvFile | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as EnvFile;
+  } catch {
+    return null;
+  }
 }
 
 function writeExecutable(path: string, text: string): void {

@@ -46,7 +46,7 @@ const CATALOG_STATE: Record<CatalogItem['installs'][number]['state'], string> = 
 const RUNTIME_STATE = { none: '', preparing: 'setting up', ready: 'ready', failed: 'setup failed' } as const;
 
 function runtimeWords(e: CatalogReview['entry']): string {
-  const parts = [e.runtime.python ? `Python ${e.runtime.python.version}` : null, e.runtime.node ? 'Node' : null, e.runtime.extras?.includes('playwright-chromium') ? 'Chromium' : null].filter(Boolean);
+  const parts = [e.runtime.python ? `Python ${e.runtime.python.version}` : null, e.runtime.node ? 'Node' : null, e.runtime.extras?.includes('playwright-chromium') ? 'Chromium' : null, e.runtime.extras?.includes('browser') ? 'browser' : null].filter(Boolean);
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 

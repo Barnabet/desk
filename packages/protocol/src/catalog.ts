@@ -57,7 +57,17 @@ export const CatalogRuntime = z.object({
       lock_from: z.string().optional(),
     })
     .optional(),
-  extras: z.array(z.enum(['playwright-chromium'])).optional(),
+  /**
+   * What else Desk provisions, a closed set: `playwright-chromium` downloads Playwright's Chromium; `browser` uses the
+   * installed Chrome, Edge or Chromium (`DESK_BROWSER`) and downloads Chromium only when there is none.
+   */
+  extras: z.array(z.enum(['playwright-chromium', 'browser'])).optional(),
+}).superRefine((rt, ctx) => {
+  // Both extras drive Playwright from the skill's Python, so an entry without it could only fail at install time.
+  const playwright = rt.python?.packages.some((p) => /^playwright(\[[^\]]*\])?==/i.test(p));
+  for (const extra of rt.extras ?? []) {
+    if (!playwright) ctx.addIssue({ code: 'custom', path: ['extras'], message: `${extra} needs runtime.python with a playwright pin` });
+  }
 });
 export type CatalogRuntime = z.infer<typeof CatalogRuntime>;
 

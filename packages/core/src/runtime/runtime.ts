@@ -559,7 +559,8 @@ export class Runtime {
       const e = provider.env(refOf(skill));
       if (e.state !== 'ready') continue;
       out.bins.push(...e.bins);
-      Object.assign(out.vars, e.vars);
+      // Earlier skills come first on PATH, so their variables win too (VIRTUAL_ENV and PLAYWRIGHT_BROWSERS_PATH match the python that runs).
+      out.vars = { ...e.vars, ...out.vars };
     }
     return out;
   }

@@ -33,6 +33,7 @@ export function runtimeWords(e: Pick<CatalogEntry, 'runtime'>): string {
   if (e.runtime.python) parts.push(`Python ${e.runtime.python.version}`);
   if (e.runtime.node) parts.push('Node');
   if (e.runtime.extras?.includes('playwright-chromium')) parts.push('Chromium');
+  if (e.runtime.extras?.includes('browser')) parts.push('browser');
   return parts.length ? `${parts.join(' + ')} · set up by Desk` : 'Nothing to set up';
 }
 

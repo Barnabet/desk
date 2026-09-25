@@ -32,6 +32,26 @@ describe('catalog schemas', () => {
     expect(bad({ id: 'Bad_Name' })).toBe(false);
   });
 
+  it('accepts only the extras Desk knows how to provision', () => {
+    const ok = (extras: string[]) => CatalogFile.safeParse({ version: 1, updated: '2026-09-24', entries: [{ ...entry, runtime: { python: { version: '3.12', packages: ['playwright==1.55.0'] }, extras } }] }).success;
+    expect(ok(['browser'])).toBe(true);
+    expect(ok(['playwright-chromium'])).toBe(true);
+    expect(ok(['firefox'])).toBe(false);
+  });
+
+  it('refuses a browser extra without Python and a playwright pin, which could only fail on users\' machines', () => {
+    const ok = (runtime: object) => CatalogFile.safeParse({ version: 1, updated: '2026-09-24', entries: [{ ...entry, runtime }] }).success;
+    const py = (...packages: string[]) => ({ version: '3.12', packages });
+    for (const extra of ['browser', 'playwright-chromium']) {
+      expect(ok({ python: py('playwright==1.55.0'), extras: [extra] })).toBe(true);
+      expect(ok({ extras: [extra] })).toBe(false);
+      expect(ok({ python: py('requests==2.32.5'), extras: [extra] })).toBe(false);
+      expect(ok({ python: py('playwright-stealth==1.0.6'), extras: [extra] })).toBe(false);
+    }
+    const res = CatalogFile.safeParse({ version: 1, updated: '2026-09-24', entries: [{ ...entry, runtime: { extras: ['browser'] } }] });
+    expect(res.error?.issues[0]).toMatchObject({ path: ['entries', 0, 'runtime', 'extras'], message: 'browser needs runtime.python with a playwright pin' });
+  });
+
   it('defaults an install to global without replacing local edits', () => {
     expect(CatalogInstallRequest.parse({})).toEqual({ scope: 'global', replace_modified: false });
   });

@@ -90,7 +90,7 @@ All licences below were verified on 2026-09-24. Any entry that fails `catalog:ch
       "python": { "version": "3.12", "packages": ["requests==2.32.5"] },          // optional
       "node": { "lock": [{ "name": "defuddle", "version": "0.6.4",
                             "integrity": "sha512-…", "path": "node_modules/defuddle" }] }, // optional, flat
-      "extras": ["playwright-chromium"]           // optional, a closed set Desk knows how to provision
+      "extras": ["playwright-chromium"]           // optional, a closed set Desk knows how to provision: playwright-chromium | browser
     },
     "smoke": ["python3", "scripts/lookup.py", "--help"],  // run by catalog:check inside the sandbox
     "caveats": ["Google Scholar lookups may be blocked; the other sources work without keys."]
@@ -187,7 +187,9 @@ All licences below were verified on 2026-09-24. Any entry that fails `catalog:ch
   3. extract it to `<env>/node/<path>`
 
   Lifecycle scripts never run. `bin/` gets links from each package's `bin` field, wrapped to use the node shim.
-- **Extras:** `playwright-chromium` runs `playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH=<env>/browsers`.
+- **Extras:**
+  - `playwright-chromium` runs `playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH=<env>/browsers`.
+  - `browser` (added for web research, `2026-09-24-web-research-design.md` §4.3) uses an installed Chrome, Edge or Chromium: `DESK_BROWSER=<executable>` goes in the environment and nothing is downloaded. Without one, it does exactly what `playwright-chromium` does. Detection: `/Applications` or `~/Applications` on macOS; `%ProgramFiles%`, `%ProgramFiles(x86)%` or `%LOCALAPPDATA%` on Windows; `google-chrome`, `chromium` or `microsoft-edge` on PATH on Linux. Each match is tried in order and kept only if `<exe> --version` answers with a version (skipped on Windows, where `chrome.exe --version` opens a window), so a blocked or broken browser falls through to the next one or to the download. A ready runtime whose `DESK_BROWSER` no longer exists reports `failed`; Retry detects again. Both extras need `runtime.python` with a `playwright==` pin, which the schema enforces.
 - **Node resolution:** each environment's `bin/node` exports `NODE_OPTIONS=--import file://…/resolve-register.mjs`. The hook retries failed bare imports from the environment, and because it is set in NODE_OPTIONS, Node processes a script spawns inherit it.
 - **Compat shims:** skills written for other agents often start with install steps, so `bin/` holds stand-ins:
   - `uv run [--with …] script.py` runs the environment's python.
