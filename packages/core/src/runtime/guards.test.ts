@@ -181,7 +181,8 @@ describe('archives', () => {
     begin(old);
     await rt.whenIdle();
     await rt.archiveThread(old);
-    rt.sendAgentMessage(desk.id, old, 'note', 'Anything else?');
+    // A revision reopens a done thread that is not archived: here it must not.
+    rt.sendAgentMessage(desk.id, old, 'revision', 'Add sources.');
     await rt.whenIdle();
     expect(runs(old)).toHaveLength(1);
     expect(() => rt.sendMessage(old, 'Hello?')).toThrow(ConflictError);
@@ -191,6 +192,21 @@ describe('archives', () => {
     await rt.whenIdle();
     expect(() => rt.sendMessage(live, 'Hello?')).toThrow(ConflictError);
     expect(h.store.list({ agentId: live, types: ['message.user'] })).toEqual([]);
+  });
+
+  it('never runs a done thread of an archived project, even for a revision', async () => {
+    const { rt, projectId, desk, thread, begin } = await setup({ Report: () => tools(call('complete', { summary: 'Done' })) });
+    const t = thread('Report');
+    begin(t);
+    await rt.whenIdle();
+    expect(status(t)).toBe('done');
+
+    rt.archiveProject(projectId);
+    rt.sendAgentMessage(desk.id, t, 'revision', 'Add sources.');
+    await rt.whenIdle();
+    const [archived] = h.store.list({ projectId, types: ['project.archived'] });
+    expect(h.store.list({ projectId, after: archived!.id, types: ['run.started'] })).toEqual([]);
+    expect(runs(t)).toHaveLength(1);
   });
 
   it('archiving a project with a waiting and a running thread schedules nothing afterwards', async () => {
