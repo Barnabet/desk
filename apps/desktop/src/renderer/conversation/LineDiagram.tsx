@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef } from 'react';
-import type { MessagesState, ProjectState, ThreadView } from '@desk/client';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { ago, clock, duration } from '../format';
@@ -46,6 +46,8 @@ export function LineDiagram(o: {
   attention: readonly AttentionItem[];
   now: number;
   onStation(s: StationG): void;
+  /** Opens the pair sheet of two agents: a question mark's asker and its recipient (design spec §8 item 8). */
+  onPair(a: string, b: string): void;
 }) {
   const { g, project } = o;
   const desk = project.desk;
@@ -54,6 +56,9 @@ export function LineDiagram(o: {
   const scroller = useRef<HTMLDivElement>(null);
   /** Whether the view follows "now" (the user hasn't scrolled back into history). */
   const pinned = useRef(true);
+  /** The counterpart of the question mark under the pointer or focus: its label lights up. */
+  const [lit, setLit] = useState<string | null>(null);
+  const hasQuestions = g.lanes.some((l) => l.marks.some((m) => m.kind === 'question'));
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollLeft = el.scrollWidth;
@@ -84,6 +89,7 @@ export function LineDiagram(o: {
                 {l.rejoins.map((d, i) => (
                   <path key={`r${i}`} d={d} fill="none" stroke={l.rejoinColor} strokeWidth={4} strokeLinecap="round" />
                 ))}
+                {l.stub ? <path className="line-stub" d={l.stub.d} fill="none" stroke="#8A857B" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" /> : null}
                 {l.marks
                   .filter((m) => m.kind === 'detour')
                   .map((m) => (
@@ -145,6 +151,39 @@ export function LineDiagram(o: {
               )),
           )}
 
+          {g.lanes.flatMap((l) =>
+            l.marks
+              .filter((m) => m.kind === 'question')
+              .map((m) => {
+                // A tracked question on its asker's lane (design spec §8 item 10); its state is the fold's.
+                const to = messageById(o.messages, m.eventId)?.to;
+                const state = messageById(o.messages, m.eventId)?.state ?? 'open';
+                return (
+                  <button
+                    key={`q-${m.eventId}`}
+                    type="button"
+                    className={`line-q line-q-${state}`}
+                    style={{ left: m.x, top: l.y }}
+                    aria-label={`${l.lane.title} asked ${m.label}, ${clock(m.ts)}`}
+                    title={`${l.lane.title} asked ${m.label} · ${clock(m.ts)} · ${state}`}
+                    onClick={() => to && o.onPair(l.lane.threadId, to)}
+                    onMouseEnter={() => setLit(to ?? null)}
+                    onMouseLeave={() => setLit(null)}
+                    onFocus={() => setLit(to ?? null)}
+                    onBlur={() => setLit(null)}
+                  />
+                );
+              }),
+          )}
+
+          {g.lanes.map((l) =>
+            l.stub ? (
+              <span key={`answering-${l.lane.threadId}`} className="line-answering" style={{ left: l.stub.x, top: l.y }} aria-hidden="true">
+                <span className="live-dot" />
+              </span>
+            ) : null,
+          )}
+
           {g.lanes.map((l) => {
             const approval = l.signal ? pendingApproval(l.lane.threadId) : undefined;
             return l.signal ? (
@@ -179,7 +218,12 @@ export function LineDiagram(o: {
 
           {g.lanes.map((l) =>
             l.inlineLabel ? (
-              <a key={`title-${l.lane.threadId}`} className="line-lane-title" style={{ left: l.inlineLabel.x, top: l.y - 20, maxWidth: l.inlineLabel.width }} href={threadHref(l.lane.threadId)}>
+              <a
+                key={`title-${l.lane.threadId}`}
+                className={`line-lane-title${lit === l.lane.threadId ? ' lit' : ''}`}
+                style={{ left: l.inlineLabel.x, top: l.y - 20, maxWidth: l.inlineLabel.width }}
+                href={threadHref(l.lane.threadId)}
+              >
                 {l.lane.title}
               </a>
             ) : null,
@@ -194,7 +238,7 @@ export function LineDiagram(o: {
         </div>
       </div>
 
-      <div className="line-label" style={{ top: g.trunkY - 15 }}>
+      <div className={`line-label${lit !== null && lit === desk?.id ? ' lit' : ''}`} style={{ top: g.trunkY - 15 }}>
         <span className="line-label-title">
           <span className="line-swatch line-swatch-desk" />
           Desk
@@ -210,7 +254,7 @@ export function LineDiagram(o: {
         // An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3).
         const answering = answeringLabel(o.messages, id);
         return (
-          <a key={id} className="line-label" style={{ top: l.y - 15 }} href={threadHref(id)}>
+          <a key={id} className={`line-label${lit === id ? ' lit' : ''}`} style={{ top: l.y - 15 }} href={threadHref(id)}>
             <span className="line-label-title">
               <span className="line-swatch" style={{ background: l.color }} />
               {l.lane.title}
@@ -235,6 +279,12 @@ export function LineDiagram(o: {
         <span><span className="line-swatch" style={{ background: '#8A857B' }} />done</span>
         <span><span className="line-swatch" style={{ background: '#A15C00' }} />waiting</span>
         <span><span className="line-legend-dot" />needs you</span>
+        {hasQuestions ? (
+          <span>
+            <span className="line-legend-q" />
+            question
+          </span>
+        ) : null}
         <span>
           <svg width="18" height="10" viewBox="0 0 18 10">
             <path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="#2F5BD3" strokeWidth="2" strokeLinecap="round" />

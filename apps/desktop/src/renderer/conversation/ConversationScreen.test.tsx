@@ -68,6 +68,9 @@ describe('ConversationScreen', () => {
     const plan = screen.getByRole('complementary', { name: 'Plan and Desk' });
     expect(plan.textContent).toContain('Add a setup checklist');
     expect(plan.textContent).toContain('claude-opus-5-5');
+    // No tracked question, no question marks, and no legend entry for them.
+    expect(document.querySelector('.line-q')).toBeNull();
+    expect(document.querySelector('.line-legend')!.textContent).not.toContain('question');
   });
 
   it('answers a question with an option and shows the message as sending', async () => {
@@ -359,5 +362,53 @@ describe('messages in the conversation', () => {
     expect(screen.getByRole('dialog', { name: 'Auth API ⇄ Desk' })).toBeTruthy();
     // The runtime wrote the notice, not the thread: its name still opens the thread.
     expect(within(row('e:7')!).getByRole('link', { name: 'Auth API' }).getAttribute('href')).toBe('#/p/p/threads/a');
+  });
+
+  it("marks tracked questions on the asker's lane as buttons that open the pair sheet and light up the counterpart", async () => {
+    const asked = minutesAgo(4);
+    const toDesk = minutesAgo(3);
+    const bridge = show([
+      ...team(),
+      msg(5, 'a', 'f', 'question', 'Which token format?', asked, { tracked: true }),
+      msg(6, 'a', 'd', 'question', 'Ship Friday?', toDesk, { tracked: true }),
+      // An untracked question has no state to show: no mark.
+      msg(7, 'f', 'd', 'question', 'Legacy?', minutesAgo(2)),
+    ]);
+    const mark = await screen.findByRole('button', { name: `Auth API asked Frontend, ${clock(asked)}` });
+    expect(mark.className).toContain('line-q-open');
+    expect(screen.getByRole('button', { name: `Auth API asked Desk, ${clock(toDesk)}` })).toBeTruthy();
+    expect(document.querySelectorAll('.line-q')).toHaveLength(2);
+    expect(document.querySelector('.line-legend')!.textContent).toContain('question');
+
+    // Hovering lights up the counterpart's lane label.
+    const label = (title: string) => [...document.querySelectorAll('.line-label')].find((el) => el.querySelector('.line-label-title')?.textContent === title)!;
+    fireEvent.mouseEnter(mark);
+    expect(label('Frontend').classList.contains('lit')).toBe(true);
+    expect(label('Auth API').classList.contains('lit')).toBe(false);
+    fireEvent.mouseLeave(mark);
+    expect(label('Frontend').classList.contains('lit')).toBe(false);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: `Auth API asked Desk, ${clock(toDesk)}` }));
+    expect(label('Desk').classList.contains('lit')).toBe(true);
+
+    // The answer fills the ring, and a click opens the pair sheet.
+    bridge.emit('desk:event', msg(8, 'f', 'a', 'answer', 'JWT, RS256.', minutesAgo(1), { reply_to: 5 }));
+    await waitFor(() => expect(mark.className).toContain('line-q-answered'));
+    fireEvent.click(mark);
+    const sheet = screen.getByRole('dialog', { name: 'Auth API ⇄ Frontend' });
+    expect(sheet.querySelector('.pair-rows > li .pair-answers')!.textContent).toContain('JWT, RS256.');
+  });
+
+  it("draws a finished lane's answer run as a dotted stub with a live dot, until the run ends", async () => {
+    const bridge = show([
+      ...team(),
+      ev(5, 'agent.status_changed', { status: 'done' }, { agent: 'f', ts: minutesAgo(8) }),
+      msg(6, 'a', 'f', 'question', 'Is the page ready?', minutesAgo(2), { tracked: true }),
+      ev(7, 'run.started', { run_id: 'rf', model: 'm', answering: 6 }, { agent: 'f', ts: minutesAgo(1) }),
+    ]);
+    await waitFor(() => expect(document.querySelectorAll('.line-answering')).toHaveLength(1));
+    expect(document.querySelectorAll('.line-stub')).toHaveLength(1);
+    bridge.emit('desk:event', ev(8, 'run.finished', { run_id: 'rf', reason: 'no_tool_calls' }, { agent: 'f', ts: minutesAgo(0) }));
+    await waitFor(() => expect(document.querySelector('.line-answering')).toBeNull());
+    expect(document.querySelector('.line-stub')).toBeNull();
   });
 });

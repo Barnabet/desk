@@ -81,7 +81,12 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const projectAttention = useMemo(() => attention.filter((i) => i.project_id === projectId), [attention, projectId]);
   const attentionIds = useMemo(() => new Set(projectAttention.map((i) => i.id)), [projectAttention]);
   const threads = s.project?.threads;
-  const geometry = useMemo(() => lineGeometry({ timeline: s.timeline, threads: threads ?? [], now, width }), [s.timeline, threads, now, width]);
+  // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
+  const answeringIds = useMemo(() => new Set(Object.keys(s.messages.answering)), [s.messages.answering]);
+  const geometry = useMemo(
+    () => lineGeometry({ timeline: s.timeline, threads: threads ?? [], now, width, answering: answeringIds }),
+    [s.timeline, threads, now, width, answeringIds],
+  );
 
   useEffect(() => markSeen(projectId), [projectId, s.events.length]);
   useEffect(() => {
@@ -156,7 +161,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
 
   return (
     <div className="conversation" ref={rootRef}>
-      <LineDiagram g={geometry} project={project} messages={s.messages} attention={projectAttention} now={now} onStation={onStation} />
+      <LineDiagram g={geometry} project={project} messages={s.messages} attention={projectAttention} now={now} onStation={onStation} onPair={onPair} />
       <div className={`conv-body${planOpen ? ' plan-open' : ''}`}>
         <div className="conv-intro">
           <WhatsUp project={project} now={now} />

@@ -45,6 +45,8 @@ export type LaneGeometry = {
   trainX: number | null;
   /** Where the lane's own title is drawn: set for a lane that shares its row with a later one (the label column names a row's latest lane). */
   inlineLabel: { x: number; width: number } | null;
+  /** A finished lane's answer run in progress: a short dotted stub straight on from its end, `x` its tip (the live dot). */
+  stub: { d: string; x: number } | null;
 };
 
 export type LineGeometry = {
@@ -75,7 +77,15 @@ export type LineGeometry = {
  * The viewport shows the last hour (or back to the oldest thread still in flight); older history scrolls to the left.
  * A new lane takes the first row a finished lane has left.
  */
-export function lineGeometry(o: { timeline: TimelineState; threads: ThreadView[]; now: number; width: number; showArchived?: boolean }): LineGeometry {
+export function lineGeometry(o: {
+  timeline: TimelineState;
+  threads: ThreadView[];
+  now: number;
+  width: number;
+  showArchived?: boolean;
+  /** Threads with an answer run in progress (the message fold's `answering`): a finished one gets a stub. */
+  answering?: ReadonlySet<string>;
+}): LineGeometry {
   const viewportLeft = LABEL_W;
   const viewportWidth = Math.max(260, o.width - LABEL_W - LEGEND_W - 20);
   // The axis always ends at now and spans at least three minutes, with a little air before the brief.
@@ -114,10 +124,13 @@ export function lineGeometry(o: { timeline: TimelineState; threads: ThreadView[]
     // A finished lane ends at its last rejoin, or where it stopped when it has no result.
     const stoppedAt = Math.min(Math.max(laneStart + STUB, x(lane.segments.at(-1)?.from ?? lane.forkedAt)), nowX);
     const laneEnd = terminal ? (lastRejoin ?? stoppedAt) : nowX;
+    // A finished lane answering a question gets a short stub past its end (design spec §8 item 10). A lane in flight already reaches now.
+    const stubEnd = terminal && o.answering?.has(lane.threadId) ? Math.min(laneEnd + STUB * 2, nowX) : null;
 
     let row = rowEnds.findIndex((free) => free + ROW_GAP <= xf);
     if (row < 0) row = rowEnds.length;
-    rowEnds[row] = terminal ? (lastRejoin !== undefined ? lastRejoin + CURVE * 2 : laneEnd) : Infinity;
+    // The row stays taken past the stub.
+    rowEnds[row] = terminal ? Math.max(lastRejoin !== undefined ? lastRejoin + CURVE * 2 : laneEnd, stubEnd ?? -Infinity) : Infinity;
     rowLane[row] = i;
     const y = TRUNK_Y + FIRST_LANE + row * LANE_GAP;
 
@@ -157,6 +170,7 @@ export function lineGeometry(o: { timeline: TimelineState; threads: ThreadView[]
       signal,
       trainX: byId.get(lane.threadId)?.status === 'running' ? nowX : null,
       inlineLabel: laneEnd - laneStart >= 56 ? { x: laneStart + 4, width: laneEnd - laneStart - 8 } : null,
+      stub: stubEnd === null ? null : { d: `M${laneEnd} ${y} H${stubEnd}`, x: stubEnd },
     };
   });
   const rows = rowLane.map((i) => lanes[i]!);

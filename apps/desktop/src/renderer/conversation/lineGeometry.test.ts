@@ -72,6 +72,19 @@ describe('lineGeometry', () => {
     expect(g.lanes).toEqual([]);
     expect(g.nowX).toBeGreaterThan(g.x0);
   });
+
+  it("draws a short stub past a finished lane's end while it answers, and none for a lane still in flight", () => {
+    const now = Date.parse(at(60));
+    const threads = [thread('a', 'done'), thread('b', 'running')];
+    expect(lineGeometry({ timeline: timeline(), threads, now, width: 1440 }).lanes.map((l) => l.stub)).toEqual([null, null]);
+    const g = lineGeometry({ timeline: timeline(), threads, now, width: 1440, answering: new Set(['a', 'b']) });
+    const [a, b] = g.lanes;
+    // Lane a ends at its rejoin; the stub runs 32 px straight on from there.
+    const rx = Number(/^M(-?[\d.]+) /.exec(a!.rejoins[0]!)![1]);
+    expect(a!.stub).toEqual({ d: `M${rx} ${a!.y} H${rx + 32}`, x: rx + 32 });
+    expect(a!.stub!.x).toBeLessThanOrEqual(g.nowX);
+    expect(b!.stub).toBeNull();
+  });
 });
 
 /** Threads created (and running) at the given minutes; `doneAt` marks a thread done with a result then. */

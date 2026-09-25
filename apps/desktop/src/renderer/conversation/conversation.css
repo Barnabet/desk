@@ -1041,3 +1041,48 @@
   font-weight: inherit;
   text-align: left;
 }
+/* A tracked question on its asker's lane (design spec §8 item 10): a hollow amber ring while open, filled once answered, muted once settled otherwise. */
+.line-q {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  padding: 0;
+  border: 2.5px solid var(--wait);
+  border-radius: 50%;
+  background: var(--ground);
+  cursor: pointer;
+}
+.line-q-answered {
+  background: var(--wait);
+}
+.line-q-closed,
+.line-q-withdrawn {
+  border-color: var(--muted);
+}
+.line-q:hover,
+.line-q:focus-visible {
+  box-shadow: 0 0 0 3px var(--wait-pastel);
+}
+.line-legend-q {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border: 2px solid var(--wait);
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+/* The live dot at the tip of a finished lane's answering stub. */
+.line-answering {
+  position: absolute;
+  display: flex;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+/* The counterpart of the question mark under the pointer. */
+.line-label.lit .line-label-title,
+.line-lane-title.lit {
+  color: var(--wait-text);
+  text-decoration: underline;
+}
