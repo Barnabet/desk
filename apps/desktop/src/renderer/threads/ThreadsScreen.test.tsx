@@ -69,7 +69,7 @@ const finished: StoredEvent[] = [
   ev(7, 'agent.status_changed', { status: 'done' }, t),
 ];
 
-function setup(events = base, extra: Record<string, (input: any) => unknown> = {}, threadId: string | null = 't') {
+function setup(events = base, extra: Record<string, (input: any) => unknown> = {}, threadId: string | null = 't', at?: number) {
   const bridge = installBridge({
     'projects.get': () => overview(),
     'broker.watch': () => {
@@ -80,7 +80,7 @@ function setup(events = base, extra: Record<string, (input: any) => unknown> = {
     ...extra,
   });
   startSessionRouting();
-  render(<ThreadsScreen projectId="p" {...(threadId ? { threadId } : {})} />);
+  render(<ThreadsScreen projectId="p" {...(threadId ? { threadId } : {})} {...(at !== undefined ? { at } : {})} />);
   return bridge;
 }
 
@@ -209,5 +209,28 @@ describe('ThreadsScreen', () => {
     expect(screen.getByText('Archived')).toBeTruthy();
     expect(screen.getByText('This thread is archived.')).toBeTruthy();
     expect(within(screen.getByRole('complementary', { name: 'Transcript' })).getByText('Draft five emails.')).toBeTruthy();
+  });
+
+  it('opens a thread at the stop holding a message (?at=), once', async () => {
+    const bridge = setup(
+      [
+        ...base,
+        ev(6, 'message.agent', { from_agent_id: 'x', from_label: 'thread "Frontend" (x)', kind: 'question', text: 'Which subject lines?', tracked: true }, t),
+        ev(7, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'read_file', arguments: '{"path":"subjects.md"}' }, t),
+        ev(8, 'tool.result', { run_id: 'r1', tool_call_id: 'c2', name: 'read_file', status: 'ok', content: 'subjects' }, t),
+      ],
+      {},
+      't',
+      6,
+    );
+    const asked = await screen.findByRole('button', { name: /^Stop 3: Frontend asked/ });
+    await waitFor(() => expect(asked.getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: /^Stop 4: Used 1 tool/ }).getAttribute('aria-pressed')).toBe('false');
+    expect(document.getElementById('tr-stop-3')!.className).toContain('selected');
+    // Selected once: the user's own choice holds when the thread moves on.
+    fireEvent.click(screen.getByRole('button', { name: /^Stop 2:/ }));
+    bridge.emit('desk:event', ev(9, 'tool.call', { run_id: 'r1', tool_call_id: 'c3', name: 'read_file', arguments: '{"path":"footer.md"}' }, t));
+    await screen.findByRole('button', { name: /^Stop 4: Using 2 tools/ });
+    expect(screen.getByRole('button', { name: /^Stop 2:/ }).getAttribute('aria-pressed')).toBe('true');
   });
 });

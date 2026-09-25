@@ -17,6 +17,7 @@ describe('router', () => {
       { name: 'tray' },
       { name: 'project', id: 'p1', tab: 'conversation' },
       { name: 'project', id: 'p1', tab: 'threads', threadId: 't9' },
+      { name: 'project', id: 'p1', tab: 'threads', threadId: 't9', at: 42 },
       { name: 'project', id: 'p1', tab: 'settings' },
       { name: 'project', id: 'p1', tab: 'library', file: 'emails/01 welcome.md' },
       { name: 'project', id: 'p1', tab: 'memory', q: 'pricing & plans' },
@@ -29,5 +30,6 @@ describe('router', () => {
     expect(parseRoute('#/nowhere')).toEqual({ name: 'map' });
     expect(parseRoute('#/p')).toEqual({ name: 'map' });
     expect(parseRoute('#/p/x/bogus')).toEqual({ name: 'project', id: 'x', tab: 'conversation' });
+    expect(parseRoute('#/p/x/threads/t?at=abc')).toEqual({ name: 'project', id: 'x', tab: 'threads', threadId: 't' });
   });
 });

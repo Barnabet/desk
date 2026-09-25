@@ -12,7 +12,8 @@ export type Route =
   /** The skill catalog, optionally with one entry's review open. */
   | { name: 'catalog'; review?: string }
   | { name: 'system' }
-  | { name: 'project'; id: string; tab: ProjectTab; threadId?: string; file?: string; q?: string };
+  /** `at`: on a thread, the event id of a message to open the route at (the digest's pair lines). */
+  | { name: 'project'; id: string; tab: ProjectTab; threadId?: string; at?: number; file?: string; q?: string };
 
 const enc = encodeURIComponent;
 
@@ -38,7 +39,10 @@ export function parseRoute(hash: string): Route {
       const id = parts[1];
       if (!id) return { name: 'map' };
       const tab = PROJECT_TABS.includes(parts[2] as ProjectTab) ? (parts[2] as ProjectTab) : 'conversation';
-      if (tab === 'threads' && parts[3]) return { name: 'project', id, tab, threadId: parts[3] };
+      if (tab === 'threads' && parts[3]) {
+        const at = Number(q.get('at'));
+        return Number.isSafeInteger(at) && at > 0 ? { name: 'project', id, tab, threadId: parts[3], at } : { name: 'project', id, tab, threadId: parts[3] };
+      }
       const file = q.get('file');
       if (tab === 'library' && file) return { name: 'project', id, tab, file };
       const search = q.get('q');
@@ -66,7 +70,7 @@ export function href(r: Route): string {
     case 'system':
       return '#/system';
     case 'project':
-      return `#/p/${enc(r.id)}/${r.tab}${r.threadId ? `/${enc(r.threadId)}` : ''}${r.file ? `?file=${enc(r.file)}` : r.q ? `?q=${enc(r.q)}` : ''}`;
+      return `#/p/${enc(r.id)}/${r.tab}${r.threadId ? `/${enc(r.threadId)}` : ''}${r.file ? `?file=${enc(r.file)}` : r.q ? `?q=${enc(r.q)}` : r.at !== undefined ? `?at=${r.at}` : ''}`;
   }
 }
 

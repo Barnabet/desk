@@ -44,7 +44,7 @@ function Screen({ route }: { route: Route }) {
       if (route.tab === 'library') return <LibraryScreen key={route.id} projectId={route.id} {...(route.file ? { file: route.file } : {})} />;
       if (route.tab === 'settings') return <SettingsScreen key={route.id} projectId={route.id} />;
       if (route.tab === 'memory') return <MemoryScreen key={route.id} projectId={route.id} {...(route.q ? { q: route.q } : {})} />;
-      return <ThreadsScreen key={route.id} projectId={route.id} {...(route.threadId ? { threadId: route.threadId } : {})} />;
+      return <ThreadsScreen key={route.id} projectId={route.id} {...(route.threadId ? { threadId: route.threadId } : {})} {...(route.at !== undefined ? { at: route.at } : {})} />;
     default:
       return null;
   }

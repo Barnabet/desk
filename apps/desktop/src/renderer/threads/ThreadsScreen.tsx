@@ -6,7 +6,8 @@ import { ThreadDetail } from './ThreadDetail';
 import { ThreadRoster } from './ThreadRoster';
 import './threads.css';
 
-export function ThreadsScreen({ projectId, threadId }: { projectId: string; threadId?: string }) {
+/** The roster, or one thread; `at` opens the thread at the stop that holds that event (a message's id). */
+export function ThreadsScreen({ projectId, threadId, at }: { projectId: string; threadId?: string; at?: number }) {
   const s = useSession(projectId);
   const now = useNow();
   if (s.status === 'loading') return <div className="page muted">Loading…</div>;
@@ -28,5 +29,5 @@ export function ThreadsScreen({ projectId, threadId }: { projectId: string; thre
         </EmptyState>
       </div>
     );
-  return <ThreadDetail s={s} thread={thread} />;
+  return <ThreadDetail s={s} thread={thread} {...(at !== undefined ? { at } : {})} />;
 }

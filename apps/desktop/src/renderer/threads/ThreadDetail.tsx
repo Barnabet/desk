@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ThreadView } from '@desk/client';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
@@ -55,7 +55,8 @@ function useDepth(): [Depth, (d: Depth) => void] {
   ];
 }
 
-export function ThreadDetail({ s, thread }: { s: SessionState; thread: ThreadView }) {
+/** One thread: its route, tabs and transcript. `at` (an event id, from `?at=`) selects the stop that holds it. */
+export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: ThreadView; at?: number }) {
   const project = s.project!;
   const projectId = project.project.id;
   const now = useNow();
@@ -69,11 +70,22 @@ export function ThreadDetail({ s, thread }: { s: SessionState; thread: ThreadVie
   const [depth, setDepth] = useDepth();
   const [confirm, setConfirm] = useState<'stop' | 'archive' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** The `at` already applied: its stop is selected once, so the user's own selection is not overridden later. */
+  const openedAt = useRef<number | null>(null);
   useEffect(() => {
     setSelected(null);
     setTab('route');
     setDir('');
+    openedAt.current = null;
   }, [thread.id]);
+  useEffect(() => {
+    if (at === undefined || openedAt.current === at) return;
+    const stop = stops.find((x) => x.entries.some((e) => e.id === `e:${at}`));
+    if (!stop) return;
+    openedAt.current = at;
+    setTab('route');
+    setSelected(stop.n);
+  }, [at, stops]);
 
   const threadEvents = useMemo(() => s.events.filter((e) => e.agent_id === thread.id), [s.events, thread.id]);
   const drafts = useMemo(() => {
