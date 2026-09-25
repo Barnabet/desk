@@ -13,6 +13,7 @@ pnpm test         # all unit + integration tests; must pass before any commit
 pnpm typecheck    # tsc --noEmit; must pass before any commit
 pnpm test:live    # live smokes against the local model proxy (slow; DESK_LIVE=1)
 bin/desk …        # CLI (tsx loader, no build step)
+bin/desk web      # the web UI on http://127.0.0.1:7434: prints a one-time login link (Enter prints another); --port, --no-open, --dev
 pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.mjs (+ migrations, better-sqlite3 prebuilds)
 pnpm desktop      # the Electron app against the repo daemon (Vite HMR)
 pnpm test:e2e     # builds the app and runs the Playwright-for-Electron suite (opens windows; set DESK_E2E_SHOTS=<dir> for screenshots)
@@ -59,6 +60,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `testing/`: the harness, exported as `@desk/core/testing`.
 - `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle, `notifier.ts` (macOS notifications), `scripts/bundle.mjs`.
 - `apps/cli`: commander CLI over `DeskClient`.
+- `apps/web-server`: `@desk/web-server`, the `desk web` host (spec `2026-09-25-angular-web-ui-design.md`). Hono on 127.0.0.1 only: the Angular build (`apps/web-ui/dist/browser`), `/login` (one-time codes; session secrets in memory, sent as `x-desk-session` and as `/push`'s first frame; no cookie), `POST /rpc/:op` (the `@desk/bff` handlers plus the web-only `webChannels`, with the `$bytes` codec), `/push` (`PushHub`: one broker sender per socket, watch acks after the backfill, `desk:notify`), the web `HandlerContext` (`web-context.ts`), and `web.json`, `web-settings.json` and `web-login-*.html` in the data dir. `@desk/web-server/contract` is the browser-safe part the Angular app imports.
 - `apps/desktop`: Electron + React app (spec: `docs/superpowers/specs/2026-09-24-desk-desktop-app-design.md`).
   - `src/main/`: the only deskd client, through `@desk/bff/server` (`Broker`, `dispatch`, `DaemonManager`); it keeps the Electron `HandlerContext`, tray, notifications, menus and windows (CSP, `desk-app://`).
   - `src/preload/`: exposes only `window.desk.{invoke,on,platform}`.
@@ -101,3 +103,4 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - Only the user installs catalog skills; every install is checked against its pinned digest, and `<data>/runtimes` is read-only to agents. Installers get a minimal environment (no secrets), npm install scripts never run, and `` !`cmd` `` blocks in skills are never executed.
 - Desk never merges branches.
 - The desktop renderer never sees the daemon token; every IPC payload is validated in main.
+- desk web never gives the browser the daemon token either. It answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
