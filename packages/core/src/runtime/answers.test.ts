@@ -574,3 +574,22 @@ describe('the answer-run gate', () => {
     expect(h.store.list({ agentId: asker, types: ['message.agent'] }).filter((e) => e.type === 'message.agent' && e.payload.kind === 'question')).toEqual([]);
   });
 });
+
+describe('notices after answer runs', () => {
+  it('tell Desk what the user wrote to a thread while it was answering', async () => {
+    let t = '';
+    const { desk, stopped, finished } = await setup({
+      Pricing: (req) => {
+        if (!answering(req)) return tools(call('complete', { summary: turns(req) === 0 ? 'v1' : 'v2' }));
+        // The user writes while the answer run is in flight: the message waits for the next full run.
+        rt.sendMessage(t, 'Add the EU prices.');
+        return text('Per seat.');
+      },
+    });
+    t = await finished('Pricing');
+    ask(stopped('Checkout'), t, 'Per seat?');
+    await rt.whenIdle();
+    expect(runs(t).map((r) => r.payload.answering !== undefined)).toEqual([false, true, false]);
+    expect(notices(desk.id, t, 'completed')).toEqual(['Summary: "v1"', '(The user wrote to it since its last report: "Add the EU prices.".)\nSummary: "v2"']);
+  });
+});

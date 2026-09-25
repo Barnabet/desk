@@ -22,6 +22,7 @@ import {
   type ReasoningEffort,
   type ServiceStopReason,
   type SkillScope,
+  type StoredEvent,
 } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { AttachmentStore } from '../attachments/store';
@@ -1450,8 +1451,15 @@ export class Runtime {
    */
   private userWroteLine(agent: AgentRow, ended: boolean): string {
     const { store } = this.o;
-    const current = ended ? lastEvent(store.db, agent.id, 'run.started')?.id : undefined;
-    const previous = store.list({ agentId: agent.id, types: ['run.finished'] }).filter((e) => current === undefined || e.id < current).at(-1);
+    // Answer runs report nothing: "its last report" is the end of the previous full run.
+    const starts = store.list({ agentId: agent.id, types: ['run.started'] });
+    const answerRuns = new Set(starts.flatMap((e) => (e.type === 'run.started' && e.payload.answering !== undefined ? [e.payload.run_id] : [])));
+    const full = (e: StoredEvent) => (e.type === 'run.started' || e.type === 'run.finished') && !answerRuns.has(e.payload.run_id);
+    const current = ended ? starts.filter(full).at(-1)?.id : undefined;
+    const previous = store
+      .list({ agentId: agent.id, types: ['run.finished'] })
+      .filter((e) => full(e) && (current === undefined || e.id < current))
+      .at(-1);
     const texts = store
       .list({ agentId: agent.id, after: previous?.id ?? 0, types: ['message.user'] })
       .flatMap((e) => (e.type === 'message.user' ? [e.payload.text] : []));
