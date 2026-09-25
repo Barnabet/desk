@@ -4,7 +4,7 @@ import type { AgentStatus, AttentionItem } from '@desk/protocol';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { ago, clock, duration } from '../format';
 import { href } from '../router';
-import { answeringLabel, waitLabel } from '../waits';
+import { answeringLabel, waitHop, waitLabel } from '../waits';
 import type { LaneGeometry, LineGeometry } from './lineGeometry';
 
 type StationG = LineGeometry['stations'][number];
@@ -196,6 +196,21 @@ export function LineDiagram(o: {
             ) : null;
           })}
 
+          {g.lanes.map((l) => {
+            // A waiting lane whose wait leads to something that needs the user ends in a vermilion dot linking to it.
+            const hop = (l.thread?.status ?? l.lane.status) === 'waiting' ? waitHop(o.messages, l.lane.threadId, o.attention) : null;
+            return hop ? (
+              <a
+                key={`hop-${l.lane.threadId}`}
+                className="line-hop"
+                style={{ left: g.nowX, top: l.y }}
+                href={href({ name: 'attention', item: hop.item.id })}
+                aria-label={hop.label}
+                title={`${l.lane.title} waits on it: ${hop.label}`}
+              />
+            ) : null;
+          })}
+
           {g.lanes.map((l) =>
             l.trainX !== null ? (
               <div key={`train-${l.lane.threadId}`}>
@@ -250,7 +265,10 @@ export function LineDiagram(o: {
       {g.rows.map((l) => {
         const id = l.lane.threadId;
         const waiting = (l.thread?.status ?? l.lane.status) === 'waiting';
-        const s = laneStatus(l, project.project.settings.review_rounds, waiting ? waitLabel(o.messages, id, o.attention, o.now) : null, o.now);
+        const wait = waiting ? waitLabel(o.messages, id, o.attention, o.now) : null;
+        // One hop further when what it waits on needs the user (design spec §8 item 11); the dot at the lane's end links there.
+        const hop = wait ? waitHop(o.messages, id, o.attention) : null;
+        const s = laneStatus(l, project.project.settings.review_rounds, wait && hop ? `${wait} ${hop.text}` : wait, o.now);
         // An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3).
         const answering = answeringLabel(o.messages, id);
         return (

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { foldMessages } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AttentionItem } from '@desk/protocol';
-import { answeringLabel, waitLabel, waitsOnYou } from './waits';
+import { answeringLabel, waitHop, waitLabel, waitsOnYou } from './waits';
 
 const NOW = Date.UTC(2026, 8, 24, 11, 0, 0);
 /** `m` minutes before NOW. */
@@ -65,5 +65,30 @@ describe('answeringLabel', () => {
     expect([answeringLabel(m, 'f'), answeringLabel(m, 'b'), answeringLabel(m, 'a'), answeringLabel(m, 'd')]).toEqual(['answering Auth API', 'answering Desk', 'answering you', null]);
     const later = foldMessages([ev(11, 'run.finished', { run_id: 'r1', reason: 'no_tool_calls' }, { agent: 'f' })], m);
     expect(answeringLabel(later, 'f')).toBeNull();
+  });
+});
+
+describe('waitHop', () => {
+  it('follows a wait one hop to an agent that needs the user', () => {
+    const m = foldMessages([...team(), ask(5, 'a', 'f', 4), ask(6, 'b', 'f', 3), ask(7, 'f', 'd', 2)]);
+    const approval = item('f', 1);
+    // a waits on Frontend, which needs your approval itself.
+    expect(waitHop(m, 'a', [approval])).toEqual({ text: '→ needs your approval', label: 'Frontend needs your approval', item: approval });
+    // b waits on Frontend, which waits on Desk, which needs your answer: one hop past Frontend.
+    const deskAsks = item('d', 1, 'question');
+    expect(waitHop(m, 'b', [deskAsks])).toEqual({ text: '→ Desk needs your answer', label: 'Desk needs your answer', item: deskAsks });
+  });
+
+  it('has no hop when nothing further needs the user, or when the agent itself does', () => {
+    const m = foldMessages([...team(), ask(5, 'a', 'f', 4)]);
+    expect(waitHop(m, 'a', [])).toBeNull();
+    expect(waitHop(m, 'a', [item('a', 1), item('f', 1)])).toBeNull();
+    expect(waitHop(m, 'f', [item('a', 1)])).toBeNull();
+  });
+
+  it("keeps the hop of a stalled thread, whose own item asks nothing of the user (waitLabel's rule)", () => {
+    const m = foldMessages([...team(), ask(5, 'a', 'f', 4)]);
+    const approval = item('f', 1);
+    expect(waitHop(m, 'a', [item('a', 0, 'stalled'), approval])).toEqual({ text: '→ needs your approval', label: 'Frontend needs your approval', item: approval });
   });
 });

@@ -1110,3 +1110,25 @@ pre {
   color: var(--wait-text);
   font-weight: 600;
 }
+
+/* One hop past a wait, to what needs the user: vermilion, because an attention item exists (design spec §8 item 11). */
+.wait-hop {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wait-hop:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.hop-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: var(--accent);
+}

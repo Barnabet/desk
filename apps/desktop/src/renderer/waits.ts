@@ -32,3 +32,37 @@ export function answeringLabel(m: MessagesState, threadId: string): string | nul
   if (!run) return null;
   return `answering ${run.asker === 'user' ? 'you' : agentTitle(m, run.asker)}`;
 }
+
+/** What the agent one hop away needs from the user, by the kind of its attention item. */
+const NEEDS: Record<AttentionItem['kind'], string> = {
+  approval: 'needs your approval',
+  question: 'needs your answer',
+  needs_you: 'needs you',
+  stalled: 'is stalled',
+  failed: 'failed',
+  paused: 'is paused',
+};
+
+/**
+ * One hop past a wait (design spec §8 item 11): `text` follows the wait label ("→ needs your approval" when the agent
+ * waited on needs the user, "→ Billing needs your approval" when an agent it asked does), `label` names it whole for the
+ * link ("Frontend needs your approval"), and `item` is the attention item the link opens.
+ */
+export type WaitHop = { text: string; label: string; item: AttentionItem };
+
+/**
+ * The first of `agentId`'s wait targets (waitingOn order) that leads to an attention item, or null. An agent with an item
+ * of its own that waits on the user waits on you (waitLabel), which is not a hop.
+ */
+export function waitHop(m: MessagesState, agentId: string, attention: readonly AttentionItem[]): WaitHop | null {
+  if (attention.some((i) => i.agent_id === agentId && waitsOnYou(i))) return null;
+  for (const t of waitingOn(m, agentId, attention)) {
+    const who = t.attention ? t.agentId : t.via?.agentId;
+    const item = t.attention ?? t.via?.attention;
+    if (!who || !item) continue;
+    const name = agentTitle(m, who);
+    const needs = NEEDS[item.kind];
+    return { text: t.attention ? `→ ${needs}` : `→ ${name} ${needs}`, label: `${name} ${needs}`, item };
+  }
+  return null;
+}

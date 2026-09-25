@@ -383,4 +383,22 @@ describe('ThreadsScreen', () => {
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
     expect(within(tr).getByText(/^Woke to answer message #9 · /)).toBeTruthy();
   });
+
+  it("follows a waiting thread's wait one hop to what needs you, on its status line", async () => {
+    globalStore.set({
+      ...initialGlobalState(),
+      connection: { status: 'live' },
+      attention: [{ id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Onboarding', agent_id: 'f', title: 'Frontend wants to run bash', detail: '', created_at: minutesAgo(1), ref: { approval_id: 'a1', thread_id: 'f' } }],
+    });
+    setup([
+      ...base,
+      ev(6, 'agent.created', { role: 'thread', model: 'claude-opus-5-5', title: 'Frontend', brief: 'Build the page', workspace_path: '/w/f', parent_id: 'd' }, f),
+      ev(7, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'question', text: 'Which subject lines?', tracked: true }, { ...f, ts: minutesAgo(4) }),
+      ev(8, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, t),
+    ]);
+    const line = (await screen.findByText('Waiting on Frontend · 4m')).closest('.thread-status-line') as HTMLElement;
+    const hop = within(line).getByRole('link', { name: 'Frontend needs your approval' });
+    expect(hop.getAttribute('href')).toBe('#/attention?item=approval%3Aa1');
+    expect(hop.textContent).toBe('→ needs your approval');
+  });
 });

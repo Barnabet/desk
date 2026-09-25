@@ -297,7 +297,7 @@ describe('messages in the conversation', () => {
       [approval],
       { 'projects.get': () => ({ ...overview(), plan }) },
     );
-    expect(await screen.findByText('waiting on Frontend · 4m')).toBeTruthy();
+    expect(await screen.findByText('waiting on Frontend · 4m → needs your approval')).toBeTruthy();
     expect(screen.getByText('waiting on you · 2m')).toBeTruthy();
     expect(screen.getByText('answering Desk').closest('.line-label-sub')!.textContent).toBe('done · answering Desk');
     const panel = screen.getByRole('complementary', { name: 'Plan and Desk' });
@@ -410,5 +410,29 @@ describe('messages in the conversation', () => {
     bridge.emit('desk:event', ev(8, 'run.finished', { run_id: 'rf', reason: 'no_tool_calls' }, { agent: 'f', ts: minutesAgo(0) }));
     await waitFor(() => expect(document.querySelector('.line-answering')).toBeNull());
     expect(document.querySelector('.line-stub')).toBeNull();
+  });
+
+  it("follows a lane's wait one hop to what needs you, with a dot linking to it", async () => {
+    const approval: AttentionItem = {
+      id: 'approval:x1',
+      kind: 'approval',
+      project_id: 'p',
+      project_name: 'Onboarding revamp',
+      agent_id: 'f',
+      title: 'Frontend wants to run bash',
+      detail: '',
+      created_at: minutesAgo(1),
+      ref: { approval_id: 'x1', thread_id: 'f' },
+    };
+    show(
+      [
+        ...team(),
+        msg(5, 'a', 'f', 'question', 'Which token format?', minutesAgo(4), { tracked: true }),
+        ev(6, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, { agent: 'a', ts: minutesAgo(4) }),
+      ],
+      [approval],
+    );
+    expect(await screen.findByText('waiting on Frontend · 4m → needs your approval')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Frontend needs your approval' }).getAttribute('href')).toBe('#/attention?item=approval%3Ax1');
   });
 });

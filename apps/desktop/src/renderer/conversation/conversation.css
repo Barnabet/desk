@@ -1086,3 +1086,13 @@
   color: var(--wait-text);
   text-decoration: underline;
 }
+/* The end of a waiting lane whose wait leads one hop to an attention item. */
+.line-hop {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 6px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2.5px var(--ground), 0 0 0 4px var(--accent);
+}
