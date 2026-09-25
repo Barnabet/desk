@@ -169,12 +169,13 @@ export const snippet = (text: string, max: number) => JSON.stringify(clip(text.r
 - `formatThreadSummary` quotes the brief, the result and the last message.
 - `notifyParent` notices keep the runtime text plain. The parts the thread wrote (summary, last text, approval arguments) and the user text they cite go through `snippet`. The inbox renderer then quotes the whole body anyway.
 - The thread tools `read_thread` and `list_threads` use them too.
-- System prompts use `snippet` only (§6).
+- System prompts use `snippet` only (§6). That includes Desk's Services section: a thread chooses a service's command and folder, so they are snippets like the thread's title.
+- Image names in the `[Images from view_image]` message stay on one line: they are file names an agent chose.
 
 **Compaction** (`agent/compaction.ts`):
 - `CHECKPOINT_INSTRUCTIONS` gains the text in §6.4.
 - `renderForCompaction` replaces `</conversation>` in turn text with `</ conversation>`.
-- `applyCheckpoint` neutralises forged markers at line start in the checkpoint body: `/^(\s*)\[(message|Checkpoint|End of checkpoint|Desk runtime|Images from view_image)/gim` becomes `$1($2`.
+- `applyCheckpoint` neutralises forged markers at line start in the checkpoint body: `/(?<=^|[\v\f\u0085])(\s*)\[(message|Checkpoint|End of checkpoint|Desk runtime|Images from view_image)/gim` becomes `$1($2`. A line starts after every break `quoteLines` splits on; the multiline `^` alone misses `\v`, `\f` and U+0085.
 
 ---
 
@@ -505,6 +506,7 @@ For a user's question, the ending appends only `run.finished`. The thread route 
   - `[Images from view_image]`;
   - `[Desk runtime …]`;
   - `## Instructions from the user`.
+- **The checkpoint is the exception.** It is the agent's own Markdown summary, set between the runtime's two checkpoint markers, and it adds no authority (§5.1). So only the bracketed markers are neutralised in it (§1.5), and a line of it may start with `#1 USER:` or a `##` heading. The fixture checks that no bracketed marker but the checkpoint's own two starts a line of it.
 
 ### 5.3 Size and rate
 - **Text size.** At most 4000 characters per message, on all four send tools.

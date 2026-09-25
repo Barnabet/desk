@@ -1,6 +1,6 @@
 import { imageLabel, type EventOf, type StoredEvent, type ToolImage } from '@desk/protocol';
 import type { ChatMessage, ContentPart } from '../model/types';
-import { renderInboxItem } from '../coordination/render';
+import { oneLine, renderInboxItem } from '../coordination/render';
 
 /** Why an image goes as text after the endpoint refused a request with it: its answer, and how many images were withheld together. */
 export type Withheld = { reason: string; count: number };
@@ -46,7 +46,9 @@ export type ConversationOptions = ImageWindow & {
   images?: ImageLoader | null;
 };
 
-const imageRef = (image: ToolImage) => `[image: ${imageLabel(image)}]`;
+/** An image's label on one line: its name is a file name an agent chose, which may hold line breaks. */
+const labelOf = (image: ToolImage) => oneLine(imageLabel(image));
+const imageRef = (image: ToolImage) => `[image: ${labelOf(image)}]`;
 const occurrence = (toolCallId: string, sha256: string) => `${toolCallId}\n${sha256}`;
 /** Names one showing of an image (the same image viewed again later is another occurrence). */
 export const occurrenceOf = (c: ConversationImage) => occurrence(c.toolCallId, c.image.sha256);
@@ -162,7 +164,7 @@ export function withholdMore(messages: TaggedMessage[], more: ReadonlyMap<string
 }
 
 function placeholder(c: ConversationImage, state: 'missing' | 'old' | 'crowded'): string {
-  const label = imageLabel(c.image);
+  const label = labelOf(c.image);
   if (c.withheld) {
     const reason = clip(c.withheld.reason);
     return c.withheld.count === 1
@@ -213,15 +215,16 @@ export function pixelGroups(messages: TaggedMessage[]): ConversationImage[][] {
     .reverse();
 }
 
-/** Applies a checkpoint: drops the messages it summarises and puts the summary in front of the rest. */
 /**
  * A checkpoint is the model's own summary: a runtime marker at the start of one of its lines (indented or not)
- * becomes `(marker…`, so only the runtime's own markers start lines (design spec §1.5).
+ * becomes `(marker…`, so only the runtime's own markers start lines (design spec §1.5). A line starts after every
+ * break quoteLines knows, \v, \f and U+0085 included, which the multiline `^` does not match.
  */
 export function neutraliseMarkers(text: string): string {
-  return text.replace(/^(\s*)\[(message|Checkpoint|End of checkpoint|Desk runtime|Images from view_image)/gim, '$1($2');
+  return text.replace(/(?<=^|[\v\f\u0085])(\s*)\[(message|Checkpoint|End of checkpoint|Desk runtime|Images from view_image)/gim, '$1($2');
 }
 
+/** Applies a checkpoint: drops the messages it summarises and puts the summary in front of the rest. */
 export function applyCheckpoint(messages: TaggedMessage[], checkpoint: EventOf<'context.compacted'> | undefined): TaggedMessage[] {
   if (!checkpoint) return messages;
   const tail = messages.filter((m) => m.eventId > checkpoint.payload.up_to);

@@ -3,7 +3,7 @@ import type { AgentRow, ApprovalRow, ServiceRow } from '../state/queries';
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 /** Agent text that must stay on one line: tool names and arguments, reasons, file names. */
-const oneLine = (s: string) => s.replace(/[\s\u0085]+/g, ' ').trim();
+export const oneLine = (s: string) => s.replace(/[\s\u0085]+/g, ' ').trim();
 
 /** One line per thread for rosters and list_threads. The title and the result are agents' words: one quoted line each. */
 export function formatThreadLine(t: AgentRow): string {
@@ -14,13 +14,16 @@ export function formatThreadLine(t: AgentRow): string {
   return `- ${parts.join('; ')}`;
 }
 
-/** Where a service runs, for service lines: a source folder or a thread's workspace. */
+/** Where a service runs, for service lines: a source folder or a thread's workspace (its title a snippet, as agents write it). */
 export function servicePlace(s: ServiceRow, source?: { label: string; path: string } | null, threadTitle?: string | null): string {
   if (s.source_id) return `source ${s.source_id} "${source?.label ?? 'removed'}"${source ? ` (${source.path})` : ''}`;
-  return `thread ${s.agent_id}${threadTitle ? ` "${threadTitle}"` : ''}`;
+  return `thread ${s.agent_id}${threadTitle ? ` ${snippet(threadTitle, 80)}` : ''}`;
 }
 
-/** One line per project service (service_list and Desk's prompt); `place` from servicePlace. */
+/**
+ * One line per project service (service_list and Desk's prompt); `place` from servicePlace. Agents choose the command
+ * and the folder, so both are snippets: no service line can start another line of a system prompt (design spec §1.5).
+ */
 export function formatServiceLine(s: ServiceRow, place: string): string {
   const state =
     s.status === 'running'
@@ -28,8 +31,8 @@ export function formatServiceLine(s: ServiceRow, place: string): string {
       : s.status === 'exited'
         ? `exited (${s.exit_signal ?? `code ${s.exit_code}`}) at ${s.ended_at}`
         : `stopped (${s.stop_reason ?? 'requested'}) at ${s.ended_at}`;
-  const where = `${place}${s.cwd !== '.' ? `, in ${s.cwd}` : ''}`;
-  return `- ${s.name}: ${state}; ${where}; \`${clip(s.command, 200)}\``;
+  const where = `${place}${s.cwd !== '.' ? `, in ${snippet(s.cwd, 200)}` : ''}`;
+  return `- ${s.name}: ${state}; ${where}; ${snippet(s.command, 200)}`;
 }
 
 /** Desk's read_thread summary. The brief, the result and the last message are quoted: they are agents' words. */
