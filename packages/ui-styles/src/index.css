@@ -1,0 +1,13 @@
+/* Desk's styles for both UIs: the fonts, the tokens, then one sheet per screen, in the Electron renderer's cascade order. */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import '@fontsource-variable/newsreader';
+@import './tokens.css';
+@import './attention.css';
+@import './conversation.css';
+@import './knowledge.css';
+@import './map.css';
+@import './settings.css';
+@import './skills.css';
+@import './system.css';
+@import './threads.css';

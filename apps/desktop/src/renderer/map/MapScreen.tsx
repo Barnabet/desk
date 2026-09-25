@@ -11,7 +11,6 @@ import { MapCanvas } from './MapCanvas';
 import { OrbitMap } from './OrbitMap';
 import { ProjectList } from './ProjectList';
 import { TerritoryInspector } from './TerritoryInspector';
-import './map.css';
 
 const VIEW_KEY = 'desk.mapView';
 const readView = (): 'map' | 'list' => {

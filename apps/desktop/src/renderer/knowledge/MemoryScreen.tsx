@@ -9,7 +9,6 @@ import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
 import { replaceRoute } from '../router';
 import { useSession } from '../state/session';
-import './knowledge.css';
 
 function Source({ projectId, source, label }: { projectId: string; source: string; label(id: string): string }) {
   const agent = originAgent(source);

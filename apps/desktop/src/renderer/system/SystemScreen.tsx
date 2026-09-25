@@ -10,7 +10,6 @@ import { describeError, toast, toastError } from '../components/Toast';
 import { useGlobal } from '../state/global';
 import { tokens } from '../threads/tabs/UsageTab';
 import { ModelsEditor } from './ModelsEditor';
-import './system.css';
 
 type DaemonStatusView = ChannelOutput<'daemon.status'>;
 type AppInfo = ChannelOutput<'app.info'>;

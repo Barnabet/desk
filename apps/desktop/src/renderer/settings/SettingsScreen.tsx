@@ -11,7 +11,6 @@ import { useSession } from '../state/session';
 import { PolicyEditor, sameRules } from './PolicyEditor';
 import { SettingsFields, workingStyleOf, type WorkingStyle } from './SettingsFields';
 import { useModels } from './useModels';
-import './settings.css';
 
 function useSaver() {
   const [busy, setBusy] = useState<string | null>(null);

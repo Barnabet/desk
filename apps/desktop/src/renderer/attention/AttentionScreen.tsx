@@ -9,7 +9,6 @@ import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { Inspector } from './Inspector';
 import { StripRack } from './StripRack';
-import './attention.css';
 
 const WHO: Record<string, string> = { user: 'you, in another window', desk: 'Desk', system: 'Desk (the thread was stopped)' };
 

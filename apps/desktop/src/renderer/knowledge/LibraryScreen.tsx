@@ -8,7 +8,6 @@ import { FileViewer } from '../components/FileViewer';
 import { toast, toastError } from '../components/Toast';
 import { replaceRoute } from '../router';
 import { useSession } from '../state/session';
-import './knowledge.css';
 
 const KINDS: Array<ArtifactKind | 'all'> = ['all', 'report', 'code', 'data', 'file', 'other'];
 

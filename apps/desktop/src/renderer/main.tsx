@@ -1,7 +1,4 @@
-import '@fontsource-variable/geist';
-import '@fontsource-variable/geist-mono';
-import '@fontsource-variable/newsreader';
-import './theme/tokens.css';
+import '@desk/ui-styles/index.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

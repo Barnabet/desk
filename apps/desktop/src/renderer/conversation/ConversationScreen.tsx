@@ -16,7 +16,6 @@ import { PlanPanel } from './PlanPanel';
 import { ServicesCard } from './ServicesCard';
 import { WhatsUp } from './WhatsUp';
 import { useMediaQuery } from '../state/media';
-import './conversation.css';
 
 /** Chat items rendered at first; scrolling up renders this many more (long conversations stay fast). */
 export const CHAT_PAGE = 60;

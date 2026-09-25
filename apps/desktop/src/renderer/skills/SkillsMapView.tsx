@@ -2,7 +2,6 @@ import type { SkillNode } from '@desk/client';
 import type { AgentStatus } from '@desk/protocol';
 import { href, layoutSkillsMap, type MapTone } from '@desk/ui-core';
 import { MapCanvas } from '../map/MapCanvas';
-import '../map/map.css';
 
 const TERRITORY: Record<MapTone, { fill: string; stroke: string; text: string }> = {
   running: { fill: '#E3E8F5', stroke: '#C9D3EC', text: '#1F45A8' },

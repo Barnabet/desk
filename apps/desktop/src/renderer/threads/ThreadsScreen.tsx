@@ -4,7 +4,6 @@ import { useNow } from '../state/now';
 import { useSession } from '../state/session';
 import { ThreadDetail } from './ThreadDetail';
 import { ThreadRoster } from './ThreadRoster';
-import './threads.css';
 
 /** The roster, or one thread; `at` opens the thread at the stop that holds that event (a message's id). */
 export function ThreadsScreen({ projectId, threadId, at }: { projectId: string; threadId?: string; at?: number }) {

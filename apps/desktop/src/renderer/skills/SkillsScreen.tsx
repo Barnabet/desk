@@ -19,7 +19,6 @@ import { SkillEditor } from './SkillEditor';
 import { SkillList } from './SkillList';
 import { SkillPanel } from './SkillPanel';
 import { SkillsMapView } from './SkillsMapView';
-import './skills.css';
 
 type View = 'map' | 'list';
 type Filter = 'all' | 'used' | 'shadowed';
