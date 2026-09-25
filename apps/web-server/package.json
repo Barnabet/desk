@@ -1,0 +1,25 @@
+{
+  "name": "@desk/web-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract": "./src/contract.ts"
+  },
+  "dependencies": {
+    "@desk/bff": "workspace:*",
+    "@desk/client": "workspace:*",
+    "@desk/protocol": "workspace:*",
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.8",
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@desk/core": "workspace:*",
+    "@desk/daemon": "workspace:*",
+    "@desk/fake-model": "workspace:*",
+    "@types/ws": "^8.18.1"
+  }
+}

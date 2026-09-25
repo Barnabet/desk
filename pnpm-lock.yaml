@@ -147,6 +147,43 @@ importers:
         specifier: ^8.3.0
         version: 8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
+  apps/web-server:
+    dependencies:
+      '@desk/bff':
+        specifier: workspace:*
+        version: link:../../packages/bff
+      '@desk/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@desk/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@hono/node-server':
+        specifier: ^2.1.1
+        version: 2.1.1(hono@4.13.8)
+      hono:
+        specifier: ^4.13.8
+        version: 4.13.8
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@desk/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@desk/daemon':
+        specifier: workspace:*
+        version: link:../daemon
+      '@desk/fake-model':
+        specifier: workspace:*
+        version: link:../../test/fake-model
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+
   packages/bff:
     dependencies:
       '@desk/client':
