@@ -247,6 +247,22 @@ describe('auto-link (design spec §1.3)', () => {
     expect(String(run!.messages.at(-1)!.content)).toContain(`[message #${r.id} from thread "Frontend" (${b}) — answer to your question #${q.id}]\n> JWT, RS256.`);
   });
 
+  it("reaches a live asker by the header's label though an archived thread has that exact title", async () => {
+    const { projectId, thread, drained } = await setup();
+    const old = thread('Auth API', 'done');
+    h.store.append({ project_id: projectId, agent_id: old, type: 'agent.archived', payload: {} });
+    const a = thread('Auth] API', 'running');
+    const b = thread('Frontend', 'running');
+    const q = rt.send({ from: a, to: b, kind: 'question', text: 'Which token format?' });
+    drained(b, q.id);
+    // The question's header says: answer with message_thread to "Auth API".
+    const r = rt.send({ from: b, to: 'Auth API', kind: 'note', text: 'JWT.' });
+    expect(r).toMatchObject({ kind: 'answer', replyTo: q.id });
+    expect(stored(r.id).agent_id).toBe(a);
+    expect(h.store.list({ agentId: old, types: ['message.agent'] })).toEqual([]);
+    await rt.whenIdle();
+  });
+
   it("records Desk's note to a thread that asked it as the answer, and wakes the thread", async () => {
     const { desk, thread } = await setup();
     const t = thread('Research', 'waiting');

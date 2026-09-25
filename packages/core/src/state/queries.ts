@@ -52,21 +52,23 @@ export const listThreads = (db: Db, projectId: string, status?: AgentRow['status
     .all();
 
 /**
- * The project's threads that `ref` names: the thread with that id, else the threads titled exactly `ref`, else the
- * threads a message header names `ref` (`sanitizeLabel` of the title). Of the threads named, the live ones when there
- * are any (a live thread wins over an archived one of the same title), oldest first.
+ * The project's threads that `ref` names: the thread with that id, else the first non-empty of the live threads titled
+ * exactly `ref`, the live threads a message header names `ref` (`sanitizeLabel` of the title), then the archived
+ * threads titled `ref` and those labelled `ref`; oldest first. A live thread wins over an archived one either way, as
+ * answer runs assume (agent/answer.ts).
  */
 export function threadsByRef(db: Db, projectId: string, ref: string): AgentRow[] {
   const threads = listThreads(db, projectId);
   const byId = threads.find((t) => t.id === ref);
   if (byId) return [byId];
-  const liveFirst = (named: AgentRow[]) => {
-    const live = named.filter((t) => !t.archived_at);
-    return live.length ? live : named;
-  };
-  const titled = threads.filter((t) => t.title === ref);
-  if (titled.length) return liveFirst(titled);
-  return liveFirst(threads.filter((t) => sanitizeLabel(t.title ?? 'untitled') === ref));
+  const titled = (t: AgentRow) => t.title === ref;
+  const labelled = (t: AgentRow) => sanitizeLabel(t.title ?? 'untitled') === ref;
+  const live = threads.filter((t) => !t.archived_at);
+  const archived = threads.filter((t) => t.archived_at);
+  for (const named of [live.filter(titled), live.filter(labelled), archived.filter(titled), archived.filter(labelled)]) {
+    if (named.length) return named;
+  }
+  return [];
 }
 
 export const listSources = (db: Db, projectId: string): SourceRow[] =>

@@ -224,6 +224,11 @@ describe('thread references', () => {
     make('Twin');
     make('Twin');
     await expect(read('Twin')).rejects.toThrow('Several threads are titled "Twin"; use its id.');
+    const archivedAuth = make('Auth API');
+    h.store.append({ project_id: projectId, agent_id: archivedAuth, type: 'agent.status_changed', payload: { status: 'done' } });
+    h.store.append({ project_id: projectId, agent_id: archivedAuth, type: 'agent.archived', payload: {} });
+    await expect(read('Auth API')).rejects.toThrow('"Auth API" is archived.');
+    // A live thread a header names "Auth API" wins over the archived one titled so.
     const bracketed = make('Auth] API');
     expect(await read('Auth API')).toContain(`Thread ${bracketed} `);
 
