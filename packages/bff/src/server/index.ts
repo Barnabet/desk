@@ -3,3 +3,4 @@ export * from './daemon';
 export * from './errors';
 export * from './handlers';
 export * from './launchd';
+export * from './notify';

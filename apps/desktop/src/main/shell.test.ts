@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AttentionItem, ProjectSummary } from '@desk/protocol';
 import { initialGlobalState } from '@desk/bff/contract';
-import { attentionRoute, notificationFor } from './notify';
+import { attentionRoute, notificationFor } from '@desk/bff/server';
 import { AppSettingsStore } from './settings';
 import { trayIconBitmap } from './trayIcon';
 import { trayModel } from './trayModel';

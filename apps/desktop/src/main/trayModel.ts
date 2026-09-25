@@ -1,6 +1,6 @@
 import { clip } from '@desk/protocol';
 import { STRIP_CODE, type GlobalState } from '@desk/bff/contract';
-import { attentionRoute } from './notify';
+import { attentionRoute } from '@desk/bff/server';
 
 export type TrayItem = { label: string; route?: string; action?: 'open' | 'quit'; enabled?: boolean } | { separator: true };
 

@@ -52,11 +52,12 @@ renderer (React, sandboxed, no Node)          main process (Node)               
 
 - **`src/main`**
   - `index.ts`: app lifecycle, the single-instance lock, and the Electron `HandlerContext` (dialogs, shell, windows, settings).
-  - `tray.ts`, `popover.ts`, `notify.ts`, `menu.ts`, and `windows.ts` (the `desk-app://` scheme, CSP, navigation lock).
+  - `tray.ts`, `popover.ts`, `menu.ts`, and `windows.ts` (the `desk-app://` scheme, CSP, navigation lock). `index.ts` posts the attention notifications, worded by `@desk/bff/server`'s `notificationFor`.
 - **`@desk/bff`** (`packages/bff`), which `desk web` runs too:
   - `server/daemon.ts`: `DaemonManager` (start, restart, stop, repair; launchd when packaged, `tsx` in dev).
   - `server/broker.ts`: the only stream subscriber. It fans out per-window watches, resumes from the last sequence and backs off with jitter.
   - `server/handlers.ts`: one handler per IPC channel.
+  - `server/notify.ts`: the wording of attention notifications (`notificationFor`, `attentionRoute`), shared with `desk web`'s browser notifications.
   - `contract/ipc.ts`: every channel's zod input schema, and `contract/types.ts` each channel's result (`ChannelOutput`). `handlers.test.ts` checks that every channel has a handler that returns that type.
 - **`src/preload`**: exposes only `invoke`, `on` and `platform`.
 - **`src/renderer`**

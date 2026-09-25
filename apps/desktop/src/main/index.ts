@@ -10,7 +10,7 @@ import { INVOKE_CHANNEL } from '@desk/bff/contract';
 import { Broker, DaemonManager, dispatch, UserFacingError, type HandlerContext } from '@desk/bff/server';
 import { createLog } from './log';
 import { buildAppMenu } from './menu';
-import { attentionRoute, notificationFor } from './notify';
+import { attentionRoute, notificationFor } from '@desk/bff/server';
 import { AppSettingsStore } from './settings';
 import { TrayPopover } from './popover';
 import { DeskTray } from './tray';
