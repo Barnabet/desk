@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open';
 import { EventStore } from '../events/store';
 import { getAgent } from '../state/queries';
-import { drainInbox, hasPendingInbox, pendingInbox } from './inbox';
+import { drainEvent, drainInbox, hasPendingInbox, pendingInbox } from './inbox';
 
 let close: () => void;
 let store: EventStore;
@@ -37,5 +37,17 @@ describe('inbox', () => {
     const [m2] = store.append({ project_id: 'p', agent_id: 'a', type: 'message.agent', payload: { from_agent_id: 'd', from_label: 'Desk', kind: 'note', text: 'two' } });
     expect(pendingInbox(store, 'a').map((e) => e.id)).toEqual([m2!.id]);
     expect(m1!.id).toBeLessThan(m2!.id);
+  });
+
+  it('builds the drain an answer run appends with its start: up to its question, never below the cursor', () => {
+    const [m1] = store.append({ project_id: 'p', agent_id: 'a', type: 'message.user', payload: { text: 'one' } });
+    const [m2] = store.append({ project_id: 'p', agent_id: 'a', type: 'message.user', payload: { text: 'two' } });
+    expect(drainEvent(store, 'a', 'r1', m1!.id)).toEqual({ project_id: 'p', agent_id: 'a', type: 'inbox.drained', payload: { run_id: 'r1', up_to: m1!.id } });
+    expect(store.list({ types: ['inbox.drained'] })).toEqual([]);
+    store.append(drainEvent(store, 'a', 'r1', m1!.id)!);
+    expect(pendingInbox(store, 'a').map((e) => e.id)).toEqual([m2!.id]);
+    // A question already read: the drain stays at the cursor and delivers nothing new.
+    expect(drainEvent(store, 'a', 'r2', 0)).toMatchObject({ payload: { run_id: 'r2', up_to: m1!.id } });
+    expect(drainEvent(store, 'nobody', 'r3', 0)).toBeNull();
   });
 });

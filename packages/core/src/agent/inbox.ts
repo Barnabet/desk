@@ -1,4 +1,4 @@
-import { INBOX_EVENT_TYPES, type StoredEvent } from '@desk/protocol';
+import { INBOX_EVENT_TYPES, type EventInput, type StoredEvent } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import { NotFoundError } from '../errors';
 import { getAgent } from '../state/queries';
@@ -25,4 +25,15 @@ export function drainInbox(store: EventStore, agentId: string, runId: string): n
   if (!last) return 0;
   store.append({ project_id: agent.project_id, agent_id: agentId, type: 'inbox.drained', payload: { run_id: runId, up_to: last.id } });
   return events.length;
+}
+
+/**
+ * The `inbox.drained` event that delivers the items pending up to `upTo` (the cursor never moves back), returned for a
+ * caller that appends it together with other events: an answer run's start (design spec §4.3). It is returned even
+ * when it delivers nothing new, so the runtime line after the batch has a position. Null for an unknown agent.
+ */
+export function drainEvent(store: EventStore, agentId: string, runId: string, upTo: number): EventInput | null {
+  const agent = getAgent(store.db, agentId);
+  if (!agent) return null;
+  return { project_id: agent.project_id, agent_id: agentId, type: 'inbox.drained', payload: { run_id: runId, up_to: Math.max(upTo, agent.inbox_cursor) } };
 }
