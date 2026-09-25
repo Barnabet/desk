@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type FakeReply, type Script } from '@desk/fake-model';
+import type { AgentStatus } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
 import { getPlan } from '../coordination/plan';
 import { getAgent, getDeskAgent, listApprovals, listThreads, type AgentRow } from '../state/queries';
@@ -173,5 +174,32 @@ describe('archiveThread', () => {
     expect(existsSync(t.workspace_path!)).toBe(false);
     expect(execFileSync('git', ['branch', '--list', t.git_branch!], { cwd: repo, encoding: 'utf8' })).toContain(t.git_branch!);
     expect(getAgent(h.store.db, id)?.archived_at).toBeTruthy();
+  });
+});
+
+describe('message_thread refusals', () => {
+  it('refuses a note to a finished thread and any message to a stopped or archived one', async () => {
+    const { rt, projectId, ctx } = await setup();
+    const thread = (title: string, status?: AgentStatus, archived = false) => {
+      const id = rt.createThread(projectId, { title, brief: 'b', workspacePath: join(h.dir, title) });
+      if (status) h.store.append({ project_id: projectId, agent_id: id, type: 'agent.status_changed', payload: { status } });
+      if (archived) h.store.append({ project_id: projectId, agent_id: id, type: 'agent.archived', payload: {} });
+      return id;
+    };
+    const finished = (title: string) =>
+      `"${title}" has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`;
+    const send = (thread_id: string, kind: 'note' | 'revision') => messageThreadTool.execute({ thread_id, kind, text: 'More, please.' }, ctx);
+
+    await expect(send(thread('Pricing', 'done'), 'note')).rejects.toThrow(finished('Pricing'));
+    await expect(send(thread('Deploy', 'failed'), 'note')).rejects.toThrow(finished('Deploy'));
+    const stopped = thread('Scout', 'cancelled');
+    await expect(send(stopped, 'note')).rejects.toThrow('"Scout" was stopped; it cannot receive messages.');
+    await expect(send(stopped, 'revision')).rejects.toThrow('"Scout" was stopped; it cannot receive messages.');
+    await expect(send(thread('Old', 'done', true), 'revision')).rejects.toThrow('"Old" is archived.');
+    expect(h.store.list({ projectId, types: ['message.agent', 'agent.revision'] })).toEqual([]);
+
+    const fresh = thread('Fresh');
+    await expect(send(fresh, 'note')).resolves.toBe(`Sent to ${fresh}.`);
+    await rt.whenIdle();
   });
 });
