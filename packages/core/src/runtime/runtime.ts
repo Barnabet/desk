@@ -8,6 +8,7 @@ import {
   GLOBAL_PROJECT_ID,
   MESSAGE_FOLD_TYPES,
   messageById,
+  openFrom,
   openTo,
   sanitizeLabel,
   ServiceName,
@@ -888,7 +889,10 @@ export class Runtime {
     this.closeQuestionsTo(this.requireAgent(agentId), WHY.stopped);
   }
 
-  /** Reports running/waiting threads with no activity for `thresholdMs` to their Desk, once per stall. Returns reported thread ids. */
+  /**
+   * Reports running and waiting threads with no activity for `thresholdMs` to their Desk, once per stall; a waiting
+   * thread's notice names what it waits on. Returns the reported thread ids.
+   */
   checkStalls(now = Date.now(), thresholdMs = 15 * 60_000): string[] {
     const reported: string[] = [];
     for (const t of listActiveThreads(this.o.store.db)) {
@@ -898,10 +902,24 @@ export class Runtime {
       if (!last || now - Date.parse(last.ts) < thresholdMs || this.stallNotified.get(t.id) === last.id) continue;
       this.stallNotified.set(t.id, last.id);
       const minutes = Math.round((now - Date.parse(last.ts)) / 60_000);
-      this.deliver(t.id, t.parent_id, 'stalled', `No activity for ${minutes} minutes (status: ${t.status}).`);
+      this.deliver(t.id, t.parent_id, 'stalled', `No activity for ${minutes} minutes (status: ${t.status}${this.waitingOn(t, now)}).`);
       reported.push(t.id);
     }
     return reported;
+  }
+
+  /**
+   * What a waiting thread waits on, for its stall notice: `; waiting on "Frontend"'s answer to #123 for 16 minutes`
+   * (its oldest open question), or `your answer` when it asked its Desk. '' for any other thread (design spec §3.6).
+   */
+  private waitingOn(t: AgentRow, now: number): string {
+    if (t.status !== 'waiting') return '';
+    const s = this.messages(t.project_id);
+    const q = openFrom(s, t.id)[0];
+    if (!q) return '';
+    const to = s.agents[q.to];
+    const who = to?.role === 'desk' ? 'your' : `"${sanitizeLabel(to?.title ?? 'untitled')}"'s`;
+    return `; waiting on ${who} answer to #${q.id} for ${Math.round((now - Date.parse(q.ts)) / 60_000)} minutes`;
   }
 
   /**

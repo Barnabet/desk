@@ -763,3 +763,40 @@ describe('crash recovery of answer runs', () => {
     expect(h.fake.requests).toEqual([]);
   });
 });
+
+describe('stalls', () => {
+  it('names what a stalled waiting thread waits on', async () => {
+    const { desk, thread, begin } = await setup({
+      Client: (req) => (turns(req) === 0 ? tools(call('act'), call('wait_for_reply')) : tools(call('complete', { summary: 'Client done' }))),
+      Scope: (req) => (turns(req) === 0 ? tools(call('act'), call('wait_for_reply')) : tools(call('complete', { summary: 'Scope done' }))),
+      Server: () => hang(),
+    });
+    const server = thread('Server');
+    begin(server);
+    await until(() => threadRequests('Server').length === 1, 'Server to call the model');
+    const [client, scope] = [thread('Client'), thread('Scope')];
+    const asked: Record<string, number> = {};
+    during = (id) => {
+      asked[id] = id === client ? ask(id, server, 'Which port?') : ask(id, desk.id, 'Is EU in scope?');
+    };
+    begin(client);
+    begin(scope);
+    await until(() => status(client) === 'waiting' && status(scope) === 'waiting' && status(desk.id) === 'idle' && !rt.scheduler.isActive(desk.id), 'both threads to wait');
+
+    const now = Date.now() + 16 * 60_000;
+    expect(rt.checkStalls(now).sort()).toEqual([client, scope, server].sort());
+    const minutes = (ts: string) => Math.round((now - Date.parse(ts)) / 60_000);
+    const quiet = (id: string) => minutes(h.store.list({ agentId: id }).at(-1)!.ts);
+    const since = (q: number) => minutes(h.store.list({ types: ['message.agent'] }).find((e) => e.id === q)!.ts);
+    expect(notices(desk.id, client, 'stalled')).toEqual([
+      `No activity for ${quiet(client)} minutes (status: waiting; waiting on "Server"'s answer to #${asked[client]} for ${since(asked[client]!)} minutes).`,
+    ]);
+    expect(notices(desk.id, scope, 'stalled')).toEqual([
+      `No activity for ${quiet(scope)} minutes (status: waiting; waiting on your answer to #${asked[scope]} for ${since(asked[scope]!)} minutes).`,
+    ]);
+    expect(notices(desk.id, server, 'stalled')).toEqual([`No activity for ${quiet(server)} minutes (status: running).`]);
+
+    rt.stop(server);
+    await rt.whenIdle();
+  });
+});
