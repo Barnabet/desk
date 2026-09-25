@@ -146,11 +146,12 @@ export class DaemonManager {
     const current = await this.status();
     if (current.running) return current;
     mkdirSync(this.logsDir(), { recursive: true });
+    let replaced: number | null = null;
     if (this.launchd) await this.installAgent();
-    else if (this.webAgent) await this.startAgentJob();
+    else if (this.webAgent) replaced = await this.startAgentJob();
     else if (this.o.mode === 'dev' || this.o.mode === 'web') this.spawnDev();
     else throw new UserFacingError('unsupported', 'Starting Desk automatically is not supported on this platform yet. Start deskd yourself, then retry.');
-    return this.waitHealthy(null);
+    return this.waitHealthy(replaced);
   }
 
   async restart(): Promise<DaemonStatus> {
@@ -200,7 +201,7 @@ export class DaemonManager {
     return this.status();
   }
 
-  /** Rewrites and reloads the LaunchAgent (System → Repair). Where there is no LaunchAgent, a restart. */
+  /** Rewrites and reloads the LaunchAgent (System → Repair); a restart where there is none. Web mode does not offer it (`not_offered`). */
   async repair(): Promise<DaemonStatus> {
     if (this.o.mode === 'web') throw new UserFacingError('not_offered', 'Repairing the LaunchAgent is only offered in the Desk app. Restart deskd instead.');
     if (!this.launchd) return this.restart();
@@ -248,10 +249,23 @@ export class DaemonManager {
     });
   }
 
-  /** Loads the desktop app's LaunchAgent (already loaded is fine) and starts its job. */
-  private async startAgentJob(): Promise<void> {
-    await this.launchctl(['bootstrap', this.domain(), plistPath(this.o.home)], true);
-    await this.launchctl(['kickstart', `${this.domain()}/${LAUNCHD_LABEL}`]);
+  /**
+   * Loads the desktop app's LaunchAgent (already loaded is fine) and starts its job. start() runs this only when deskd
+   * does not answer, so a job that was already loaded while daemon.json is there has a wedged deskd: kickstart -k kills
+   * and restarts it (a plain kickstart leaves a running job alone). Returns the pid it replaced, if any.
+   */
+  private async startAgentJob(): Promise<number | null> {
+    const stale = readDaemonInfo(this.o.dataDir);
+    const loaded = await this.o.exec('launchctl', ['bootstrap', this.domain(), plistPath(this.o.home)]);
+    // A bootstrap that succeeds loads the job, and RunAtLoad starts a fresh deskd: never kill that one.
+    const wedged = stale !== null && loaded.code !== 0;
+    const r = await this.o.exec('launchctl', ['kickstart', ...(wedged ? ['-k'] : []), `${this.domain()}/${LAUNCHD_LABEL}`]);
+    if (r.code !== 0) {
+      // bootstrap's own failure (usually "already loaded") is kept: when kickstart fails too, it is often the reason.
+      const bootstrap = loaded.code !== 0 ? ` (launchctl bootstrap failed first: ${loaded.stderr.trim() || `exit ${loaded.code}`})` : '';
+      throw new UserFacingError('launchd_failed', `launchctl kickstart failed: ${r.stderr.trim() || `exit ${r.code}`}${bootstrap}`);
+    }
+    return wedged ? stale.pid : null;
   }
 
   private domain(): string {

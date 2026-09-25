@@ -273,6 +273,78 @@ describe('DaemonManager in web mode', () => {
     ]);
   });
 
+  it("kills and restarts the LaunchAgent's deskd when it left daemon.json but does not answer (wedged)", async () => {
+    const file = installDesktopAgent();
+    const log: string[][] = [];
+    let answering = false;
+    const { m, up } = manager({
+      mode: 'web',
+      exec: async (bin, args) => {
+        log.push([bin, ...args]);
+        // The job is loaded already, so bootstrap fails; a plain kickstart leaves a running job as it is.
+        if (args[0] === 'bootstrap') return { code: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' };
+        if (args[0] === 'kickstart' && args[1] === '-k') {
+          up(43);
+          answering = true;
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      fetchHealth: async () => {
+        if (!answering) throw new Error('The operation was aborted due to timeout');
+        return { version: '1.0.0', protocol_version: 1, proxy: 'up', uptime_s: 1, build: 'b2' };
+      },
+    });
+    up(42);
+    expect(await m.status()).toMatchObject({ running: false, agent: 'installed' });
+    expect((await m.start()).pid).toBe(43);
+    expect(log).toEqual([
+      ['launchctl', 'bootstrap', 'gui/501', file],
+      ['launchctl', 'kickstart', '-k', 'gui/501/dev.desk.deskd'],
+    ]);
+  });
+
+  it("starts the job it just loaded without killing it, even over a stale daemon.json", async () => {
+    const file = installDesktopAgent();
+    const log: string[][] = [];
+    let answering = false;
+    const { m, up } = manager({
+      mode: 'web',
+      exec: async (bin, args) => {
+        log.push([bin, ...args]);
+        if (args[0] === 'bootstrap') {
+          up(43); // RunAtLoad
+          answering = true;
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      fetchHealth: async () => {
+        if (!answering) throw new Error('connect ECONNREFUSED');
+        return { version: '1.0.0', protocol_version: 1, proxy: 'up', uptime_s: 1, build: 'b2' };
+      },
+    });
+    up(42);
+    expect((await m.start()).pid).toBe(43);
+    expect(log).toEqual([
+      ['launchctl', 'bootstrap', 'gui/501', file],
+      ['launchctl', 'kickstart', 'gui/501/dev.desk.deskd'],
+    ]);
+  });
+
+  it("says why bootstrap failed when the LaunchAgent's job then cannot be started", async () => {
+    installDesktopAgent();
+    const { m } = manager({
+      mode: 'web',
+      exec: async (_bin, args) =>
+        args[0] === 'bootstrap'
+          ? { code: 125, stdout: '', stderr: 'Bootstrap failed: 125: Domain does not support specified action' }
+          : { code: 113, stdout: '', stderr: 'Could not find service "dev.desk.deskd" in domain for user gui: 501' },
+    });
+    await expect(m.start()).rejects.toMatchObject({
+      code: 'launchd_failed',
+      message: expect.stringMatching(/kickstart failed: Could not find service .*Bootstrap failed: 125: Domain does not support specified action/),
+    });
+  });
+
   it('offers no repair and leaves an older daemon alone', async () => {
     installDesktopAgent();
     const { m, calls, up, setVersion } = manager({ mode: 'web' });

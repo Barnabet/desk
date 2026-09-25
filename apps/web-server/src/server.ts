@@ -91,7 +91,7 @@ function listen(app: Hono, port: number): Promise<Server> {
   });
 }
 
-/** DaemonManager in web mode: the desktop app's LaunchAgent through launchctl when installed, else the repo's deskd. */
+/** DaemonManager in web mode: the desktop app's LaunchAgent through launchctl when it runs deskd for this data dir, else the repo's deskd. */
 function webDaemonManager(dataDir: string, home: string): DaemonManager {
   return new DaemonManager({
     dataDir,
