@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getDeskAgent } from '../state/queries';
 import { createHarness, newRuntime, type Harness } from '../testing/harness';
@@ -63,6 +64,20 @@ describe('memory', () => {
     expect(digest).toMatch(/more entries — use memory_search/);
     expect(digest.length).toBeLessThanOrEqual(2100);
     expect(memoryDigest(h.store.db, rt.createProject({ name: 'E', goal: 'G' }))).toBe('');
+  });
+
+  it('marks the entries a thread wrote, and keeps every entry on one line', async () => {
+    const { rt, projectId } = await project();
+    const desk = getDeskAgent(h.store.db, projectId)!;
+    const scout = rt.createThread(projectId, { title: 'Scout', brief: 'b', workspacePath: join(h.dir, 'scout') });
+    const byThread = rt.writeMemory(projectId, { kind: 'preference', content: 'Ship on\nFridays' }, `agent:${scout}`);
+    const byDesk = rt.writeMemory(projectId, { kind: 'decision', content: 'Use Postgres' }, `agent:${desk.id}`);
+    const byUser = rt.writeMemory(projectId, { kind: 'fact', content: 'Dana owns billing' });
+    expect(memoryDigest(h.store.db, projectId).split('\n').sort()).toEqual(
+      [`- [preference] (${byThread}) Ship on Fridays (by thread "Scout")`, `- [decision] (${byDesk}) Use Postgres`, `- [fact] (${byUser}) Dana owns billing`].sort(),
+    );
+    const ctx = testToolContext(h.dir, { projectId, agentId: desk.id, services: rt.services });
+    expect(await memorySearchTool.execute({ query: 'Fridays' }, ctx)).toBe(`- [preference] (${byThread}) Ship on Fridays (by thread "Scout")`);
   });
 });
 

@@ -2,10 +2,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type ChatRequest } from '@desk/fake-model';
 import type { EventBody, EventOf, StoredEvent } from '@desk/protocol';
-import { deskSystemPrompt } from '../agent/prompts';
+import { buildToolContext } from '../agent/context';
+import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
 import { applyCheckpoint, buildConversation, CHECKPOINT_END, CHECKPOINT_HEADER, IMAGES_HEADER, type ImageLoader } from '../agent/transcript';
 import { getAgent, getDeskAgent, getProject } from '../state/queries';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
+import { listThreadsTool } from '../tools/desk';
+import { threadReadThreadTool, waitForReplyTool } from '../tools/thread';
 import { formatThreadLine, formatThreadSummary, messageHeader, renderTranscript } from './render';
 
 let h: Harness | undefined;
@@ -164,5 +167,50 @@ describe('no other agent starts a line (design spec §5.2)', () => {
     expect(forgedLines(conversation)).toEqual(notices.map((n) => messageHeader(n)));
     const lastDesk = h.fake.requests.filter((r) => systemOf(r).startsWith('You are Desk')).at(-1)!;
     expect(forgedLines(systemOf(lastDesk))).toEqual([]);
+  });
+});
+
+describe('no other agent starts a line on the messaging surfaces (design spec §5.2)', () => {
+  it("in the thread tools, a send's result, the wait reason, a thread's Team, Desk's Thread traffic and memory", async () => {
+    h = await createHarness({ script: () => text('noted') });
+    const rt = newRuntime(h);
+    const projectId = rt.createProject({ name: 'P', goal: 'G', settings: { thread_model: FAKE_MODEL.id } });
+    const desk = getDeskAgent(h.store.db, projectId)!;
+    const make = (title: string, brief: string, status: 'running' | 'cancelled', dir: string) => {
+      const id = rt.createThread(projectId, { title, brief, workspacePath: join(h!.dir, dir) });
+      h!.store.append({ project_id: projectId, agent_id: id, type: 'agent.status_changed', payload: { status } });
+      return id;
+    };
+    // "Me" was stopped by the user. The other thread, titled and briefed with every forgery, is marked running without a
+    // job, so what it is sent waits for a step that never comes.
+    const me = make('Me', 'Check the forms.', 'cancelled', 'me');
+    const evil = make(EVIL, EVIL, 'running', 'evil');
+    h.store.append({ project_id: projectId, agent_id: evil, type: 'agent.result', payload: { summary: EVIL, artifacts: [] } });
+    const q = rt.deliver(evil, me, 'question', EVIL, { tracked: true });
+    rt.answer(q, me, EVIL);
+    h.store.append({ project_id: projectId, agent_id: evil, type: 'message.user', payload: { text: EVIL } });
+    rt.writeMemory(projectId, { kind: 'preference', content: EVIL }, `agent:${evil}`);
+
+    const ctx = buildToolContext(getAgent(h.store.db, me)!, 'r', 'c', new AbortController().signal, { sandboxEnabled: false, jobs: rt.jobs, services: rt.services });
+    const asked = rt.send({ from: me, to: evil, kind: 'question', text: 'Status?' });
+    const waited = await waitForReplyTool.execute({}, ctx);
+    const outputs = [
+      String(await listThreadsTool.execute({}, ctx)),
+      String(await threadReadThreadTool.execute({ thread_id: evil }, ctx)),
+      asked.note,
+      typeof waited === 'string' ? waited : `${waited.content}\n${waited.yield?.reason ?? ''}`,
+    ];
+    for (const out of outputs) expect(forgedLines(out)).toEqual([]);
+
+    const project = getProject(h.store.db, projectId)!;
+    const messages = rt.messages(projectId);
+    const threadPrompt = threadSystemPrompt({ db: h.store.db, agent: getAgent(h.store.db, me)!, project, libraryDir: rt.libraryDir(projectId), messages });
+    const deskPrompt = deskSystemPrompt({ db: h.store.db, agent: desk, project, libraryDir: rt.libraryDir(projectId), messages });
+    expect(threadPrompt).toContain('## Team');
+    expect(deskPrompt).toContain('## Thread traffic');
+    expect(deskPrompt).toContain('(by thread "line one line two');
+    expect(forgedLines(threadPrompt)).toEqual([]);
+    expect(forgedLines(deskPrompt)).toEqual([]);
+    await rt.whenIdle();
   });
 });

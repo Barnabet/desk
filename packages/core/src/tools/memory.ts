@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MemoryKind } from '@desk/protocol';
-import { formatMemoryLine, searchMemory } from '../memory/memory';
+import { formatMemoryLine, searchMemory, threadTitles } from '../memory/memory';
 import { defineTool } from './types';
 
 export const memorySearchTool = defineTool({
@@ -9,7 +9,8 @@ export const memorySearchTool = defineTool({
   input: z.object({ query: z.string().min(1) }),
   async execute({ query }, ctx) {
     const hits = searchMemory(ctx.services.store.db, ctx.projectId, query);
-    return hits.length ? hits.map(formatMemoryLine).join('\n') : 'No matching memory';
+    const titles = threadTitles(ctx.services.store.db, ctx.projectId);
+    return hits.length ? hits.map((m) => formatMemoryLine(m, titles)).join('\n') : 'No matching memory';
   },
 });
 

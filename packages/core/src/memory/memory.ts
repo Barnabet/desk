@@ -1,6 +1,8 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { sanitizeLabel } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { memory } from '../db/schema';
+import { listThreads } from '../state/queries';
 
 export type MemoryRow = typeof memory.$inferSelect;
 
@@ -28,7 +30,21 @@ export function searchMemory(db: Db, projectId: string, query: string, limit = 2
     ORDER BY rank LIMIT ${limit}`);
 }
 
-export const formatMemoryLine = (m: MemoryRow): string => `- [${m.kind}] (${m.id}) ${m.content}`;
+/** Titles of the project's threads by id, archived ones included: who wrote an `agent:<id>` memory entry. */
+export function threadTitles(db: Db, projectId: string): Map<string, string | null> {
+  return new Map(listThreads(db, projectId).map((t) => [t.id, t.title]));
+}
+
+/**
+ * One memory entry on one line, whitespace collapsed. An entry a thread wrote (source `agent:<thread id>`, `threads`
+ * mapping thread ids to titles) ends with ` (by thread "<title>")`: it is that thread's claim, not the user's
+ * preference (design spec §5.1).
+ */
+export const formatMemoryLine = (m: MemoryRow, threads: ReadonlyMap<string, string | null> = new Map()): string => {
+  const author = m.source.startsWith('agent:') ? m.source.slice('agent:'.length) : undefined;
+  const by = author !== undefined && threads.has(author) ? ` (by thread "${sanitizeLabel(threads.get(author) ?? 'untitled')}")` : '';
+  return `- [${m.kind}] (${m.id}) ${m.content.replace(/[\s\u0085]+/g, ' ').trim()}${by}`;
+};
 
 /** Compact memory for system prompts: all preferences and decisions, then the newest other entries. */
 export function memoryDigest(db: Db, projectId: string, maxChars = DEFAULT_DIGEST_CHARS): string {
@@ -36,11 +52,12 @@ export function memoryDigest(db: Db, projectId: string, maxChars = DEFAULT_DIGES
   if (!active.length) return '';
   const pinned = active.filter((m) => m.kind === 'preference' || m.kind === 'decision');
   const rest = active.filter((m) => m.kind !== 'preference' && m.kind !== 'decision');
+  const titles = threadTitles(db, projectId);
   const lines: string[] = [];
   let used = 0;
   let omitted = 0;
   for (const m of [...pinned, ...rest]) {
-    const line = formatMemoryLine(m);
+    const line = formatMemoryLine(m, titles);
     if (used + line.length + 1 > maxChars - 80) {
       omitted++;
       continue;
