@@ -31,8 +31,11 @@ export function modelConfigFromEnv(env: NodeJS.ProcessEnv): ModelConfig | null {
   return null;
 }
 
+/** The model credentials file (`CLIPROXY_BASE_URL`, `CLIPROXY_API_KEY`). */
+export const modelCredentialsFile = (home: string) => join(home, '.config', 'cliproxyapi.env');
+
 export function modelConfigFromFile(home: string): ModelConfig | null {
-  const file = join(home, '.config', 'cliproxyapi.env');
+  const file = modelCredentialsFile(home);
   if (!existsSync(file)) return null;
   const vars = parseEnvFile(readFileSync(file, 'utf8'));
   return vars.CLIPROXY_BASE_URL && vars.CLIPROXY_API_KEY ? { baseURL: normalizeBaseURL(vars.CLIPROXY_BASE_URL), apiKey: vars.CLIPROXY_API_KEY } : null;

@@ -38,10 +38,10 @@ describe('sources', () => {
     h = await createHarness();
     const rt = newRuntime(h);
     const projectId = rt.createProject({ name: 'P', goal: 'G', settings: fakeModels });
-    const repo = join(h.dir, 'repo');
+    const repo = join(h.files, 'repo');
     mkdirSync(repo);
     execFileSync('git', ['init', '-q', repo]);
-    const folder = join(h.dir, 'docs');
+    const folder = join(h.files, 'docs');
     mkdirSync(folder);
     await rt.addSource(projectId, repo, 'API repo');
     await rt.addSource(projectId, folder);
@@ -56,7 +56,7 @@ describe('sources', () => {
     h = await createHarness();
     const rt = newRuntime(h);
     const projectId = rt.createProject({ name: 'P', goal: 'G', settings: fakeModels });
-    const id = await rt.addSource(projectId, h.dir);
+    const id = await rt.addSource(projectId, h.files);
     rt.removeSource(projectId, id);
     expect(listSources(h.store.db, projectId)).toHaveLength(0);
   });

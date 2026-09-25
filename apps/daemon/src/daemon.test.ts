@@ -32,6 +32,23 @@ const api = (d: RunningDaemon, path: string, init: RequestInit = {}) =>
   fetch(`http://127.0.0.1:${d.port}/v1${path}`, { ...init, headers: { authorization: `Bearer ${d.token}`, 'content-type': 'application/json', ...init.headers } });
 
 describe('startDaemon', () => {
+  it("keeps agents off deskd's token file, its database, the model credentials file and its port", async () => {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-home-')));
+    try {
+      const d = await boot([], { home });
+      const p = daemonPaths(dir);
+      expect(d.runtime.guard).toEqual({
+        dataDir: dir,
+        secrets: [p.daemonJson, p.db, `${p.db}-wal`, `${p.db}-shm`, `${p.db}-journal`, join(home, '.config', 'cliproxyapi.env')],
+        readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh')],
+        ports: [d.port],
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('serves the API and writes a private daemon.json without secrets', async () => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
     const d = await boot();

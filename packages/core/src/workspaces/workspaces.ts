@@ -3,8 +3,26 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { runProcess } from '../tools/process';
 
 /** Runs git and returns trimmed stdout+stderr; throws with git's output on failure. */
-export async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
-  const r = await runProcess({ command: 'git', args, cwd, timeoutMs: 120_000, ...(env ? { env } : {}) });
+/**
+ * deskd runs git outside the sandbox, in repos agents write to, so no repo content may make it run a command: hooks
+ * (`core.hooksPath` may point into the working tree) and fsmonitor are off, and diffs skip external diff and textconv
+ * drivers. The config that could name other commands stays out of agents' reach (`SandboxSpec.gitDirs`).
+ */
+export function safeGitArgs(args: string[]): string[] {
+  const i = args.indexOf('diff');
+  const sub = i >= 0 && args.slice(0, i).every((a, j) => a === '-c' || args[j - 1] === '-c') ? [...args.slice(0, i + 1), '--no-ext-diff', '--no-textconv', ...args.slice(i + 1)] : args;
+  return ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', ...sub];
+}
+
+/** Daemon env for git/gh (needs HOME, SSH agent, credential helpers) minus model credentials; never prompts. */
+export function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  for (const key of Object.keys(env)) if (/^(DESK_OPENAI|CLIPROXY)_/.test(key)) delete env[key];
+  return env;
+}
+
+export async function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = gitEnv()): Promise<string> {
+  const r = await runProcess({ command: 'git', args: safeGitArgs(args), cwd, timeoutMs: 120_000, env });
   if (r.exitCode !== 0) throw new Error(`git ${args[0]} failed: ${r.output.trim()}`);
   return r.output.trim();
 }

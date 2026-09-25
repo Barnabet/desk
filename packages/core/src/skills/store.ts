@@ -4,6 +4,8 @@ import { basename, dirname, join, normalize, relative, sep } from 'node:path';
 import { SkillName, type SkillScope } from '@desk/protocol';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { NotFoundError, ValidationError } from '../errors';
+import { readAgentFileSync } from '../tools/agent-files';
+import type { SandboxGuard } from '../tools/sandbox';
 
 export const SKILL_FILE = 'SKILL.md';
 const HISTORY_DIR = '.history';
@@ -105,8 +107,12 @@ function walkFiles(dir: string, base = dir): Array<{ path: string; size: number 
   return out;
 }
 
-/** Copies a directory tree, skipping symlinks and tooling dirs, enforcing size limits. */
-function copyTree(src: string, dest: string): void {
+/**
+ * Copies a directory tree, skipping symlinks and tooling dirs, enforcing size limits. The tree may be a thread's draft,
+ * so each file is read through `readAgentFileSync`: a symlink swapped in after the lstat cannot redirect the copy.
+ */
+function copyTree(from: string, dest: string, guard: SandboxGuard | undefined): void {
+  const src = realpathSync(from);
   let files = 0;
   let bytes = 0;
   const walk = (from: string, to: string) => {
@@ -124,7 +130,7 @@ function copyTree(src: string, dest: string): void {
         bytes += st.size;
         if (files > MAX_FILES) throw new ValidationError(`A skill can hold at most ${MAX_FILES} files`);
         if (bytes > MAX_TOTAL_BYTES) throw new ValidationError(`A skill can hold at most ${MAX_TOTAL_BYTES / 1024 / 1024} MB`);
-        writeFileSync(d, readFileSync(s));
+        writeFileSync(d, readAgentFileSync(s, st, guard));
       }
     }
   };
@@ -144,7 +150,11 @@ function makeScriptsExecutable(dir: string): void {
  * Every change keeps the previous version under `<root>/.history/<name>/<version>/`.
  */
 export class SkillStore {
-  constructor(private readonly dataDir: string) {}
+  /** `guard` keeps Desk's secrets out of skills copied from agents' folders. */
+  constructor(
+    private readonly dataDir: string,
+    private readonly guard?: SandboxGuard,
+  ) {}
 
   root(scope: SkillScope, projectId?: string): string {
     if (scope === 'global') return join(this.dataDir, 'skills');
@@ -265,9 +275,9 @@ export class SkillStore {
     try {
       if (input.fromDir) {
         if (!existsSync(input.fromDir) || !statSync(input.fromDir).isDirectory()) throw new ValidationError(`${input.fromDir} is not a directory`);
-        copyTree(input.fromDir, staging);
+        copyTree(input.fromDir, staging, this.guard);
       } else if (existed) {
-        copyTree(dir, staging);
+        copyTree(dir, staging, this.guard);
       } else {
         mkdirSync(staging, { recursive: true });
       }

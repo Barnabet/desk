@@ -9,6 +9,7 @@ import {
   SkillRuntimes,
   EventStore,
   ModelRegistry,
+  modelCredentialsFile,
   normalizeBaseURL,
   openDb,
   resolveModelEndpoint,
@@ -72,6 +73,7 @@ export type RunningDaemon = { port: number; token: string; runtime: Runtime; sto
 
 export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
   const paths = daemonPaths(o.dataDir);
+  const home = o.home ?? homedir();
   const log = o.log ?? createLogger(paths.logFile, false);
   mkdirSync(o.dataDir, { recursive: true });
   const releaseLock = acquireLock(paths.lock);
@@ -84,7 +86,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
     const resolveEndpoint = () =>
       o.modelConfig
         ? { config: o.modelConfig, source: 'env' as const }
-        : resolveModelEndpoint({ env: o.env ?? process.env, home: o.home ?? homedir(), baseUrl: file.base_url, keychain });
+        : resolveModelEndpoint({ env: o.env ?? process.env, home, baseUrl: file.base_url, keychain });
     let endpointState = resolveEndpoint();
     if (!endpointState.config) log.info('no model endpoint configured yet; agents stay paused until one is set');
     const adapter = createSwitchableAdapter(endpointState.config, models);
@@ -103,6 +105,11 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       adapter,
       models,
       dataDir: o.dataDir,
+      // Off limits to agents: the token file, every project's history, and the model credentials file; and read-only,
+      // the git and ssh config that deskd's own git runs with.
+      secrets: [paths.daemonJson, ...['', '-wal', '-shm', '-journal'].map((x) => paths.db + x), modelCredentialsFile(home)],
+      readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh')],
+      home,
       ...(o.sandboxAvailable !== undefined ? { sandboxAvailable: o.sandboxAvailable } : {}),
       onError: (err, ctx) => log.error(`runtime error (${ctx})`, err),
     });
@@ -159,6 +166,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       },
     });
     const server = await startServer({ app, store, token, port: o.port ?? DEFAULT_PORT });
+    runtime.guardPort(server.port);
 
     const stopNotifier = o.notify
       ? startNotifier({

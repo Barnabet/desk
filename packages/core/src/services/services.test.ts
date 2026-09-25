@@ -1,5 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools } from '@desk/fake-model';
 import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, resolveSettings, upgradePolicy, type StoredEvent } from '@desk/protocol';
@@ -16,11 +18,20 @@ import { detectLoopbackUrl, sameCommand, stripAnsi } from './manager';
 
 let h: Harness;
 let rt: Runtime | undefined;
+const folders: string[] = [];
 afterEach(async () => {
   await rt?.shutdown();
   rt = undefined;
   await h?.cleanup();
+  for (const f of folders.splice(0)) rmSync(f, { recursive: true, force: true });
 });
+
+/** A project folder outside Desk's data dir (the harness's `h.dir`), where agents may never write. */
+const outsideFolder = (prefix: string) => {
+  const f = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  folders.push(f);
+  return f;
+};
 
 /** A node one-liner that prints a URL and keeps running (like a dev server). */
 const server = (url: string) => `node -e "console.log('  ➜  Local:   ${url}'); setInterval(() => {}, 1000)"`;
@@ -187,7 +198,7 @@ describe('service tools', () => {
 describe('project folders agents may write to', () => {
   async function withSource() {
     const base = await setup();
-    const folder = join(h.dir, 'anyfight');
+    const folder = join(outsideFolder('desk-src-'), 'anyfight');
     mkdirSync(join(folder, 'tools'), { recursive: true });
     const sourceId = await base.rt.addSource(base.projectId, folder);
     const ctxFor = (id: string) => buildToolContext(getAgent(h.store.db, id)!, 'run', 'tc', new AbortController().signal, { sandboxEnabled: false, jobs: base.rt.jobs, services: base.rt.services, writeRoots: (a) => base.rt['writeRoots'](a) });
@@ -212,7 +223,7 @@ describe('project folders agents may write to', () => {
     h = await createHarness({ script: (req) => (req.messages.some((m) => m.role === 'tool') ? text('done') : tools(call('write_file', { path: join(folder, 'queue.json'), content: '[1]' }))) });
     rt = newRuntime(h);
     const projectId = rt.createProject({ name: 'App', goal: 'g' });
-    const folder = realpathSync(mkdtempSync(join(h.dir, 'src-')));
+    const folder = outsideFolder('desk-src-');
     await rt.addSource(projectId, folder);
     const { agentId } = await seedThread(h.store, h.dir, { projectId });
     rt.sendMessage(agentId, 'write it');
@@ -220,6 +231,48 @@ describe('project folders agents may write to', () => {
     expect(readFileSync(join(folder, 'queue.json'), 'utf8')).toBe('[1]');
     const result = h.store.list({ agentId, types: ['tool.result'] })[0]!;
     expect(result.type === 'tool.result' && result.payload.status).toBe('ok');
+  });
+
+  it("can never be the root, the home folder or above, or Desk's data dir or anything inside or around it", async () => {
+    const base = await setup();
+    const inside = join(h.dir, 'skills-copy');
+    mkdirSync(inside);
+    for (const path of ['/', homedir(), dirname(homedir()), h.dir, inside, dirname(h.dir)]) {
+      await expect(base.rt.addSource(base.projectId, path)).rejects.toThrow(/A project source cannot be/);
+    }
+
+    // An older project may still have one: it is never writable and cannot host services.
+    h.store.append({ project_id: base.projectId, agent_id: null, type: 'source.added', payload: { source_id: 'src_old', path: inside, kind: 'folder', label: 'skills-copy', agent_write: true } });
+    const ctx = buildToolContext(getAgent(h.store.db, base.threadId)!, 'run', 'tc', new AbortController().signal, {
+      sandboxEnabled: false,
+      jobs: base.rt.jobs,
+      services: base.rt.services,
+      writeRoots: (a) => base.rt['writeRoots'](a),
+      guard: base.rt.guard,
+    });
+    expect(ctx.sandbox.guard).toBe(base.rt.guard);
+    expect(ctx.sandbox.writable).not.toContain(realpathSync(inside));
+    await expect(writeFileTool.execute({ path: join(inside, 'x.md'), content: '' }, ctx)).rejects.toThrow(/outside the allowed directories/);
+    await expect(base.rt.startService(base.projectId, { name: 'x', command: 'true', sourceId: 'src_old', by: 'user' })).rejects.toThrow(/inside or around it/);
+    await writeFileTool.execute({ path: join(base.workspace, 'notes.md'), content: 'ok' }, ctx);
+    expect(readFileSync(join(base.workspace, 'notes.md'), 'utf8')).toBe('ok');
+  });
+
+  it("protect the git dirs deskd runs git in, and never publish Desk's secrets to the library", async () => {
+    h = await createHarness();
+    const secret = join(h.dir, 'daemon.json');
+    writeFileSync(secret, '{"token":"tok-123"}');
+    rt = newRuntime(h, { secrets: [secret] });
+    const projectId = rt.createProject({ name: 'App', goal: 'g' });
+    const repo = outsideFolder('desk-repo-');
+    execFileSync('git', ['init', '-q', repo]);
+    await rt.addSource(projectId, repo);
+    const thread = await seedThread(h.store, h.dir, { projectId });
+    const agent = { ...getAgent(h.store.db, thread.agentId)!, git_common_dir: join(repo, '.git') };
+    expect(rt['gitDirs'](agent)).toEqual([join(repo, '.git'), join(thread.workspace, '.git')]);
+
+    linkSync(secret, join(thread.workspace, 'token.json'));
+    await expect(rt.publishToLibrary(projectId, join(thread.workspace, 'token.json'), { title: 't', kind: 'file', description: '' }, 'user')).rejects.toThrow(/holds Desk credentials/);
   });
 
   it('can run services (started by Desk with source_id), which survive archiving any thread', async () => {

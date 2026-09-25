@@ -38,7 +38,7 @@ export {
 export { listAttention } from './state/attention';
 export { listOverview } from './state/overview';
 export { listWorkspace, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
-export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
+export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, modelCredentialsFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
 export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';
 export { DEFAULT_MODEL_ID, effortFor, ModelRegistry, SEED_MODELS, STANDARD_EFFORTS } from './model/registry';
@@ -56,7 +56,7 @@ export { AttachmentStore } from './attachments/store';
 export { imageProblem, imageTokens, readDataUrlInfo, readImageInfo, sniffImageType, type ImageInfo } from './attachments/image';
 export { bashTool, scrubbedEnv, withSkillEnv } from './tools/bash';
 export { completeTool } from './tools/thread';
-export { buildSandboxProfile, detectSandbox, NO_SANDBOX, shellInvocation, type SandboxSpec } from './tools/sandbox';
+export { buildSandboxProfile, detectSandbox, NO_SANDBOX, sandboxGuard, shellInvocation, type SandboxGuard, type SandboxSpec } from './tools/sandbox';
 export { bashBackgroundTool, bashKillTool, bashOutputTool, JobManager, jobTools, type JobSnapshot, type JobStatus } from './tools/jobs';
 export { serviceTools, SERVICE_START_WAIT_MS } from './tools/services';
 export { detectLoopbackUrl, ServiceProcesses, stripAnsi, tailLog } from './services/manager';

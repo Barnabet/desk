@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
-import { open, readFile, realpath, stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { realpath, stat, type FileHandle } from 'node:fs/promises';
 import { extname, isAbsolute, relative, sep } from 'node:path';
 import { z } from 'zod';
 import type { ImageMediaType, ToolImage } from '@desk/protocol';
 import { imageProblem, readImageInfo, sniffImageType } from '../attachments/image';
 import { MAX_IMAGES_SHOWN } from '../agent/transcript';
 import { findToolImage } from '../state/queries';
-import { resolveInside } from './paths';
+import { openAgentFile } from './agent-files';
+import { resolveForTool } from './paths';
 import { defineTool, ToolDenied, type Tool, type ToolContext } from './types';
 
 /** Per image: the largest file a provider takes once base64-encoded (5 MB). */
@@ -76,15 +78,10 @@ function humanSize(bytes: number): string {
 
 const mb = (n: number) => `${+(n / (1024 * 1024)).toFixed(2)} MB`;
 
-async function readHead(file: string, n: number): Promise<Buffer> {
-  const fh = await open(file, 'r');
-  try {
-    const buf = Buffer.alloc(n);
-    const { bytesRead } = await fh.read(buf, 0, n, 0);
-    return buf.subarray(0, bytesRead);
-  } finally {
-    await fh.close();
-  }
+async function readHead(fh: FileHandle, n: number): Promise<Buffer> {
+  const buf = Buffer.alloc(n);
+  const { bytesRead } = await fh.read(buf, 0, n, 0);
+  return buf.subarray(0, bytesRead);
 }
 
 /** How the transcript names an image: relative to the workspace when inside it, else the absolute path. */
@@ -140,22 +137,38 @@ async function load(path: string, ctx: ToolContext, budget: number, refused: Map
   if (attachment) return loadAttachment(path, attachment[1]!, ctx, budget, refused);
   let file: string;
   try {
-    file = await resolveInside(path, ctx.readRoots, ctx.workspace);
+    file = await resolveForTool(path, 'read', ctx);
   } catch (err) {
     if (err instanceof ToolDenied) return { ok: false, line: `${path}: outside the directories you may read`, denied: true };
     throw err;
   }
   const name = await displayName(file, ctx);
-  const st = await stat(file).catch(() => null);
-  if (!st) return { ok: false, line: `${name}: no such file` };
-  if (!st.isFile()) return { ok: false, line: `${name}: not a file` };
-  const head = await readHead(file, 64 * 1024);
-  const type = sniffImageType(head);
-  if (!type) return { ok: false, line: unsupported(name, file, head) };
-  if (st.size > MAX_IMAGE_BYTES) return { ok: false, line: `${name}: ${mb(st.size)} is over the ${mb(MAX_IMAGE_BYTES)} limit per image; ${LIMIT_HINT}` };
-  if (st.size > budget) return { ok: false, line: `${name}: over the ${mb(MAX_CALL_BYTES)} limit per call; view it in another call` };
-  const data = await readFile(file);
+  const found = await stat(file).catch(() => null);
+  if (!found) return { ok: false, line: `${name}: no such file` };
+  if (!found.isFile()) return { ok: false, line: `${name}: not a file` };
+  let opened: { fh: FileHandle; st: Stats };
+  try {
+    opened = await openAgentFile(file, ctx.sandbox.guard);
+  } catch (err) {
+    if (err instanceof ToolDenied) return { ok: false, line: `${name}: ${err.message}`, denied: true };
+    throw err;
+  }
+  const { fh, st } = opened;
+  let data: Buffer;
+  try {
+    if (!st.isFile()) return { ok: false, line: `${name}: not a file` };
+    const head = await readHead(fh, 64 * 1024);
+    const type = sniffImageType(head);
+    if (!type) return { ok: false, line: unsupported(name, file, head) };
+    if (st.size > MAX_IMAGE_BYTES) return { ok: false, line: `${name}: ${mb(st.size)} is over the ${mb(MAX_IMAGE_BYTES)} limit per image; ${LIMIT_HINT}` };
+    if (st.size > budget) return { ok: false, line: `${name}: over the ${mb(MAX_CALL_BYTES)} limit per call; view it in another call` };
+    data = await fh.readFile();
+  } finally {
+    await fh.close();
+  }
   if (data.length > Math.min(MAX_IMAGE_BYTES, budget)) return { ok: false, line: `${name}: the file grew past the size limits while it was read; view it again` };
+  const type = sniffImageType(data);
+  if (!type) return { ok: false, line: unsupported(name, file, data.subarray(0, 64 * 1024)) };
   const info = readImageInfo(data);
   if (!info) return { ok: false, line: `${name}: the ${FORMAT_LABEL[type]} header is unreadable (corrupt or truncated file)` };
   if (info.width > MAX_IMAGE_SIDE || info.height > MAX_IMAGE_SIDE) {

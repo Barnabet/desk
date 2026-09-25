@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { parseSkillMd } from '../skills/store';
+import { readAgentFile } from './agent-files';
 import { resolveInside } from './paths';
 import { listArtifacts } from '../library/library';
 import { getAgent } from '../state/queries';
@@ -33,7 +34,7 @@ export const completeTool = defineTool({
         const dir = await resolveInside(d, [ctx.workspace], ctx.workspace);
         const md = join(dir, 'SKILL.md');
         if (!existsSync(md)) throw new Error(`${d} has no SKILL.md`);
-        parseSkillMd(readFileSync(md, 'utf8'));
+        parseSkillMd((await readAgentFile(md, ctx.sandbox.guard)).toString('utf8'));
         return dir;
       }),
     );

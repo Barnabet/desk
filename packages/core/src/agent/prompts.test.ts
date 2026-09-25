@@ -22,7 +22,7 @@ async function setup() {
     instructions: 'Never touch the billing service without asking.',
     settings: { thread_model: FAKE_MODEL.id, check_in: 'minimal' },
   });
-  const repo = join(h.dir, 'api');
+  const repo = join(h.files, 'api');
   mkdirSync(repo);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   writeFileSync(join(repo, 'x'), 'x');

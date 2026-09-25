@@ -73,7 +73,7 @@ describe('projects', () => {
   it('adds and removes sources, validating paths', async () => {
     const { api } = await setup();
     const { project } = await newProject(api);
-    const dir = mkdtempSync(join(h.dir, 'src-'));
+    const dir = mkdtempSync(join(h.files, 'src-'));
     const added = await api('POST', `/projects/${project.id}/sources`, { path: dir, label: 'Docs' });
     expect(added.status).toBe(201);
     expect(added.body).toMatchObject({ label: 'Docs', kind: 'folder' });
@@ -222,7 +222,7 @@ describe('services', () => {
       expect((await api('POST', `/services/${started.id}/start`)).body).toMatchObject({ status: 'running', started_by: 'user' });
       expect((await api('POST', `/services/${started.id}/restart`)).body).toMatchObject({ status: 'running' });
       expect((await api('GET', '/services/nope/logs')).status).toBe(404);
-      const src = (await api('POST', `/projects/${project.id}/sources`, { path: h.dir })).body;
+      const src = (await api('POST', `/projects/${project.id}/sources`, { path: h.files })).body;
       expect(src.agent_write).toBe(true);
       expect((await api('PATCH', `/projects/${project.id}/sources/${src.id}`, { agent_write: false })).body).toMatchObject({ id: src.id, agent_write: false });
       expect((await api('PATCH', `/projects/${project.id}/sources/nope`, { agent_write: true })).status).toBe(404);

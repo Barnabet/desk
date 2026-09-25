@@ -1,8 +1,10 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { ToolCall } from '@desk/protocol';
 import type { ToolSpec } from '../model/types';
+import { writeAgentFile } from './agent-files';
+import { resolveForTool } from './paths';
 import { ToolDenied, type Tool, type ToolContext, type ToolResult } from './types';
 
 export const MAX_TOOL_OUTPUT_CHARS = 20_000;
@@ -16,12 +18,19 @@ export function toToolSpecs(tools: Tool[]): ToolSpec[] {
 
 async function truncateOutput(content: string, ctx: ToolContext): Promise<string> {
   if (content.length <= MAX_TOOL_OUTPUT_CHARS) return content;
-  const dir = join(ctx.workspace, '.desk', 'outputs');
-  await mkdir(dir, { recursive: true });
-  const file = join(dir, `${ctx.toolCallId.replace(/[^\w-]/g, '_')}.txt`);
-  await writeFile(file, content);
   const half = MAX_TOOL_OUTPUT_CHARS / 2;
-  return `${content.slice(0, half)}\n\n[... ${content.length - MAX_TOOL_OUTPUT_CHARS} characters truncated; full output saved to ${file} ...]\n\n${content.slice(-half)}`;
+  const cut = `${content.length - MAX_TOOL_OUTPUT_CHARS} characters truncated`;
+  // The agent controls its workspace, `.desk` included: the file is placed like any write_file, so a symlinked
+  // folder cannot send it elsewhere.
+  const saved = await (async () => {
+    const dir = join(ctx.workspace, '.desk', 'outputs');
+    await mkdir(dir, { recursive: true });
+    const file = await resolveForTool(join(dir, `${ctx.toolCallId.replace(/[^\w-]/g, '_')}.txt`), 'write', { ...ctx, writeRoots: [ctx.workspace] });
+    await writeAgentFile(file, content, ctx.sandbox.guard);
+    return file;
+  })().catch(() => null);
+  const note = saved ? `${cut}; full output saved to ${saved}` : `${cut}; the full output could not be saved`;
+  return `${content.slice(0, half)}\n\n[... ${note} ...]\n\n${content.slice(-half)}`;
 }
 
 export type PreparedCall = { ok: true; tool: Tool; input: unknown } | { ok: false; result: ToolResult };

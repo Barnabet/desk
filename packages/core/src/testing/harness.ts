@@ -27,7 +27,10 @@ export const noSleep: RetryOptions = { sleep: async () => {}, random: () => 0 };
 
 export type Harness = {
   fake: FakeModelServer;
+  /** Desk's data dir for runtimes made with `newRuntime`. */
   dir: string;
+  /** A folder outside the data dir for project sources: a source inside the data dir is refused. */
+  files: string;
   store: EventStore;
   models: ModelRegistry;
   adapter: ModelAdapter;
@@ -37,6 +40,7 @@ export type Harness = {
 export async function createHarness(opts: { script?: Script | FakeReply[]; concurrency?: number } = {}): Promise<Harness> {
   const fake = await startFakeModel(opts.script ?? []);
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'desk-test-')));
+  const files = await realpath(await mkdtemp(join(tmpdir(), 'desk-test-files-')));
   const { db, close } = openDb(':memory:');
   const store = new EventStore(db);
   const models = new ModelRegistry([...SEED_MODELS, { ...FAKE_MODEL, concurrency: opts.concurrency ?? FAKE_MODEL.concurrency }]);
@@ -44,6 +48,7 @@ export async function createHarness(opts: { script?: Script | FakeReply[]; concu
   return {
     fake,
     dir,
+    files,
     store,
     models,
     adapter,
@@ -51,6 +56,7 @@ export async function createHarness(opts: { script?: Script | FakeReply[]; concu
       await fake.close();
       close();
       await rm(dir, { recursive: true, force: true });
+      await rm(files, { recursive: true, force: true });
     },
   };
 }

@@ -40,7 +40,7 @@ async function setup(threadReplies: FakeReply[] = [], settings: Record<string, u
 const idOf = (out: unknown) => /thread ([0-9A-Z]{26})/.exec(String(out))![1]!;
 
 async function gitRepo(): Promise<string> {
-  const repo = join(h.dir, 'repo');
+  const repo = join(h.files, 'repo');
   mkdirSync(repo);
   const g = (...a: string[]) => execFileSync('git', a, { cwd: repo });
   g('init', '-q', '-b', 'main');

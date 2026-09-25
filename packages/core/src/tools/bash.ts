@@ -63,7 +63,7 @@ export const bashReadonlyTool = defineTool({
   gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command, timeout_s }, ctx) {
     const r = await runProcess({
-      ...shellInvocation(command, { enabled: ctx.sandbox.enabled, writable: [] }),
+      ...shellInvocation(command, { ...ctx.sandbox, writable: [] }),
       cwd: ctx.workspace,
       env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
       timeoutMs: timeout_s * 1000,

@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { editFileTool, globTool, grepFallback, grepTool, listDirTool, readFileTool, writeFileTool } from './fs';
 import { testToolContext } from '../testing/context';
+import { NO_SANDBOX, sandboxGuard } from './sandbox';
 import { ToolDenied, type ToolContext } from './types';
 
 let base: string;
@@ -98,5 +99,59 @@ describe('grep', () => {
   it('has a JS fallback with the same output shape', async () => {
     expect(await grepFallback('two', src)).toBe('readme.md:2:line two');
     expect(await grepFallback('answer', src, '*.ts')).toBe('lib/util.ts:1:export const answer = 42;');
+  });
+});
+
+describe('guard', () => {
+  // `outer` plays a project source that contains Desk's data dir (like a source at ~); the workspace lives inside it.
+  let outer: string;
+  let data: string;
+  let work: string;
+  let secret: string;
+  let g: ToolContext;
+  beforeEach(async () => {
+    outer = await realpath(base);
+    data = join(outer, 'data');
+    work = join(data, 'workspaces', 't1');
+    secret = join(data, 'daemon.json');
+    await mkdir(work, { recursive: true });
+    await writeFile(secret, '{"token":"tok-123"}');
+    await symlink(secret, join(work, 'link.json'));
+    g = testToolContext(work, { readRoots: [work, outer], writeRoots: [work, outer], sandbox: { ...NO_SANDBOX, guard: sandboxGuard({ dataDir: data, secrets: [secret] }) } });
+  });
+
+  it('never reads a secret, directly or through a symlink, and never searches a folder that holds one', async () => {
+    await expect(readFileTool.execute({ path: secret }, g)).rejects.toThrow(/off limits because it holds Desk credentials/);
+    await expect(readFileTool.execute({ path: 'link.json' }, g)).rejects.toThrow(ToolDenied);
+    await expect(grepTool.execute({ pattern: 'tok', root: outer }, g)).rejects.toThrow(/off limits because it contains Desk credentials/);
+    await expect(grepTool.execute({ pattern: 'tok', root: data }, g)).rejects.toThrow(ToolDenied);
+    // The workspace holds only a symlink to the secret: searches skip symlinks.
+    expect(await grepTool.execute({ pattern: 'tok', root: '.' }, g)).not.toContain('tok-123');
+    expect(await grepFallback('tok', work)).not.toContain('tok-123');
+    expect(await listDirTool.execute({ path: data }, g)).toContain('daemon.json');
+  });
+
+  it("writes Desk's data dir only inside the workspace, even under a writable source", async () => {
+    await writeFileTool.execute({ path: 'notes.md', content: 'x' }, g);
+    await writeFileTool.execute({ path: join(outer, 'source.md'), content: 'x' }, g);
+    await expect(writeFileTool.execute({ path: join(data, 'config.json'), content: '{}' }, g)).rejects.toThrow(/off limits because it is inside Desk's data folder/);
+    await expect(writeFileTool.execute({ path: secret, content: '{}' }, g)).rejects.toThrow(/holds Desk credentials/);
+    await expect(editFileTool.execute({ path: secret, old_string: 'tok', new_string: 'x' }, g)).rejects.toThrow(ToolDenied);
+    expect(await readFile(secret, 'utf8')).toBe('{"token":"tok-123"}');
+  });
+
+  it("never writes the git or ssh config deskd's git runs with", async () => {
+    const ro = testToolContext(work, { readRoots: [work, outer], writeRoots: [work, outer], sandbox: { ...NO_SANDBOX, guard: sandboxGuard({ dataDir: data, secrets: [secret], readOnly: [join(outer, '.gitconfig'), join(outer, '.ssh')] }) } });
+    await expect(writeFileTool.execute({ path: join(outer, '.gitconfig'), content: '[filter "x"]' }, ro)).rejects.toThrow(/git or ssh configuration/);
+    await expect(writeFileTool.execute({ path: join(outer, '.ssh', 'config'), content: 'Host *' }, ro)).rejects.toThrow(/git or ssh configuration/);
+  });
+
+  it('never writes git internals: deskd runs git outside the sandbox', async () => {
+    await mkdir(join(work, '.git', 'hooks'), { recursive: true });
+    await expect(writeFileTool.execute({ path: '.git/hooks/pre-commit', content: '#!/bin/sh' }, g)).rejects.toThrow(/inside a \.git folder/);
+    await expect(writeFileTool.execute({ path: '.git/config', content: '' }, g)).rejects.toThrow(/inside a \.git folder/);
+    await expect(writeFileTool.execute({ path: join(outer, 'repo', '.git'), content: 'gitdir: /tmp/x' }, g)).rejects.toThrow(/inside a \.git folder/);
+    await writeFileTool.execute({ path: '.gitignore', content: 'dist\n' }, g);
+    await writeFileTool.execute({ path: '.github/workflows/ci.yml', content: 'on: push\n' }, g);
   });
 });

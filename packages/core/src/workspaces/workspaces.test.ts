@@ -11,7 +11,7 @@ import { bashReadonlyTool } from '../tools/bash';
 import { gitCommitTool, gitDiffTool, gitPushTool, gitStatusTool, openPrTool } from '../tools/git';
 import { detectSandbox } from '../tools/sandbox';
 import type { ToolContext } from '../tools/types';
-import { createWorkspace, removeWorkspace, threadBranchName } from './workspaces';
+import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from './workspaces';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
@@ -97,6 +97,46 @@ describe('git tools', () => {
     expect(evaluatePolicy(gitPushTool, {}, DEFAULT_POLICY, { ...on, gitBranch: 'desk/x-123456' }).action).toBe('allow');
     expect(evaluatePolicy(gitPushTool, {}, DEFAULT_POLICY, { ...on, gitBranch: 'main' }).action).toBe('deny');
     expect(evaluatePolicy(openPrTool, { title: 't', body: 'b' }, DEFAULT_POLICY, on).action).toBe('allow');
+  });
+
+  it("never runs the repo's hooks, fsmonitor, external diff or textconv: deskd's git runs outside the sandbox", async () => {
+    const { path, ctx } = await worktree();
+    const marker = join(base, 'ran');
+    const hook = `#!/bin/sh\necho "$0" >> '${marker}'\n`;
+    for (const name of ['pre-commit', 'commit-msg', 'post-commit', 'post-checkout', 'pre-push']) {
+      writeFileSync(join(repo, '.git', 'hooks', name), hook, { mode: 0o755 });
+    }
+    // A hooks path inside the working tree (husky's layout), where an agent could have edited the hooks.
+    mkdirSync(join(path, '.husky'));
+    writeFileSync(join(path, '.husky', 'pre-commit'), hook, { mode: 0o755 });
+    git(repo, 'config', 'core.hooksPath', '.husky');
+    git(repo, 'config', 'core.fsmonitor', `echo fsmonitor >> '${marker}'; false`);
+    git(repo, 'config', 'diff.external', `sh -c 'echo external >> "${marker}"'`);
+    git(repo, 'config', 'diff.conv.textconv', `sh -c 'echo textconv >> "${marker}"; cat "$1"' --`);
+    writeFileSync(join(path, '.gitattributes'), '*.ts diff=conv\n');
+
+    writeFileSync(join(path, 'login.ts'), 'export const ok = true;\n');
+    expect(String(await gitStatusTool.execute({}, ctx))).toContain('login.ts');
+    expect(String(await gitDiffTool.execute({}, ctx))).toContain('+export const ok = true;');
+    await gitCommitTool.execute({ message: 'Fix login' }, ctx);
+    await gitPushTool.execute({}, ctx);
+    await worktree('Second', '01K5ABCDEFGHJKMNPQRSTVWXZZ');
+    expect(existsSync(marker) ? readFileSync(marker, 'utf8') : '').toBe('');
+  });
+
+  it("gives git deskd's environment without the model credentials", () => {
+    const saved = { ...process.env };
+    process.env.DESK_OPENAI_API_KEY = 'k1';
+    process.env.CLIPROXY_API_KEY = 'k2';
+    try {
+      const env = gitEnv();
+      expect(env).not.toHaveProperty('DESK_OPENAI_API_KEY');
+      expect(env).not.toHaveProperty('CLIPROXY_API_KEY');
+      expect(env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', HOME: saved.HOME });
+      expect(safeGitArgs(['push'])).toEqual(['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', 'push']);
+    } finally {
+      process.env = saved;
+    }
   });
 
   it('refuses git tools outside a worktree', async () => {

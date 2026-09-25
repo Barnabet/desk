@@ -54,7 +54,7 @@ describe('overview', () => {
 describe('thread inspection', () => {
   it('serves the diff of a git thread and browses its workspace', async () => {
     const { runtime, api, projectId } = await setup();
-    const repo = join(h.dir, 'repo');
+    const repo = join(h.files, 'repo');
     await mkdir(repo);
     const g = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: repo, stdio: 'pipe' });
     g('init', '-q', '-b', 'main');

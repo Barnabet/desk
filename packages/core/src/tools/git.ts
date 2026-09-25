@@ -1,14 +1,7 @@
 import { z } from 'zod';
-import { git } from '../workspaces/workspaces';
+import { git, gitEnv, safeGitArgs } from '../workspaces/workspaces';
 import { runProcess } from './process';
 import { defineTool, type ToolContext } from './types';
-
-/** Daemon env for git/gh (needs HOME, SSH agent, credential helpers) minus model credentials; never prompts. */
-function gitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-  for (const key of Object.keys(env)) if (/^(DESK_OPENAI|CLIPROXY)_/.test(key)) delete env[key];
-  return env;
-}
 
 function requireGit(ctx: ToolContext): { branch: string; base: string } {
   if (!ctx.git) throw new Error('Your workspace is not a git worktree; git tools are unavailable');
@@ -44,9 +37,9 @@ export const gitCommitTool = defineTool({
     requireGit(ctx);
     const env = gitEnv();
     await git(ctx.workspace, paths?.length ? ['add', '--', ...paths] : ['add', '--all'], env);
-    const staged = await runProcess({ command: 'git', args: ['diff', '--cached', '--quiet'], cwd: ctx.workspace, env });
+    const staged = await runProcess({ command: 'git', args: safeGitArgs(['diff', '--cached', '--quiet']), cwd: ctx.workspace, env });
     if (staged.exitCode === 0) throw new Error('Nothing to commit');
-    const email = await runProcess({ command: 'git', args: ['config', 'user.email'], cwd: ctx.workspace, env });
+    const email = await runProcess({ command: 'git', args: safeGitArgs(['config', 'user.email']), cwd: ctx.workspace, env });
     const identity = email.exitCode === 0 && email.output.trim() ? [] : ['-c', 'user.name=Desk', '-c', 'user.email=desk@localhost'];
     await git(ctx.workspace, [...identity, 'commit', '-q', '-m', message], env);
     const sha = await git(ctx.workspace, ['rev-parse', '--short', 'HEAD'], env);

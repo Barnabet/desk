@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -73,5 +73,18 @@ describe('executeToolCall', () => {
     expect(r.content.length).toBeLessThan(MAX_TOOL_OUTPUT_CHARS + 500);
     expect(r.content).toContain('characters truncated');
     expect(await readFile(join(ws, '.desk', 'outputs', 'toolu_1.txt'), 'utf8')).toBe(big);
+  });
+
+  it('never saves the full output through a symlinked outputs folder', async () => {
+    const elsewhere = await mkdtemp(join(tmpdir(), 'desk-elsewhere-'));
+    try {
+      await mkdir(join(ws, '.desk'), { recursive: true });
+      await symlink(elsewhere, join(ws, '.desk', 'outputs'));
+      const r = await run('echo', { text: 'y'.repeat(MAX_TOOL_OUTPUT_CHARS + 10) });
+      expect(r.content).toContain('the full output could not be saved');
+      expect(await readdir(elsewhere)).toEqual([]);
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
   });
 });

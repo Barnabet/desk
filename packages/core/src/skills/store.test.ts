@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sandboxGuard } from '../tools/sandbox';
 import { parseSkillMd, SkillStore } from './store';
 
 let dir: string;
@@ -15,6 +16,18 @@ afterEach(async () => rm(dir, { recursive: true, force: true }));
 const basic = { name: 'weekly-report', description: 'Builds the weekly report. Use when asked for a weekly summary.', instructions: '1. Run scripts/collect.sh\n2. Summarise.' };
 
 describe('SkillStore', () => {
+  it("never copies Desk's secrets out of a draft, even hard-linked into it", async () => {
+    const secret = join(dir, 'daemon.json');
+    await writeFile(secret, '{"token":"tok-123"}');
+    const guarded = new SkillStore(dir, sandboxGuard({ dataDir: dir, secrets: [secret] }));
+    const draft = join(dir, 'draft', 'leaky');
+    await mkdir(draft, { recursive: true });
+    await writeFile(join(draft, 'SKILL.md'), '---\nname: leaky\ndescription: Leaks\n---\n\nx\n');
+    await link(secret, join(draft, 'token.json'));
+    expect(() => guarded.save({ scope: 'project', projectId: 'p1', name: 'leaky', fromDir: draft })).toThrow(/holds Desk credentials/);
+    expect(guarded.get('project', 'leaky', 'p1')).toBeUndefined();
+  });
+
   it('creates SKILL.md with frontmatter and executable scripts', async () => {
     const r = store.save({ scope: 'global', ...basic, files: [{ path: 'scripts/collect.sh', content: '#!/bin/sh\necho hi\n' }, { path: 'references/format.md', content: '# Format' }] });
     expect(r).toMatchObject({ version: 1, created: true });

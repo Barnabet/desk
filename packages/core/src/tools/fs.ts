@@ -1,17 +1,19 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import fg from 'fast-glob';
 import { z } from 'zod';
-import { resolveInside } from './paths';
+import { readAgentFile, writeAgentFile } from './agent-files';
+import { resolveForTool } from './paths';
 import { runProcess } from './process';
+import { commandInvocation } from './sandbox';
 import { defineTool, type Tool, type ToolContext } from './types';
 
 const DEFAULT_READ_LIMIT = 2000;
 const MAX_LIST_RESULTS = 500;
 const IGNORE = ['**/node_modules/**', '**/.git/**'];
 
-const readable = (p: string, ctx: ToolContext) => resolveInside(p, ctx.readRoots, ctx.workspace);
-const writable = (p: string, ctx: ToolContext) => resolveInside(p, ctx.writeRoots ?? [ctx.workspace], ctx.workspace);
+const readable = (p: string, ctx: ToolContext) => resolveForTool(p, 'read', ctx);
+const writable = (p: string, ctx: ToolContext) => resolveForTool(p, 'write', ctx);
 
 export const readFileTool = defineTool({
   name: 'read_file',
@@ -23,7 +25,7 @@ export const readFileTool = defineTool({
   }),
   async execute({ path, offset = 1, limit = DEFAULT_READ_LIMIT }, ctx) {
     const file = await readable(path, ctx);
-    const lines = (await readFile(file, 'utf8')).split('\n');
+    const lines = (await readAgentFile(file, ctx.sandbox.guard)).toString('utf8').split('\n');
     const slice = lines.slice(offset - 1, offset - 1 + limit);
     const body = slice.map((line, i) => `${offset + i}\t${line}`).join('\n');
     const end = offset - 1 + slice.length;
@@ -38,7 +40,7 @@ export const writeFileTool = defineTool({
   async execute({ path, content }, ctx) {
     const file = await writable(path, ctx);
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, content);
+    await writeAgentFile(file, content, ctx.sandbox.guard);
     return `Wrote ${Buffer.byteLength(content)} bytes to ${file}`;
   },
 });
@@ -55,14 +57,14 @@ export const editFileTool = defineTool({
   }),
   async execute({ path, old_string, new_string, replace_all = false }, ctx) {
     const file = await writable(path, ctx);
-    const original = await readFile(file, 'utf8');
+    const original = (await readAgentFile(file, ctx.sandbox.guard)).toString('utf8');
     const count = original.split(old_string).length - 1;
     if (count === 0) throw new Error(`old_string not found in ${file}`);
     if (count > 1 && !replace_all) {
       throw new Error(`old_string matches ${count} times in ${file}; include more context or set replace_all`);
     }
     const updated = replace_all ? original.split(old_string).join(new_string) : original.replace(old_string, () => new_string);
-    await writeFile(file, updated);
+    await writeAgentFile(file, updated, ctx.sandbox.guard);
     const n = replace_all ? count : 1;
     return `Edited ${file} (${n} replacement${n === 1 ? '' : 's'})`;
   },
@@ -94,15 +96,17 @@ export const globTool = defineTool({
   },
 });
 
-export async function grepFallback(pattern: string, dir: string, glob?: string): Promise<string> {
+/** Searches without rg. `read` defaults to plain reads (tests); the grep tool passes the guarded reader. */
+export async function grepFallback(pattern: string, dir: string, glob?: string, read: (file: string) => Promise<Buffer> = (f) => readFile(f)): Promise<string> {
   const re = new RegExp(pattern);
-  const files = (await fg(glob ? `**/${glob}` : '**/*', { cwd: dir, onlyFiles: true, ignore: IGNORE })).sort();
+  // Like rg, never follow symlinks: one could lead out of the roots.
+  const files = (await fg(glob ? `**/${glob}` : '**/*', { cwd: dir, onlyFiles: true, ignore: IGNORE, followSymbolicLinks: false })).sort();
   const out: string[] = [];
   for (const f of files) {
     if (out.length >= MAX_LIST_RESULTS) break;
     let text: string;
     try {
-      text = await readFile(join(dir, f), 'utf8');
+      text = (await read(join(dir, f))).toString('utf8');
     } catch {
       continue;
     }
@@ -111,6 +115,16 @@ export async function grepFallback(pattern: string, dir: string, glob?: string):
     });
   }
   return out.length ? out.join('\n') : 'No matches';
+}
+
+let ripgrep: Promise<boolean> | undefined;
+/** Whether `rg` is on PATH (checked once): inside sandbox-exec a missing rg is an exit code, not ENOENT. */
+function hasRipgrep(): Promise<boolean> {
+  ripgrep ??= runProcess({ command: 'rg', args: ['--version'], cwd: '/', timeoutMs: 5000 }).then(
+    (r) => r.exitCode === 0,
+    () => false,
+  );
+  return ripgrep;
 }
 
 export const grepTool = defineTool({
@@ -122,11 +136,13 @@ export const grepTool = defineTool({
     glob: z.string().optional().describe('Only search files whose name matches this glob, e.g. "*.ts"'),
   }),
   async execute({ pattern, root, glob }, ctx) {
-    const dir = await readable(root, ctx);
+    const dir = await resolveForTool(root, 'search', ctx);
     try {
+      if (!(await hasRipgrep())) return grepFallback(pattern, dir, glob, (f) => readAgentFile(f, ctx.sandbox.guard));
+      // rg runs outside deskd, so it is sandboxed like the agent's shell: the guard keeps secrets unreadable even if a
+      // folder is swapped for a symlink while rg walks it.
       const r = await runProcess({
-        command: 'rg',
-        args: ['-n', '--no-heading', '--color', 'never', '--max-count', '50', ...(glob ? ['--glob', glob] : []), '-e', pattern, '.'],
+        ...commandInvocation('rg', ['-n', '--no-heading', '--color', 'never', '--max-count', '50', ...(glob ? ['--glob', glob] : []), '-e', pattern, '.'], { ...ctx.sandbox, writable: [] }),
         cwd: dir,
         timeoutMs: 30_000,
         signal: ctx.signal,
@@ -135,7 +151,7 @@ export const grepTool = defineTool({
       if (r.exitCode !== 0) throw new Error(`grep failed: ${r.output.trim()}`);
       return r.output.replace(/^\.\//gm, '').trimEnd().split('\n').sort().join('\n');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return grepFallback(pattern, dir, glob);
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return grepFallback(pattern, dir, glob, (f) => readAgentFile(f, ctx.sandbox.guard));
       throw err;
     }
   },

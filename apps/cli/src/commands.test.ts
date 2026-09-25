@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { call, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
 import { SEED_MODELS } from '@desk/core';
@@ -28,6 +28,7 @@ afterEach(async () => {
   await daemon.stop();
   await fake.close();
   rmSync(dir, { recursive: true, force: true });
+  rmSync(`${dir}-src`, { recursive: true, force: true });
 });
 
 async function cli(...argv: string[]) {
@@ -39,7 +40,10 @@ async function cli(...argv: string[]) {
 
 describe('desk CLI', () => {
   it('creates, lists, shows and configures projects', async () => {
-    const created = await cli('project', 'new', 'Launch', '--goal', 'Ship the launch', '--source', dir);
+    // A source cannot be the daemon's data dir (`dir` here), so the project's folder sits beside it.
+    const src = join(dir, '..', `${basename(dir)}-src`);
+    mkdirSync(src);
+    const created = await cli('project', 'new', 'Launch', '--goal', 'Ship the launch', '--source', src);
     expect(created.code).toBe(0);
     const id = /Created project (\S+)/.exec(created.out)![1]!;
     expect((await cli('project', 'list')).out).toContain(`${id}  Launch — Ship the launch`);

@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { copyFile, realpath } from 'node:fs/promises';
-import { basename, join, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, join, sep } from 'node:path';
 import { GLOBAL_PROJECT_ID, ServiceName, type AgentMessageKind, type ArtifactKind, type MemoryKind, type ProjectSettingsPatch, type ReasoningEffort, type ServiceStopReason, type SkillScope } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { AttachmentStore } from '../attachments/store';
 import { uniqueLibraryName } from '../library/library';
-import { createWorkspace, removeWorkspace, threadBranchName } from '../workspaces/workspaces';
+import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
@@ -45,7 +46,8 @@ import { listAttention } from '../state/attention';
 import { JobManager } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
-import { detectSandbox } from '../tools/sandbox';
+import { readAgentFile } from '../tools/agent-files';
+import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard } from '../tools/sandbox';
 import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
@@ -75,6 +77,12 @@ export type RuntimeOptions = {
   skillEnv?: SkillEnvProvider;
   /** Remind Desk to update What's up when it ends a turn after changing things (default on; the test harness turns it off). */
   whatsUpReminder?: boolean;
+  /** Files agents may never read or replace: deskd's token file, its database, model credentials (see `SandboxGuard`). */
+  secrets?: string[];
+  /** Files and folders agents may never write, whatever their roots: the git and ssh config deskd's git runs with. */
+  readOnly?: string[];
+  /** The user's home folder (default `os.homedir()`), which can never be a source. */
+  home?: string;
 };
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
@@ -88,6 +96,8 @@ export class Runtime {
   readonly skills: SkillStore;
   /** Images shown to models (`<data>/attachments`), served by GET /v1/attachments/:sha256. */
   readonly attachments: AttachmentStore;
+  /** What agents' commands and file tools may never touch; deskd adds its port with `guardPort`. */
+  readonly guard: SandboxGuard;
   private readonly proxy: ProxyGate | undefined;
   /** Bytes of images per request, by model, lowered after an endpoint refused a request as too large (until restart). */
   private readonly imageBudgets = new Map<string, number>();
@@ -111,7 +121,8 @@ export class Runtime {
           }),
         )
       : undefined;
-    this.skills = new SkillStore(o.dataDir);
+    this.guard = sandboxGuard({ dataDir: o.dataDir, secrets: o.secrets ?? [], readOnly: o.readOnly ?? [] });
+    this.skills = new SkillStore(o.dataDir, this.guard);
     this.attachments = new AttachmentStore(join(o.dataDir, 'attachments'));
     this.services = {
       store: o.store,
@@ -218,7 +229,9 @@ export class Runtime {
     this.requireOpenProject(projectId);
     if (!existsSync(path) || !statSync(path).isDirectory()) throw new ValidationError(`Source path does not exist or is not a directory: ${path}`);
     const real = await realpath(path);
-    const top = await runProcess({ command: 'git', args: ['rev-parse', '--show-toplevel'], cwd: real, timeoutMs: 10_000 }).catch(() => null);
+    const unsafe = this.unsafeSource(real);
+    if (unsafe) throw new ValidationError(`A project source cannot be ${unsafe}: ${path}`);
+    const top = await runProcess({ command: 'git', args: safeGitArgs(['rev-parse', '--show-toplevel']), cwd: real, env: gitEnv(), timeoutMs: 10_000 }).catch(() => null);
     const isRepoRoot = top?.exitCode === 0 && (await realpath(top.output.trim()).catch(() => '')) === real;
     const id = newId();
     this.o.store.append({
@@ -256,7 +269,8 @@ export class Runtime {
     const dir = this.libraryDir(projectId);
     mkdirSync(dir, { recursive: true });
     const name = uniqueLibraryName(dir, meta.name ?? basename(file));
-    await copyFile(file, join(dir, name));
+    // `file` is an agent's: read it without following a swapped-in symlink, and never a secret.
+    writeFileSync(join(dir, name), await readAgentFile(file, this.guard));
     return this.recordArtifact(projectId, name, meta, origin);
   }
 
@@ -634,7 +648,7 @@ export class Runtime {
     if (existing?.status === 'running') await this.stopServiceRun(existing, input.by, 'restart');
     const serviceId = existing?.id ?? `svc_${newId()}`;
     const env = withSkillEnv(scrubbedEnv(workspace), this.skillEnv(place.agent.id));
-    const sandbox = { enabled: await this.sandboxAvailable(), writable: [workspace, ...place.writable, ...this.writeRoots(place.agent)] };
+    const sandbox = { enabled: await this.sandboxAvailable(), writable: [workspace, ...place.writable, ...this.writeRoots(place.agent)], guard: this.guard, gitDirs: this.gitDirs(place.agent) };
     const relCwd = cwd === workspace ? '.' : cwd.slice(workspace.length + 1);
     const pid = this.serviceProcs.start(serviceId, {
       command,
@@ -706,6 +720,8 @@ export class Runtime {
       if (!source || source.project_id !== projectId) throw new ValidationError(`Unknown source in this project: ${input.sourceId}`);
       if (!source.agent_write) throw new ConflictError(`Agents may not write to ${source.label}; turn it on in the project's Settings → Sources`);
       if (!existsSync(source.path)) throw new ConflictError(`Source folder is missing: ${source.path}`);
+      const unsafe = this.unsafeSource(realpathSync(source.path));
+      if (unsafe) throw new ConflictError(`Services cannot run in ${source.label}: it is ${unsafe}`);
       const starter = input.by.startsWith('agent:') ? getAgent(this.o.store.db, input.by.slice(6)) : undefined;
       const agent = starter && starter.project_id === projectId ? starter : getDeskAgent(this.o.store.db, projectId);
       if (!agent) throw new NotFoundError(`Project ${projectId} has no Desk agent`);
@@ -929,10 +945,41 @@ export class Runtime {
 
   /** Own workspace + every project source + the project library + skill directories. */
   /** Source folders agents of the project may write to (besides their own workspace). */
+  /**
+   * Sources agents may write to. Folders `unsafeSource` names never are, even when an older project has one: agents
+   * could plant what runs outside the sandbox there (login items, shell and git config) or reach Desk's own files.
+   */
   private writeRoots(agent: AgentRow): string[] {
     return listSources(this.o.store.db, agent.project_id)
-      .filter((s) => s.agent_write && existsSync(s.path))
+      .filter((s) => s.agent_write && existsSync(s.path) && !this.unsafeSource(realOrSelf(s.path)))
       .map((s) => s.path);
+  }
+
+  /** Why `real` can never be a project source, or null: the filesystem root, the home folder or above, or Desk's data dir or anything inside or around it. */
+  private unsafeSource(real: string): string | null {
+    const home = realOrSelf(this.o.home ?? homedir());
+    if (real === dirname(real)) return 'the filesystem root';
+    if (isWithin(home, real)) return real === home ? 'your home folder' : 'a folder that contains your home folder';
+    if (isWithin(real, this.guard.dataDir) || isWithin(this.guard.dataDir, real)) return "Desk's data folder, or a folder inside or around it";
+    return null;
+  }
+
+  /**
+   * Git dirs of the repos deskd runs git in on this agent's behalf, which its commands may not reconfigure: its
+   * worktree's `.git` link and the repo's common dir, and the `.git` of every git source it may write to (threads are
+   * branched from those).
+   */
+  private gitDirs(agent: AgentRow): string[] {
+    const own = agent.git_common_dir && agent.workspace_path ? [agent.git_common_dir, join(agent.workspace_path, '.git')] : [];
+    const sources = listSources(this.o.store.db, agent.project_id)
+      .filter((s) => s.kind === 'git' && s.agent_write)
+      .map((s) => join(s.path, '.git'));
+    return [...new Set([...own, ...sources])];
+  }
+
+  /** Blocks agents' commands from connecting to `port` (deskd's, once it listens). */
+  guardPort(port: number): void {
+    if (!this.guard.ports.includes(port)) this.guard.ports.push(port);
   }
 
   private readRoots(agent: AgentRow): string[] {
@@ -959,6 +1006,8 @@ export class Runtime {
       services: this.services,
       readRoots: (a) => this.readRoots(a),
       writeRoots: (a) => this.writeRoots(a),
+      guard: this.guard,
+      gitDirs: (a) => this.gitDirs(a),
     });
   }
 
@@ -1008,6 +1057,8 @@ export class Runtime {
             services: this.services,
             readRoots: (x) => this.readRoots(x),
             writeRoots: (x) => this.writeRoots(x),
+            guard: this.guard,
+            gitDirs: (x) => this.gitDirs(x),
           }),
       },
       agentId,
