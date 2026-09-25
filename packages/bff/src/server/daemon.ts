@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { readDaemonInfo } from '@desk/client/node';
 import type { HealthResponse } from '@desk/protocol';
 import type { DaemonMode, DaemonStatus } from '../contract';
@@ -50,6 +50,25 @@ export function isOutdated(health: Pick<HealthResponse, 'version' | 'build'>, bu
   return !!bundled.build && health.build !== null && health.build !== bundled.build;
 }
 
+const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/** Undoes XML escaping: the named entities `launchdPlist` and the CLI's `plistFor` write, and character references. */
+function unescapeXml(s: string): string {
+  return s.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (m, e: string) => {
+    if (!e.startsWith('#')) return XML_ENTITIES[e] ?? m;
+    return String.fromCodePoint(e.startsWith('#x') ? Number.parseInt(e.slice(2), 16) : Number.parseInt(e.slice(1), 10));
+  });
+}
+
+/** The `--data-dir` a LaunchAgent plist runs deskd with (`plist()` and the CLI's `desk up --install` both write one), or null. */
+function plistDataDir(xml: string): string | null {
+  const args = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(xml)?.[1];
+  if (args === undefined) return null;
+  const values = [...args.matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unescapeXml(m[1] ?? ''));
+  const i = values.indexOf('--data-dir');
+  return i >= 0 ? (values[i + 1] ?? null) : null;
+}
+
 async function defaultFetchHealth(port: number): Promise<HealthResponse> {
   const res = await fetch(`http://127.0.0.1:${port}/v1/health`, { signal: AbortSignal.timeout(1500) });
   if (!res.ok) throw new Error(`health ${res.status}`);
@@ -62,6 +81,21 @@ export class DaemonManager {
 
   private get launchd(): boolean {
     return this.o.mode === 'packaged' && this.o.platform === 'darwin';
+  }
+
+  /**
+   * desk web on macOS with the desktop app's LaunchAgent installed for this data dir: launchctl drives that job; its
+   * plist is never written. A LaunchAgent that runs deskd for another data dir (desk web under DESK_DATA_DIR) is left
+   * alone, and this data dir's deskd is run and stopped as when there is no LaunchAgent.
+   */
+  private get webAgent(): boolean {
+    if (this.o.mode !== 'web' || this.o.platform !== 'darwin') return false;
+    try {
+      const agentDataDir = plistDataDir(readFileSync(plistPath(this.o.home), 'utf8'));
+      return agentDataDir !== null && resolve(agentDataDir) === resolve(this.o.dataDir);
+    } catch {
+      return false; // No plist, or one that cannot be read.
+    }
   }
 
   private logsDir(): string {
@@ -94,7 +128,7 @@ export class DaemonManager {
       bundledVersion: this.o.bundledVersion,
       build: p ? p.health.build : null,
       bundledBuild: this.o.bundledBuild,
-      agent: this.launchd ? (existsSync(plistPath(this.o.home)) ? 'installed' : 'missing') : 'unsupported',
+      agent: this.launchd ? (existsSync(plistPath(this.o.home)) ? 'installed' : 'missing') : this.webAgent ? 'installed' : 'unsupported',
     };
   }
 
@@ -113,12 +147,21 @@ export class DaemonManager {
     if (current.running) return current;
     mkdirSync(this.logsDir(), { recursive: true });
     if (this.launchd) await this.installAgent();
-    else if (this.o.mode === 'dev') this.spawnDev();
+    else if (this.webAgent) await this.startAgentJob();
+    else if (this.o.mode === 'dev' || this.o.mode === 'web') this.spawnDev();
     else throw new UserFacingError('unsupported', 'Starting Desk automatically is not supported on this platform yet. Start deskd yourself, then retry.');
     return this.waitHealthy(null);
   }
 
   async restart(): Promise<DaemonStatus> {
+    if (this.webAgent) {
+      const before = await this.status();
+      if (!before.running) return this.start();
+      if (await this.launchctlOk(['kickstart', '-k', `${this.domain()}/${LAUNCHD_LABEL}`])) return this.waitHealthy(before.pid);
+      // deskd runs, but not as the LaunchAgent's job (`desk up` started it): stop it by pid, then start the job.
+      await this.stop();
+      return this.start();
+    }
     if (this.launchd) {
       if (!existsSync(plistPath(this.o.home))) return this.start();
       const before = await this.status();
@@ -132,6 +175,17 @@ export class DaemonManager {
   async stop(): Promise<DaemonStatus> {
     if (this.launchd && existsSync(plistPath(this.o.home))) {
       await this.launchctl(['bootout', `${this.domain()}/${LAUNCHD_LABEL}`], true);
+    } else if (this.webAgent) {
+      const info = readDaemonInfo(this.o.dataDir);
+      // KeepAlive would undo a signal, so the job is booted out. That fails when the job is not loaded
+      // (`desk up` started deskd), and then the pid is signalled.
+      if (!(await this.launchctlOk(['bootout', `${this.domain()}/${LAUNCHD_LABEL}`])) && info) {
+        try {
+          this.o.kill(info.pid);
+        } catch {
+          // Already gone.
+        }
+      }
     } else {
       const info = readDaemonInfo(this.o.dataDir);
       if (info) {
@@ -148,6 +202,7 @@ export class DaemonManager {
 
   /** Rewrites and reloads the LaunchAgent (System → Repair). Where there is no LaunchAgent, a restart. */
   async repair(): Promise<DaemonStatus> {
+    if (this.o.mode === 'web') throw new UserFacingError('not_offered', 'Repairing the LaunchAgent is only offered in the Desk app. Restart deskd instead.');
     if (!this.launchd) return this.restart();
     const before = await this.status();
     await this.installAgent();
@@ -193,6 +248,12 @@ export class DaemonManager {
     });
   }
 
+  /** Loads the desktop app's LaunchAgent (already loaded is fine) and starts its job. */
+  private async startAgentJob(): Promise<void> {
+    await this.launchctl(['bootstrap', this.domain(), plistPath(this.o.home)], true);
+    await this.launchctl(['kickstart', `${this.domain()}/${LAUNCHD_LABEL}`]);
+  }
+
   private domain(): string {
     return `gui/${this.o.uid}`;
   }
@@ -200,6 +261,10 @@ export class DaemonManager {
   private async launchctl(args: string[], ignoreFailure = false): Promise<void> {
     const r = await this.o.exec('launchctl', args);
     if (r.code !== 0 && !ignoreFailure) throw new UserFacingError('launchd_failed', `launchctl ${args[0]} failed: ${r.stderr.trim() || `exit ${r.code}`}`);
+  }
+
+  private async launchctlOk(args: string[]): Promise<boolean> {
+    return (await this.o.exec('launchctl', args)).code === 0;
   }
 
   /** Waits for a healthy daemon (a new pid when restarting, the bundled build when refreshing). */

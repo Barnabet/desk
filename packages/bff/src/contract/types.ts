@@ -2,8 +2,12 @@ import type { DeskClient } from '@desk/client';
 import type { AppSettings, Channel } from './ipc';
 import type { GlobalState } from './state';
 
-/** How the host runs deskd: from this repository through tsx (`dev`), or the app's bundled deskd under a LaunchAgent (`packaged`). */
-export type DaemonMode = 'dev' | 'packaged';
+/**
+ * How the host runs deskd: from this repository through tsx (`dev`), the app's bundled deskd under a LaunchAgent
+ * (`packaged`), or for desk web (`web`: the desktop app's LaunchAgent through launchctl when it is installed for the same
+ * data dir, else the repository's deskd through tsx).
+ */
+export type DaemonMode = 'dev' | 'packaged' | 'web';
 
 /** What `daemon.status`, `start`, `restart`, `stop` and `repair` report. */
 export type DaemonStatus = {

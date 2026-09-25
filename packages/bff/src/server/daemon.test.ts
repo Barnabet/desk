@@ -168,3 +168,126 @@ describe('DaemonManager', () => {
     expect(compareVersions('1.0', '1.0.0')).toBe(0);
   });
 });
+
+describe('DaemonManager in web mode', () => {
+  /** The desktop app's LaunchAgent, as `installAgent` writes it: deskd for `dataDir` (the manager's by default). */
+  const installDesktopAgent = (dataDir = join(dir, 'data')) => {
+    const file = plistPath(join(dir, 'home'));
+    mkdirSync(join(dir, 'home', 'Library', 'LaunchAgents'), { recursive: true });
+    writeFileSync(file, launchdPlist({ programArguments: ['/Applications/Desk.app/Contents/MacOS/Desk', 'deskd.mjs', '--data-dir', dataDir], env: { ELECTRON_RUN_AS_NODE: '1' }, workingDirectory: '/w', logFile: '/l/deskd.log' }));
+    return file;
+  };
+
+  it("starts the repo's deskd through tsx and stops it by pid when there is no LaunchAgent", async () => {
+    const { m, calls } = manager({ mode: 'web' });
+    expect(await m.status()).toMatchObject({ running: false, mode: 'web', agent: 'unsupported' });
+    expect((await m.start()).running).toBe(true);
+    expect(calls[0]).toEqual(['spawn', 'node', '--import', '/repo/node_modules/tsx/dist/loader.mjs', '/repo/apps/daemon/src/main.ts', '--data-dir', join(dir, 'data')]);
+    expect((await m.stop()).running).toBe(false);
+    expect(calls.at(-1)).toEqual(['kill', '42']);
+  });
+
+  it("goes through launchctl when the desktop app's LaunchAgent is installed, and never rewrites or removes it", async () => {
+    const file = installDesktopAgent();
+    const plist = readFileSync(file, 'utf8');
+    const { m, calls, up } = manager({ mode: 'web' });
+    expect((await m.status()).agent).toBe('installed');
+    expect((await m.start()).pid).toBe(43);
+    expect(calls).toEqual([
+      ['launchctl', 'bootstrap', 'gui/501', file],
+      ['launchctl', 'kickstart', 'gui/501/dev.desk.deskd'],
+    ]);
+    up(7);
+    calls.length = 0;
+    expect((await m.restart()).pid).toBe(43);
+    expect(calls).toEqual([['launchctl', 'kickstart', '-k', 'gui/501/dev.desk.deskd']]);
+    calls.length = 0;
+    expect((await m.stop()).running).toBe(false);
+    expect(calls).toEqual([['launchctl', 'bootout', 'gui/501/dev.desk.deskd']]);
+    expect(readFileSync(file, 'utf8')).toBe(plist);
+  });
+
+  it('leaves a LaunchAgent that runs deskd for another data dir alone, and runs and stops its own deskd', async () => {
+    const file = installDesktopAgent(join(dir, 'Application Support', 'Desk'));
+    const plist = readFileSync(file, 'utf8');
+    const { m, calls, up } = manager({ mode: 'web' });
+    expect(await m.status()).toMatchObject({ running: false, mode: 'web', agent: 'unsupported' });
+    expect((await m.start()).pid).toBe(42);
+    expect(calls).toEqual([['spawn', 'node', '--import', '/repo/node_modules/tsx/dist/loader.mjs', '/repo/apps/daemon/src/main.ts', '--data-dir', join(dir, 'data')]]);
+    up(7);
+    calls.length = 0;
+    expect((await m.restart()).pid).toBe(42);
+    expect(calls.map((c) => c[0])).toEqual(['kill', 'spawn']);
+    calls.length = 0;
+    expect((await m.stop()).running).toBe(false);
+    expect(calls).toEqual([['kill', '42']]);
+    expect(readFileSync(file, 'utf8')).toBe(plist);
+  });
+
+  it("reads the LaunchAgent's data dir back through the plist's XML escaping", async () => {
+    const dataDir = join(dir, 'A & B <"Desk">');
+    installDesktopAgent(dataDir);
+    expect((await manager({ mode: 'web', dataDir }).m.status()).agent).toBe('installed');
+    expect((await manager({ mode: 'web', dataDir: join(dir, 'A & B') }).m.status()).agent).toBe('unsupported');
+  });
+
+  it('stops by pid, then starts the job, when `desk up` started deskd while the LaunchAgent was not loaded', async () => {
+    const file = installDesktopAgent();
+    const daemonJson = join(dir, 'data', 'daemon.json');
+    const log: string[][] = [];
+    let loaded = false;
+    const ok = { code: 0, stdout: '', stderr: '' };
+    const { m, up } = manager({
+      mode: 'web',
+      exec: async (bin, args) => {
+        log.push([bin, ...args]);
+        if (args[0] === 'bootstrap') {
+          loaded = true;
+          return ok;
+        }
+        if (args[0] === 'kickstart') {
+          if (!loaded) return { code: 113, stdout: '', stderr: 'Could not find service "dev.desk.deskd" in domain for user gui: 501' };
+          writeFileSync(daemonJson, JSON.stringify({ port: 1234, token: 't', pid: 44, version: '1.0.0' }));
+          return ok;
+        }
+        if (args[0] === 'bootout') {
+          if (!loaded) return { code: 3, stdout: '', stderr: 'Boot-out failed: 3: No such process' };
+          loaded = false;
+          rmSync(daemonJson, { force: true });
+        }
+        return ok;
+      },
+      kill: (pid) => {
+        log.push(['kill', String(pid)]);
+        rmSync(daemonJson, { force: true });
+      },
+    });
+    up(42);
+    expect((await m.restart()).pid).toBe(44);
+    expect(log).toEqual([
+      ['launchctl', 'kickstart', '-k', 'gui/501/dev.desk.deskd'],
+      ['launchctl', 'bootout', 'gui/501/dev.desk.deskd'],
+      ['kill', '42'],
+      ['launchctl', 'bootstrap', 'gui/501', file],
+      ['launchctl', 'kickstart', 'gui/501/dev.desk.deskd'],
+    ]);
+  });
+
+  it('offers no repair and leaves an older daemon alone', async () => {
+    installDesktopAgent();
+    const { m, calls, up, setVersion } = manager({ mode: 'web' });
+    await expect(m.repair()).rejects.toMatchObject({ code: 'not_offered' });
+    up();
+    setVersion('0.9.0');
+    expect(await m.ensureCurrent()).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('never uses launchctl off macOS', async () => {
+    installDesktopAgent();
+    const { m, calls } = manager({ mode: 'web', platform: 'linux' });
+    expect((await m.status()).agent).toBe('unsupported');
+    await m.start();
+    expect(calls[0]?.[0]).toBe('spawn');
+  });
+});

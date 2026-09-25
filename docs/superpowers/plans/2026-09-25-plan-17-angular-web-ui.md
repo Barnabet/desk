@@ -265,7 +265,7 @@ The plan has 105 tasks in 11 sections, one commit per task. The sections follow 
 - **One instance.** `web.json` (pid and port, mode 0600) makes a second `desk web` say so and exit. A taken port exits with a message naming `--port` and never moves. A `--port` choice is saved in `web-settings.json`.
 - **desk web logs to `<data>/logs/web.log`.**
 - **The attention notification wording (`notificationFor`, `attentionRoute`) moves to `@desk/bff/server`** (`server/notify.ts`), so both hosts word notifications the same way. `docs/desktop.md` is updated in the same task (W0b.6).
-- **No Repair on the web.** `daemon.repair` answers `not_offered`, and System hides Repair and "Install LaunchAgent" when `mode === 'web'`. When the desktop app's LaunchAgent exists, `DaemonManager` `web` mode goes through `launchctl` and never writes or removes the plist.
+- **No Repair on the web.** `daemon.repair` answers `not_offered`, and System hides Repair and "Install LaunchAgent" when `mode === 'web'`. When the desktop app's LaunchAgent exists and runs deskd for desk web's data dir, `DaemonManager` `web` mode goes through `launchctl` and never writes or removes the plist.
 
 **Angular app (W0c, W0d)**
 - **`DeskCallError` has two forms:** `new DeskCallError(ipcError)` and `new DeskCallError(code, message, status?)`.
@@ -3040,7 +3040,7 @@ Expected: no output. Six commits since the spec commit: W0a.1 to W0a.6.
   - `GET /push`: send `{ session }` first. The first server frame after a valid session is `{ channel: 'desk:global', payload: <GlobalState> }` (it doubles as "signed in"); then `{ channel, payload }` pushes. Requests are `{ op, id, input }` with an integer `id >= 0`; the answer is `{ ack: id, result: IpcResult }`, sent after the backfill frames the watch caused. `{ notifyPermission }` on connect and on change. Close 4401 means signed out; 4400 means the client sent a malformed frame.
   - Host operations the browser does itself (`app.openExternal`, `app.pickFolder`, `app.saveFile`, `app.openMain`) and `daemon.repair` answer `{ ok: false, error: { code: 'not_offered' } }` on `/rpc`.
   - The login link is `http://127.0.0.1:<port>/login?code=<43 base64url characters>`; its page carries `<meta name="desk-session" content="…">` and loads `/login.js`, which stores the secret under `desk.session` and calls `location.replace('/')`.
-  - In the web mode, `daemon.status` reports `mode: 'web'` and `agent: 'installed'` when the desktop app's LaunchAgent plist exists on macOS (else `'unsupported'`); the web System screen hides Repair for `mode === 'web'`.
+  - In the web mode, `daemon.status` reports `mode: 'web'` and `agent: 'installed'` when the desktop app's LaunchAgent plist exists on macOS and runs deskd for desk web's data dir (else `'unsupported'`); the web System screen hides Repair for `mode === 'web'`.
 - `@desk/bff`: `DaemonMode` gains `'web'`; `attentionRoute(item)` and `notificationFor(item)` move from `apps/desktop/src/main/notify.ts` to `packages/bff/src/server/notify.ts` (exported by `@desk/bff/server`).
 - `apps/cli`: `CliIO` gains `stopped?: Promise<void>` and `onEnter?(cb): () => void` (test seams for `desk web`).
 
@@ -4436,7 +4436,9 @@ git commit -m "feat(web-server): web.json, web-settings.json, the login pages an
 
 ### Task W0b.5: `DaemonManager` in `web` mode
 
-desk web starts, restarts and stops deskd itself (spec §3). When the desktop app's LaunchAgent is installed (macOS), a signal would be undone by `KeepAlive`, so it goes through `launchctl` on the existing plist and never writes or removes it. Otherwise it runs the repo's deskd through tsx, as dev mode does, and stops it by the pid in `daemon.json`. Repair is not offered.
+desk web starts, restarts and stops deskd itself (spec §3). When the desktop app's LaunchAgent is installed (macOS) and runs deskd for desk web's data dir, a signal would be undone by `KeepAlive`, so it goes through `launchctl` on the existing plist and never writes or removes it. Otherwise it runs the repo's deskd through tsx, as dev mode does, and stops it by the pid in `daemon.json`. Repair is not offered.
+
+**Deviation (review fix):** the plan first took the plist's existence alone as "installed". desk web honours `DESK_DATA_DIR` (W0c.16's smoke runs with one), and the plist pins `--data-dir` to the app's data dir, so desk web on another data dir kickstarted and booted out the user's real deskd and then timed out on its own `daemon.json`. `webAgent` now also requires the plist's `ProgramArguments` to hold `--data-dir` followed by this manager's data dir (XML-unescaped, compared after `path.resolve`); both `plist()` and the CLI's `plistFor` write that pair. Two cases cover it: another data dir (spawn and pid stop, no `launchctl`, the plist untouched) and an escaped data dir.
 
 **Files:**
 - Modify: `packages/bff/src/contract/types.ts`, `packages/bff/src/server/daemon.ts`
@@ -4444,7 +4446,7 @@ desk web starts, restarts and stops deskd itself (spec §3). When the desktop ap
 
 **Interfaces:**
 - Consumes: W0a's `DaemonManager`, `DaemonManagerOptions`, `plistPath`, `launchdPlist`, `LAUNCHD_LABEL`, `UserFacingError`, `readDaemonInfo`.
-- Produces: `DaemonMode = 'dev' | 'packaged' | 'web'`. In `mode: 'web'`: `status().agent` is `'installed'` when `plistPath(home)` exists on `darwin`, else `'unsupported'`; `start()` = `launchctl bootstrap gui/<uid> <plist>` (already loaded is fine) then `launchctl kickstart gui/<uid>/dev.desk.deskd`, or the tsx spawn without the plist; `restart()` = `kickstart -k`, or stop then start when deskd runs outside the job; `stop()` = `launchctl bootout`, or SIGTERM to `daemon.json`'s pid when the job is not loaded; `repair()` throws `UserFacingError('not_offered', …)`; `ensureCurrent()` is always `false`.
+- Produces: `DaemonMode = 'dev' | 'packaged' | 'web'`. In `mode: 'web'`: `status().agent` is `'installed'` when `plistPath(home)` exists on `darwin` and its `ProgramArguments` hold `--data-dir <this data dir>`, else `'unsupported'`; `start()` = `launchctl bootstrap gui/<uid> <plist>` (already loaded is fine) then `launchctl kickstart gui/<uid>/dev.desk.deskd`, or the tsx spawn without the plist; `restart()` = `kickstart -k`, or stop then start when deskd runs outside the job; `stop()` = `launchctl bootout`, or SIGTERM to `daemon.json`'s pid when the job is not loaded; `repair()` throws `UserFacingError('not_offered', …)`; `ensureCurrent()` is always `false`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4453,11 +4455,11 @@ Append to `packages/bff/src/server/daemon.test.ts` (after its last line):
 ```ts
 
 describe('DaemonManager in web mode', () => {
-  /** The desktop app's LaunchAgent, as `installAgent` writes it. */
-  const installDesktopAgent = () => {
+  /** The desktop app's LaunchAgent, as `installAgent` writes it: deskd for `dataDir` (the manager's by default). */
+  const installDesktopAgent = (dataDir = join(dir, 'data')) => {
     const file = plistPath(join(dir, 'home'));
     mkdirSync(join(dir, 'home', 'Library', 'LaunchAgents'), { recursive: true });
-    writeFileSync(file, launchdPlist({ programArguments: ['/Applications/Desk.app/Contents/MacOS/Desk', 'deskd.mjs'], env: { ELECTRON_RUN_AS_NODE: '1' }, workingDirectory: '/w', logFile: '/l/deskd.log' }));
+    writeFileSync(file, launchdPlist({ programArguments: ['/Applications/Desk.app/Contents/MacOS/Desk', 'deskd.mjs', '--data-dir', dataDir], env: { ELECTRON_RUN_AS_NODE: '1' }, workingDirectory: '/w', logFile: '/l/deskd.log' }));
     return file;
   };
 
@@ -4488,6 +4490,30 @@ describe('DaemonManager in web mode', () => {
     expect((await m.stop()).running).toBe(false);
     expect(calls).toEqual([['launchctl', 'bootout', 'gui/501/dev.desk.deskd']]);
     expect(readFileSync(file, 'utf8')).toBe(plist);
+  });
+
+  it('leaves a LaunchAgent that runs deskd for another data dir alone, and runs and stops its own deskd', async () => {
+    const file = installDesktopAgent(join(dir, 'Application Support', 'Desk'));
+    const plist = readFileSync(file, 'utf8');
+    const { m, calls, up } = manager({ mode: 'web' });
+    expect(await m.status()).toMatchObject({ running: false, mode: 'web', agent: 'unsupported' });
+    expect((await m.start()).pid).toBe(42);
+    expect(calls).toEqual([['spawn', 'node', '--import', '/repo/node_modules/tsx/dist/loader.mjs', '/repo/apps/daemon/src/main.ts', '--data-dir', join(dir, 'data')]]);
+    up(7);
+    calls.length = 0;
+    expect((await m.restart()).pid).toBe(42);
+    expect(calls.map((c) => c[0])).toEqual(['kill', 'spawn']);
+    calls.length = 0;
+    expect((await m.stop()).running).toBe(false);
+    expect(calls).toEqual([['kill', '42']]);
+    expect(readFileSync(file, 'utf8')).toBe(plist);
+  });
+
+  it("reads the LaunchAgent's data dir back through the plist's XML escaping", async () => {
+    const dataDir = join(dir, 'A & B <"Desk">');
+    installDesktopAgent(dataDir);
+    expect((await manager({ mode: 'web', dataDir }).m.status()).agent).toBe('installed');
+    expect((await manager({ mode: 'web', dataDir: join(dir, 'A & B') }).m.status()).agent).toBe('unsupported');
   });
 
   it('stops by pid, then starts the job, when `desk up` started deskd while the LaunchAgent was not loaded', async () => {
@@ -4557,7 +4583,7 @@ The file already imports `existsSync, mkdirSync, mkdtempSync, readFileSync, rmSy
 - [ ] **Step 2: Run them and watch them fail**
 
 Run: `pnpm vitest run packages/bff/src/server/daemon.test.ts --maxWorkers=2`
-Expected: FAIL. The five new tests fail: `start()` rejects with `code: 'unsupported'` (web mode is neither `dev` nor a LaunchAgent), `status().agent` is `'unsupported'` where `'installed'` is expected, and `repair()` rejects with `unsupported` (it falls through to a restart) instead of `not_offered`. The 11 existing tests pass.
+Expected: FAIL. The seven new tests fail: `start()` rejects with `code: 'unsupported'` (web mode is neither `dev` nor a LaunchAgent), `status().agent` is `'unsupported'` where `'installed'` is expected, and `repair()` rejects with `unsupported` (it falls through to a restart) instead of `not_offered`. The 11 existing tests pass.
 
 - [ ] **Step 3: Add the mode**
 
@@ -4573,13 +4599,58 @@ after:
 ```ts
 /**
  * How the host runs deskd: from this repository through tsx (`dev`), the app's bundled deskd under a LaunchAgent
- * (`packaged`), or for desk web (`web`: the desktop app's LaunchAgent through launchctl when it is installed, else the
- * repository's deskd through tsx).
+ * (`packaged`), or for desk web (`web`: the desktop app's LaunchAgent through launchctl when it is installed for the same
+ * data dir, else the repository's deskd through tsx).
  */
 export type DaemonMode = 'dev' | 'packaged' | 'web';
 ```
 
 In `packages/bff/src/server/daemon.ts`, before:
+
+```ts
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+```
+
+after:
+
+```ts
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+```
+
+before:
+
+```ts
+async function defaultFetchHealth(port: number): Promise<HealthResponse> {
+```
+
+after:
+
+```ts
+const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/** Undoes XML escaping: the named entities `launchdPlist` and the CLI's `plistFor` write, and character references. */
+function unescapeXml(s: string): string {
+  return s.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (m, e: string) => {
+    if (!e.startsWith('#')) return XML_ENTITIES[e] ?? m;
+    return String.fromCodePoint(e.startsWith('#x') ? Number.parseInt(e.slice(2), 16) : Number.parseInt(e.slice(1), 10));
+  });
+}
+
+/** The `--data-dir` a LaunchAgent plist runs deskd with (`plist()` and the CLI's `desk up --install` both write one), or null. */
+function plistDataDir(xml: string): string | null {
+  const args = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(xml)?.[1];
+  if (args === undefined) return null;
+  const values = [...args.matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unescapeXml(m[1] ?? ''));
+  const i = values.indexOf('--data-dir');
+  return i >= 0 ? (values[i + 1] ?? null) : null;
+}
+
+async function defaultFetchHealth(port: number): Promise<HealthResponse> {
+```
+
+before:
 
 ```ts
   private get launchd(): boolean {
@@ -4594,9 +4665,19 @@ after:
     return this.o.mode === 'packaged' && this.o.platform === 'darwin';
   }
 
-  /** desk web on macOS with the desktop app's LaunchAgent installed: launchctl drives that job; its plist is never written. */
+  /**
+   * desk web on macOS with the desktop app's LaunchAgent installed for this data dir: launchctl drives that job; its
+   * plist is never written. A LaunchAgent that runs deskd for another data dir (desk web under DESK_DATA_DIR) is left
+   * alone, and this data dir's deskd is run and stopped as when there is no LaunchAgent.
+   */
   private get webAgent(): boolean {
-    return this.o.mode === 'web' && this.o.platform === 'darwin' && existsSync(plistPath(this.o.home));
+    if (this.o.mode !== 'web' || this.o.platform !== 'darwin') return false;
+    try {
+      const agentDataDir = plistDataDir(readFileSync(plistPath(this.o.home), 'utf8'));
+      return agentDataDir !== null && resolve(agentDataDir) === resolve(this.o.dataDir);
+    } catch {
+      return false; // No plist, or one that cannot be read.
+    }
   }
 ```
 
@@ -4736,7 +4817,7 @@ after:
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm vitest run packages/bff/src/server/daemon.test.ts packages/bff/src/contract --maxWorkers=2`
-Expected: PASS (16 daemon tests, and the contract tests).
+Expected: PASS (18 daemon tests, and the contract tests).
 
 Run: `pnpm typecheck`
 Expected: exit 0 (the desktop `SystemScreen` compares `s.mode === 'packaged'`, which still type-checks).
@@ -33568,7 +33649,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 
 **Consumes (exact names; the contract's are used as they are):**
 
-- `@desk/bff/contract` (W0a.1, W0b.5): `channels` (every operation's input schema; its keys are the operation names), `ChannelOutput<'daemon.status'>` (`DaemonStatus`: `running`, `version`, `pid`, `uptime_s`, `proxy`, `mode: 'dev' | 'packaged' | 'web'`, `bundledVersion`, `build`, `bundledBuild`, `agent: 'installed' | 'missing' | 'unsupported'`; desk web always reports `mode: 'web'` and `agent` `'installed'` only when the Desk app's LaunchAgent plist exists on macOS, else `'unsupported'`), `ChannelOutput<'app.info'>`, `GlobalState`, `initialGlobalState()`.
+- `@desk/bff/contract` (W0a.1, W0b.5): `channels` (every operation's input schema; its keys are the operation names), `ChannelOutput<'daemon.status'>` (`DaemonStatus`: `running`, `version`, `pid`, `uptime_s`, `proxy`, `mode: 'dev' | 'packaged' | 'web'`, `bundledVersion`, `build`, `bundledBuild`, `agent: 'installed' | 'missing' | 'unsupported'`; desk web always reports `mode: 'web'` and `agent` `'installed'` only when the Desk app's LaunchAgent plist exists on macOS and runs deskd for desk web's data dir, else `'unsupported'`), `ChannelOutput<'app.info'>`, `GlobalState`, `initialGlobalState()`.
 - `@desk/web-server/contract` (W0b.1): `webChannels` (keys: `'fs.listDirs'`). desk web answers `daemon.repair` with `not_offered` (W0b.8), so the web UI never offers it.
 - `@desk/ui-core` (W0a.3): `bytes`, `clock`, `duration`, `plural`, `href`, `Route`, `PROJECT_TABS`, `GROUP_ORDER`, `rankPalette`, `PaletteItem`.
 - `@desk/protocol`: `REASONING_EFFORTS`, `ModelInfo`, `ReasoningEffort`, `RuntimesReport`, `UsageResponse`, `ProjectSummary`, `clip`, `ArtifactKind`, `CatalogItem`. `@desk/client`: `SkillSummary`.
