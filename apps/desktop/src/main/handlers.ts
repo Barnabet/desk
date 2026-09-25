@@ -89,7 +89,7 @@ export const handlers = {
   'threads.list': (i, c) => c.client().threads.list(i.projectId, i.all ?? false),
   'threads.get': (i, c) => c.client().threads.get(i.id),
   'threads.transcript': (i, c) => c.client().threads.transcript(i.id, { ...(i.after !== undefined ? { after: i.after } : {}), ...(i.limit ? { limit: i.limit } : {}) }),
-  'threads.send': (i, c) => c.client().threads.send(i.id, i.text),
+  'threads.send': (i, c) => c.client().threads.send(i.id, i.text, { question: i.question ?? false }),
   'threads.stop': (i, c) => c.client().threads.stop(i.id),
   'threads.archive': (i, c) => c.client().threads.archive(i.id),
   'threads.diff': (i, c) => c.client().threads.diff(i.id),

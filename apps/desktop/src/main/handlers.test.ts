@@ -156,4 +156,16 @@ describe('IPC dispatch', () => {
     expect(await dispatch('attachments.get', { sha256: sha }, ctx)).toEqual({ ok: true, value: `data:image/png;base64,${opaque.toString('base64')}` });
     expect(Object.keys(ctx.app)).not.toContain('thumbnail');
   });
+
+  it("carries the user's Ask to a thread, and validates it", async () => {
+    const { ctx, runtime } = await setup();
+    const projectId = runtime.createProject({ name: 'Launch', goal: 'g' });
+    const thread = runtime.createThread(projectId, { title: 'Pricing', brief: 'b', workspacePath: join(h.dir, 'pricing') });
+    // A running thread reads an Ask at its next step, like any message: nothing starts a run here.
+    h.store.append({ project_id: projectId, agent_id: thread, type: 'agent.status_changed', payload: { status: 'running' } });
+    expect(await dispatch('threads.send', { id: thread, text: 'How did you price it?', question: true }, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('threads.send', { id: thread, text: 'Carry on.' }, ctx)).toMatchObject({ ok: true });
+    expect(h.store.list({ agentId: thread, types: ['message.user'] }).map((e) => e.payload)).toEqual([{ text: 'How did you price it?', question: true }, { text: 'Carry on.' }]);
+    expect(await dispatch('threads.send', { id: thread, text: 'x', question: 'yes' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
 });

@@ -177,7 +177,9 @@ export class DeskClient {
     list: (projectId: string, all = false) => this.get<AgentRow[]>(`/projects/${enc(projectId)}/threads${all ? '?all=1' : ''}`),
     get: (id: string) => this.get<AgentRow>(`/threads/${enc(id)}`),
     transcript: (id: string, p?: { after?: number; limit?: number }) => this.get<EventPage>(`/threads/${enc(id)}/transcript${page(p)}`),
-    send: (id: string, text: string) => this.post<{ ok: true }>(`/threads/${enc(id)}/messages`, { text }),
+    /** Steers a thread; with `question`, asks it (the user's Ask: an idle, done or failed thread answers and keeps its status; any other thread reads it as a message). */
+    send: (id: string, text: string, opts: { question?: boolean } = {}) =>
+      this.post<{ ok: true }>(`/threads/${enc(id)}/messages`, { text, ...(opts.question ? { question: true } : {}) }),
     stop: (id: string) => this.post<{ ok: true }>(`/threads/${enc(id)}/stop`),
     archive: (id: string) => this.post<{ ok: true }>(`/threads/${enc(id)}/archive`),
     diff: (id: string) => this.get<ThreadDiff>(`/threads/${enc(id)}/diff`),

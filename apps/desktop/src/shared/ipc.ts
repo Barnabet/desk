@@ -50,7 +50,8 @@ export const channels = {
   'threads.list': z.object({ projectId: id, all: z.boolean().optional() }),
   'threads.get': z.object({ id }),
   'threads.transcript': z.object({ id, after, limit }),
-  'threads.send': z.object({ id, text }),
+  /** A steer, or with `question` the user's Ask: a done, failed or idle thread answers it without reopening. */
+  'threads.send': z.object({ id, text, question: z.boolean().optional() }),
   'threads.stop': z.object({ id }),
   'threads.archive': z.object({ id }),
   'threads.diff': z.object({ id }),
