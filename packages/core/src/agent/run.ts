@@ -389,7 +389,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
           const prepared = prepareToolCall(deps.tools, tc);
           if (!prepared.ok) return { result: prepared.result };
           const decision = deps.gate(prepared.tool, prepared.input, freshProject, current);
-          if (decision.action === 'deny') return { result: { status: 'denied', content: `Denied by policy. ${decision.reason}` } };
+          if (decision.action === 'deny') return { result: { status: 'denied', content: decision.denial ?? `Denied by policy. ${decision.reason}` } };
           if (decision.action === 'ask') return { pending: decision };
           // The model that asked for the call (the fallback after a switch): view_image checks that it sees images.
           return { result: await runPreparedTool(prepared.tool, prepared.input, { ...deps.toolContext(current, runId, tc.id, signal), model }) };

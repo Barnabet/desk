@@ -516,3 +516,61 @@ describe('an approved call still running', () => {
     expect(answersTo(theirs).map((e) => e.payload.text)).toEqual(['Region eu-west-1.']);
   });
 });
+
+describe('the answer-run gate', () => {
+  it('lets an answer run read, and denies writes, commands, completing and messages to anyone but its asker', async () => {
+    const { projectId, desk, stopped, finished } = await setup(
+      {
+        Pricing: (req) => {
+          if (!answering(req)) return tools(call('complete', { summary: 'Pricing page done' }));
+          if (stepsTaken(req) > 0) return text('Per seat.');
+          return tools(
+            call('write_file', { path: 'x.txt', content: 'x' }, 'w'),
+            call('bash', { command: 'echo hi' }, 'b'),
+            call('complete', { summary: 'Changed my mind' }, 'c'),
+            call('message_desk', { kind: 'update', text: 'FYI' }, 'm'),
+            call('read_file', { path: 'notes.md' }, 'r'),
+          );
+        },
+      },
+      // The Windows case: without a sandbox every bash call would ask for approval.
+      { runtime: { sandboxAvailable: false } },
+    );
+    const t = await finished('Pricing');
+    writeFileSync(join(h.dir, 'Pricing', 'notes.md'), 'We charge per seat.');
+    const q = ask(stopped('Checkout'), t, 'Per seat?');
+    await rt.whenIdle();
+    const results = new Map(
+      h.store.list({ agentId: t, types: ['tool.result'] }).flatMap((e) => (e.type === 'tool.result' ? [[e.payload.tool_call_id, [e.payload.status, e.payload.content]] as const] : [])),
+    );
+    for (const id of ['w', 'b', 'c', 'm']) expect(results.get(id)).toEqual(['denied', DENIED]);
+    expect(results.get('r')).toEqual(['ok', expect.stringContaining('We charge per seat.')]);
+    expect(existsSync(join(h.dir, 'Pricing', 'x.txt'))).toBe(false);
+    expect(listApprovals(h.store.db, projectId)).toEqual([]);
+    expect(h.store.list({ agentId: t, types: ['approval.requested'] })).toEqual([]);
+    expect(getAgent(h.store.db, t)).toMatchObject({ status: 'done', result_summary: 'Pricing page done' });
+    expect(notices(desk.id, t, 'update')).toEqual([]);
+    expect(answersTo(q).map((e) => [e.payload.text, e.payload.auto])).toEqual([['Per seat.', undefined]]);
+  });
+
+  it('records a note to the asker as the answer and ends the run there; a question to the asker is denied', async () => {
+    const { stopped, finished } = await setup({
+      Pricing: (req) => {
+        if (!answering(req)) return tools(call('complete', { summary: 'Pricing page done' }));
+        if (stepsTaken(req) === 0) return tools(call('message_thread', { thread_id: 'Checkout', kind: 'question', text: 'Why do you ask?' }, 'q1'));
+        return tools(call('message_thread', { thread_id: 'Checkout', text: 'Per seat, billed monthly.' }, 'n1'));
+      },
+    });
+    const t = await finished('Pricing');
+    const asker = stopped('Checkout');
+    const q = ask(asker, t, 'Per seat?');
+    await rt.whenIdle();
+    const denied = h.store.list({ agentId: t, types: ['tool.result'] }).find((e) => e.type === 'tool.result' && e.payload.tool_call_id === 'q1');
+    expect(denied).toMatchObject({ payload: { status: 'denied', content: DENIED } });
+    expect(answersTo(q).map((e) => [e.agent_id, e.payload.text, e.payload.auto, e.payload.tool_call_id])).toEqual([[asker, 'Per seat, billed monthly.', undefined, 'n1']]);
+    const [run] = answerRuns(t);
+    expect(endOf(run!.payload.run_id).payload).toMatchObject({ reason: 'yielded' });
+    expect(threadRequests('Pricing').filter(answering)).toHaveLength(2);
+    expect(h.store.list({ agentId: asker, types: ['message.agent'] }).filter((e) => e.type === 'message.agent' && e.payload.kind === 'question')).toEqual([]);
+  });
+});

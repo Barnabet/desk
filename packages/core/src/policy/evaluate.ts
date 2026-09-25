@@ -6,6 +6,8 @@ export type PolicyDecision = {
   rule?: PolicyRule;
   delegateToDesk: boolean;
   reason: string;
+  /** A denial's tool result, instead of "Denied by policy. <reason>" (an answer run's own rules). */
+  denial?: string;
 };
 
 const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly', 'skill_run', 'service_start']);

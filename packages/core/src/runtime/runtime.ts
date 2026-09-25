@@ -32,7 +32,7 @@ import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { pendingInbox } from '../agent/inbox';
 import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
-import { answerText, ANSWER_MAX_STEPS, closureText, WHY } from '../agent/answer';
+import { answerGate, answerText, ANSWER_MAX_STEPS, closureText, WHY } from '../agent/answer';
 import { runAgent, SHUTDOWN_REASON, type RunDeps } from '../agent/run';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
@@ -1280,10 +1280,12 @@ export class Runtime {
   private async execute(job: Job, signal: AbortSignal): Promise<void> {
     const agent = this.requireAgent(job.agentId);
     let answer: RunDeps['answer'];
+    let asker: AgentRow | 'user' = 'user';
     if (job.kind === 'answer') {
       const d = wakeDecision(this.wakeState(agent));
       if (d.kind !== 'answer' || d.question !== job.answering) return;
       const q = messageById(this.messages(agent.project_id), d.question)!;
+      if (q.from !== 'user') asker = this.requireAgent(q.from);
       answer = {
         question: q.id,
         asker: q.from,
@@ -1317,7 +1319,8 @@ export class Runtime {
             this.o.models.has(model) ? this.o.models.get(model) : undefined,
             a.role === 'desk' ? project.settings.desk_reasoning_effort : (a.reasoning_effort ?? project.settings.thread_reasoning_effort),
           ),
-        gate,
+        // An answer run only reads, and sends nothing but its answer (§4.4).
+        gate: answer ? answerGate(gate, asker) : gate,
         toolContext: (a, runId, toolCallId, sig) =>
           buildToolContext(a, runId, toolCallId, sig, {
             sandboxEnabled: sandboxAvailable,
