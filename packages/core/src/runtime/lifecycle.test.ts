@@ -76,7 +76,9 @@ describe('thread lifecycle notifications', () => {
     begin(threadId);
     await rt.whenIdle();
     expect(getAgent(h.store.db, threadId)?.status).toBe('waiting');
-    expect(lastDeskInput()).toBe(`[message #${lastMessageId(desk.id)} from thread "Research" (${threadId}) — question]\n> Which region?`);
+    expect(lastDeskInput()).toBe(
+      `[message #${lastMessageId(desk.id)} from thread "Research" (${threadId}) — question; they may be waiting on you: answer with message_thread to "Research"]\n> Which region?`,
+    );
     const note = rt.deliver(desk.id, threadId, 'note', 'EU only.');
     await rt.whenIdle();
     const threadReqs = h.fake.requests.filter((r) => r.model === FAKE_MODEL.id);

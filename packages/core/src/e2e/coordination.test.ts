@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
+import type { EventOf } from '@desk/protocol';
 import { getPlan } from '../coordination/plan';
 import { listArtifacts } from '../library/library';
 import { activeMemory } from '../memory/memory';
@@ -96,5 +97,74 @@ describe('end-to-end coordination', () => {
     expect(h.store.list({ projectId, types: ['report'] })).toHaveLength(1);
     const last = h.store.list({ agentId: deskAgent.id, types: ['assistant.message'] }).at(-1);
     expect(last?.type === 'assistant.message' && last.payload.content).toBe('All done: combined.md is in the library.');
+  });
+});
+
+describe('threads that talk to each other', () => {
+  let projectId = '';
+  const systemOf = (req: ChatRequest) => String(req.messages[0]?.content ?? '');
+  const isDesk = (req: ChatRequest) => systemOf(req).startsWith('You are Desk');
+  const titleOf = (req: ChatRequest) => /## Your assignment: (\w+)/.exec(systemOf(req))?.[1];
+  const statusOf = (title: string) => listThreads(h.store.db, projectId).find((t) => t.title === title)?.status;
+  /** One step that only looks around, a little later: how a script waits for another agent to get somewhere. */
+  const later = (): FakeReply => ({ kind: 'reply', toolCalls: [{ name: 'list_threads', args: {} }], delayMs: 10 });
+  const completed = (req: ChatRequest, title: string) => new RegExp(`"${title}" \\([0-9A-Z]{26}\\) — completed\\]`).test(all(req));
+  /** Desk spawns A and B and waits in one step, then waits until both completed. */
+  const deskScript = (req: ChatRequest): FakeReply => {
+    if (!called(req, 'spawn_thread')) {
+      return tools(
+        call('spawn_thread', { title: 'A', brief: 'Build the login form. B builds the login API.' }),
+        call('spawn_thread', { title: 'B', brief: 'Build the login API. A builds the login form.' }),
+        call('wait_for_threads', {}),
+      );
+    }
+    return completed(req, 'A') && completed(req, 'B') ? text('Both parts are done.') : tools(call('wait_for_threads', {}));
+  };
+  /** The result of the agent's first call to tool `name`. */
+  const resultOf = (agentId: string, name: string) =>
+    h.store.list({ agentId, types: ['tool.result'] }).find((e): e is EventOf<'tool.result'> => e.type === 'tool.result' && e.payload.name === name)?.payload.content;
+  /** The first message of `kind` stored on the agent's stream. */
+  const firstOf = (agentId: string, kind: string) =>
+    h.store.list({ agentId, types: ['message.agent'] }).find((e): e is EventOf<'message.agent'> => e.type === 'message.agent' && e.payload.kind === kind)!;
+  /** Runs a project whose Desk spawns A and B; `threads` answers both threads' model calls. */
+  async function run(threads: (req: ChatRequest) => FakeReply) {
+    h = await createHarness({ script: (req) => (isDesk(req) ? deskScript(req) : threads(req)) });
+    const rt = newRuntime(h);
+    projectId = rt.createProject({ name: 'Login', goal: 'Ship login', settings: { desk_model: FAKE_MODEL.id, thread_model: FAKE_MODEL.id } });
+    rt.sendToDesk(projectId, 'Build the login form and the login API.');
+    await rt.whenIdle();
+    const list = listThreads(h.store.db, projectId);
+    return { a: list.find((t) => t.title === 'A')!, b: list.find((t) => t.title === 'B')!, deskAgent: getDeskAgent(h.store.db, projectId)! };
+  }
+
+  it('lets A ask B once B is done: B answers in an answer run and stays done', async () => {
+    const { a, b, deskAgent } = await run((req) => {
+      if (titleOf(req) === 'B') {
+        // B's answer run: its batch ends with the runtime's answer-mode line.
+        return String(req.messages.at(-1)?.content).includes('[Desk runtime — answer mode]')
+          ? text('Tokens are JWTs signed with RS256.')
+          : tools(call('complete', { summary: 'Login API done' }));
+      }
+      if (all(req).includes('— answer to your question #')) return tools(call('complete', { summary: 'Form sends the JWT' }));
+      if (called(req, 'message_thread')) return tools(call('wait_for_reply', {}));
+      if (statusOf('B') !== 'done') return later();
+      return tools(call('message_thread', { thread_id: 'B', kind: 'question', text: 'How are tokens signed?' }), call('wait_for_reply', {}));
+    });
+    expect(a.status).toBe('done');
+    expect(b).toMatchObject({ status: 'done', result_summary: 'Login API done' });
+    const q = firstOf(b.id, 'question');
+    const answer = firstOf(a.id, 'answer');
+    expect(resultOf(a.id, 'message_thread')).toBe(`Sent question #${q.id} to "B" (done: it will be woken to answer from its context; its result stays final).`);
+    expect(answer.payload).toMatchObject({ from_agent_id: b.id, reply_to: q.id, text: 'Tokens are JWTs signed with RS256.' });
+    expect(answer.payload.auto).toBeUndefined();
+    const answerRun = h.store
+      .list({ agentId: b.id, types: ['run.started'] })
+      .find((e): e is EventOf<'run.started'> => e.type === 'run.started' && e.payload.answering !== undefined)!;
+    expect(answerRun.payload.answering).toBe(q.id);
+    expect(h.store.list({ agentId: b.id, after: answerRun.id, types: ['agent.status_changed'] })).toEqual([]);
+    const fromB = h.store
+      .list({ agentId: deskAgent.id, types: ['message.agent'] })
+      .flatMap((e) => (e.type === 'message.agent' && e.payload.from_agent_id === b.id ? [e.payload.kind] : []));
+    expect(fromB).toEqual(['completed']);
   });
 });

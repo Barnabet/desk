@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { call, error, hang, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
-import { messageById, openTo, type EventInput, type EventOf } from '@desk/protocol';
+import { messageById, type EventInput, type EventOf } from '@desk/protocol';
 import { ConflictError, ValidationError } from '../errors';
 import { getAgent, getDeskAgent, listApprovals, type AgentRow } from '../state/queries';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
@@ -31,29 +31,11 @@ const actTool = defineTool({
   },
 });
 
-/**
- * Stands in for the thread message_thread that S3 adds, auto-link included: a note to a thread that asked this one an
- * open question is recorded as the answer (through answer()); anything else is delivered as sent.
- */
-const messageThreadStandIn = defineTool({
-  name: 'message_thread',
-  description: 'Send a message to another thread of this project (thread_id: its id or exact title).',
-  input: z.object({ thread_id: z.string(), kind: z.enum(['note', 'question']).default('note'), text: z.string().min(1) }),
-  async execute({ thread_id, kind, text: body }, ctx) {
-    const s = rt.messages(ctx.projectId);
-    const to = Object.values(s.agents).find((a) => a.id === thread_id || a.title === thread_id);
-    if (!to) throw new Error(`Unknown thread: ${thread_id}`);
-    const open = kind === 'note' ? openTo(s, ctx.agentId).find((q) => q.from === to.id) : undefined;
-    if (open) return `Sent #${rt.answer(open.id, ctx.agentId, body, { toolCallId: ctx.toolCallId })} as the answer to #${open.id}.`;
-    return `Sent #${rt.deliver(ctx.agentId, to.id, kind, body, { tracked: kind === 'question', toolCallId: ctx.toolCallId })}.`;
-  },
-});
-
-/** Threads get the test hook, the message_thread stand-in (in place of S3's tool once it exists) and `extra`. */
+/** Threads get the test hook and `extra`. */
 const testTools =
   (extra: Tool[] = []) =>
   (a: AgentRow): Tool[] =>
-    a.role === 'thread' ? [...toolsForRole(a).filter((t) => t.name !== 'message_thread'), actTool, messageThreadStandIn, ...extra] : toolsForRole(a);
+    a.role === 'thread' ? [...toolsForRole(a), actTool, ...extra] : toolsForRole(a);
 
 const systemOf = (req: ChatRequest) => String(req.messages[0]?.content ?? '');
 const isDesk = (req: ChatRequest) => systemOf(req).startsWith('You are Desk');

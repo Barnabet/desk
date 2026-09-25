@@ -96,18 +96,46 @@ export const listThreadsTool = defineTool({
   },
 });
 
-export const readThreadTool = defineTool({
-  name: 'read_thread',
-  description: 'Inspect a thread: `summary` (status, brief, result, last message) or `full` transcript (optionally only events after `since`).',
-  input: z.object({ thread_id: z.string(), mode: z.enum(['summary', 'full']).default('summary'), since: z.number().int().optional() }),
-  async execute({ thread_id, mode, since }, ctx) {
-    const t = requireThread(ctx, thread_id);
-    const { store } = ctx.services;
-    if (mode === 'full') return renderTranscript(store.list({ agentId: t.id, ...(since !== undefined ? { after: since } : {}) }));
-    const last = lastEvent(store.db, t.id, 'assistant.message');
-    return formatThreadSummary(t, pendingApprovalsFor(store.db, t.id), last?.type === 'assistant.message' ? last.payload.content : null);
-  },
-});
+const readThreadInput = z.object({ thread_id: z.string(), mode: z.enum(['summary', 'full']).default('summary'), since: z.number().int().optional() });
+const readSummaryInput = z.object({ thread_id: z.string() });
+
+/** A thread's summary: status, brief, result, artifacts, branch, pending approvals and its last message. */
+function threadSummary(ctx: ToolContext, t: AgentRow): string {
+  const { store } = ctx.services;
+  const last = lastEvent(store.db, t.id, 'assistant.message');
+  return formatThreadSummary(t, pendingApprovalsFor(store.db, t.id), last?.type === 'assistant.message' ? last.payload.content : null);
+}
+
+/**
+ * read_thread. Desk's (`full: true`) reads a summary or the full transcript; a thread's reads another thread's summary
+ * only, so it has no `mode` input (design spec §2.1).
+ */
+export function makeReadThreadTool(opts: { full: true }): Tool<z.output<typeof readThreadInput>>;
+export function makeReadThreadTool(opts: { full: false }): Tool<z.output<typeof readSummaryInput>>;
+export function makeReadThreadTool({ full }: { full: boolean }): Tool<z.output<typeof readThreadInput>> | Tool<z.output<typeof readSummaryInput>> {
+  if (!full) {
+    return defineTool({
+      name: 'read_thread',
+      description: 'Inspect another thread of this project: status, brief, result, artifacts, branch and its last message.',
+      input: readSummaryInput,
+      async execute({ thread_id }, ctx) {
+        return threadSummary(ctx, requireThread(ctx, thread_id));
+      },
+    });
+  }
+  return defineTool({
+    name: 'read_thread',
+    description: 'Inspect a thread: `summary` (status, brief, result, last message) or `full` transcript (optionally only events after `since`).',
+    input: readThreadInput,
+    async execute({ thread_id, mode, since }, ctx) {
+      const t = requireThread(ctx, thread_id);
+      if (mode === 'full') return renderTranscript(ctx.services.store.list({ agentId: t.id, ...(since !== undefined ? { after: since } : {}) }));
+      return threadSummary(ctx, t);
+    },
+  });
+}
+
+export const readThreadTool = makeReadThreadTool({ full: true });
 
 export const reviewDiffTool = defineTool({
   name: 'review_diff',

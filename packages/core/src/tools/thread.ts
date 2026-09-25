@@ -5,7 +5,9 @@ import { parseSkillMd } from '../skills/store';
 import { readAgentFile } from './agent-files';
 import { resolveInside } from './paths';
 import { listArtifacts } from '../library/library';
-import { getAgent } from '../state/queries';
+import { openFrom, sanitizeLabel, type MessagesState } from '@desk/protocol';
+import { getAgent, getDeskAgent, threadsByRef } from '../state/queries';
+import { listThreadsTool, makeReadThreadTool } from './desk';
 import { defineTool, type ToolContext } from './types';
 
 function parentOf(ctx: ToolContext): string {
@@ -48,24 +50,61 @@ export const completeTool = defineTool({
   },
 });
 
+/** read_thread for threads: another thread's summary (design spec §2.1). */
+export const threadReadThreadTool = makeReadThreadTool({ full: false });
+
+/** Whether a message_thread target names Desk: its id, or "Desk" (any case) when no thread has that exact title. */
+function namesDesk(ctx: ToolContext, ref: string): boolean {
+  const { db } = ctx.services.store;
+  const desk = getDeskAgent(db, ctx.projectId);
+  if (!desk) return false;
+  return ref === desk.id || (ref.trim().toLowerCase() === 'desk' && threadsByRef(db, ctx.projectId, ref).length === 0);
+}
+
+export const threadMessageThreadTool = defineTool({
+  name: 'message_thread',
+  description:
+    "Send a message to another thread of this project (thread_id: its id or exact title). `question`: ask about its own work (an interface, file, format or finding it owns); it may be woken just to answer you, so ask only what its brief, its result or read_thread don't tell you. `note`: tell it something that changes its work. If that thread asked you a question, your next message to it is recorded as the answer. At most 4000 characters: publish long content with library_publish and send the path.",
+  input: z.object({ thread_id: z.string(), kind: z.enum(['note', 'question']).default('note'), text: z.string().min(1) }),
+  // A project rule can deny messages between threads, require approval for them, or delegate them to Desk (§5.5).
+  gate: { subject: () => ({}), unmatched: 'auto' },
+  async execute({ thread_id, kind, text }, ctx) {
+    // §2.4 check 2. Only this tool knows that a thread aimed message_thread at Desk.
+    if (namesDesk(ctx, thread_id)) throw new Error('Use message_desk to reach Desk.');
+    return ctx.services.send({ from: ctx.agentId, to: thread_id, kind, text, toolCallId: ctx.toolCallId }).note;
+  },
+});
+
 export const messageDeskTool = defineTool({
   name: 'message_desk',
   description:
-    'Send a message to Desk, the project coordinator: a progress `update`, a `question`, or a `blocker`. After a question or blocker, call wait_for_reply unless you can keep working meanwhile.',
+    'Send a message to Desk, the project coordinator: a progress `update`, a `question`, or a `blocker`. If Desk asked you a question, your next update is recorded as the answer. After a question or blocker, call wait_for_reply unless you can keep working meanwhile. At most 4000 characters.',
   input: z.object({ kind: z.enum(['update', 'question', 'blocker']), text: z.string().min(1) }),
   async execute({ kind, text }, ctx) {
-    ctx.services.deliver(ctx.agentId, parentOf(ctx), kind, text);
-    return 'Sent to Desk.';
+    return ctx.services.send({ from: ctx.agentId, to: parentOf(ctx), kind, text, toolCallId: ctx.toolCallId }).note;
   },
 });
+
+/**
+ * What a waiting thread waits on, for its status reason (design spec §2.1; the CLI and list_threads show it): the
+ * recipients of its open questions, threads first and Desk last, or "Desk or the user" when it asked nothing.
+ */
+export function waitingReason(s: MessagesState, agentId: string): string {
+  const to = [...new Set(openFrom(s, agentId).map((q) => q.to))];
+  const threads = to.filter((id) => s.agents[id]?.role === 'thread').map((id) => `"${sanitizeLabel(s.agents[id]?.title ?? 'untitled')}"`);
+  const names = to.some((id) => s.agents[id]?.role === 'desk') ? [...threads, 'Desk'] : threads;
+  if (!names.length) return 'Waiting on Desk or the user';
+  return `Waiting on ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}`;
+}
 
 export const waitForReplyTool = defineTool({
   name: 'wait_for_reply',
-  description: 'Pause until Desk or the user replies. Your next turn starts with their message.',
+  description: 'Pause until an answer to a question you asked arrives, or Desk or the user writes to you. Notes from other threads do not end the wait.',
   input: z.object({}),
-  async execute() {
-    return { content: 'Waiting for a reply.', yield: { status: 'waiting', reason: 'Waiting for a reply' } };
+  async execute(_input, ctx) {
+    const reason = waitingReason(ctx.services.messages(ctx.projectId), ctx.agentId);
+    return { content: `${reason}.`, yield: { status: 'waiting', reason } };
   },
 });
 
-export const threadCoordinationTools = [messageDeskTool, waitForReplyTool, completeTool];
+export const threadCoordinationTools = [listThreadsTool, threadReadThreadTool, threadMessageThreadTool, messageDeskTool, waitForReplyTool, completeTool];
