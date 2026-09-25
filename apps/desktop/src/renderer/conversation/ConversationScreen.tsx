@@ -86,8 +86,8 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
   const answeringIds = useMemo(() => new Set(Object.keys(s.messages.answering)), [s.messages.answering]);
   const geometry = useMemo(
-    () => lineGeometry({ timeline: s.timeline, threads: threads ?? [], now, width, answering: answeringIds }),
-    [s.timeline, threads, now, width, answeringIds],
+    () => lineGeometry({ timeline: s.timeline, threads: threads ?? [], now, width, answering: answeringIds, messages: s.messages }),
+    [s.timeline, threads, now, width, answeringIds, s.messages],
   );
 
   useEffect(() => markSeen(projectId), [projectId, s.events.length]);

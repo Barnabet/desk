@@ -423,6 +423,45 @@ describe('messages in the conversation', () => {
     expect(sheet.querySelector('.pair-rows > li .pair-answers')!.textContent).toContain('JWT, RS256.');
   });
 
+  it('draws messages between agents as links that name both sides, light up both labels and open the pair sheet', async () => {
+    const noted = minutesAgo(10);
+    const bridge = show([
+      ...team(),
+      msg(5, 'd', 'a', 'note', 'Use the new schema.', noted),
+      msg(6, 'a', 'f', 'question', 'Which token format?', minutesAgo(6), { tracked: true }),
+      msg(7, 'f', 'a', 'answer', 'JWT, RS256.', minutesAgo(4), { reply_to: 6 }),
+      // What the diagram shows otherwise (a rejoin) is no link.
+      msg(8, 'a', 'd', 'completed', 'Auth API ready.', minutesAgo(3)),
+    ]);
+    const note = await screen.findByRole('button', { name: `Desk → Auth API, note, ${clock(noted)}` });
+    expect(note.getAttribute('title')).toContain('Use the new schema.');
+    expect(document.querySelectorAll('.line-link')).toHaveLength(3);
+    expect(document.querySelector('.line-link-question')).toBeTruthy();
+    expect(document.querySelector('.line-link-answer')).toBeTruthy();
+    expect(document.querySelector('.line-legend')!.textContent).toContain('message');
+
+    const label = (title: string) => [...document.querySelectorAll('.line-label')].find((el) => el.querySelector('.line-label-title')?.textContent === title)!;
+    fireEvent.mouseEnter(note);
+    expect(label('Desk').classList.contains('lit')).toBe(true);
+    expect(label('Auth API').classList.contains('lit')).toBe(true);
+    expect(label('Frontend').classList.contains('lit')).toBe(false);
+    fireEvent.mouseLeave(note);
+    expect(label('Desk').classList.contains('lit')).toBe(false);
+    fireEvent.click(note);
+    expect(screen.getByRole('dialog', { name: 'Auth API ⇄ Desk' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    // A burst between one pair is one link with a count; a message sent just now travels.
+    const now = new Date(Date.now() - 1000).toISOString();
+    bridge.emit('desk:events', [msg(9, 'd', 'f', 'note', 'Heads up.', now), msg(10, 'f', 'd', 'update', 'On it.', now)]);
+    const trip = await screen.findByRole('button', { name: `2 messages between Desk and Frontend, ${clock(now)}` });
+    // A round trip shows its two ends, not a count; a longer burst counts.
+    expect(trip.textContent).toBe('');
+    expect(trip.className).toContain('live');
+    bridge.emit('desk:event', msg(11, 'd', 'f', 'revision', 'One more thing.', now));
+    await waitFor(() => expect(screen.getByRole('button', { name: `3 messages between Desk and Frontend, ${clock(now)}` }).textContent).toBe('3'));
+  });
+
   it("draws a finished lane's answer run as a dotted stub with a live dot, until the run ends", async () => {
     const bridge = show([
       ...team(),

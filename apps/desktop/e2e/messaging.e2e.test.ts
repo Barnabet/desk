@@ -137,6 +137,15 @@ describe('messages between threads, end to end', () => {
     await sheet.getByRole('button', { name: 'Close' }).click();
     await sheet.waitFor({ state: 'detached' });
 
+    // The question and its answer, seconds apart, are one link between the two lanes; a real click opens the same sheet.
+    const link = page.getByRole('button', { name: /^2 messages between Frontend and Auth API, / });
+    await link.hover();
+    await shot(page, 'messaging-2b-link');
+    await link.click();
+    await sheet.waitFor();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await sheet.waitFor({ state: 'detached' });
+
     // The digest's pair line opens the same sheet; the answer's link opens Frontend where it received it.
     await digest.click();
     await page.getByRole('button', { name: /^Frontend ⇄ Auth API · 2/ }).click();

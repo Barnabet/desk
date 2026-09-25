@@ -1117,3 +1117,68 @@
   background: var(--accent);
   box-shadow: 0 0 0 2.5px var(--ground), 0 0 0 4px var(--accent);
 }
+
+/* A message between agents: a hit area over its link (drawn in the SVG), under the rings, trains and chips drawn after it */
+.line-link {
+  position: absolute;
+  width: 12px;
+  transform: translateX(-50%);
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-min);
+  cursor: pointer;
+}
+.line-link-question,
+.line-link-answer {
+  color: var(--wait);
+}
+.line-link:hover,
+.line-link:focus-visible {
+  background: var(--hover-tint);
+  outline-offset: 0;
+}
+.line-link-count {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+}
+/* A message sent moments ago travels from sender to recipient */
+.line-link-pulse {
+  position: absolute;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px var(--ground);
+  animation: line-link-travel 1.1s ease-in-out infinite;
+}
+@keyframes line-link-travel {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(var(--dy));
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .line-link-pulse {
+    display: none;
+  }
+}

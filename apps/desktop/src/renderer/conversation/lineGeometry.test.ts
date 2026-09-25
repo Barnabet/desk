@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyTimeline, reduceTimeline, type ThreadView } from '@desk/client';
-import type { StoredEvent } from '@desk/protocol';
+import { emptyTimeline, foldMessages, reduceTimeline, type ThreadView } from '@desk/client';
+import type { AgentMessageKind, StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { LANE_COLOR, lineGeometry } from './lineGeometry';
 
@@ -184,4 +184,57 @@ describe('lineGeometry: rows', () => {
     const g = lineGeometry({ timeline: lanes(specs), threads: views(specs), now: Date.parse(at(40)), width: 1440 });
     expect(g.lanes[1]!.y).toBeGreaterThan(g.lanes[0]!.y);
   });
+
+  describe('message links', () => {
+    const sec = (min: number, s: number) => new Date(Date.UTC(2026, 8, 24, 10, min, s)).toISOString();
+    let id = 100;
+    const msg = (from: string, to: string, kind: AgentMessageKind, ts: string, extra: object = {}) =>
+      ev(id++, 'message.agent', { from_agent_id: from, from_label: from, kind, text: `${kind} from ${from}`, ...extra }, { agent: to, ts });
+    const geometry = (events: StoredEvent[], now = Date.parse(at(60))) =>
+      lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now, width: 1440, messages: foldMessages(events) });
+
+    it('links sender and recipient at the send time: Desk on the trunk, threads on their lanes, answers back to the asker', () => {
+      const q = msg('a', 'b', 'question', at(5), { tracked: true });
+      const g = geometry([q, msg('b', 'a', 'answer', at(7), { reply_to: q.id }), msg('d', 'b', 'note', at(20))]);
+      const [a, b] = g.lanes;
+      expect(g.links.map((l) => [l.kind, l.from, l.to, l.y1, l.y2, l.count])).toEqual([
+        ['question', 'a', 'b', a!.y, b!.y, 1],
+        ['answer', 'b', 'a', b!.y, a!.y, 1],
+        ['note', 'd', 'b', g.trunkY, b!.y, 1],
+      ]);
+      const note = g.links[2]!;
+      expect(note.x).toBeGreaterThan(g.links[1]!.x);
+      expect(note.x).toBeLessThan(g.nowX);
+      expect(note.text).toBe('note from d');
+      expect(note.live).toBe(false);
+    });
+
+    it("never lands in a lane's fork curve: a message sent as a thread forks sits where its lane begins", () => {
+      const g = geometry([msg('d', 'a', 'note', at(1))]);
+      expect(g.links[0]!.x).toBeCloseTo(g.lanes[0]!.start);
+      expect(g.lanes[0]!.fork.endsWith(`${g.lanes[0]!.start} ${g.lanes[0]!.y}`)).toBe(true);
+    });
+
+    it('leaves out what the diagram already shows or no lane can hold', () => {
+      const g = geometry([
+        msg('d', 'a', 'start', at(1)),
+        msg('b', 'd', 'completed', at(20)),
+        msg('b', 'd', 'stalled', at(21)),
+        msg('b', 'd', 'approval', at(22)),
+        msg('d', 'd', 'reminder', at(23)),
+        msg('zz', 'b', 'note', at(24)),
+        msg('b', 'd', 'blocker', at(25)),
+      ]);
+      expect(g.links.map((l) => [l.kind, l.text])).toEqual([['note', 'blocker from b']]);
+    });
+
+    it('merges a burst between the same pair into one link with a count, marked live while fresh', () => {
+      const burst = [msg('d', 'b', 'note', sec(40, 0)), msg('b', 'd', 'question', sec(40, 5)), msg('d', 'b', 'revision', sec(40, 10))];
+      const [link] = geometry(burst).links;
+      expect(link).toMatchObject({ count: 3, ids: burst.map((e) => e.id), kind: 'question', both: true, firstTs: sec(40, 0), lastTs: sec(40, 10) });
+      expect(geometry(burst, Date.parse(sec(40, 12))).links[0]!.live).toBe(true);
+      expect(geometry([msg('d', 'b', 'note', at(40)), msg('d', 'b', 'note', at(45))]).links).toHaveLength(2);
+    });
+  });
 });
+

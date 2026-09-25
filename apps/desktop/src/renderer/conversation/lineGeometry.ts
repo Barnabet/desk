@@ -1,4 +1,4 @@
-import type { Lane, LaneMark, Station, ThreadView, TimelineState } from '@desk/client';
+import type { Lane, LaneMark, MessagesState, Station, ThreadView, TimelineState } from '@desk/client';
 import type { AgentStatus } from '@desk/protocol';
 
 export const LANE_COLOR: Record<AgentStatus, string> = {
@@ -26,14 +26,47 @@ const PAD_L = 16;
 const PAD_R = 50;
 /** Space kept between a finished lane's rejoin and the next lane forking into its row. */
 const ROW_GAP = 12;
+/** Messages between the same two agents closer than this (in px) share one link. */
+const MERGE_PX = 10;
+/** A link this fresh shows the message travelling. */
+const LIVE_MS = 8_000;
+/** Agent messages the diagram draws as links; the rest it already shows (start is the fork, completed a rejoin, stalled and approval marks) or never shows (reminder). */
+const LINKED = new Set(['note', 'revision', 'update', 'question', 'blocker', 'answer']);
 const IN_FLIGHT = new Set<AgentStatus>(['running', 'waiting', 'queued']);
 const TERMINAL = new Set<AgentStatus>(['done', 'cancelled', 'failed']);
+
+/**
+ * A message between two agents (or a burst of them) drawn from the sender's line to the recipient's at the send time:
+ * Desk's end on the trunk, a thread's on its lane.
+ */
+export type MessageLink = {
+  /** The messages, oldest first; the first one's sender and recipient orient the link. */
+  ids: number[];
+  from: string;
+  to: string;
+  /** The strongest kind in it: a question, else an answer, else a note (notes, revisions, updates, blockers). */
+  kind: 'question' | 'answer' | 'note';
+  /** Messages went both ways. */
+  both: boolean;
+  x: number;
+  y1: number;
+  y2: number;
+  count: number;
+  firstTs: string;
+  lastTs: string;
+  /** The latest message's text. */
+  text: string;
+  /** The latest message was sent moments ago. */
+  live: boolean;
+};
 
 export type LaneGeometry = {
   lane: Lane;
   thread: ThreadView | undefined;
   row: number;
   y: number;
+  /** Where the lane runs straight after its fork curve. */
+  start: number;
   color: string;
   forkColor: string;
   rejoinColor: string;
@@ -70,6 +103,8 @@ export type LineGeometry = {
   lanes: LaneGeometry[];
   /** One entry per row, top to bottom: the row's latest lane, which the label column names. */
   rows: LaneGeometry[];
+  /** Messages between agents, in time order. */
+  links: MessageLink[];
 };
 
 /**
@@ -85,6 +120,8 @@ export function lineGeometry(o: {
   showArchived?: boolean;
   /** Threads with an answer run in progress (the message fold's `answering`): a finished one gets a stub. */
   answering?: ReadonlySet<string>;
+  /** The session's message fold: messages between agents become links. */
+  messages?: MessagesState;
 }): LineGeometry {
   const viewportLeft = LABEL_W;
   const viewportWidth = Math.max(260, o.width - LABEL_W - LEGEND_W - 20);
@@ -160,6 +197,7 @@ export function lineGeometry(o: {
       thread: byId.get(lane.threadId),
       row,
       y,
+      start: laneStart,
       color: LANE_COLOR[lane.status],
       forkColor: finalColor ?? segments[0]?.color ?? LANE_COLOR[lane.status],
       rejoinColor: finalColor ?? LANE_COLOR.done,
@@ -188,6 +226,33 @@ export function lineGeometry(o: {
     return { ...s, x: sx, showLabel };
   });
 
+  const yOf = new Map<string, number>([[o.timeline.deskId, TRUNK_Y], ...lanes.map((l): [string, number] => [l.lane.threadId, l.y])]);
+  /** Where each thread's lane begins after its fork: a message sent as it forks lands there, not in the curve. */
+  const startOf = new Map(lanes.map((l): [string, number] => [l.lane.threadId, l.start]));
+  const kindRank = { note: 0, answer: 1, question: 2 } as const;
+  const links: MessageLink[] = [];
+  const lastOfPair = new Map<string, MessageLink>();
+  const sent = (o.messages?.messages ?? []).filter((m) => LINKED.has(m.kind) && yOf.has(m.from) && yOf.has(m.to) && m.from !== m.to);
+  for (const m of [...sent].sort((p, q) => Date.parse(p.ts) - Date.parse(q.ts) || p.id - q.id)) {
+    const mx = Math.min(nowX, Math.max(x0, x(m.ts), startOf.get(m.from) ?? x0, startOf.get(m.to) ?? x0));
+    const kind = m.kind === 'question' || m.kind === 'answer' ? m.kind : 'note';
+    const pairKey = [m.from, m.to].sort().join(' ');
+    const prev = lastOfPair.get(pairKey);
+    if (prev && mx - prev.x <= MERGE_PX) {
+      prev.ids.push(m.id);
+      prev.count++;
+      prev.both ||= m.from !== prev.from;
+      if (kindRank[kind] > kindRank[prev.kind]) prev.kind = kind;
+      prev.lastTs = m.ts;
+      prev.text = m.text;
+      prev.live = o.now - Date.parse(m.ts) < LIVE_MS;
+      continue;
+    }
+    const link: MessageLink = { ids: [m.id], from: m.from, to: m.to, kind, both: false, x: mx, y1: yOf.get(m.from)!, y2: yOf.get(m.to)!, count: 1, firstTs: m.ts, lastTs: m.ts, text: m.text, live: o.now - Date.parse(m.ts) < LIVE_MS };
+    links.push(link);
+    lastOfPair.set(pairKey, link);
+  }
+
   const height = Math.max(120, TRUNK_Y + FIRST_LANE + Math.max(0, rows.length - 1) * LANE_GAP + 34);
   const firstFork = Math.min(...lanes.map((l) => Number(/^M(-?[\d.]+)/.exec(l.fork)?.[1] ?? Infinity)));
   return {
@@ -207,5 +272,6 @@ export function lineGeometry(o: {
     stations,
     lanes,
     rows,
+    links,
   };
 }

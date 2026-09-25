@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
+import { agentTitle, messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
+import { clip } from '@desk/protocol';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { ago, clock, duration } from '../format';
 import { href } from '../router';
 import { answeringLabel, waitHop, waitLabel } from '../waits';
-import type { LaneGeometry, LineGeometry } from './lineGeometry';
+import type { LaneGeometry, LineGeometry, MessageLink } from './lineGeometry';
 
 type StationG = LineGeometry['stations'][number];
 
@@ -32,6 +33,20 @@ function laneStatus(l: LaneGeometry, reviewRounds: number, wait: string | null, 
 
 const shortModel = (m: string) => m.replace(/^claude-/, '');
 
+const LINK_COLOR: Record<MessageLink['kind'], string> = { question: 'var(--wait)', answer: 'var(--wait)', note: 'var(--text-min)' };
+
+/** A link's accessible name and tooltip: one message says who wrote what to whom; a burst says how many, between whom, when. */
+function linkText(m: MessagesState, k: MessageLink): { name: string; title: string } {
+  const a = agentTitle(m, k.from);
+  const b = agentTitle(m, k.to);
+  if (k.count === 1) {
+    const kind = messageById(m, k.ids[0]!)?.kind ?? k.kind;
+    return { name: `${a} → ${b}, ${kind}, ${clock(k.firstTs)}`, title: `${a} → ${b} · ${kind} · ${clock(k.firstTs)}: ${clip(k.text, 160)}` };
+  }
+  const when = clock(k.firstTs) === clock(k.lastTs) ? clock(k.firstTs) : `${clock(k.firstTs)}–${clock(k.lastTs)}`;
+  return { name: `${k.count} messages between ${a} and ${b}, ${when}`, title: `${k.count} messages between ${a} and ${b} · ${when} · latest: ${clip(k.text, 120)}` };
+}
+
 /**
  * The transit diagram: Desk's trunk with stations, thread lanes forking and rejoining, trains at "now".
  * The lanes scroll sideways (older history to the left) and follow "now" unless the user has scrolled back;
@@ -56,8 +71,8 @@ export function LineDiagram(o: {
   const scroller = useRef<HTMLDivElement>(null);
   /** Whether the view follows "now" (the user hasn't scrolled back into history). */
   const pinned = useRef(true);
-  /** The counterpart of the question mark under the pointer or focus: its label lights up. */
-  const [lit, setLit] = useState<string | null>(null);
+  /** The agents of the question mark or message link under the pointer or focus: their labels light up. */
+  const [lit, setLit] = useState<readonly string[]>([]);
   const hasQuestions = g.lanes.some((l) => l.marks.some((m) => m.kind === 'question'));
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -101,6 +116,20 @@ export function LineDiagram(o: {
               </g>
             ))}
             <path d={`M${g.trunkStart - 6} ${g.trunkY} H${g.nowX}`} stroke="var(--ink)" strokeWidth={6} strokeLinecap="round" />
+            {g.links.map((k) => {
+              // A message crosses the lanes between its two ends over a halo, and lands on a dot; a burst both ways has two.
+              // Notes stay light so the lanes read first; questions and answers are drawn full strength.
+              const dir = Math.sign(k.y2 - k.y1);
+              const color = LINK_COLOR[k.kind];
+              return (
+                <g key={`k${k.ids[0]}`} opacity={k.kind === 'note' ? 0.55 : 1}>
+                  <path d={`M${k.x} ${k.y1 + dir * 8} V${k.y2 - dir * 8}`} stroke="var(--ground)" strokeWidth={6} />
+                  <path d={`M${k.x} ${k.y1} V${k.y2}`} stroke={color} strokeWidth={k.kind === 'note' ? 1.5 : 2} strokeLinecap="round" strokeDasharray={k.kind === 'answer' ? '3 3' : undefined} />
+                  <circle cx={k.x} cy={k.y2} r={4} fill={color} stroke="var(--ground)" strokeWidth={1.5} />
+                  <circle cx={k.x} cy={k.y1} r={k.both ? 4 : 2.5} fill={color} stroke={k.both ? 'var(--ground)' : undefined} strokeWidth={k.both ? 1.5 : undefined} />
+                </g>
+              );
+            })}
           </svg>
 
           {g.ticks.map((t) => (
@@ -151,6 +180,30 @@ export function LineDiagram(o: {
               )),
           )}
 
+          {g.links.map((k) => {
+            const t = linkText(o.messages, k);
+            const pair = [k.from, k.to];
+            return (
+              <button
+                key={`link-${k.ids[0]}`}
+                type="button"
+                className={`line-link line-link-${k.kind}${k.live ? ' live' : ''}`}
+                style={{ left: k.x, top: Math.min(k.y1, k.y2), height: Math.abs(k.y2 - k.y1) }}
+                aria-label={t.name}
+                title={t.title}
+                onClick={() => o.onPair(k.from, k.to)}
+                onMouseEnter={() => setLit(pair)}
+                onMouseLeave={() => setLit([])}
+                onFocus={() => setLit(pair)}
+                onBlur={() => setLit([])}
+              >
+                {/* A round trip already shows as a dot at each end; a longer burst says how long. */}
+                {k.count > 2 ? <span className="line-link-count">{k.count}</span> : null}
+                {k.live ? <span className="line-link-pulse" aria-hidden="true" style={{ top: k.y1 < k.y2 ? 0 : '100%', ['--dy' as string]: `${k.y2 - k.y1}px` }} /> : null}
+              </button>
+            );
+          })}
+
           {g.lanes.flatMap((l) =>
             l.marks
               .filter((m) => m.kind === 'question')
@@ -167,10 +220,10 @@ export function LineDiagram(o: {
                     aria-label={`${l.lane.title} asked ${m.label}, ${clock(m.ts)}`}
                     title={`${l.lane.title} asked ${m.label} · ${clock(m.ts)} · ${state}`}
                     onClick={() => to && o.onPair(l.lane.threadId, to)}
-                    onMouseEnter={() => setLit(to ?? null)}
-                    onMouseLeave={() => setLit(null)}
-                    onFocus={() => setLit(to ?? null)}
-                    onBlur={() => setLit(null)}
+                    onMouseEnter={() => setLit(to ? [to] : [])}
+                    onMouseLeave={() => setLit([])}
+                    onFocus={() => setLit(to ? [to] : [])}
+                    onBlur={() => setLit([])}
                   />
                 );
               }),
@@ -235,7 +288,7 @@ export function LineDiagram(o: {
             l.inlineLabel ? (
               <a
                 key={`title-${l.lane.threadId}`}
-                className={`line-lane-title${lit === l.lane.threadId ? ' lit' : ''}`}
+                className={`line-lane-title${lit.includes(l.lane.threadId) ? ' lit' : ''}`}
                 style={{ left: l.inlineLabel.x, top: l.y - 20, maxWidth: l.inlineLabel.width }}
                 href={threadHref(l.lane.threadId)}
               >
@@ -253,7 +306,7 @@ export function LineDiagram(o: {
         </div>
       </div>
 
-      <div className={`line-label${lit !== null && lit === desk?.id ? ' lit' : ''}`} style={{ top: g.trunkY - 15 }}>
+      <div className={`line-label${desk && lit.includes(desk.id) ? ' lit' : ''}`} style={{ top: g.trunkY - 15 }}>
         <span className="line-label-title">
           <span className="line-swatch line-swatch-desk" />
           Desk
@@ -272,7 +325,7 @@ export function LineDiagram(o: {
         // An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3).
         const answering = answeringLabel(o.messages, id);
         return (
-          <a key={id} className={`line-label${lit === id ? ' lit' : ''}`} style={{ top: l.y - 15 }} href={threadHref(id)}>
+          <a key={id} className={`line-label${lit.includes(id) ? ' lit' : ''}`} style={{ top: l.y - 15 }} href={threadHref(id)}>
             <span className="line-label-title">
               <span className="line-swatch" style={{ background: l.color }} />
               {l.lane.title}
@@ -301,6 +354,15 @@ export function LineDiagram(o: {
           <span>
             <span className="line-legend-q" />
             question
+          </span>
+        ) : null}
+        {g.links.length ? (
+          <span>
+            <svg width="18" height="14" viewBox="0 0 18 14">
+              <path d="M9 1.5 V10" stroke="var(--text-min)" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="9" cy="10.5" r="3" fill="var(--text-min)" />
+            </svg>
+            message
           </span>
         ) : null}
         <span>
