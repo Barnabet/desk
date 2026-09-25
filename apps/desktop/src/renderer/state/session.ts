@@ -3,14 +3,17 @@ import {
   applyChatDelta,
   applyTranscriptDelta,
   emptyChat,
+  emptyMessages,
   emptyTimeline,
   emptyTranscript,
+  foldMessages,
   projectFromOverview,
   reduceChat,
   reduceProject,
   reduceTimeline,
   reduceTranscript,
   type ChatState,
+  type MessagesState,
   type ProjectState,
   type TimelineState,
   type TranscriptState,
@@ -25,13 +28,28 @@ export type SessionState = {
   project: ProjectState | null;
   chat: ChatState;
   timeline: TimelineState;
+  /**
+   * The project's messages, folded over the full backfill like chat and timeline: the agent directory (archived threads
+   * included), question states and answer runs. "Answering" and "waiting on" come from here, never from the overview,
+   * so they survive reloads (design spec §1.4).
+   */
+  messages: MessagesState;
   /** The project's full event log, in id order. */
   events: StoredEvent[];
   /** Live streamed text per agent (ephemeral), until its assistant.message lands. */
   streams: Record<string, { runId: string; text: string }>;
 };
 
-const initial = (): SessionState => ({ status: 'loading', error: null, project: null, chat: emptyChat(''), timeline: emptyTimeline(''), events: [], streams: {} });
+const initial = (): SessionState => ({
+  status: 'loading',
+  error: null,
+  project: null,
+  chat: emptyChat(''),
+  timeline: emptyTimeline(''),
+  messages: emptyMessages(),
+  events: [],
+  streams: {},
+});
 
 let releaseDelayMs = 30_000;
 /** How long a session outlives its last viewer (switching tabs keeps it warm). */
@@ -48,7 +66,7 @@ class ProjectSession {
   private started = false;
   /** Set once the backfill has arrived: until then events only queue, so the history renders once, not event by event. */
   private synced = false;
-  private base: Pick<SessionState, 'project' | 'chat' | 'timeline'> | null = null;
+  private base: Pick<SessionState, 'project' | 'chat' | 'timeline' | 'messages'> | null = null;
 
   constructor(
     readonly projectId: string,
@@ -76,7 +94,7 @@ class ProjectSession {
     try {
       const overview = await call('projects.get', { id: this.projectId });
       const deskId = overview.desk?.id ?? '';
-      this.base = { project: projectFromOverview(overview), chat: emptyChat(deskId), timeline: emptyTimeline(deskId) };
+      this.base = { project: projectFromOverview(overview), chat: emptyChat(deskId), timeline: emptyTimeline(deskId), messages: emptyMessages() };
       await call('broker.watch', { projectId: this.projectId, afterSeq: 0 });
       // The backfill (pushed before watch resolves) and the overview become visible in a single update.
       const base = this.base;
@@ -129,7 +147,7 @@ class ProjectSession {
         streams = rest;
       }
     }
-    return fresh.length ? { ...s, project, chat, timeline, streams, events: s.events.concat(fresh) } : s;
+    return fresh.length ? { ...s, project, chat, timeline, streams, messages: foldMessages(fresh, s.messages), events: s.events.concat(fresh) } : s;
   }
 
   onDelta(e: EphemeralEvent): void {

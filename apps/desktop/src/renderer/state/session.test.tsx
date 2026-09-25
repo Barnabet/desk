@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ev } from '@desk/client/testing';
-import type { ProjectOverview } from '@desk/client';
+import { agentTitle, answeringOf, waitingOn, type ProjectOverview } from '@desk/client';
 import { installBridge } from '../test/bridge';
 import { resetSessions, setReleaseDelay, startSessionRouting, useSession, useTranscript } from './session';
 
@@ -70,5 +70,42 @@ describe('project session', () => {
     startSessionRouting();
     render(<Probe id="x" agent="t" />);
     await waitFor(() => expect(screen.getByTestId('probe').textContent?.startsWith('missing|')).toBe(true));
+  });
+});
+
+function Waits({ id }: { id: string }) {
+  const s = useSession(id);
+  const run = answeringOf(s.messages, 'f');
+  const waits = waitingOn(s.messages, 'a', []).map((w) => `${agentTitle(s.messages, w.agentId)} since ${w.since}`);
+  const threads = s.project?.threads.map((t) => `${t.id}:${t.status}`).join(',') ?? '-';
+  return <p data-testid="waits">{[s.status, threads, run ? `answering ${run.asker} #${run.question}` : 'not answering', waits.join(',') || 'waiting on nothing'].join('|')}</p>;
+}
+
+describe("the session's message fold", () => {
+  it('shows answering and waiting-on from the backfill alone, with the overview past every event', async () => {
+    const at = (id: number) => new Date(Date.UTC(2026, 8, 24, 10, 0, id)).toISOString();
+    const thread = (id: string, title: string, status: 'waiting' | 'done') => ({ ...overview().desk!, id, role: 'thread' as const, title, status, parent_id: 'd' });
+    const events = [
+      ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' }),
+      ev(2, 'agent.created', { role: 'desk', model: 'm', title: 'Desk', brief: null, workspace_path: '/w', parent_id: null }, { agent: 'd' }),
+      ev(3, 'agent.created', { role: 'thread', model: 'm', title: 'Auth API', brief: 'b', workspace_path: '/w/a', parent_id: 'd' }, { agent: 'a' }),
+      ev(4, 'agent.created', { role: 'thread', model: 'm', title: 'Frontend', brief: 'b', workspace_path: '/w/f', parent_id: 'd' }, { agent: 'f' }),
+      ev(5, 'agent.status_changed', { status: 'done' }, { agent: 'f' }),
+      ev(6, 'message.agent', { from_agent_id: 'a', from_label: 'thread "Auth API" (a)', kind: 'question', text: 'Which token format?', tracked: true }, { agent: 'f' }),
+      ev(7, 'agent.status_changed', { status: 'waiting', reason: 'Waiting on "Frontend"' }, { agent: 'a' }),
+      ev(8, 'run.started', { run_id: 'r1', model: 'm', answering: 6 }, { agent: 'f' }),
+    ];
+    const bridge = installBridge({
+      // A reload: the overview already includes every event (last_seq 8), so reduceProject ignores the whole backfill.
+      'projects.get': () => ({ ...overview(), threads: [thread('a', 'Auth API', 'waiting'), thread('f', 'Frontend', 'done')], last_seq: 8 }),
+      'broker.watch': () => {
+        for (const e of events) bridge.emit('desk:event', e);
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    startSessionRouting();
+    render(<Waits id="p" />);
+    await waitFor(() => expect(screen.getByTestId('waits').textContent).toBe(`ready|a:waiting,f:done|answering a #6|Frontend since ${at(6)}`));
   });
 });
