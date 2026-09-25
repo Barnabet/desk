@@ -8,7 +8,8 @@ import { getAgent, getProject, lastEvent, type AgentRow, type ProjectRow } from 
 import { prepareToolCall, runPreparedTool, toToolSpecs } from '../tools/registry';
 import type { PolicyDecision } from '../policy/evaluate';
 import type { Tool, ToolContext, ToolResult } from '../tools/types';
-import { drainInbox } from './inbox';
+import { WHY } from './answer';
+import { drainEvent, drainInbox } from './inbox';
 import { chooseSplit, compactionPrompt, DEFAULT_KEEP_MESSAGES, shouldCompact } from './compaction';
 import { buildCurrentConversation, imagesInWindow, occurrenceOf, pixelGroups, showImages, withholdMore, type ConversationImage, type Withheld } from './transcript';
 
@@ -40,6 +41,22 @@ export type RunDeps = {
     /** Bytes of images a request to the model may carry, together; lowered after the endpoint refuses a request as too large. */
     maxBytes?(model: string): number | undefined;
     lowerMaxBytes?(model: string, bytes: number): void;
+  };
+  /**
+   * Answer mode (design spec §4): the run only answers `question` from `asker` (an agent id, or 'user'). It never
+   * changes the agent's status. Its start drains the inbox up to `upTo` in the same append as `run.started`, later
+   * steps do not drain, and every ending appends `ending(…)` together with `run.finished`.
+   */
+  answer?: {
+    question: number;
+    asker: string;
+    upTo: number;
+    /**
+     * The events that close the question, appended with `run.finished`: the answer for the reply `text`, or with
+     * `auto` the runtime's closure `(<title> <text>.)`. None for the user's question, or once the question has an
+     * answer.
+     */
+    ending(text: string, auto?: boolean): EventInput[];
   };
 };
 
@@ -103,7 +120,13 @@ function nextImageTrial(err: ModelError, built: Built, trial: ImageTrial | undef
 /** Budget used to render a compaction request when the model's window is unknown. */
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
-export type RunOutcome = { reason: RunFinishReason; status: AgentStatus };
+export type RunOutcome = {
+  reason: RunFinishReason;
+  /** The agent's status once the run ended (an answer run leaves it unchanged). */
+  status: AgentStatus;
+  /** An answer run's text reply. */
+  text?: string;
+};
 
 /** Abort reason used when the daemon stops: the run ends resumable (agent left `queued`) instead of cancelled. */
 export const SHUTDOWN_REASON = 'daemon_shutdown';
@@ -121,21 +144,53 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   /** Read per call: settings can change during a run, and a fallback model may take different levels. */
   const effortFor = (model: string) => deps.reasoningEffort?.(getAgent(store.db, agentId) ?? agent, getProject(store.db, agent.project_id) ?? project, model);
   const startEffort = effortFor(agent.model);
-  store.append([
-    { ...base, type: 'run.started', payload: { run_id: runId, model: agent.model, ...(startEffort ? { reasoning_effort: startEffort } : {}) } },
-    { ...base, type: 'agent.status_changed', payload: { status: 'running' } },
-  ]);
+  /** Answer mode (design spec §4): this run only answers one question. */
+  const answering = deps.answer;
+  const started: EventInput = {
+    ...base,
+    type: 'run.started',
+    payload: {
+      run_id: runId,
+      model: agent.model,
+      ...(startEffort ? { reasoning_effort: startEffort } : {}),
+      ...(answering ? { answering: answering.question } : {}),
+    },
+  };
+  // An answer run starts with its only drain, in one append and before any early exit, so its question is read by this
+  // run and no other; it never shows as running (§4.3). `drainEvent` is null only for an unknown agent, and this one
+  // was loaded above.
+  const opening: EventInput = answering
+    ? drainEvent(store, agentId, runId, answering.upTo)!
+    : { ...base, type: 'agent.status_changed', payload: { status: 'running' } };
+  store.append([started, opening]);
 
-  const finish = (reason: RunFinishReason, status: AgentStatus, detail?: string): RunOutcome => {
-    store.append([
-      { ...base, type: 'run.finished', payload: { run_id: runId, reason, ...(detail ? { detail } : {}) } },
-      { ...base, type: 'agent.status_changed', payload: { status, ...(detail ? { reason: detail } : {}) } },
-    ]);
-    return { reason, status };
+  /**
+   * Ends the run: `run.finished` and the agent's new status. An answer run keeps its status: `end` (its answer or
+   * closure) goes with `run.finished` instead, after `before` (its text reply), all in one append (§4.5, §4.6).
+   */
+  const finish = (reason: RunFinishReason, status: AgentStatus, detail?: string, end: EventInput[] = [], before: EventInput[] = []): RunOutcome => {
+    const events: EventInput[] = [...before, { ...base, type: 'run.finished', payload: { run_id: runId, reason, ...(detail ? { detail } : {}) } }];
+    if (answering) events.push(...end);
+    else events.push({ ...base, type: 'agent.status_changed', payload: { status, ...(detail ? { reason: detail } : {}) } });
+    store.append(events);
+    return { reason, status: answering ? (getAgent(store.db, agentId)?.status ?? agent.status) : status };
   };
 
+  /** An answer run's closure `(<title> <why>.)`: none outside answer mode, for the user's question, or once answered. */
+  const closing = (why: string): EventInput[] => answering?.ending(why, true) ?? [];
+
+  /** Whether a message tool already recorded the answer to an agent's question: the message path (§4.5). */
+  const answered = (): boolean =>
+    answering !== undefined &&
+    answering.asker !== 'user' &&
+    store
+      .list({ agentId: answering.asker, after: answering.question, types: ['message.agent'] })
+      .some((e) => e.type === 'message.agent' && e.payload.reply_to === answering.question);
+
   const interrupted = (): RunOutcome =>
-    signal.reason === SHUTDOWN_REASON ? finish('error', 'queued', SHUTDOWN_REASON) : finish('stopped', 'cancelled');
+    signal.reason === SHUTDOWN_REASON
+      ? finish('error', 'queued', SHUTDOWN_REASON, closing(WHY.restart))
+      : finish('stopped', 'cancelled', undefined, closing(WHY.stopped));
   /** The user or Desk stopped this run (a daemon shutdown is not a stop: it keeps the run's yield). */
   const stopped = () => signal.aborted && signal.reason !== SHUTDOWN_REASON;
   /** The result of a call that a stop kept from running or from asking for approval. */
@@ -146,7 +201,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   });
 
   const workspace = agent.workspace_path;
-  if (!workspace) return finish('error', 'failed', 'Agent has no workspace');
+  if (!workspace) return finish('error', 'failed', 'Agent has no workspace', closing(WHY.noWorkspace));
   const specs = toToolSpecs(deps.tools);
   // Snapshot per run: a stable prefix (prompt caching) and no mid-run surprises (e.g. an agent's own fresh
   // artifact appearing as pre-existing context). Changes made by others arrive as messages instead.
@@ -272,7 +327,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   try {
     for (let step = 0; step < deps.maxSteps; step++) {
       if (signal.aborted) return interrupted();
-      drainInbox(store, agentId, runId);
+      // An answer run drained once, at its start: what arrives meanwhile is decided after it (§4.3).
+      if (!answering) drainInbox(store, agentId, runId);
 
       const current = getAgent(store.db, agentId)!;
       if (compactNext && !thresholdCompactionFailed) {
@@ -302,12 +358,18 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       // The call may have switched to the fallback model; attribute usage to the model that answered.
       const model = fallbackModel ?? current.model;
 
-      store.append([
+      const reply: EventInput[] = [
         { ...base, type: 'assistant.message', payload: { run_id: runId, content: result.content, tool_calls: result.toolCalls } },
         recordUsage(model, result.usage),
-      ]);
+      ];
       compactNext = shouldCompact(result.usage.prompt_tokens, windowOf(model) ?? Infinity);
 
+      // An answer run's text reply is its answer: the reply, run.finished and the answer are one append (§4.5).
+      if (answering && result.toolCalls.length === 0 && !stopped()) {
+        const text = result.content ?? '';
+        return { ...finish('no_tool_calls', 'idle', undefined, answering.ending(text), reply), text };
+      }
+      store.append(reply);
       if (result.toolCalls.length === 0) return stopped() ? interrupted() : finish('no_tool_calls', 'idle');
 
       store.append(
@@ -350,6 +412,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         store.append(pending.map(({ tc }) => deniedByStop(tc)));
         return interrupted();
       }
+      // The answer went to the asker as a message and was recorded as the answer: the run ends with nothing more (§4.5).
+      if (answered()) return finish('yielded', 'idle');
       if (pending.length) {
         store.append(
           pending.map(
@@ -373,12 +437,13 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       const results = done.map((d) => d.r);
 
       const yielded = results.find((r) => r.yield)?.yield;
-      if (yielded) return finish('yielded', yielded.status, yielded.reason);
+      // (An answer run cannot yield: its gate denies complete and wait_for_reply. If it did, it would still close.)
+      if (yielded) return finish('yielded', yielded.status, yielded.reason, closing(WHY.unfinished));
     }
-    return finish('max_steps', 'idle', `Reached the limit of ${deps.maxSteps} steps`);
+    return finish('max_steps', 'idle', `Reached the limit of ${deps.maxSteps} steps`, closing(WHY.unfinished));
   } catch (e) {
     const err = classifyModelError(e);
     if (err.kind === 'aborted' || signal.aborted) return interrupted();
-    return finish('error', 'failed', err.message);
+    return finish('error', 'failed', err.message, closing(WHY.error(err.message)));
   }
 }

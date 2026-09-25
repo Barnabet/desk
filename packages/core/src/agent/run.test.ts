@@ -1,11 +1,11 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { call, error, hang, text, tools } from '@desk/fake-model';
-import type { EphemeralEvent } from '@desk/protocol';
+import type { EphemeralEvent, EventInput } from '@desk/protocol';
 import { getAgent } from '../state/queries';
-import { createHarness, newRuntime, noSleep, seedThread, type Harness } from '../testing/harness';
+import { createHarness, FAKE_MODEL, newRuntime, noSleep, seedThread, type Harness } from '../testing/harness';
 import { fileTools } from '../tools/fs';
 import { JobManager } from '../tools/jobs';
 import { buildToolContext } from './context';
@@ -255,5 +255,118 @@ describe('runAgent stopped in the middle of a step', () => {
       ['tool.call', ''],
       ['tool.result', 'denied'],
     ]);
+  });
+});
+
+describe('runAgent in answer mode', () => {
+  /** An `ending` that records what the run ended with (the runtime turns it into the answer or the closure). */
+  function recorder() {
+    const endings: string[] = [];
+    const ending = (text: string, auto?: boolean): EventInput[] => {
+      endings.push(`${auto ? 'closure' : 'answer'}: ${text}`);
+      return [];
+    };
+    return { endings, ending };
+  }
+
+  /** A done thread with the user's question and a later message pending; the run answers the question. */
+  async function pendingQuestion() {
+    const { agentId, projectId, workspace } = await seedThread(h.store, h.dir);
+    await writeFile(join(workspace, 'notes.md'), 'We charge per seat.');
+    h.store.append({ project_id: projectId, agent_id: agentId, type: 'agent.status_changed', payload: { status: 'done' } });
+    const [q] = say(agentId, projectId, 'How do we charge?');
+    const [later] = say(agentId, projectId, 'Also: which currency?');
+    const { endings, ending } = recorder();
+    const answer: NonNullable<RunDeps['answer']> = { question: q!.id, asker: 'user', upTo: q!.id, ending };
+    return { agentId, projectId, q: q!.id, later: later!.id, answer, endings };
+  }
+
+  it('starts with its only drain in one append, keeps the status, and ends with its text in one append', async () => {
+    h = await createHarness({ script: (req) => (req.messages.at(-1)?.role === 'tool' ? text('Per seat.') : tools(call('read_file', { path: 'notes.md' }))) });
+    const { agentId, q, later, answer, endings } = await pendingQuestion();
+    const outcome = await runAgent(deps({ maxSteps: 4, answer }), agentId, new AbortController().signal);
+    expect(outcome).toEqual({ reason: 'no_tool_calls', status: 'done', text: 'Per seat.' });
+    expect(endings).toEqual(['answer: Per seat.']);
+    const run = h.store.list({ agentId, after: later });
+    expect(run.map((e) => e.type)).toEqual([
+      'run.started', 'inbox.drained', 'assistant.message', 'usage', 'tool.call', 'tool.result', 'assistant.message', 'usage', 'run.finished',
+    ]);
+    expect(run[0]!.payload).toMatchObject({ answering: q });
+    expect(run[1]!.payload).toMatchObject({ up_to: q });
+    // The later message stays pending: it is decided after the run.
+    expect(getAgent(h.store.db, agentId)).toMatchObject({ status: 'done', inbox_cursor: q });
+    expect(String(h.fake.requests[0]!.messages.at(-1)?.content)).toMatch(/^How do we charge\?\n\n\[Desk runtime — answer mode\] You were woken only to answer the user's question above\./);
+  });
+
+  it('passes an empty reply to its ending as the text (the runtime closes the question)', async () => {
+    h = await createHarness({ script: [text('')] });
+    const { agentId, answer, endings } = await pendingQuestion();
+    expect(await runAgent(deps({ maxSteps: 4, answer }), agentId, new AbortController().signal)).toEqual({ reason: 'no_tool_calls', status: 'done', text: '' });
+    expect(endings).toEqual(['answer: ']);
+  });
+
+  it.each([
+    { on: 'the step limit', reply: 'read', abort: undefined, reason: 'max_steps', ending: 'closure: did not finish answering. Ask again or use read_thread' },
+    { on: 'a model error', reply: 'error', abort: undefined, reason: 'error', ending: /^closure: could not answer: .*bad key$/ },
+    { on: 'a stop', reply: 'hang', abort: 'stop', reason: 'stopped', ending: 'closure: was stopped before answering' },
+    { on: 'a shutdown', reply: 'hang', abort: SHUTDOWN_REASON, reason: 'error', ending: 'closure: could not answer: Desk was restarting. Ask again if you still need to know' },
+  ])('closes the question on $on, without a status change', async ({ reply, abort, reason, ending }) => {
+    const controller = new AbortController();
+    h = await createHarness({
+      script: () => {
+        if (reply === 'read') return tools(call('read_file', { path: 'notes.md' }));
+        if (reply === 'error') return error(401, 'authentication_error', 'bad key');
+        // The stop lands while the model call is in flight.
+        controller.abort(abort === 'stop' ? undefined : abort);
+        return hang();
+      },
+    });
+    const { agentId, answer, endings } = await pendingQuestion();
+    expect(await runAgent(deps({ maxSteps: 4, answer }), agentId, controller.signal)).toEqual({ reason, status: 'done' });
+    expect(endings).toEqual([typeof ending === 'string' ? ending : expect.stringMatching(ending)]);
+    expect(h.store.list({ agentId, types: ['agent.status_changed'] })).toHaveLength(1);
+    expect(h.store.list({ agentId, types: ['inbox.drained'] })).toHaveLength(1);
+    if (reply === 'read') expect(h.fake.requests).toHaveLength(4);
+  });
+
+  it('closes the question when the workspace is missing', async () => {
+    h = await createHarness();
+    const { projectId } = await seedThread(h.store, h.dir);
+    const agentId = 'no-workspace';
+    h.store.append({
+      project_id: projectId,
+      agent_id: agentId,
+      type: 'agent.created',
+      payload: { role: 'thread', model: FAKE_MODEL.id, title: 'T', brief: 'b', workspace_path: null, parent_id: null },
+    });
+    const [q] = say(agentId, projectId, 'How do we charge?');
+    const { endings, ending } = recorder();
+    const outcome = await runAgent(deps({ maxSteps: 4, answer: { question: q!.id, asker: 'user', upTo: q!.id, ending } }), agentId, new AbortController().signal);
+    expect(outcome.reason).toBe('error');
+    expect(endings).toEqual(['closure: could not answer: its workspace is missing']);
+    expect(types(agentId)).toEqual(['agent.created', 'message.user', 'run.started', 'inbox.drained', 'run.finished']);
+  });
+
+  it("ends as soon as a message tool recorded the answer to an agent's question", async () => {
+    h = await createHarness({ script: () => tools(call('reply', {}, 'c1')) });
+    const { agentId, projectId, q, answer, endings } = await pendingQuestion();
+    const replyTool = defineTool({
+      name: 'reply',
+      description: 'Sends the answer to the asker',
+      input: z.object({}),
+      async execute() {
+        h.store.append({
+          project_id: projectId,
+          agent_id: 'asker',
+          type: 'message.agent',
+          payload: { from_agent_id: agentId, from_label: 'thread "Test thread" (x)', kind: 'answer', text: 'Per seat.', reply_to: q },
+        });
+        return 'Sent.';
+      },
+    });
+    const outcome = await runAgent(deps({ maxSteps: 4, tools: [replyTool], answer: { ...answer, asker: 'asker' } }), agentId, new AbortController().signal);
+    expect(outcome).toEqual({ reason: 'yielded', status: 'done' });
+    expect(endings).toEqual([]);
+    expect(h.fake.requests).toHaveLength(1);
   });
 });
