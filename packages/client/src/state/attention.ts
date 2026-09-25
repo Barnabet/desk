@@ -27,6 +27,8 @@ const ATTENTION_TYPES = new Set<EventType>([
   'project.created',
   'project.archived',
   'tool.call',
+  // A pause (the `wakes_paused` notice) may be the only news: nothing else nearby changes attention (design spec §5.4).
+  'system.notice',
 ]);
 
 const OVERVIEW_TYPES = new Set<EventType>([

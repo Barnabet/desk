@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { DeskClient, type StreamOptions } from '@desk/client';
 import { createHarness, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
-import type { StoredEvent } from '@desk/protocol';
+import { WAKES_PAUSED, type StoredEvent } from '@desk/protocol';
 import { text } from '@desk/fake-model';
 import type { GlobalState } from '../shared/state';
 import { Broker, type BrokerDeps } from './broker';
@@ -79,6 +79,22 @@ describe('Broker', () => {
     stream().onEvent({ ...(q as StoredEvent), id: q!.id + 100, type: 'usage', payload: { run_id: 'r', model: 'm', prompt_tokens: 1, completion_tokens: 1, estimated: false } } as StoredEvent);
     await new Promise((r) => setTimeout(r, 30));
     expect(added).toHaveLength(1);
+  });
+
+  it('refetches attention when a pause notice is the only new event', async () => {
+    const added: string[][] = [];
+    const { runtime, stream, store } = await setup({ onAttentionAdded: (items) => void added.push(items.map((i) => i.kind)) });
+    const p = runtime.createProject({ name: 'Launch', goal: 'g' });
+    await broker!.start();
+    const [notice] = store.append({
+      project_id: p,
+      agent_id: null,
+      type: 'system.notice',
+      payload: { level: 'warning', code: WAKES_PAUSED, message: 'Agents woke each other 60 times in the last hour, so automatic wakes are paused.' },
+    });
+    stream().onEvent(notice as StoredEvent);
+    await until(() => broker!.snapshot().attention.length === 1);
+    expect(added).toEqual([['paused']]);
   });
 
   it('backfills a watched project, then forwards live events once, plus deltas', async () => {

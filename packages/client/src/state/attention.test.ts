@@ -17,4 +17,8 @@ describe('attention helpers', () => {
     expect(affectsOverview(ev(3, 'tool.call', { run_id: 'r', tool_call_id: 'c', name: 'bash', arguments: '{}' }))).toBe(true);
     expect(affectsOverview(ev(4, 'usage', { run_id: 'r', model: 'm', prompt_tokens: 1, completion_tokens: 1, estimated: false }))).toBe(false);
   });
+
+  it('refetches attention on a notice, since a pause may be the only news', () => {
+    expect(affectsAttention(ev(5, 'system.notice', { level: 'warning', code: 'wakes_paused', message: 'Agents woke each other 60 times in the last hour.' }))).toBe(true);
+  });
 });
