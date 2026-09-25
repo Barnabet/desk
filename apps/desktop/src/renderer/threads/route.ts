@@ -112,6 +112,36 @@ export function narrate(entries: TranscriptEntry[], sent: ReadonlyMap<string, nu
 
 export const stopsOf = (rows: NarrativeRow[]): Stop[] => rows.flatMap((r) => (r.kind === 'stop' ? [r.stop] : []));
 
+/** The event id a stop begins at: its first entry's (`e:<id>`, or `tools:<id>` for its first call); a streamed reply has none. */
+function beganAt(s: Stop): number | undefined {
+  for (const e of s.entries) {
+    const id = /^(?:e|tools):(\d+)$/.exec(e.id)?.[1];
+    if (id !== undefined) return Number(id);
+  }
+  return undefined;
+}
+
+/**
+ * The stop a link to message `at` opens (`?at=`, design spec §8 items 2 and 8): the stop that holds it, as an entry or
+ * as the card of a send. A message between this thread and another agent that the transcript shows another way, or not
+ * at all, opens the stop that shows what it came from: an answer the thread wrote without a tool call (an answer run's
+ * reply, or the runtime's closure) opens the answer run for its question; anything else (Desk's revision, written just
+ * after its revision entry, or a runtime notice about the thread) the last stop begun before it. The session applies
+ * events in id order, so once the fold knows the message, every stop begun before it is there.
+ */
+export function stopAt(stops: readonly Stop[], m: MessagesState, threadId: string, at: number): Stop | undefined {
+  const holding = stops.find((x) => x.entries.some((e) => e.id === `e:${at}`) || x.cards.some((c) => c.message === at));
+  if (holding) return holding;
+  const msg = messageById(m, at);
+  if (!msg || (msg.from !== threadId && msg.to !== threadId)) return undefined;
+  const before = stops.filter((x) => (beganAt(x) ?? Infinity) < at);
+  if (msg.kind === 'answer' && msg.from === threadId) {
+    const run = before.findLast((x) => x.entries[0]?.kind === 'answer' && x.entries[0].question === msg.replyTo);
+    if (run) return run;
+  }
+  return before.at(-1);
+}
+
 /** A stop's words on the route and at the top of its transcript entry. `muted`: an answer that did not happen (S6 styles it). */
 export type StopText = { title: string; sub: string; quote?: string; muted?: true };
 

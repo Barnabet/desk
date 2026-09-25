@@ -16,7 +16,7 @@ import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { useTranscript, type SessionState } from '../state/session';
 import { answeringLabel, waitHop, waitLabel } from '../waits';
-import { narrate, sentCalls, stopsOf } from './route';
+import { narrate, sentCalls, stopAt, stopsOf } from './route';
 import { RouteView } from './RouteView';
 import { DiffTab } from './tabs/DiffTab';
 import { FilesTab } from './tabs/FilesTab';
@@ -92,13 +92,13 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   }, [thread.id]);
   useEffect(() => {
     if (at === undefined || openedAt.current === at) return;
-    // The message is on this stream (its entry), or this thread sent it (an outgoing card).
-    const stop = stops.find((x) => x.entries.some((e) => e.id === `e:${at}`) || x.cards.some((c) => c.message === at));
+    // The stop that holds the message (its entry, or the card of a send), or the one that shows what it came from.
+    const stop = stopAt(stops, s.messages, thread.id, at);
     if (!stop) return;
     openedAt.current = at;
     setTab('route');
     setSelected(stop.n);
-  }, [at, stops]);
+  }, [at, stops, s.messages, thread.id]);
 
   const threadEvents = useMemo(() => s.events.filter((e) => e.agent_id === thread.id), [s.events, thread.id]);
   const drafts = useMemo(() => {

@@ -294,6 +294,30 @@ describe('ThreadsScreen', () => {
     expect(screen.getByRole('button', { name: /^Stop 3: Desk: note/ }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('opens a thread at the answer run that wrote its answer to Desk (?at=), a reply sent with no tool call', async () => {
+    const d = { agent: 'd' };
+    setup(
+      [
+        ...base,
+        ...finished,
+        ev(8, 'agent.created', { role: 'desk', model: 'claude-opus-5-5', title: 'Desk', brief: null, workspace_path: '/w/d', parent_id: null }, d),
+        ev(9, 'message.agent', { from_agent_id: 'd', from_label: 'Desk', kind: 'question', text: 'Which currency?', tracked: true }, t),
+        ev(10, 'run.started', { run_id: 'r2', model: 'claude-opus-5-5', answering: 9 }, t),
+        // Desk's note during the run is a stop of its own, after the run's.
+        ev(11, 'message.agent', { from_agent_id: 'd', from_label: 'Desk', kind: 'note', text: 'EUR only.' }, t),
+        ev(12, 'assistant.message', { run_id: 'r2', content: 'Euros.', tool_calls: [] }, t),
+        ev(13, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'answer', text: 'Euros.', reply_to: 9 }, d),
+        ev(14, 'run.finished', { run_id: 'r2', reason: 'no_tool_calls' }, t),
+      ],
+      {},
+      't',
+      13,
+    );
+    const run = await screen.findByRole('button', { name: /^Stop 5: Answered Desk/ });
+    await waitFor(() => expect(run.getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: /^Stop 6: Desk: note/ }).getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('shows "answering" on a done thread, which keeps its status, Archive and Skill actions and gets no Stop', async () => {
     setup([...base, ...finished, ...answeringFrontend(8)]);
     const head = (await screen.findByRole('heading', { name: 'Welcome emails', level: 1 })).closest('.thread-head') as HTMLElement;

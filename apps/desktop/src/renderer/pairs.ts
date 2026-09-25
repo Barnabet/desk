@@ -5,7 +5,8 @@ export type PairEntry = {
   message: MessageView;
   /**
    * Its recipient when that is a thread (the message is on its stream); otherwise, for a message to Desk, the thread
-   * that sent it (its transcript shows the send as a card). Null when neither is a thread.
+   * that sent it (its transcript shows the send as a card, or the stop it came from: see `stopAt`). Null when neither
+   * is a thread.
    */
   shownIn: string | null;
 };

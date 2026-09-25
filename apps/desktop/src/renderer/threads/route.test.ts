@@ -3,7 +3,7 @@ import { emptyTranscript, foldMessages, messageById, reduceTranscript } from '@d
 import { ev } from '@desk/client/testing';
 import type { AgentMessageKind, EventOf, RunFinishReason, StoredEvent } from '@desk/protocol';
 import { clock } from '../format';
-import { cardTitle, inCard, isCard, narrate, outCard, routeLayout, senderDisc, senderName, sentCalls, stopsOf, stopText, type CardView } from './route';
+import { cardTitle, inCard, isCard, narrate, outCard, routeLayout, senderDisc, senderName, sentCalls, stopAt, stopsOf, stopText, type CardView } from './route';
 
 const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
 const a = { agent: 't' };
@@ -322,6 +322,34 @@ describe('messages and answer runs on the route', () => {
         ['c34', 34],
       ]),
     );
+  });
+
+  it('finds the stop a message link opens, also for messages the transcript shows another way or not at all', () => {
+    const events = [
+      ...team(),
+      agentMsg(Q, 't', 'd', 'question', 'Which currency?', { tracked: true }),
+      start(),
+      // Desk's note during the answer run is a stop of its own, after the run's.
+      agentMsg(12, 't', 'd', 'note', 'EUR only.'),
+      said(13, 'Euros.'),
+      // The run's reply is the answer, on Desk's stream with no tool call: the answer run's stop shows it.
+      agentMsg(14, 'd', 't', 'answer', 'Euros.', { reply_to: Q }),
+      end(15, 'no_tool_calls'),
+      // Desk's revision shows as the revision entry written just before it.
+      ev(16, 'agent.revision', { round: 1, feedback: 'Add GBP.' }, t),
+      agentMsg(17, 't', 'd', 'revision', 'Add GBP.', { tool_call_id: 'cr' }),
+      ev(18, 'agent.status_changed', { status: 'running' }, t),
+      call(19, 'c19', 'read_file'),
+      result(20, 'c19', 'read_file'),
+      // A runtime notice about the thread opens the stop it was written after.
+      agentMsg(21, 'd', 't', 'update', 'Reached the step limit without completing.'),
+      // Desk's note to another thread is not this thread's.
+      agentMsg(22, 'f', 'd', 'note', 'Ship it.'),
+    ];
+    const m = foldMessages(events);
+    const stops = stopsOf(narrate(events.reduce(reduceTranscript, emptyTranscript('t')).entries, sentCalls(m, 't')));
+    expect(stops.map((x) => `${x.n}:${x.kind}`)).toEqual(['1:brief', '2:incoming', '3:answer', '4:incoming', '5:revision', '6:work']);
+    expect([Q, 12, 14, 17, 21, 22, 99].map((id) => stopAt(stops, m, 't', id)?.n ?? null)).toEqual([2, 4, 3, 5, 6, null, null]);
   });
 });
 
