@@ -1,14 +1,16 @@
-import { imageLabel, quoteLines, sanitizeLabel, type EventOf, type StoredEvent } from '@desk/protocol';
+import { imageLabel, quoteLines, sanitizeLabel, snippet, type EventOf, type StoredEvent } from '@desk/protocol';
 import type { AgentRow, ApprovalRow, ServiceRow } from '../state/queries';
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+/** Agent text that must stay on one line: tool names and arguments, reasons, file names. */
+const oneLine = (s: string) => s.replace(/[\s\u0085]+/g, ' ').trim();
 
-/** One line per thread for rosters and list_threads. */
+/** One line per thread for rosters and list_threads. The title and the result are agents' words: one quoted line each. */
 export function formatThreadLine(t: AgentRow): string {
-  const parts = [`${t.id} "${t.title ?? 'untitled'}" [${t.status}]`, t.reasoning_effort ? `${t.model} (${t.reasoning_effort} effort)` : t.model];
+  const parts = [`${t.id} ${snippet(t.title ?? 'untitled', 80)} [${t.status}]`, t.reasoning_effort ? `${t.model} (${t.reasoning_effort} effort)` : t.model];
   if (t.git_branch) parts.push(`branch ${t.git_branch}`);
   if (t.review_round) parts.push(`review round ${t.review_round}`);
-  if (t.result_summary) parts.push(`result: ${clip(t.result_summary.replace(/\s+/g, ' '), 160)}`);
+  if (t.result_summary) parts.push(`result: ${snippet(t.result_summary, 160)}`);
   return `- ${parts.join('; ')}`;
 }
 
@@ -30,46 +32,58 @@ export function formatServiceLine(s: ServiceRow, place: string): string {
   return `- ${s.name}: ${state}; ${where}; \`${clip(s.command, 200)}\``;
 }
 
+/** Desk's read_thread summary. The brief, the result and the last message are quoted: they are agents' words. */
 export function formatThreadSummary(t: AgentRow, approvals: ApprovalRow[], lastText: string | null): string {
+  const quoted = (label: string, text: string | null, none: string) => (text ? `${label}:\n${quoteLines(text)}` : `${label}: ${none}`);
   return [
-    `Thread ${t.id} "${t.title ?? 'untitled'}"`,
+    `Thread ${t.id} ${snippet(t.title ?? 'untitled', 80)}`,
     `Status: ${t.status}${t.archived_at ? ' (archived)' : ''}`,
     `Model: ${t.model}${t.reasoning_effort ? ` (reasoning effort ${t.reasoning_effort})` : ''}`,
     t.git_branch ? `Branch: ${t.git_branch} (base ${t.git_base?.slice(0, 10)})` : `Workspace: ${t.workspace_path}`,
     `Review round: ${t.review_round}`,
-    `Brief: ${t.brief ?? ''}`,
-    `Result: ${t.result_summary ?? '(not completed)'}`,
+    quoted('Brief', t.brief, '(none)'),
+    quoted('Result', t.result_summary, '(not completed)'),
     ...(t.result_artifacts?.length ? [`Artifacts: ${t.result_artifacts.join(', ')}`] : []),
     ...(approvals.length ? [`Pending approvals: ${approvals.map((a) => `${a.id} ${a.tool}`).join(', ')}`] : []),
-    `Last message: ${lastText ? clip(lastText, 1500) : '(none)'}`,
+    quoted('Last message', lastText ? clip(lastText, 1500) : null, '(none)'),
   ].join('\n');
 }
 
-/** Human-readable transcript of an agent's events. */
+/** A message as a third party reads it in a transcript: `[message from thread "X" (id) — answer to #12]`. */
+function transcriptTag(p: EventOf<'message.agent'>['payload']): string {
+  const what = p.kind === 'answer' && p.reply_to !== undefined ? `answer to #${p.reply_to}${p.auto ? ', written by the runtime' : ''}` : p.kind;
+  return `[message from ${senderOf(p).label} — ${what}]`;
+}
+
+/**
+ * Human-readable transcript of an agent's events (Desk's read_thread full). Every free text (the user's, the agent's,
+ * other agents', tool output) is quoted and the rest kept on one line, so no text poses as a transcript line (§1.5).
+ */
 export function renderTranscript(events: StoredEvent[]): string {
   const lines: string[] = [];
+  const quoted = (head: string, text: string) => lines.push(`${head}\n${quoteLines(text)}`);
   for (const ev of events) {
     switch (ev.type) {
       case 'message.user':
-        lines.push(`#${ev.id} USER: ${ev.payload.text}`);
+        quoted(`#${ev.id} USER:`, ev.payload.text);
         break;
       case 'message.agent':
-        lines.push(`#${ev.id} [from ${ev.payload.from_label} — ${ev.payload.kind}] ${ev.payload.text}`);
+        quoted(`#${ev.id} ${transcriptTag(ev.payload)}`, ev.payload.text);
         break;
       case 'assistant.message':
-        if (ev.payload.content) lines.push(`#${ev.id} ASSISTANT: ${ev.payload.content}`);
-        for (const tc of ev.payload.tool_calls) lines.push(`#${ev.id} → ${tc.name}(${clip(tc.arguments, 300)})`);
+        if (ev.payload.content) quoted(`#${ev.id} ASSISTANT:`, ev.payload.content);
+        for (const tc of ev.payload.tool_calls) lines.push(`#${ev.id} → ${oneLine(tc.name)}(${clip(oneLine(tc.arguments), 300)})`);
         break;
       case 'tool.result':
-        lines.push(`#${ev.id} ← ${ev.payload.name} [${ev.payload.status}]: ${clip(ev.payload.content, 600)}`);
+        quoted(`#${ev.id} ← ${oneLine(ev.payload.name)} [${ev.payload.status}]:`, clip(ev.payload.content, 600));
         // Desk cannot read thread workspaces, so each image carries the reference view_image takes.
-        for (const image of ev.payload.images ?? []) lines.push(`#${ev.id}   [image: ${imageLabel(image)}, view_image attachment:${image.sha256}]`);
+        for (const image of ev.payload.images ?? []) lines.push(`#${ev.id}   [image: ${oneLine(imageLabel(image))}, view_image attachment:${image.sha256}]`);
         break;
       case 'images.withheld':
-        lines.push(`#${ev.id} (images no longer sent to the model: ${ev.payload.images.map((i) => i.name).join(', ')}; ${clip(ev.payload.reason, 200)})`);
+        lines.push(`#${ev.id} (images no longer sent to the model: ${ev.payload.images.map((i) => oneLine(i.name)).join(', ')}; ${clip(oneLine(ev.payload.reason), 200)})`);
         break;
       case 'agent.status_changed':
-        lines.push(`#${ev.id} (status → ${ev.payload.status}${ev.payload.reason ? `: ${clip(ev.payload.reason, 200)}` : ''})`);
+        lines.push(`#${ev.id} (status → ${ev.payload.status}${ev.payload.reason ? `: ${clip(oneLine(ev.payload.reason), 200)}` : ''})`);
         break;
       default:
         break;

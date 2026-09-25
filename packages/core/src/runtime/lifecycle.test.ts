@@ -33,7 +33,7 @@ describe('thread lifecycle notifications', () => {
     begin(threadId);
     await rt.whenIdle();
     expect(getAgent(h.store.db, threadId)).toMatchObject({ status: 'done', result_summary: 'Found 3 facts', result_artifacts: [] });
-    expect(lastDeskInput()).toBe(`[message #${lastMessageId(desk.id)} from thread "Research" (${threadId}) — completed]\n> Summary: Found 3 facts`);
+    expect(lastDeskInput()).toBe(`[message #${lastMessageId(desk.id)} from thread "Research" (${threadId}) — completed]\n> Summary: "Found 3 facts"`);
     expect(getAgent(h.store.db, desk.id)?.status).toBe('idle');
   });
 
@@ -96,7 +96,7 @@ describe('thread lifecycle notifications', () => {
     const { rt, threadId, begin } = await setup(routed([text('I need the API key location before continuing.')]));
     begin(threadId);
     await rt.whenIdle();
-    expect(lastDeskInput()).toContain('— update]\n> Ended its turn without completing: I need the API key location');
+    expect(lastDeskInput()).toContain('— update]\n> Ended its turn without completing: "I need the API key location');
   });
 
   it('reports stalled threads once per stall', async () => {

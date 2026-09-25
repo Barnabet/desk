@@ -1320,7 +1320,8 @@ export class Runtime {
         send(
           'completed',
           [
-            `Summary: ${agent.result_summary ?? '(none)'}`,
+            // The thread's own words go in as one quoted line each (snippet); the runtime's text stays plain.
+            `Summary: ${agent.result_summary ? snippet(agent.result_summary, 4000) : '(none)'}`,
             ...(artifacts.length ? [`Artifacts: ${artifacts.join(', ')}`] : []),
             ...(drafts.length ? [`Skill drafts to review and install (skill_write from_dir): ${drafts.join(', ')}`] : []),
             ...(unread.length ? [`Unread messages that arrived after it finished: ${unread.join(', ')}`] : []),
@@ -1343,7 +1344,7 @@ export class Runtime {
           pending
             .map(
               (ap) =>
-                `Approval ${ap.id} needed for ${ap.tool}(${ap.arguments}): ${ap.reason}. ${
+                `Approval ${ap.id} needed for ${ap.tool}(${snippet(ap.arguments, 300)}): ${ap.reason}. ${
                   ap.delegate_to_desk ? 'You may resolve it with resolve_approval.' : 'Waiting for the user to decide.'
                 }`,
             )
@@ -1357,7 +1358,7 @@ export class Runtime {
         } else if (fin?.reason === 'no_tool_calls') {
           const msg = lastEvent(this.o.store.db, agent.id, 'assistant.message');
           const content = msg?.type === 'assistant.message' ? msg.payload.content : null;
-          send('update', `Ended its turn without completing: ${content ?? '(no text)'}`);
+          send('update', `Ended its turn without completing: ${content ? snippet(content, 1000) : '(no text)'}`);
         }
         return;
       }

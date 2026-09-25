@@ -198,14 +198,14 @@ describe('wakes in the runtime', () => {
     begin(t);
     await rt.whenIdle();
     expect(status(desk.id)).toBe('cancelled');
-    expect(notices(desk.id, t, 'completed')).toEqual(['Summary: Shipped']);
+    expect(notices(desk.id, t, 'completed')).toEqual(['Summary: "Shipped"']);
     expect(runs(desk.id)).toHaveLength(0);
 
     rt.sendToDesk(projectId, 'What happened?');
     await rt.whenIdle();
     expect(runs(desk.id)).toHaveLength(1);
     const batch = lastText(h.fake.requests.filter(isDesk).at(-1)!);
-    expect(batch).toContain('Summary: Shipped');
+    expect(batch).toContain('> Summary: "Shipped"');
     expect(batch).toContain('What happened?');
   });
 });
@@ -304,7 +304,7 @@ describe('notices to Desk', () => {
     const note = h.store.list({ agentId: t, types: ['message.agent'] }).at(-1)!;
     expect(status(t)).toBe('done');
     expect(runs(t)).toHaveLength(1);
-    expect(notices(desk.id, t, 'completed')).toEqual([`Summary: Draft written\nUnread messages that arrived after it finished: #${note.id}`]);
+    expect(notices(desk.id, t, 'completed')).toEqual([`Summary: "Draft written"\nUnread messages that arrived after it finished: #${note.id}`]);
   });
 
   it('opens the notice after the user reopened a done thread with what the user wrote', async () => {
@@ -315,8 +315,8 @@ describe('notices to Desk', () => {
     rt.sendMessage(t, 'Please add a summary table.');
     await rt.whenIdle();
     expect(notices(desk.id, t, 'completed')).toEqual([
-      'Summary: v1',
-      '(The user wrote to it since its last report: "Please add a summary table.".)\nSummary: v2',
+      'Summary: "v1"',
+      '(The user wrote to it since its last report: "Please add a summary table.".)\nSummary: "v2"',
     ]);
   });
 });

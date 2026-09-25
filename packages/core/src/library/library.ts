@@ -27,5 +27,8 @@ export function uniqueLibraryName(dir: string, name: string): string {
   }
 }
 
-export const formatArtifactLine = (a: ArtifactRow): string =>
-  `- ${a.path} — ${a.title} [${a.kind}] (${a.origin})${a.description ? `: ${a.description}` : ''}`;
+/** One line per library item (system prompts, library_list). Titles and descriptions are agents' words: kept on one line. */
+export const formatArtifactLine = (a: ArtifactRow): string => {
+  const flat = (s: string) => s.replace(/[\s\u0085]+/g, ' ').trim();
+  return `- ${a.path} — ${flat(a.title)} [${a.kind}] (${a.origin})${a.description ? `: ${flat(a.description)}` : ''}`;
+};

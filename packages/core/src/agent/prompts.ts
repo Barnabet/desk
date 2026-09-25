@@ -5,7 +5,7 @@ import { latestWhatsUp } from '../coordination/whatsup';
 import { formatArtifactLine, listArtifacts } from '../library/library';
 import { memoryDigest } from '../memory/memory';
 import type { SkillStore } from '../skills/store';
-import type { SkillScope } from '@desk/protocol';
+import { snippet, type SkillScope } from '@desk/protocol';
 import { listApprovals, listServices, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
 import { formatSkillLine, renderSkill } from '../tools/skills';
 
@@ -187,7 +187,7 @@ export function deskSystemPrompt(ctx: PromptContext): string {
     section(
       'Pending approvals',
       approvals
-        .map((a) => `- ${a.id} ${a.tool}(${a.arguments.slice(0, 200)}) from ${a.agent_id} — ${a.delegate_to_desk ? 'you may resolve it' : 'the user must decide'}`)
+        .map((a) => `- ${a.id} ${a.tool}(${snippet(a.arguments, 200)}) from ${a.agent_id} — ${a.delegate_to_desk ? 'you may resolve it' : 'the user must decide'}`)
         .join('\n'),
     ),
     '',

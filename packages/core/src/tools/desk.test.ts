@@ -127,8 +127,8 @@ describe('approvals, stop and inspection', () => {
     expect(list).toContain(`${waiting} "Waiter" [cancelled]`);
     const summary = String(await readThreadTool.execute({ thread_id: done, mode: 'summary' }, ctx));
     expect(summary).toContain('Status: done');
-    expect(summary).toContain('Brief: Find pricing');
-    expect(summary).toContain('Result: Found pricing');
+    expect(summary).toContain('Brief:\n> Find pricing');
+    expect(summary).toContain('Result:\n> Found pricing');
     const full = String(await readThreadTool.execute({ thread_id: done, mode: 'full' }, ctx));
     expect(full).toContain('→ complete(');
     expect(listThreads(h.store.db, projectId)).toHaveLength(2);
