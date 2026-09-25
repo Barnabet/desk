@@ -136,6 +136,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
 
   const interrupted = (): RunOutcome =>
     signal.reason === SHUTDOWN_REASON ? finish('error', 'queued', SHUTDOWN_REASON) : finish('stopped', 'cancelled');
+  /** The user or Desk stopped this run (a daemon shutdown is not a stop: it keeps the run's yield). */
+  const stopped = () => signal.aborted && signal.reason !== SHUTDOWN_REASON;
 
   const workspace = agent.workspace_path;
   if (!workspace) return finish('error', 'failed', 'Agent has no workspace');
@@ -300,7 +302,7 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       ]);
       compactNext = shouldCompact(result.usage.prompt_tokens, windowOf(model) ?? Infinity);
 
-      if (result.toolCalls.length === 0) return finish('no_tool_calls', 'idle');
+      if (result.toolCalls.length === 0) return stopped() ? interrupted() : finish('no_tool_calls', 'idle');
 
       store.append(
         result.toolCalls.map(
@@ -331,6 +333,20 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         ),
       );
       const pending = result.toolCalls.flatMap((tc, i) => (outcomes[i]!.pending ? [{ tc, d: outcomes[i]!.pending! }] : []));
+      // A stop during the tool phase ends the run cancelled: no approval is requested and no yield is honoured. Calls
+      // that would have asked get a denial, so every call keeps its result.
+      if (stopped()) {
+        store.append(
+          pending.map(
+            ({ tc }): EventInput => ({
+              ...base,
+              type: 'tool.result',
+              payload: { run_id: runId, tool_call_id: tc.id, name: tc.name, status: 'denied', content: 'Denied: the agent was stopped' },
+            }),
+          ),
+        );
+        return interrupted();
+      }
       if (pending.length) {
         store.append(
           pending.map(
