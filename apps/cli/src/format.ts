@@ -68,10 +68,13 @@ export function createRenderer(write: (s: string) => void, opts: RenderOptions):
       case 'message.user':
         line(isDesk ? `\nyou › ${e.payload.text}` : `you → "${title(e.agent_id)}": ${e.payload.text}`);
         return;
-      case 'message.agent':
+      case 'message.agent': {
+        // Threads message each other too: the sender is Desk or the thread the message came from.
+        const from = e.payload.from_agent_id === opts.deskId ? 'Desk' : `"${title(e.payload.from_agent_id)}"`;
         if (isDesk) line(`  ↳ [${e.payload.from_label} — ${e.payload.kind}] ${clip(e.payload.text, 300)}`);
-        else if (opts.verbose) line(`  ↦ Desk → "${title(e.agent_id)}" [${e.payload.kind}] ${clip(e.payload.text, 200)}`);
+        else if (opts.verbose) line(`  ↦ ${from} → "${title(e.agent_id)}" [${e.payload.kind}] ${clip(e.payload.text, 200)}`);
         return;
+      }
       case 'assistant.message':
         if (!isDesk && !opts.verbose) return;
         if (e.payload.content && !streamedRuns.has(e.payload.run_id)) line(`${isDesk ? speaker : `"${title(e.agent_id)}"`} › ${e.payload.content}`);

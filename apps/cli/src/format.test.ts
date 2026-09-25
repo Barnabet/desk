@@ -66,4 +66,15 @@ describe('renderer', () => {
     render(ev('D', { type: 'assistant.message', payload: { run_id: 'r2', content: 'Replayed answer', tool_calls: [] } }));
     expect(out).toContain('desk › Replayed answer');
   });
+
+  it("labels a message between threads with the sender's title", () => {
+    let out = '';
+    const render = createRenderer((s) => (out += s), { deskId: 'D', verbose: true });
+    render(ev('A', { type: 'agent.created', payload: { role: 'thread', model: 'm', title: 'Auth API', brief: 'x', workspace_path: '/a', parent_id: 'D' } }));
+    render(ev('F', { type: 'agent.created', payload: { role: 'thread', model: 'm', title: 'Frontend', brief: 'y', workspace_path: '/f', parent_id: 'D' } }));
+    render(ev('F', { type: 'message.agent', payload: { from_agent_id: 'A', from_label: 'thread "Auth API" (A)', kind: 'question', text: 'Which token format?', tracked: true } }));
+    render(ev('F', { type: 'message.agent', payload: { from_agent_id: 'D', from_label: 'Desk', kind: 'note', text: 'Use EU.' } }));
+    expect(out).toContain('↦ "Auth API" → "Frontend" [question] Which token format?');
+    expect(out).toContain('↦ Desk → "Frontend" [note] Use EU.');
+  });
 });
