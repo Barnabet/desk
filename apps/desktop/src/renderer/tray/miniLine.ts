@@ -15,13 +15,13 @@ export type MiniLane = {
 export type MiniLine = { width: number; height: number; trunkY: number; x0: number; nowX: number; trunk: string; lanes: MiniLane[] };
 
 const COLOR: Record<AgentStatus, [string, string]> = {
-  running: ['#2F5BD3', '#1F45A8'],
-  waiting: ['#A15C00', '#7A4500'],
-  queued: ['#A15C00', '#7A4500'],
-  idle: ['#B9B3A7', '#4A4740'],
-  done: ['#8A857B', '#4A4740'],
-  cancelled: ['#8A857B', '#4A4740'],
-  failed: ['#C4441C', '#C4441C'],
+  running: ['var(--run)', 'var(--run-text)'],
+  waiting: ['var(--wait)', 'var(--wait-text)'],
+  queued: ['var(--wait)', 'var(--wait-text)'],
+  idle: ['var(--muted-soft)', 'var(--text-min)'],
+  done: ['var(--muted)', 'var(--text-min)'],
+  cancelled: ['var(--muted)', 'var(--text-min)'],
+  failed: ['var(--accent)', 'var(--accent)'],
 };
 const RANK: Record<AgentStatus, number> = { waiting: 1, running: 2, queued: 3, failed: 4, idle: 5, done: 6, cancelled: 7 };
 

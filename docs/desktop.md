@@ -37,7 +37,7 @@ The CLI's `desk up --install` uses the same LaunchAgent label, so there is only 
 | **Library** | A grid with a safe preview (Markdown, text, code and images from the daemon). It shows each file's origin, supports drag-and-drop upload, and has Save a copy. |
 | **Memory** | Entries grouped by kind, with search. You can add, correct (with the supersession chain shown) and delete. |
 | **Settings** | About, sources (each with "Agents can write here", on by default), working style (check-ins, autonomy, review rounds, models, reasoning effort, slots), the ordered policy editor with reset, and archive. |
-| **System** | deskd start/restart/stop/repair and the proxy state; the model endpoint; notifications; the data directory and logs; the model registry editor; usage by model and project; and system notices. |
+| **System** | deskd start/restart/stop/repair and the proxy state; the model endpoint; appearance (System, Light or Dark); notifications; the data directory and logs; the model registry editor; usage by model and project; and system notices. |
 | **Menu bar** | A count badge and a popover with a mini line diagram of today. The strips let you approve or deny in place. The popover also shows what's running and has Open Desk. |
 
 Global shortcuts: ⌘K (palette: places, projects, threads, skills, library titles, and memory search across projects), ⌘P (project switcher), and ⌘1 to ⌘4 (Map, Attention, Skills, System).
@@ -56,6 +56,7 @@ renderer (React, sandboxed, no Node)          main process (Node)               
   - `broker.ts`: the only stream subscriber. It fans out per-window watches, resumes from the last sequence and backs off with jitter.
   - `handlers.ts`: one handler per IPC channel.
   - `tray.ts`, `popover.ts`, `notify.ts`, `menu.ts`, and `windows.ts` (the `desk-app://` scheme, CSP, navigation lock).
+  - `theme.ts`: maps the Appearance setting to `nativeTheme.themeSource` and keeps the native window fills in step.
 - **`src/shared/ipc.ts`**: every channel's zod input schema. `handlers.test.ts` checks that every channel has a handler.
 - **`src/preload`**: exposes only `invoke`, `on` and `platform`.
 - **`src/renderer`**
@@ -63,6 +64,7 @@ renderer (React, sandboxed, no Node)          main process (Node)               
     - `session.ts`: each project's event log, folded into chat, timeline, transcripts and streams.
     - `global.ts`: connection, health, overview, attention and system.
   - A hash router, and one folder per place.
+  - `theme/tokens.css`: every color, with a dark value under `prefers-color-scheme: dark`, which follows the Appearance setting. Components use tokens only, including SVG fills and strokes (`var(--run)`); `theme/tokens.test.ts` fails on a color literal anywhere else, or a token without a dark value.
 
 ### Security rules the app keeps
 
@@ -86,14 +88,14 @@ The end-to-end suite (`apps/desktop/e2e`):
 
 | File | Covers |
 |---|---|
-| `smoke.e2e.test.ts` | Onboarding, connecting, the map, and a live tray count |
+| `smoke.e2e.test.ts` | Onboarding, connecting, the map, a live tray count, and switching Appearance between light and dark |
 | `flows.e2e.test.ts` | Brief → threads fork → question → approval in Attention → revision loop → report → reopening the done thread with a message → tray popover |
 | `messaging.e2e.test.ts` | A thread asks a done thread: one "Between threads" digest; the asker's lane mark (answered) and the digest's pair line open the pair sheet, with the answer nested under the question; the sheet's link opens the asker at the stop holding both message cards; "Answered Frontend" on the answerer's route; the user asks the done thread, which answers and stays Done |
 | `knowledge.e2e.test.ts` | Refine and restore a skill, library upload, memory correction, settings and policy, System, ⌘K |
 | `catalog.e2e.test.ts` | Browse the real catalog, review and install a first-party skill (uv stand-in), Ready, panel, map mark, System → Data |
 | `packaged.e2e.test.ts` | The packaged `Desk.app` from a clean data dir. deskd runs as the LaunchAgent would, but no real LaunchAgent is installed. Skipped if there is no build. |
 
-Set `DESK_E2E_SHOTS=<dir>` to save screenshots of each screen for visual review.
+Set `DESK_E2E_SHOTS=<dir>` to save screenshots of each screen for visual review. Add `DESK_E2E_SCHEME=dark` to take them in the dark theme.
 
 Environment switches:
 - `DESK_DATA_DIR`: the daemon data directory.

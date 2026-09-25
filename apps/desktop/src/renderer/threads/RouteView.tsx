@@ -42,9 +42,9 @@ export function RouteView(o: {
       <div className="route-canvas" style={{ height: l.height }}>
         <svg width={l.width} height={l.height} aria-hidden="true" className="route-svg">
           {l.pieces.map((p, i) => (
-            <path key={i} d={p.d} fill="none" stroke={p.live ? '#2F5BD3' : '#1C1B18'} strokeWidth={p.live ? 2.5 : 2} />
+            <path key={i} d={p.d} fill="none" stroke={p.live ? 'var(--run)' : 'var(--ink)'} strokeWidth={p.live ? 2.5 : 2} />
           ))}
-          {l.tailPath ? <path d={l.tailPath} fill="none" stroke="#8A857B" strokeWidth={2} strokeDasharray="4 5" /> : null}
+          {l.tailPath ? <path d={l.tailPath} fill="none" stroke="var(--muted)" strokeWidth={2} strokeDasharray="4 5" /> : null}
         </svg>
         {l.points.map((p) => {
           const t = stopText(p.stop, o.reviewRounds, o.messages);

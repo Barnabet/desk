@@ -45,7 +45,7 @@
   padding: 0 8px;
   border: 1px solid var(--rule);
   border-radius: 7px;
-  background: #fffc;
+  background: var(--glass);
   cursor: pointer;
 }
 .orbit-svg {
@@ -61,7 +61,7 @@
   border: 0;
   border-radius: 30px;
   background: var(--ink);
-  color: #f7f5f0;
+  color: var(--on-ink);
   font-family: var(--font-mono);
   font-size: 11px;
   cursor: pointer;
@@ -102,13 +102,13 @@
   border: 0;
   border-radius: 50%;
   background: var(--ink);
-  color: #f7f5f0;
+  color: var(--on-ink);
   font-family: var(--font-serif);
   font-size: 15px;
   cursor: pointer;
 }
 .orbit-desk-idle {
-  background: #f7f5f0;
+  background: var(--paper);
   color: var(--text-min);
   border: 1.5px solid var(--muted);
 }
@@ -134,7 +134,7 @@
   flex-shrink: 0;
   border-radius: 7px;
   background: var(--run);
-  box-shadow: 0 0 0 4px rgba(47, 91, 211, 0.2);
+  box-shadow: 0 0 0 4px rgba(var(--run-rgb), 0.2);
 }
 .orbit-thread-waiting,
 .orbit-thread-queued {
@@ -142,7 +142,7 @@
 }
 .orbit-thread-waiting .orbit-thread-dot,
 .orbit-thread-queued .orbit-thread-dot {
-  background: #fff;
+  background: var(--card);
   border: 2.5px solid var(--wait);
   box-shadow: none;
 }
@@ -165,7 +165,7 @@
   color: var(--accent);
 }
 .orbit-thread-failed .orbit-thread-dot {
-  background: #fff;
+  background: var(--card);
   border: 2.5px solid var(--accent);
   box-shadow: none;
 }
@@ -185,7 +185,7 @@
   flex-shrink: 0;
   border-radius: 11px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: 0 0 0 4px var(--accent-tint);
   display: flex;
   align-items: center;
@@ -200,8 +200,8 @@
   gap: 1px;
   padding: 6px 10px;
   border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 4px 14px rgba(28, 27, 24, 0.1);
+  background: var(--card);
+  box-shadow: 0 4px 14px rgba(var(--shadow-rgb), 0.1);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -222,7 +222,7 @@
   min-width: 360px;
   padding: 10px 14px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--glass);
   font-size: 12px;
   color: var(--text);
 }
@@ -238,16 +238,16 @@
   border: 1px solid;
 }
 .legend-running {
-  background: #e3e8f5;
-  border-color: #c9d3ec;
+  background: var(--run-pastel);
+  border-color: var(--run-ring);
 }
 .legend-waiting {
-  background: #f3e6cf;
-  border-color: #e6d3af;
+  background: var(--wait-pastel);
+  border-color: var(--wait-ring);
 }
 .legend-idle {
-  background: #e6e1d7;
-  border-color: #d6cfc1;
+  background: var(--idle-pastel);
+  border-color: var(--rule);
 }
 .legend-dot {
   width: 10px;
@@ -258,7 +258,7 @@
   background: var(--run);
 }
 .legend-dot-waiting {
-  background: #fff;
+  background: var(--card);
   border: 2px solid var(--wait);
 }
 .legend-dot-needs {
@@ -276,10 +276,10 @@
   padding: 0 18px;
   border: 1.5px dashed var(--muted);
   border-radius: 21px;
-  background: #f7f5f0;
+  background: var(--paper);
   font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 8px 20px rgba(28, 27, 24, 0.1);
+  box-shadow: 0 8px 20px rgba(var(--shadow-rgb), 0.1);
   cursor: pointer;
 }
 .territory {
@@ -353,8 +353,8 @@
   width: 12px;
   height: 12px;
   border-radius: 6px;
-  background: #fff;
-  border: 2px solid #b9b3a7;
+  background: var(--card);
+  border: 2px solid var(--muted-soft);
 }
 .waypoint-done {
   background: var(--ink);
@@ -388,7 +388,7 @@
 }
 .status-dot-waiting,
 .status-dot-queued {
-  background: #fff;
+  background: var(--card);
   border: 2px solid var(--wait);
 }
 .status-dot-failed {

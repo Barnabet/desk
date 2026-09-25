@@ -24,6 +24,8 @@ beforeAll(async () => {
   app = await electron.launch({
     executablePath: electronPath as unknown as string,
     args: [appDir],
+    // Playwright emulates a light prefers-color-scheme by default; let nativeTheme drive it, as in the real app.
+    colorScheme: null,
     env: { ...process.env, DESK_DATA_DIR: join(dir, 'data'), DESK_USER_DATA: join(dir, 'user'), DESK_E2E: '1' },
   });
 });
@@ -65,5 +67,22 @@ describe('desktop shell', () => {
     expect(csp).toContain("default-src 'self'");
     expect(await page.evaluate(() => typeof (window as unknown as { require?: unknown }).require)).toBe('undefined');
     expect(await page.evaluate(() => Object.keys((window as unknown as { desk: object }).desk).sort())).toEqual(['invoke', 'on', 'platform']);
+  });
+
+  it('switches every window between light and dark from System → Appearance', async () => {
+    const page = await app.firstWindow();
+    const look = () => page.evaluate(() => ({ dark: matchMedia('(prefers-color-scheme: dark)').matches, ground: getComputedStyle(document.body).backgroundColor }));
+    const fill = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.getBackgroundColor()));
+    await page.evaluate(() => (window.location.hash = '#/system'));
+    const appearance = page.getByRole('group', { name: 'Appearance' });
+    await appearance.getByRole('button', { name: 'Dark' }).click();
+    await expect.poll(look).toEqual({ dark: true, ground: 'rgb(23, 22, 19)' });
+    await expect.poll(fill).toContain('#171613');
+    await appearance.getByRole('button', { name: 'Light' }).click();
+    await expect.poll(look).toEqual({ dark: false, ground: 'rgb(239, 234, 224)' });
+    await expect.poll(fill).toContain('#EFEAE0');
+    expect(await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('light');
+    await appearance.getByRole('button', { name: 'System' }).click();
+    await expect.poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('system');
   });
 });

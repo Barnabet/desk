@@ -44,8 +44,8 @@ export function FlightStrip(o: { item: AttentionItem; now: number; selected: boo
           <span className="strip-col strip-wait" aria-hidden="true">
             <span className="strip-label">Waiting</span>
             <svg width="76" height="10" viewBox="0 0 76 10">
-              <rect x="0" y="3" width="76" height="4" rx="2" fill="#E6E0D4" />
-              <path d="M38 1 V9 M75.5 1 V9" stroke="#8A857B" strokeWidth="1" />
+              <rect x="0" y="3" width="76" height="4" rx="2" fill="var(--rule-soft)" />
+              <path d="M38 1 V9 M75.5 1 V9" stroke="var(--muted)" strokeWidth="1" />
               <rect x="0" y="3" width={Math.max(3, 76 * g)} height="4" rx="2" fill={CAP_COLOR[i.kind]} />
             </svg>
             <span className="strip-age-big">{age}</span>

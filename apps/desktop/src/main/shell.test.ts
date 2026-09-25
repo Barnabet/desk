@@ -26,12 +26,15 @@ describe('app settings', () => {
     const dir = mkdtempSync(join(tmpdir(), 'desk-settings-'));
     try {
       const file = join(dir, 'settings.json');
-      expect(new AppSettingsStore(file).get()).toEqual({ notifications: true });
+      expect(new AppSettingsStore(file).get()).toEqual({ notifications: true, appearance: 'system' });
       new AppSettingsStore(file).update({ notifications: false });
-      expect(new AppSettingsStore(file).get()).toEqual({ notifications: false });
-      expect(new AppSettingsStore(file).update({})).toEqual({ notifications: false });
+      expect(new AppSettingsStore(file).get()).toEqual({ notifications: false, appearance: 'system' });
+      expect(new AppSettingsStore(file).update({ appearance: 'dark' })).toEqual({ notifications: false, appearance: 'dark' });
+      expect(new AppSettingsStore(file).update({})).toEqual({ notifications: false, appearance: 'dark' });
+      writeFileSync(file, '{"notifications":false}');
+      expect(new AppSettingsStore(file).get()).toEqual({ notifications: false, appearance: 'system' });
       writeFileSync(file, '{nope');
-      expect(new AppSettingsStore(file).get()).toEqual({ notifications: true });
+      expect(new AppSettingsStore(file).get()).toEqual({ notifications: true, appearance: 'system' });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

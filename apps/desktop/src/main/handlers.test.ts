@@ -51,8 +51,8 @@ async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = fals
       revealLogs: async () => {},
       saveFile: async () => true,
       openMain: (route) => void opened.push(`main:${route ?? ''}`),
-      settings: () => ({ notifications: true }),
-      updateSettings: (p) => ({ notifications: p.notifications ?? true }),
+      settings: () => ({ notifications: true, appearance: 'system' }),
+      updateSettings: (p) => ({ notifications: p.notifications ?? true, appearance: p.appearance ?? 'system' }),
     },
     ...overrides,
   };
@@ -93,6 +93,8 @@ describe('IPC dispatch', () => {
     expect(await dispatch('nope', {}, ctx)).toMatchObject({ ok: false, error: { code: 'unknown_channel' } });
     expect(await dispatch('projects.get', { id: 5 }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
     expect(await dispatch('__proto__', {}, ctx)).toMatchObject({ ok: false, error: { code: 'unknown_channel' } });
+    expect(await dispatch('app.updateSettings', { appearance: 'sepia' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await dispatch('app.updateSettings', { appearance: 'dark' }, ctx)).toMatchObject({ ok: true, value: { appearance: 'dark' } });
   });
 
   it('maps daemon and runtime errors without leaking internals', async () => {

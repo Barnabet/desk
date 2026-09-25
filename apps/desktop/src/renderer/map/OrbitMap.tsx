@@ -33,16 +33,16 @@ export function projectSummaryLine(p: ProjectSummary, attention: readonly Attent
 }
 
 const TONE = {
-  running: { fill: '#E3E8F5', stroke: '#C9D3EC', orbit: '#B7C4E6', text: '#1F45A8' },
-  waiting: { fill: '#F3E6CF', stroke: '#E6D3AF', orbit: '#E0C99E', text: '#7A4500' },
-  idle: { fill: '#E6E1D7', stroke: '#D6CFC1', orbit: '#D6CFC1', text: '#4A4740' },
+  running: { fill: 'var(--run-pastel)', stroke: 'var(--run-ring)', orbit: 'var(--muted-blue)', text: 'var(--run-text)' },
+  waiting: { fill: 'var(--wait-pastel)', stroke: 'var(--wait-ring)', orbit: 'var(--wait-orbit)', text: 'var(--wait-text)' },
+  idle: { fill: 'var(--idle-pastel)', stroke: 'var(--rule)', orbit: 'var(--rule)', text: 'var(--text-min)' },
 } as const;
 
 const SPOKE: Partial<Record<AgentStatus, { stroke: string; width: number; dash?: string }>> = {
-  running: { stroke: '#2F5BD3', width: 2.5 },
-  waiting: { stroke: '#A15C00', width: 2, dash: '4 4' },
-  queued: { stroke: '#A15C00', width: 2, dash: '4 4' },
-  failed: { stroke: '#C4441C', width: 2, dash: '4 4' },
+  running: { stroke: 'var(--run)', width: 2.5 },
+  waiting: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
+  queued: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
+  failed: { stroke: 'var(--accent)', width: 2, dash: '4 4' },
 };
 
 const CALLOUT: Record<AttentionItem['kind'], { label: string; glyph: string }> = {
@@ -85,7 +85,7 @@ export function OrbitMap(o: {
     <>
       <svg className="orbit-svg" width={o.width} height={o.height} aria-hidden="true">
         {o.layout.rings.map((r) => (
-          <circle key={r} cx={o.layout.sun.x} cy={o.layout.sun.y} r={r} fill="none" stroke="#D3CCBE" strokeDasharray="3 6" />
+          <circle key={r} cx={o.layout.sun.x} cy={o.layout.sun.y} r={r} fill="none" stroke="var(--orbit)" strokeDasharray="3 6" />
         ))}
         {o.layout.territories.map((t) => {
           const p = byId.get(t.id)!;
@@ -96,7 +96,7 @@ export function OrbitMap(o: {
               <circle cx={t.x} cy={t.y} r={t.orbit} fill="none" stroke={tone.orbit} strokeDasharray="3 6" />
               {t.threads.map((pos) => {
                 const th = p.threads.find((x) => x.id === pos.id);
-                const s = (th && SPOKE[th.status]) ?? { stroke: '#B7C4E6', width: 1.5, dash: '2 4' };
+                const s = (th && SPOKE[th.status]) ?? { stroke: 'var(--muted-blue)', width: 1.5, dash: '2 4' };
                 return <path key={pos.id} d={`M${t.x} ${t.y} L ${pos.x} ${pos.y}`} stroke={s.stroke} strokeWidth={s.width} strokeDasharray={s.dash} />;
               })}
             </g>

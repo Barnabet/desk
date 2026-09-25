@@ -29,14 +29,14 @@
   background: var(--titlebar);
   border: 1px solid var(--rule);
   border-radius: 12px;
-  box-shadow: inset 0 1px 0 #f2eee6, inset 0 -1px 0 var(--rule);
+  box-shadow: inset 0 1px 0 var(--highlight), inset 0 -1px 0 var(--rule);
 }
 .bay {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   padding: 20px 0;
-  border-bottom: 1px dashed #cfc7b8;
+  border-bottom: 1px dashed var(--rule-strong);
 }
 .bay:last-child {
   border-bottom: 0;
@@ -71,7 +71,7 @@
   padding: 12px 8px;
   border-radius: 8px;
   background: var(--nav);
-  box-shadow: inset 0 2px 3px rgba(28, 27, 24, 0.14), inset 0 -1px 0 #ede8de;
+  box-shadow: inset 0 2px 3px rgba(var(--shadow-rgb), 0.14), inset 0 -1px 0 var(--rule-faint);
 }
 .bay-empty {
   margin: auto 0;
@@ -88,8 +88,8 @@
   padding: 0;
   border: 1px solid var(--rule);
   border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(28, 27, 24, 0.1), 0 2px 6px rgba(28, 27, 24, 0.06);
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.1), 0 2px 6px rgba(var(--shadow-rgb), 0.06);
   overflow: hidden;
   color: var(--ink);
   text-align: left;
@@ -99,7 +99,7 @@
 }
 .strip.selected {
   margin-left: 28px;
-  box-shadow: 0 12px 26px rgba(28, 27, 24, 0.2), 0 2px 4px rgba(28, 27, 24, 0.1);
+  box-shadow: 0 12px 26px rgba(var(--shadow-rgb), 0.2), 0 2px 4px rgba(var(--shadow-rgb), 0.1);
 }
 .strip:focus-visible {
   outline: 2px solid var(--run);
@@ -114,7 +114,7 @@
   justify-content: center;
   gap: 3px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-family: var(--font-mono);
 }
 .strip-question .strip-cap {
@@ -124,7 +124,7 @@
   box-sizing: border-box;
   border: 1.5px solid var(--ink);
   border-radius: 5px 0 0 5px;
-  background: #fff;
+  background: var(--card);
   color: var(--ink);
 }
 .strip-stalled .strip-cap,
@@ -252,7 +252,7 @@
   align-items: center;
   padding: 10px 14px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--glass);
   font-size: 12px;
   color: var(--text);
 }
@@ -269,7 +269,7 @@
   padding: 0 5px;
   border-radius: 3px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -279,7 +279,7 @@
 }
 .code-needs_you {
   border: 1.5px solid var(--ink);
-  background: #fff;
+  background: var(--card);
   color: var(--ink);
 }
 .code-stalled,
@@ -324,7 +324,7 @@
   word-break: break-all;
 }
 .command-prompt {
-  color: #b9b3a7;
+  color: var(--muted-soft);
 }
 .inspector-raw {
   align-self: flex-start;
@@ -347,7 +347,7 @@
   justify-content: center;
   gap: 2px;
   padding: 4px 12px;
-  background: #fff;
+  background: var(--card);
   min-width: 0;
 }
 .fact-label {
@@ -402,9 +402,9 @@
   height: 40px;
   box-sizing: border-box;
   padding: 0 12px;
-  border: 1px solid #cfc9bd;
+  border: 1px solid var(--rule-strong);
   border-radius: 10px;
-  background: #fbfaf7;
+  background: var(--soft);
   font-size: 13px;
 }
 .inspector-actions {
@@ -458,7 +458,7 @@ kbd {
 .rule-chip {
   padding: 2px 7px;
   border-radius: 6px;
-  background: #f4f1ea;
+  background: var(--sunken);
   border: 1px solid var(--rule);
   font-size: 11px;
   line-height: 16px;

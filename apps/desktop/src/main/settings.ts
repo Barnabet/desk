@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { AppSettings, type AppSettingsPatch } from '../shared/ipc';
 
-const DEFAULTS: AppSettings = { notifications: true };
+const DEFAULTS: AppSettings = { notifications: true, appearance: 'system' };
 
 function load(file: string): AppSettings {
   try {

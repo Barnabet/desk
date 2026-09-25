@@ -6,14 +6,14 @@ import { layoutSkillsMap, type MapTone } from './skillsMap';
 import '../map/map.css';
 
 const TERRITORY: Record<MapTone, { fill: string; stroke: string; text: string }> = {
-  running: { fill: '#E3E8F5', stroke: '#C9D3EC', text: '#1F45A8' },
-  waiting: { fill: '#F3E6CF', stroke: '#E6D3AF', text: '#7A4500' },
-  idle: { fill: '#E6E1D7', stroke: '#D6CFC1', text: '#4A4740' },
+  running: { fill: 'var(--run-pastel)', stroke: 'var(--run-ring)', text: 'var(--run-text)' },
+  waiting: { fill: 'var(--wait-pastel)', stroke: 'var(--wait-ring)', text: 'var(--wait-text)' },
+  idle: { fill: 'var(--idle-pastel)', stroke: 'var(--rule)', text: 'var(--text-min)' },
 };
 const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: number }>> = {
-  running: { stroke: '#2F5BD3', width: 2.5 },
-  waiting: { stroke: '#A15C00', width: 2, dash: '4 4' },
-  queued: { stroke: '#A15C00', width: 2, dash: '4 4' },
+  running: { stroke: 'var(--run)', width: 2.5 },
+  waiting: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
+  queued: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
 };
 
 /** Global skills in the middle, project skills inside their project, live threads linked to the skills they use. */
@@ -32,16 +32,16 @@ export function SkillsMapView(o: {
         return (
           <>
             <svg width={width} height={height} aria-hidden="true" className="skills-svg">
-              {l.globalRadius ? <circle cx={l.center.x} cy={l.center.y} r={l.globalRadius} fill="none" stroke="#D3CCBE" strokeDasharray="3 6" /> : null}
+              {l.globalRadius ? <circle cx={l.center.x} cy={l.center.y} r={l.globalRadius} fill="none" stroke="var(--orbit)" strokeDasharray="3 6" /> : null}
               {l.territories.map((t) => (
                 <circle key={t.projectId} cx={t.x} cy={t.y} r={t.r} fill={TERRITORY[t.tone].fill} stroke={TERRITORY[t.tone].stroke} />
               ))}
               {l.shadows.map((s) => (
-                <path key={s.toKey} d={s.d} fill="none" stroke="#A15C00" strokeWidth="1.5" strokeDasharray="5 5" />
+                <path key={s.toKey} d={s.d} fill="none" stroke="var(--wait)" strokeWidth="1.5" strokeDasharray="5 5" />
               ))}
               {l.markers.flatMap((m) =>
                 m.to.map((p, i) => {
-                  const line = LINE[m.status] ?? { stroke: '#8A857B', width: 2 };
+                  const line = LINE[m.status] ?? { stroke: 'var(--muted)', width: 2 };
                   return <path key={`${m.threadId}-${i}`} d={`M${m.x} ${m.y} L ${p.x} ${p.y}`} stroke={line.stroke} strokeWidth={line.width} strokeDasharray={line.dash} />;
                 }),
               )}

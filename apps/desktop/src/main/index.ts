@@ -15,6 +15,7 @@ import { createLog } from './log';
 import { buildAppMenu } from './menu';
 import { attentionRoute, notificationFor } from './notify';
 import { AppSettingsStore } from './settings';
+import { applyAppearance, repaintOnThemeChange } from './theme';
 import { TrayPopover } from './popover';
 import { DeskTray } from './tray';
 import { createMainWindow, hardenSession, isAppUrl, registerAppScheme, serveRenderer } from './windows';
@@ -59,6 +60,8 @@ async function start(): Promise<void> {
 
   let tray: DeskTray | null = null;
   const popover = new TrayPopover({ preload, hideOnBlur: !e2e });
+  applyAppearance(settings.get().appearance);
+  repaintOnThemeChange((w) => popover.is(w));
   const mainWindow = () => BrowserWindow.getAllWindows().find((w) => !popover.is(w) && !w.isDestroyed());
   const openRoute = (route?: string) => {
     popover.hide();
@@ -168,6 +171,7 @@ async function start(): Promise<void> {
         const before = settings.get();
         const next = settings.update(patch);
         if (before.notifications !== next.notifications) broker.updateHello();
+        if (before.appearance !== next.appearance) applyAppearance(next.appearance);
         return next;
       },
     },

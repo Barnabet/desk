@@ -43,9 +43,9 @@
 .filter-chip {
   height: 26px;
   padding: 0 10px;
-  border: 1px solid #cfc9bd;
+  border: 1px solid var(--rule-strong);
   border-radius: 13px;
-  background: #f7f5f0;
+  background: var(--paper);
   color: var(--text);
   font-size: 12px;
   cursor: pointer;
@@ -53,7 +53,7 @@
 .filter-chip[aria-pressed='true'] {
   border-color: var(--ink);
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 .skills-body {
   flex: 1;
@@ -90,7 +90,7 @@
   align-items: center;
   padding: 9px 14px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--glass);
   font-size: 12px;
   color: var(--text);
 }
@@ -110,7 +110,7 @@
 }
 .lg-dot.project {
   border: 2px solid var(--run-text);
-  background: #fff;
+  background: var(--card);
 }
 .lg-dot.shadowed {
   border: 1.5px dashed var(--muted);
@@ -138,7 +138,7 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.14em;
-  color: #6e6a62;
+  color: var(--text-faint);
 }
 .skills-shadow-label {
   position: absolute;
@@ -160,13 +160,13 @@
   border: 0;
   border-radius: 50%;
   background: var(--ink);
-  color: #f7f5f0;
+  color: var(--on-ink);
   cursor: pointer;
   overflow: hidden;
 }
 .skill-node.project {
   border: 2px solid var(--run-text);
-  background: #fff;
+  background: var(--card);
   color: var(--ink);
 }
 .skill-node.shadowed {
@@ -212,7 +212,7 @@
   box-sizing: border-box;
   border-radius: 7px;
   background: var(--run);
-  box-shadow: 0 0 0 4px rgba(47, 91, 211, 0.2);
+  box-shadow: 0 0 0 4px rgba(var(--run-rgb), 0.2);
 }
 .skill-marker.status-waiting,
 .skill-marker.status-queued {
@@ -221,7 +221,7 @@
 .skill-marker.status-waiting .skill-marker-dot,
 .skill-marker.status-queued .skill-marker-dot {
   border: 2.5px solid var(--wait);
-  background: #fff;
+  background: var(--card);
   box-shadow: none;
 }
 .skill-list section {
@@ -249,7 +249,7 @@
   padding: 10px 14px;
   border: 1px solid var(--rule);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   text-align: left;
   font: inherit;
   cursor: pointer;
@@ -289,7 +289,7 @@
 }
 .skill-scope.global {
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 .skill-scope.project {
   border: 1.5px solid var(--run-text);
@@ -318,7 +318,7 @@
   background: var(--wait-pastel);
   font-size: 12.5px;
   line-height: 1.45;
-  color: #5c3400;
+  color: var(--wait-deep);
 }
 .skill-change {
   display: flex;
@@ -326,7 +326,7 @@
   gap: 4px;
   padding: 12px 14px;
   border-radius: 10px;
-  background: #f4f1ea;
+  background: var(--sunken);
 }
 .skill-versions {
   display: flex;
@@ -338,14 +338,14 @@
   height: 30px;
   border: 1px solid var(--rule);
   border-radius: 6px;
-  background: #fff;
+  background: var(--card);
   font-size: 12.5px;
   cursor: pointer;
 }
 .skill-versions button.on {
   border-color: var(--ink);
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 .skill-used {
   list-style: none;
@@ -430,7 +430,7 @@
   gap: 8px;
   padding: 4px 8px;
   border-radius: 6px;
-  background: #fbfaf7;
+  background: var(--soft);
   font-size: 12.5px;
 }
 .skill-files-edit li.removing .mono {
@@ -438,7 +438,7 @@
   color: var(--text-min);
 }
 .skill-files-edit li.adding {
-  background: #e6f2eb;
+  background: var(--add-bg);
 }
 .skill-add-files {
   display: flex;

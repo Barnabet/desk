@@ -67,7 +67,7 @@ export function Composer(o: { projectId: string; draft: string; setDraft(v: stri
       <div className="composer-bar">
         <button type="button" className="icon-btn" aria-label="Attach a file" disabled={uploading > 0} onClick={() => fileRef.current?.click()}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M11.5 6.5L7 11a3 3 0 0 1-4.2-4.2l4.6-4.6a2 2 0 0 1 2.8 2.8L5.6 9.6a1 1 0 0 1-1.4-1.4L8.4 4" fill="none" stroke="#3D3A34" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M11.5 6.5L7 11a3 3 0 0 1-4.2-4.2l4.6-4.6a2 2 0 0 1 2.8 2.8L5.6 9.6a1 1 0 0 1-1.4-1.4L8.4 4" fill="none" stroke="var(--text)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
         <input ref={fileRef} type="file" multiple hidden data-testid="attach-input" onChange={(e) => void attach(e.target.files)} />

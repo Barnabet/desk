@@ -2,13 +2,13 @@ import type { Lane, LaneMark, Station, ThreadView, TimelineState } from '@desk/c
 import type { AgentStatus } from '@desk/protocol';
 
 export const LANE_COLOR: Record<AgentStatus, string> = {
-  running: '#2F5BD3',
-  waiting: '#A15C00',
-  queued: '#A15C00',
-  idle: '#B9B3A7',
-  done: '#8A857B',
-  cancelled: '#8A857B',
-  failed: '#C4441C',
+  running: 'var(--run)',
+  waiting: 'var(--wait)',
+  queued: 'var(--wait)',
+  idle: 'var(--muted-soft)',
+  done: 'var(--muted)',
+  cancelled: 'var(--muted)',
+  failed: 'var(--accent)',
 };
 
 const TICK_MINUTES = [1, 2, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440, 2880, 10080];

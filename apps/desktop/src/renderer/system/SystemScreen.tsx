@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RuntimesReport, UsageResponse } from '@desk/protocol';
 import type { ChannelOutput } from '../../main/handlers';
+import type { Appearance } from '../../shared/ipc';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -225,6 +226,41 @@ function NoticesSection() {
   );
 }
 
+const APPEARANCES: Array<[Appearance, string]> = [
+  ['system', 'System'],
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+];
+
+function AppearanceSection() {
+  const [appearance, setAppearance] = useState<Appearance | null>(null);
+  useEffect(() => {
+    call('app.settings', {})
+      .then((s) => setAppearance(s.appearance))
+      .catch(() => setAppearance(null));
+  }, []);
+  const choose = async (v: Appearance) => {
+    try {
+      setAppearance((await call('app.updateSettings', { appearance: v })).appearance);
+    } catch (err) {
+      toastError(err);
+    }
+  };
+  return (
+    <section className="card sys-section" aria-labelledby="sys-appearance">
+      <h2 id="sys-appearance">Appearance</h2>
+      <div className="segmented" role="group" aria-label="Appearance">
+        {APPEARANCES.map(([v, label]) => (
+          <button key={v} type="button" aria-pressed={appearance === v} disabled={appearance === null} onClick={() => void choose(v)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="field-hint">System follows macOS, including its automatic switch at sunset. Applies to every Desk window and the menu bar popover.</p>
+    </section>
+  );
+}
+
 function NotificationsSection() {
   const [appOn, setAppOn] = useState<boolean | null>(null);
   const [daemon, setDaemon] = useState<'auto' | 'off' | null>(null);
@@ -356,6 +392,7 @@ export function SystemScreen() {
           <h2 id="sys-endpoint">Model endpoint</h2>
           <EndpointPanel />
         </section>
+        <AppearanceSection />
         <NotificationsSection />
         <AboutSection />
       </div>

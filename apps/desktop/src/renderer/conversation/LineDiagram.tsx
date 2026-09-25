@@ -77,9 +77,9 @@ export function LineDiagram(o: {
         <div className="line-canvas" style={{ width: g.contentWidth, height: g.height }}>
           <svg width={g.contentWidth} height={g.height} aria-hidden="true" className="line-svg">
             {g.ticks.map((t) => (
-              <path key={t.t} d={`M${t.x} 24 V${g.height}`} stroke="#E3DFD6" strokeDasharray="2 4" />
+              <path key={t.t} d={`M${t.x} 24 V${g.height}`} stroke="var(--rule-soft)" strokeDasharray="2 4" />
             ))}
-            <path d={`M${g.nowX} 22 V${g.height}`} stroke="#4A4740" strokeDasharray="3 3" />
+            <path d={`M${g.nowX} 22 V${g.height}`} stroke="var(--text-min)" strokeDasharray="3 3" />
             {g.lanes.map((l) => (
               <g key={l.lane.threadId} opacity={l.lane.archived ? 0.45 : 1}>
                 <path d={l.fork} fill="none" stroke={l.forkColor} strokeWidth={4} strokeLinecap="round" />
@@ -89,18 +89,18 @@ export function LineDiagram(o: {
                 {l.rejoins.map((d, i) => (
                   <path key={`r${i}`} d={d} fill="none" stroke={l.rejoinColor} strokeWidth={4} strokeLinecap="round" />
                 ))}
-                {l.stub ? <path className="line-stub" d={l.stub.d} fill="none" stroke="#8A857B" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" /> : null}
+                {l.stub ? <path className="line-stub" d={l.stub.d} fill="none" stroke="var(--muted)" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" /> : null}
                 {l.marks
                   .filter((m) => m.kind === 'detour')
                   .map((m) => (
                     <g key={`d${m.eventId}`}>
-                      <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke="#EFEAE0" strokeWidth={9} />
+                      <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke="var(--ground)" strokeWidth={9} />
                       <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke={l.color} strokeWidth={4} strokeLinecap="round" />
                     </g>
                   ))}
               </g>
             ))}
-            <path d={`M${g.trunkStart - 6} ${g.trunkY} H${g.nowX}`} stroke="#1C1B18" strokeWidth={6} strokeLinecap="round" />
+            <path d={`M${g.trunkStart - 6} ${g.trunkY} H${g.nowX}`} stroke="var(--ink)" strokeWidth={6} strokeLinecap="round" />
           </svg>
 
           {g.ticks.map((t) => (
@@ -293,9 +293,9 @@ export function LineDiagram(o: {
 
       <div className="line-legend" aria-hidden="true">
         <span><span className="line-swatch line-swatch-desk" />Desk</span>
-        <span><span className="line-swatch" style={{ background: '#2F5BD3' }} />running</span>
-        <span><span className="line-swatch" style={{ background: '#8A857B' }} />done</span>
-        <span><span className="line-swatch" style={{ background: '#A15C00' }} />waiting</span>
+        <span><span className="line-swatch" style={{ background: 'var(--run)' }} />running</span>
+        <span><span className="line-swatch" style={{ background: 'var(--muted)' }} />done</span>
+        <span><span className="line-swatch" style={{ background: 'var(--wait)' }} />waiting</span>
         <span><span className="line-legend-dot" />needs you</span>
         {hasQuestions ? (
           <span>
@@ -305,7 +305,7 @@ export function LineDiagram(o: {
         ) : null}
         <span>
           <svg width="18" height="10" viewBox="0 0 18 10">
-            <path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="#2F5BD3" strokeWidth="2" strokeLinecap="round" />
+            <path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="var(--run)" strokeWidth="2" strokeLinecap="round" />
           </svg>
           fallback
         </span>

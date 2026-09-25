@@ -1,35 +1,135 @@
 :root {
+  color-scheme: light dark;
   --ground: #efeae0;
   --titlebar: #e6e0d4;
   --nav: #dad3c5;
   --rule: #d6cfc1;
   --rule-soft: #e3dfd6;
+  /* Input and chip borders; the faint one separates rows inside a card */
+  --rule-strong: #cfc9bd;
+  --rule-faint: #ece8e0;
   --ink: #1c1b18;
   --text: #3d3a34;
   --text-min: #4a4740;
+  --text-faint: #6e6a62;
   --run: #2f5bd3;
   --run-text: #1f45a8;
   --run-pastel: #e3e8f5;
   --run-ring: #c9d3ec;
+  /* A selected or flashed row */
+  --run-wash: #eef2fb;
+  /* --run as r, g, b, for glows: rgba(var(--run-rgb), 0.2) */
+  --run-rgb: 47, 91, 211;
   --wait: #a15c00;
   --wait-text: #7a4500;
+  --wait-deep: #5c3400;
   --wait-pastel: #f3e6cf;
+  --wait-ring: #e6d3af;
+  --wait-orbit: #e0c99e;
+  --idle-pastel: #e6e1d7;
   --muted: #8a857b;
+  --muted-soft: #b9b3a7;
   --muted-blue: #b7c4e6;
+  /* The dashed rings on the map and the skills map */
+  --orbit: #d3ccbe;
   --accent: #c4441c;
   --accent-tint: #c4441c14;
   --ok: #2f6b4f;
+  /* Surfaces, lowest to highest: ground, sunken, paper, soft, card */
   --card: #ffffff;
-  --card-shadow: 0 16px 36px rgba(28, 27, 24, 0.14);
+  /* The selected segment of a --nav track: above the track in both themes */
+  --raised: #ffffff;
+  --sunken: #f4f1ea;
+  --paper: #f7f5f0;
+  --soft: #fbfaf7;
+  /* The top edge light catches on a recessed rack */
+  --highlight: #f2eee6;
+  /* Text on --ink and on --accent fills */
+  --on-ink: #ffffff;
+  --on-accent: #ffffff;
+  --hover-tint: #0000000a;
+  /* Translucent white laid over the titlebar on hover */
+  --hover-lift: rgba(255, 255, 255, 0.5);
+  /* Legends and controls floating over a map */
+  --glass: rgba(255, 255, 255, 0.72);
+  /* The ground, see-through: loading and drop overlays */
+  --overlay: rgba(239, 234, 224, 0.86);
+  /* Shadows and backdrops as r, g, b: rgba(var(--shadow-rgb), 0.1) */
+  --shadow-rgb: 28, 27, 24;
+  --card-shadow: 0 16px 36px rgba(var(--shadow-rgb), 0.14);
   --radius-card: 16px;
   --code-bg: #1c1b18;
   --code-fg: #f3f0e8;
+  --code-muted: #bdb8ad;
+  --code-inline-bg: #0000000d;
+  --add-bg: #e6f2eb;
+  --del-bg: #f8e4dd;
   /* The checkerboard behind images, so transparent areas show */
   --checker-a: #f4f1ea;
   --checker-b: #ffffff;
   --font-serif: 'Newsreader Variable', Newsreader, Georgia, serif;
   --font-sans: 'Geist Variable', Geist, system-ui, sans-serif;
   --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+}
+
+/* Warm charcoal: the same paper and ink at night. Main maps the Appearance setting to nativeTheme.themeSource, which
+   is what this query sees, so "System" follows macOS and Light/Dark override it in every window. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #171613;
+    --titlebar: #1e1c19;
+    --nav: #2e2b26;
+    --rule: #3a362f;
+    --rule-soft: #2c2925;
+    --rule-strong: #4a453d;
+    --rule-faint: #2a2723;
+    --ink: #f1ece2;
+    --text: #d6cfc2;
+    --text-min: #bcb5a8;
+    --text-faint: #a09a8e;
+    --run: #6f93f0;
+    --run-text: #a3bbf7;
+    --run-pastel: #1f2841;
+    --run-ring: #33436b;
+    --run-wash: #1d2438;
+    --run-rgb: 111, 147, 240;
+    --wait: #e0a045;
+    --wait-text: #eec07a;
+    --wait-deep: #f3cf95;
+    --wait-pastel: #372a1a;
+    --wait-ring: #56422a;
+    --wait-orbit: #6b5233;
+    --idle-pastel: #2c2925;
+    --muted: #8f897e;
+    --muted-soft: #605b52;
+    --muted-blue: #41558a;
+    --orbit: #3f3b34;
+    --accent: #f07a52;
+    --accent-tint: #f07a5224;
+    --ok: #6fbf94;
+    --card: #25231f;
+    --raised: #45413a;
+    --sunken: #1d1b18;
+    --paper: #201e1b;
+    --soft: #22201c;
+    --highlight: #ffffff08;
+    --on-ink: #171613;
+    --on-accent: #1a120e;
+    --hover-tint: #ffffff0f;
+    --hover-lift: rgba(255, 255, 255, 0.07);
+    --glass: rgba(37, 35, 31, 0.82);
+    --overlay: rgba(23, 22, 19, 0.86);
+    --shadow-rgb: 0, 0, 0;
+    --card-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    --code-bg: #0e0d0b;
+    --code-fg: #f3f0e8;
+    --code-muted: #9d978b;
+    --code-inline-bg: #ffffff14;
+    --add-bg: #1d3326;
+    --del-bg: #3e231a;
+    --checker-a: #2c2925;
+    --checker-b: #25231f;
+  }
 }
 
 *,
@@ -166,7 +266,7 @@ pre {
   white-space: nowrap;
 }
 .places a[aria-current='page'] {
-  background: #fff;
+  background: var(--raised);
   color: var(--ink);
   font-weight: 500;
 }
@@ -207,10 +307,10 @@ pre {
 }
 .pill.needs {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .pill.needs:hover {
-  color: #fff;
+  color: var(--on-accent);
 }
 .pill.clear {
   color: var(--text-min);
@@ -269,11 +369,11 @@ pre {
 }
 .btn-primary {
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 .btn-secondary {
-  background: #fff;
-  border-color: #cfc9bd;
+  background: var(--card);
+  border-color: var(--rule-strong);
   color: var(--ink);
 }
 .btn-ghost {
@@ -281,11 +381,11 @@ pre {
   color: var(--ink);
 }
 .btn-ghost:hover {
-  background: #0000000a;
+  background: var(--hover-tint);
 }
 .btn-danger {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn[aria-busy='true']::after {
   content: '…';
@@ -305,9 +405,9 @@ pre {
 .select {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid #cfc9bd;
+  border: 1px solid var(--rule-strong);
   border-radius: 8px;
-  background: #fff;
+  background: var(--card);
 }
 .textarea {
   min-height: 72px;
@@ -368,14 +468,14 @@ pre {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(28, 27, 24, 0.28);
+  background: rgba(var(--shadow-rgb), 0.28);
 }
 .sheet {
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 64px);
   overflow: auto;
   padding: 24px;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
   box-shadow: var(--card-shadow);
@@ -414,16 +514,16 @@ pre {
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
   box-shadow: var(--card-shadow);
 }
 .toast .btn-ghost {
-  color: #fff;
+  color: var(--on-ink);
 }
 .toast-close {
   border: 0;
   background: none;
-  color: #fff;
+  color: var(--on-ink);
   cursor: pointer;
   font-size: 16px;
 }
@@ -475,7 +575,7 @@ pre {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(239, 234, 224, 0.86);
+  background: var(--overlay);
 }
 .overlay .card {
   width: 440px;
@@ -514,7 +614,7 @@ pre {
   color: var(--wait-text);
 }
 .chip-done {
-  background: #e6e1d7;
+  background: var(--idle-pastel);
   color: var(--text);
 }
 .chip-fail {
@@ -522,7 +622,7 @@ pre {
   color: var(--accent);
 }
 .chip-idle {
-  background: #e6e1d7;
+  background: var(--idle-pastel);
   color: var(--text-min);
 }
 .skill-badge {
@@ -532,7 +632,7 @@ pre {
   padding: 0 8px;
   border-radius: 6px;
   border: 1px solid var(--rule);
-  background: #fff;
+  background: var(--card);
   font-family: var(--font-mono);
   font-size: 11.5px;
 }
@@ -551,12 +651,12 @@ pre {
   padding: 4px 8px 0 10px;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #bdb8ad;
+  color: var(--code-muted);
 }
 .codeblock-copy {
   border: 0;
   background: none;
-  color: #bdb8ad;
+  color: var(--code-muted);
   cursor: pointer;
   font-size: 11px;
 }
@@ -595,7 +695,7 @@ pre {
 .md .md-code {
   padding: 1px 4px;
   border-radius: 4px;
-  background: #0000000d;
+  background: var(--code-inline-bg);
   font-size: 12.5px;
 }
 .md .codeblock {
@@ -739,7 +839,7 @@ pre {
   flex-shrink: 0;
   border-radius: 4px;
   background: var(--run);
-  box-shadow: 0 0 0 3px rgba(47, 91, 211, 0.3);
+  box-shadow: 0 0 0 3px rgba(var(--run-rgb), 0.3);
   display: inline-block;
 }
 .segmented {
@@ -760,7 +860,7 @@ pre {
   cursor: pointer;
 }
 .segmented button[aria-pressed='true'] {
-  background: #fff;
+  background: var(--raised);
   color: var(--ink);
   font-weight: 500;
 }
@@ -791,7 +891,7 @@ pre {
   cursor: pointer;
 }
 .switcher-btn:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--hover-lift);
 }
 .switcher-pop {
   position: absolute;
@@ -857,7 +957,7 @@ pre {
   justify-content: center;
   border-radius: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 11px;
 }
 .switcher-new {
@@ -875,7 +975,7 @@ pre {
   gap: 8px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--rule);
 }
 .file-viewer-bar {
@@ -939,7 +1039,7 @@ pre {
   padding: 0;
   border: 1px solid var(--rule);
   border-radius: 8px;
-  background: #fff;
+  background: var(--card);
   cursor: pointer;
 }
 
@@ -948,7 +1048,7 @@ pre {
   margin: 0;
   padding: 12px 14px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--rule);
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -957,11 +1057,11 @@ pre {
 }
 .diff-line-add {
   display: block;
-  background: #e6f2eb;
+  background: var(--add-bg);
 }
 .diff-line-del {
   display: block;
-  background: #f8e4dd;
+  background: var(--del-bg);
 }
 .diff-hunk {
   color: var(--run-text);
@@ -996,7 +1096,7 @@ pre {
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
-  background: rgba(28, 27, 24, 0.18);
+  background: rgba(var(--shadow-rgb), 0.18);
 }
 .palette {
   width: min(640px, 92vw);

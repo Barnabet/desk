@@ -118,24 +118,24 @@ export function TrayPopover() {
       </header>
       <div className="tray-line" role="img" aria-label={`Today: ${line.lanes.map((l) => `${l.title} ${l.status}`).join(', ') || 'no threads'}`}>
         <svg width={line.width} height={line.height} aria-hidden="true">
-          <path d={`M${line.nowX} 6 V ${line.height - 20}`} stroke="#8A857B" strokeWidth="1" strokeDasharray="2 3" />
+          <path d={`M${line.nowX} 6 V ${line.height - 20}`} stroke="var(--muted)" strokeWidth="1" strokeDasharray="2 3" />
           {line.lanes.map((l) => (
             <path key={l.id} d={l.d} fill="none" stroke={l.color} strokeWidth="2" strokeDasharray={l.dashed ? '4 3' : undefined} />
           ))}
-          <path d={line.trunk} stroke="#1C1B18" strokeWidth="2" />
-          <circle cx={line.x0} cy={line.trunkY} r="3" fill="#1C1B18" />
+          <path d={line.trunk} stroke="var(--ink)" strokeWidth="2" />
+          <circle cx={line.x0} cy={line.trunkY} r="3" fill="var(--ink)" />
           {line.lanes.map((l) =>
             l.end.kind === 'train' ? (
               <g key={`e${l.id}`}>
-                <circle cx={l.end.x} cy={l.y} r="8" fill="#2F5BD3" fillOpacity="0.18" />
-                <circle cx={l.end.x} cy={l.y} r="4.5" fill="#2F5BD3" />
+                <circle cx={l.end.x} cy={l.y} r="8" fill="var(--run)" fillOpacity="0.18" />
+                <circle cx={l.end.x} cy={l.y} r="4.5" fill="var(--run)" />
               </g>
             ) : l.end.kind === 'signal' ? (
-              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="5" fill="#C4441C" stroke="#F4F1EA" strokeWidth="1.5" />
+              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="5" fill="var(--accent)" stroke="var(--sunken)" strokeWidth="1.5" />
             ) : l.end.kind === 'stalled' ? (
-              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="3.5" fill="#fff" stroke="#A15C00" strokeWidth="1.8" />
+              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="3.5" fill="var(--card)" stroke="var(--wait)" strokeWidth="1.8" />
             ) : l.end.kind === 'stop' ? (
-              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="3" fill="#8A857B" />
+              <circle key={`e${l.id}`} cx={l.end.x} cy={l.y} r="3" fill="var(--muted)" />
             ) : null,
           )}
         </svg>
