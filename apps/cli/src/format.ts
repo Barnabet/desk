@@ -46,6 +46,8 @@ export type RenderOptions = { deskId: string; label?: string; verbose?: boolean 
 /** Turns stream messages into terminal lines. Stateful: tracks streamed text and thread titles. */
 export function createRenderer(write: (s: string) => void, opts: RenderOptions): (m: StreamServerMessage) => void {
   const speaker = opts.label ?? 'desk';
+  /** The followed agent as a message's recipient: Desk, or the quoted title `tail` passes as its label. */
+  const followed = opts.label ?? 'Desk';
   const titles = new Map<string, string>();
   const streamedRuns = new Set<string>();
   let streaming = false;
@@ -57,6 +59,15 @@ export function createRenderer(write: (s: string) => void, opts: RenderOptions):
     write(`${s}\n`);
   };
   const title = (id: string | null) => (id ? (titles.get(id) ?? id) : '?');
+  /** The recipient of an event on `agentId`'s stream. */
+  const recipient = (agentId: string | null) => (agentId === opts.deskId ? followed : `"${title(agentId)}"`);
+  /** A message's sender: Desk, or a thread's quoted title from its agent.created, else from its label (`thread "X" (id)`). */
+  const sender = (p: { from_agent_id: string; from_label: string }) => {
+    if (p.from_label === 'Desk') return 'Desk';
+    const known = titles.get(p.from_agent_id) ?? /^thread "(.*)" \(/.exec(p.from_label)?.[1];
+    if (known !== undefined && !titles.has(p.from_agent_id)) titles.set(p.from_agent_id, known);
+    return `"${known ?? p.from_agent_id}"`;
+  };
 
   const onEvent = (e: StoredEvent) => {
     const isDesk = e.agent_id === opts.deskId;
@@ -66,13 +77,23 @@ export function createRenderer(write: (s: string) => void, opts: RenderOptions):
         if (e.payload.role === 'thread') line(`  + thread "${e.payload.title}" (${e.agent_id}) [${e.payload.model}]`);
         return;
       case 'message.user':
-        line(isDesk ? `\nyou › ${e.payload.text}` : `you → "${title(e.agent_id)}": ${e.payload.text}`);
+        if (e.payload.question) line(`you asked ${recipient(e.agent_id)}: ${e.payload.text}`);
+        else line(isDesk ? `\nyou › ${e.payload.text}` : `you → "${title(e.agent_id)}": ${e.payload.text}`);
         return;
       case 'message.agent': {
+        const p = e.payload;
         // Threads message each other too: the sender is Desk or the thread the message came from.
-        const from = e.payload.from_agent_id === opts.deskId ? 'Desk' : `"${title(e.payload.from_agent_id)}"`;
-        if (isDesk) line(`  ↳ [${e.payload.from_label} — ${e.payload.kind}] ${clip(e.payload.text, 300)}`);
-        else if (opts.verbose) line(`  ↦ ${from} → "${title(e.agent_id)}" [${e.payload.kind}] ${clip(e.payload.text, 200)}`);
+        const from = sender(p);
+        // A thread's brief already says what `start` says.
+        if (p.kind === 'start') return;
+        if (p.kind === 'answer') {
+          // Who answered whom; a closure the runtime wrote says the question was closed.
+          const what = p.auto ? `#${p.reply_to ?? '?'} closed` : `answer to #${p.reply_to ?? '?'}`;
+          if (isDesk || opts.verbose) line(`  ↩ ${from} → ${recipient(e.agent_id)} (${what}) ${clip(p.text, 300)}`);
+          return;
+        }
+        if (isDesk) line(`  ↳ [${p.from_label} — ${p.kind}] ${clip(p.text, 300)}`);
+        else if (opts.verbose) line(`  ↦ ${from} → "${title(e.agent_id)}" [${p.kind}] ${clip(p.text, 200)}`);
         return;
       }
       case 'assistant.message':

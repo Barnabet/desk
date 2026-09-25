@@ -369,10 +369,14 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         process.once('SIGINT', () => resolveDone());
       });
     });
-  program.command('tell <thread> <text...>').description('Message a thread directly').action(async (id: string, words: string[]) => {
-    await client().post(`/threads/${id}/messages`, { text: words.join(' ') });
-    say(`Sent to ${id}`);
-  });
+  program
+    .command('tell <thread> <text...>')
+    .description('Message a thread directly')
+    .option('--ask', 'ask a question: a finished thread answers from its context and stays finished')
+    .action(async (id: string, words: string[], opts: { ask?: boolean }) => {
+      await client().post(`/threads/${id}/messages`, { text: words.join(' '), ...(opts.ask ? { question: true } : {}) });
+      say(opts.ask ? `Asked ${id}` : `Sent to ${id}`);
+    });
   program.command('stop <thread>').action(async (id: string) => {
     await client().post(`/threads/${id}/stop`);
     say(`Stopped ${id}`);

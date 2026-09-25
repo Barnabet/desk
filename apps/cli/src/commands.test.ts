@@ -114,6 +114,25 @@ describe('desk CLI', () => {
     expect(shown).toContain(`- ${live} "Live" [idle]`);
     expect(shown).not.toContain('"Old"');
   });
+
+  it('asks a finished thread, which answers without reopening', async () => {
+    const id = /Created project (\S+)/.exec((await cli('project', 'new', 'Pricing', '--goal', 'g')).out)![1]!;
+    const thread = daemon.runtime.createThread(id, { title: 'Pricing page', brief: 'Price the plans', workspacePath: join(dir, 'pricing'), model: FAKE_MODEL.id });
+    daemon.store.append({ project_id: id, agent_id: thread, type: 'agent.status_changed', payload: { status: 'done' } });
+    // Only an answer run answers: its latest user turn ends with the runtime's answer-mode line.
+    fake.setScript((req) =>
+      String(req.messages.findLast((m) => m.role === 'user')?.content ?? '').includes('[Desk runtime — answer mode]') ? text('Per seat.') : text('(not an answer run)'),
+    );
+    expect(await cli('tell', thread, 'How', 'did', 'you', 'price', 'it?', '--ask')).toMatchObject({ code: 0, out: `Asked ${thread}\n` });
+    await daemon.runtime.whenIdle();
+    const [ask] = daemon.store.list({ agentId: thread, types: ['message.user'] });
+    expect(ask).toMatchObject({ payload: { text: 'How did you price it?', question: true } });
+    expect(daemon.store.list({ agentId: thread, types: ['run.started'] }).map((e) => e.payload)).toEqual([expect.objectContaining({ answering: ask!.id })]);
+    expect(daemon.store.list({ agentId: thread, types: ['agent.status_changed'] }).at(-1)).toMatchObject({ payload: { status: 'done' } });
+    const tail = (await cli('tail', thread)).out;
+    expect(tail).toContain('you asked "Pricing page": How did you price it?');
+    expect(tail).toContain('"Pricing page" › Per seat.');
+  });
 });
 
 describe('launchd plist', () => {

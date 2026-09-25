@@ -77,4 +77,34 @@ describe('renderer', () => {
     expect(out).toContain('↦ "Auth API" → "Frontend" [question] Which token format?');
     expect(out).toContain('↦ Desk → "Frontend" [note] Use EU.');
   });
+
+  it("shows who answered whom, closures and the user's Ask, and hides start", () => {
+    let out = '';
+    const render = createRenderer((s) => (out += s), { deskId: 'D', verbose: true });
+    render(ev('A', { type: 'agent.created', payload: { role: 'thread', model: 'm', title: 'Auth API', brief: 'x', workspace_path: '/a', parent_id: 'D' } }));
+    render(ev('F', { type: 'agent.created', payload: { role: 'thread', model: 'm', title: 'Frontend', brief: 'y', workspace_path: '/f', parent_id: 'D' } }));
+    render(ev('F', { type: 'message.agent', payload: { from_agent_id: 'D', from_label: 'Desk', kind: 'start', text: 'Begin your assignment.' } }));
+    render(ev('A', { type: 'message.agent', payload: { from_agent_id: 'F', from_label: 'thread "Frontend" (F)', kind: 'answer', text: 'JWT, RS256.', reply_to: 123 } }));
+    render(ev('A', { type: 'message.agent', payload: { from_agent_id: 'F', from_label: 'thread "Frontend" (F)', kind: 'answer', text: '(Frontend was stopped before answering.)', reply_to: 124, auto: true } }));
+    render(ev('D', { type: 'message.agent', payload: { from_agent_id: 'A', from_label: 'thread "Auth API" (A)', kind: 'answer', text: 'Done by Friday.', reply_to: 125 } }));
+    render(ev('F', { type: 'message.user', payload: { text: 'How did you price it?', question: true } }));
+    expect(out).not.toContain('Begin your assignment');
+    expect(out).toContain('↩ "Frontend" → "Auth API" (answer to #123) JWT, RS256.');
+    expect(out).toContain('↩ "Frontend" → "Auth API" (#124 closed) (Frontend was stopped before answering.)');
+    expect(out).toContain('↩ "Auth API" → Desk (answer to #125) Done by Friday.');
+    expect(out).toContain('you asked "Frontend": How did you price it?');
+  });
+
+  it("names senders it has not seen from their labels, as tail does", () => {
+    let out = '';
+    const render = createRenderer((s) => (out += s), { deskId: 'A', label: '"Auth API"', verbose: true });
+    render(ev('A', { type: 'message.agent', payload: { from_agent_id: 'F', from_label: 'thread "Frontend" (F)', kind: 'answer', text: 'JWT.', reply_to: 7 } }));
+    render(ev('A', { type: 'message.agent', payload: { from_agent_id: 'D', from_label: 'Desk', kind: 'question', text: 'Status?', tracked: true } }));
+    render(ev('A', { type: 'message.agent', payload: { from_agent_id: 'D', from_label: 'Desk', kind: 'start', text: 'Begin your assignment.' } }));
+    render(ev('A', { type: 'message.user', payload: { text: 'Which format did you pick?', question: true } }));
+    expect(out).toContain('↩ "Frontend" → "Auth API" (answer to #7) JWT.');
+    expect(out).toContain('↳ [Desk — question] Status?');
+    expect(out).toContain('you asked "Auth API": Which format did you pick?');
+    expect(out).not.toContain('Begin');
+  });
 });
