@@ -1220,6 +1220,8 @@ export class Runtime {
       projectArchived: Boolean(getProject(store.db, agent.project_id)?.archived_at),
       pendingApprovals: pendingApprovalsFor(store.db, agent.id).length + (this.resolving.get(agent.id) ?? 0),
       pending,
+      // S2.7 lists the open questions here, together with wake() starting answer jobs.
+      open: [],
     };
   }
 
