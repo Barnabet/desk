@@ -27,7 +27,7 @@ function desk(req: ChatRequest): FakeReply {
   const a = threadId(req, 'A');
   const b = threadId(req, 'B');
   const calls = [];
-  if (convo.includes('— question] Which region?') && !called(req, 'message_thread', (x) => x.kind === 'note')) {
+  if (/ — question(;[^\]\n]*)?\]\n> Which region\?/.test(convo) && !called(req, 'message_thread', (x) => x.kind === 'note')) {
     calls.push(call('message_thread', { thread_id: a, kind: 'note', text: 'Use EU.' }));
   }
   const bDone = (convo.match(/"B" \([0-9A-Z]{26}\) — completed\]/g) ?? []).length;

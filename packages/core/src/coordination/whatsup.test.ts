@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
 import { getDeskAgent } from '../state/queries';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
-import { latestWhatsUp, REMINDER_LABEL } from './whatsup';
+import { latestWhatsUp } from './whatsup';
 
 let h: Harness;
 afterEach(async () => h?.cleanup());
@@ -50,7 +50,7 @@ describe("What's up", () => {
   it('reminds Desk once when it ends a turn after changing things without updating it, and Desk updates it', async () => {
     const { rt, projectId, desk } = await setup((last) => {
       if (last === 'Plan it') return tools(call('update_plan', { items: [{ title: 'Research', status: 'todo' }] }));
-      if (last.startsWith(`[from ${REMINDER_LABEL} — reminder]`)) return tools(call('update_whats_up', { text: 'Planned the research.' }));
+      if (last.startsWith('[Desk runtime — reminder]')) return tools(call('update_whats_up', { text: 'Planned the research.' }));
       return text(last === '(tool result)' ? 'Planned.' : '');
     });
     rt.sendToDesk(projectId, 'Plan it');
@@ -70,7 +70,7 @@ describe("What's up", () => {
   });
 
   it('reminds Desk after a thread reports and Desk only replies', async () => {
-    const { rt, desk } = await setup((last) => (last.startsWith(`[from ${REMINDER_LABEL}`) ? tools(call('update_whats_up', { text: 'Research is in.' })) : text('Noted.')), [
+    const { rt, desk } = await setup((last) => (last.startsWith('[Desk runtime — reminder]') ? tools(call('update_whats_up', { text: 'Research is in.' })) : text('Noted.')), [
       tools(call('complete', { summary: 'Found 3 facts', artifacts: [] })),
     ]);
     const threadId = rt.createThread(desk.project_id, { title: 'Research', brief: 'Find facts', workspacePath: join(h.dir, 'ws') });

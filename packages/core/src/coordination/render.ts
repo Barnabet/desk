@@ -1,4 +1,4 @@
-import { imageLabel, type StoredEvent } from '@desk/protocol';
+import { imageLabel, quoteLines, sanitizeLabel, type EventOf, type StoredEvent } from '@desk/protocol';
 import type { AgentRow, ApprovalRow, ServiceRow } from '../state/queries';
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -76,4 +76,47 @@ export function renderTranscript(events: StoredEvent[]): string {
     }
   }
   return lines.join('\n') || '(no activity yet)';
+}
+
+/** A line the runtime writes itself, never another agent: `[Desk runtime — reminder] …`, `[Desk runtime — answer mode] …`. */
+export function runtimeLine(what: string, text: string): string {
+  return `[Desk runtime — ${what}] ${text}`;
+}
+
+/**
+ * Who sent a message, from its stored label (`Desk`, or `thread "<title>" (<id>)`). The title is sanitised here too,
+ * so labels stored before sanitising render like new ones.
+ */
+export function senderOf(p: { from_agent_id: string; from_label: string }): { desk: boolean; title: string; label: string } {
+  if (p.from_label === 'Desk') return { desk: true, title: 'Desk', label: 'Desk' };
+  const title = sanitizeLabel(/^thread "([\s\S]*)" \([^()]*\)$/.exec(p.from_label)?.[1] ?? p.from_label);
+  return { desk: false, title, label: `thread "${title}" (${p.from_agent_id})` };
+}
+
+/**
+ * The runtime's header for a message, as its recipient reads it (design spec §1.5): who sent it and its kind, how to
+ * answer a tracked question, or which question an answer answers.
+ */
+export function messageHeader(ev: EventOf<'message.agent'>): string {
+  const p = ev.payload;
+  const from = senderOf(p);
+  let what: string = p.kind;
+  if (p.kind === 'question' && p.tracked) {
+    what = from.desk
+      ? 'question; Desk may be waiting on you: answer with message_desk'
+      : `question; they may be waiting on you: answer with message_thread to "${from.title}"`;
+  } else if (p.kind === 'answer' && p.reply_to !== undefined) {
+    what = `answer to your question #${p.reply_to}${p.auto ? ', written by the runtime' : ''}`;
+  }
+  return `[message #${ev.id} from ${from.label} — ${what}]`;
+}
+
+/**
+ * An inbox item as its recipient's model reads it: the user's text as is; another agent's message as the runtime's
+ * header followed by the sender's words, every line quoted; the runtime's own reminder as a runtime line.
+ */
+export function renderInboxItem(ev: EventOf<'message.user'> | EventOf<'message.agent'>): string {
+  if (ev.type === 'message.user') return ev.payload.text;
+  if (ev.payload.kind === 'reminder') return runtimeLine('reminder', ev.payload.text);
+  return `${messageHeader(ev)}\n${quoteLines(ev.payload.text)}`;
 }

@@ -19,7 +19,7 @@ const CHANGING_TOOLS = new Set([
 /** Thread notices after which What's up is out of date. */
 const CHANGING_NOTICES = new Set(['completed', 'failed', 'cancelled']);
 
-/** How the runtime's reminders to Desk are labelled in its conversation: `[from the Desk runtime — reminder] …`. */
+/** The sender label stored on the runtime's reminders to Desk; its conversation shows them as `[Desk runtime — reminder] …`. */
 export const REMINDER_LABEL = 'the Desk runtime';
 export const WHATS_UP_REMINDER =
   "Update What's up with update_whats_up: things changed this turn, and it is the first thing the user reads in the project. Then end your turn without writing anything else.";

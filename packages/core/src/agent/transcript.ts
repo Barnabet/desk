@@ -1,5 +1,6 @@
 import { imageLabel, type EventOf, type StoredEvent, type ToolImage } from '@desk/protocol';
 import type { ChatMessage, ContentPart } from '../model/types';
+import { renderInboxItem } from '../coordination/render';
 
 /** Why an image goes as text after the endpoint refused a request with it: its answer, and how many images were withheld together. */
 export type Withheld = { reason: string; count: number };
@@ -50,11 +51,6 @@ export const occurrenceOf = (c: ConversationImage) => occurrence(c.toolCallId, c
 /** An images message without pixels is plain text: endpoints that take no images may take no content parts either. */
 const textMessage = (lines: string[]): ChatMessage => ({ role: 'user', content: [IMAGES_HEADER, ...lines].join('\n') });
 const clip = (s: string, n = 160) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-function renderInboxItem(ev: EventOf<'message.user'> | EventOf<'message.agent'>): string {
-  if (ev.type === 'message.user') return ev.payload.text;
-  return `[from ${ev.payload.from_label} — ${ev.payload.kind}] ${ev.payload.text}`;
-}
 
 /**
  * Rebuilds the full model conversation for one agent from its events (in id order), ignoring checkpoints.

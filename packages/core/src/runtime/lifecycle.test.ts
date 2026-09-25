@@ -13,6 +13,8 @@ function routed(threadReplies: FakeReply[], deskReplies: FakeReply[] = []): Scri
 }
 const deskRequests = () => h.fake.requests.filter((r) => r.model !== FAKE_MODEL.id);
 const lastDeskInput = () => deskRequests().at(-1)?.messages.at(-1)?.content as string;
+/** The id of the latest message on `agentId`'s stream: the number in the runtime's header for it. */
+const lastMessageId = (agentId: string) => h.store.list({ agentId, types: ['message.agent'] }).at(-1)!.id;
 
 async function setup(script: Script) {
   h = await createHarness({ script });
@@ -31,7 +33,7 @@ describe('thread lifecycle notifications', () => {
     begin(threadId);
     await rt.whenIdle();
     expect(getAgent(h.store.db, threadId)).toMatchObject({ status: 'done', result_summary: 'Found 3 facts', result_artifacts: [] });
-    expect(lastDeskInput()).toBe(`[from thread "Research" (${threadId}) — completed] Summary: Found 3 facts`);
+    expect(lastDeskInput()).toBe(`[message #${lastMessageId(desk.id)} from thread "Research" (${threadId}) — completed]\n> Summary: Found 3 facts`);
     expect(getAgent(h.store.db, desk.id)?.status).toBe('idle');
   });
 
@@ -50,7 +52,7 @@ describe('thread lifecycle notifications', () => {
     const { rt, threadId, begin } = await setup(routed([error(401, 'authentication_error', 'bad key')]));
     begin(threadId);
     await rt.whenIdle();
-    expect(lastDeskInput()).toMatch(/— failed\] .*bad key/);
+    expect(lastDeskInput()).toMatch(/— failed\]\n> Failed: .*bad key/);
   });
 
   it('tells Desk when the user stops a thread, but not when Desk does', async () => {
@@ -74,11 +76,11 @@ describe('thread lifecycle notifications', () => {
     begin(threadId);
     await rt.whenIdle();
     expect(getAgent(h.store.db, threadId)?.status).toBe('waiting');
-    expect(lastDeskInput()).toBe(`[from thread "Research" (${threadId}) — question] Which region?`);
-    rt.deliver(desk.id, threadId, 'note', 'EU only.');
+    expect(lastDeskInput()).toBe(`[message #${lastMessageId(desk.id)} from thread "Research" (${threadId}) — question]\n> Which region?`);
+    const note = rt.deliver(desk.id, threadId, 'note', 'EU only.');
     await rt.whenIdle();
     const threadReqs = h.fake.requests.filter((r) => r.model === FAKE_MODEL.id);
-    expect(threadReqs.at(-1)!.messages.at(-1)).toEqual({ role: 'user', content: '[from Desk — note] EU only.' });
+    expect(threadReqs.at(-1)!.messages.at(-1)).toEqual({ role: 'user', content: `[message #${note} from Desk — note]\n> EU only.` });
   });
 
   it('tells Desk about approvals a thread is waiting on', async () => {
@@ -86,7 +88,7 @@ describe('thread lifecycle notifications', () => {
     begin(threadId);
     await rt.whenIdle();
     const [ap] = listApprovals(h.store.db, projectId, 'pending');
-    expect(lastDeskInput()).toContain(`— approval] Approval ${ap!.id} needed for bash`);
+    expect(lastDeskInput()).toContain(`— approval]\n> Approval ${ap!.id} needed for bash(`);
     expect(lastDeskInput()).toContain('Waiting for the user to decide');
   });
 
@@ -94,7 +96,7 @@ describe('thread lifecycle notifications', () => {
     const { rt, threadId, begin } = await setup(routed([text('I need the API key location before continuing.')]));
     begin(threadId);
     await rt.whenIdle();
-    expect(lastDeskInput()).toContain('— update] Ended its turn without completing: I need the API key location');
+    expect(lastDeskInput()).toContain('— update]\n> Ended its turn without completing: I need the API key location');
   });
 
   it('reports stalled threads once per stall', async () => {

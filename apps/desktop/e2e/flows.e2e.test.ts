@@ -16,6 +16,8 @@ let app: ElectronApplication;
 
 const content = (m: Record<string, unknown> | undefined) => (typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? ''));
 const system = (req: ChatRequest) => content(req.messages[0]);
+/** Whether a user turn holds a runtime message header of this kind, e.g. `[message #12 from thread "…" (…) — completed]`. */
+const hasHeader = (said: string, kind: string) => new RegExp(`^\\[message #\\d+ from .+ — ${kind}\\]$`, 'm').test(said);
 
 /** Desk: dispatch a thread and ask a question; send the first result back for revision; report on the second. */
 function desk(req: ChatRequest): FakeReply {
@@ -28,9 +30,9 @@ function desk(req: ChatRequest): FakeReply {
       call('ask_user', { question: 'Data source or teammate invite first?', options: ['Data source', 'Teammate invite'] }),
     );
   }
-  if (said.includes('— completed]')) {
+  if (hasHeader(said, 'completed')) {
     const spawned = req.messages.map(content).join('\n').match(/Spawned thread (\S+) /)?.[1] ?? '';
-    const results = req.messages.filter((m) => m.role === 'user' && content(m).includes('— completed]')).length;
+    const results = req.messages.filter((m) => m.role === 'user' && hasHeader(content(m), 'completed')).length;
     return results === 1
       ? tools(call('message_thread', { thread_id: spawned, kind: 'revision', text: 'Item 3 reads as salesy; tighten it.' }))
       : tools(call('report', { headline: 'The signup checklist is in', progress: 'Two rounds, now tight.', needs_you: ['Review the checklist copy'], results: [] }));
@@ -48,7 +50,7 @@ function thread(req: ChatRequest): FakeReply {
   }
   const said = content(last);
   if (said.includes('Keep it short')) return text('Will do.');
-  if (said.includes('— revision]')) return tools(call('complete', { summary: 'Checklist tightened.' }));
+  if (hasHeader(said, 'revision')) return tools(call('complete', { summary: 'Checklist tightened.' }));
   return tools(call('bash', { command: 'echo sudo make me a checklist' }));
 }
 
