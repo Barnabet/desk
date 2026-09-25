@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { call } from '../bridge';
 import { EmptyState } from '../components/EmptyState';
+import { PairSheet } from '../components/PairSheet';
 import { toastError } from '../components/Toast';
 import { plural } from '../format';
 import { useGlobal } from '../state/global';
@@ -70,6 +71,9 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const onOwnWords = useCallback(() => textareaRef.current?.focus(), []);
   const jumpRef = useRef<(itemId: string) => void>(() => {});
   const onJump = useCallback((itemId: string) => jumpRef.current(itemId), []);
+  /** The pair sheet's two agents (design spec §8 item 8): local state, no route. */
+  const [pairOf, setPairOf] = useState<readonly [string, string] | null>(null);
+  const onPair = useCallback((a: string, b: string) => setPairOf([a, b]), []);
   /** Last render's row views: a row whose view did not change keeps its object, so ChatRow's memo skips it (design spec §7). */
   const viewsRef = useRef<Map<string, RowView>>(new Map());
   const views = useMemo(() => (viewsRef.current = keepStable(viewsRef.current, rowViews(s.chat.items, s.messages))), [s.chat.items, s.messages]);
@@ -192,6 +196,8 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
                   view={views.get(item.id)}
                   now={ticks(views.get(item.id)) ? now : undefined}
                   onJump={onJump}
+                  deskId={s.chat.agentId}
+                  onPair={onPair}
                 />
               </div>
             ))}
@@ -211,6 +217,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
           {narrow ? <ServicesCard project={project} /> : null}
         </div>
       </div>
+      {pairOf ? <PairSheet projectId={projectId} messages={s.messages} a={pairOf[0]} b={pairOf[1]} onClose={() => setPairOf(null)} /> : null}
     </div>
   );
 }

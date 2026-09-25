@@ -5,8 +5,8 @@ import { chatEventId } from './ChatItems';
 /** The question an answer answers, quoted on one line: "↩ Auth API's question: “Which token format…”". */
 export type AnswerQuote = { question: number; asker: string; text: string };
 
-/** One pair of a between-threads digest, ready to show; the line opens `to`'s thread at message `at` (its latest). */
-export type PairLine = { key: string; label: string; count: number; waiting?: { who: string; since: string }; to: string; at: number };
+/** One pair of a between-threads digest, ready to show; the line opens the pair sheet of `a` (its first sender) and `b`. */
+export type PairLine = { key: string; label: string; count: number; waiting?: { who: string; since: string }; a: string; b: string };
 
 /**
  * What a chat row shows from the session's message fold (design spec §7 "Chat rows"). A question's state and a
@@ -78,8 +78,8 @@ function rowView(item: ChatItem, m: MessagesState): RowView | undefined {
             label: `${agentTitle(m, p.a)} ⇄ ${agentTitle(m, p.b)}`,
             count: p.count,
             ...(p.waiting ? { waiting: { who: agentTitle(m, p.waiting.agentId), since: p.waiting.since } } : {}),
-            to: p.latestTo,
-            at: p.latest,
+            a: p.a,
+            b: p.b,
           })),
         },
       };

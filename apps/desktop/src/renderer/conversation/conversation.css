@@ -1035,3 +1035,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.digest-pair,
+.msg-who {
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}

@@ -186,7 +186,7 @@ describe('messages in the conversation', () => {
     ]);
     await waitFor(() => expect(row('e:6')?.textContent).toContain('waiting for an answer · 4m'));
     expect(row('e:6')!.textContent).toContain(`Desk → Auth API · question · ${clock(asked)}`);
-    expect(within(row('e:6')!).getByRole('link', { name: 'Auth API' }).getAttribute('href')).toBe('#/p/p/threads/a');
+    expect(within(row('e:6')!).getByRole('button', { name: 'Auth API' })).toBeTruthy();
     expect(within(row('e:7')!).getByRole('button', { name: 'Between threads · 1 message · 1 open question' })).toBeTruthy();
 
     // Auth API answers Desk on Desk's stream: the question row reads "answered", and the answer quotes the question.
@@ -205,13 +205,16 @@ describe('messages in the conversation', () => {
     expect(within(row('e:10')!).getByRole('button', { name: 'Between threads · 1 message' })).toBeTruthy();
   });
 
-  it('lists a digest pair by pair when expanded, each line opening the recipient of its latest message there', async () => {
+  it("lists a digest pair by pair when expanded, each line opening the pair's sheet", async () => {
     show([...team(), msg(5, 'a', 'f', 'question', 'Is the login page ready?', minutesAgo(3), { tracked: true }), msg(6, 'f', 'a', 'note', 'Renamed the token field.', minutesAgo(2))]);
     const toggle = await screen.findByRole('button', { name: 'Between threads · 2 messages · 1 open question' });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('link', { name: /⇄/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /⇄/ })).toBeNull();
     fireEvent.click(toggle);
-    expect(screen.getByRole('link', { name: 'Auth API ⇄ Frontend · 2 · Auth API waiting 3m' }).getAttribute('href')).toBe('#/p/p/threads/a?at=6');
+    fireEvent.click(screen.getByRole('button', { name: 'Auth API ⇄ Frontend · 2 · Auth API waiting 3m' }));
+    const sheet = screen.getByRole('dialog', { name: 'Auth API ⇄ Frontend' });
+    expect(sheet.querySelectorAll('.pair-rows > li')).toHaveLength(2);
+    expect(sheet.textContent).toContain('open · 3m');
   });
 
   it('shows what Desk and the user sent threads, hides start, clamps long text and mutes a closure', async () => {
@@ -337,5 +340,24 @@ describe('messages in the conversation', () => {
       ev(6, 'tool.result', { run_id: 'r', tool_call_id: 'c1', name: 'read_thread', status: 'ok', content: 'Auth API: running' }, d),
     ]);
     await waitFor(() => expect(row('tools:5')?.textContent).toContain('read_thread Auth API'));
+  });
+
+  it("opens the pair sheet from the counterpart's name on Desk's message rows, and keeps a notice's link", async () => {
+    show([
+      ...team(),
+      msg(5, 'd', 'a', 'question', 'Which token format?', minutesAgo(4), { tracked: true }),
+      msg(6, 'a', 'd', 'update', 'Halfway there.', minutesAgo(3)),
+      msg(7, 'a', 'd', 'completed', 'Auth API ready.', minutesAgo(2)),
+    ]);
+    await waitFor(() => expect(row('e:7')).toBeTruthy());
+    fireEvent.click(within(row('e:5')!).getByRole('button', { name: 'Auth API' }));
+    const sheet = screen.getByRole('dialog', { name: 'Auth API ⇄ Desk' });
+    expect(sheet.querySelectorAll('.pair-rows > li')).toHaveLength(3);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(within(row('e:6')!).getByRole('button', { name: 'Auth API' }));
+    expect(screen.getByRole('dialog', { name: 'Auth API ⇄ Desk' })).toBeTruthy();
+    // The runtime wrote the notice, not the thread: its name still opens the thread.
+    expect(within(row('e:7')!).getByRole('link', { name: 'Auth API' }).getAttribute('href')).toBe('#/p/p/threads/a');
   });
 });

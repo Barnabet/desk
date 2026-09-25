@@ -31,7 +31,7 @@ describe('rowViews', () => {
     expect(Object.fromEntries(rowViews(chatOf(events), foldMessages(events)))).toEqual({
       'e:4': { toTitle: 'Auth API', question: { state: 'open', since: ts(4), toTitle: 'Auth API' } },
       'e:5': { toTitle: 'Frontend' },
-      'e:6': { digest: { messages: 1, open: 1, pairs: [{ key: 'a f', label: 'Auth API ⇄ Frontend', count: 1, waiting: { who: 'Auth API', since: ts(6) }, to: 'f', at: 6 }] } },
+      'e:6': { digest: { messages: 1, open: 1, pairs: [{ key: 'a f', label: 'Auth API ⇄ Frontend', count: 1, waiting: { who: 'Auth API', since: ts(6) }, a: 'a', b: 'f' }] } },
       'e:7': { question: { state: 'open', since: ts(7), toTitle: 'Desk' } },
     });
   });

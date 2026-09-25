@@ -93,8 +93,8 @@ function Quote({ a, onJump }: { a: AnswerQuote; onJump(itemId: string): void }) 
   );
 }
 
-/** What threads said to each other during one Desk turn: counts, then one line per pair (design spec §8 item 2). */
-function Digest({ view, projectId, now }: { view: NonNullable<RowView['digest']>; projectId: string; now: number | undefined }) {
+/** What threads said to each other during one Desk turn: counts, then one line per pair, which opens the pair's sheet (design spec §8 items 2 and 8). */
+function Digest({ view, now, onPair }: { view: NonNullable<RowView['digest']>; now: number | undefined; onPair(a: string, b: string): void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="chat-digest">
@@ -105,9 +105,9 @@ function Digest({ view, projectId, now }: { view: NonNullable<RowView['digest']>
         <ul className="digest-pairs">
           {view.pairs.map((p) => (
             <li key={p.key}>
-              <a href={href({ name: 'project', id: projectId, tab: 'threads', threadId: p.to, at: p.at })}>
+              <button type="button" className="link digest-pair" onClick={() => onPair(p.a, p.b)}>
                 {`${p.label} · ${p.count}${p.waiting ? ` · ${p.waiting.who} waiting ${age(p.waiting.since, now ?? Date.now())}` : ''}`}
-              </a>
+              </button>
             </li>
           ))}
         </ul>
@@ -115,6 +115,9 @@ function Digest({ view, projectId, now }: { view: NonNullable<RowView['digest']>
     </div>
   );
 }
+
+/** Kinds a thread writes to Desk itself; the rest on Desk's stream are the runtime's notices about it. */
+const WRITTEN: ReadonlySet<string> = new Set(['note', 'update', 'question', 'blocker', 'answer']);
 
 /**
  * Resumes a paused project from its notice (design spec §5.4): dismissing its `paused` item resumes the agents. It stays
@@ -151,6 +154,10 @@ export function ChatItemView(o: {
   now?: number | undefined;
   /** Scrolls the chat to an item and flashes it. */
   onJump(itemId: string): void;
+  /** Desk's agent id: the other side of a message row's pair. */
+  deskId: string;
+  /** Opens the pair sheet of two agents (design spec §8 item 8). */
+  onPair(a: string, b: string): void;
 }) {
   const { item, view } = o;
   const thread = (id: string) => href({ name: 'project', id: o.projectId, tab: 'threads', threadId: id });
@@ -204,9 +211,15 @@ export function ChatItemView(o: {
       return (
         <div className={`chat-feed feed-${item.messageKind}`}>
           <span className="feed-chip">{FEED[item.messageKind] ?? item.messageKind}</span>
-          <a className="feed-from" href={thread(item.fromAgentId)}>
-            {agentLabel(item.fromLabel)}
-          </a>
+          {WRITTEN.has(item.messageKind) ? (
+            <button type="button" className="link feed-from" onClick={() => o.onPair(item.fromAgentId, o.deskId)}>
+              {agentLabel(item.fromLabel)}
+            </button>
+          ) : (
+            <a className="feed-from" href={thread(item.fromAgentId)}>
+              {agentLabel(item.fromLabel)}
+            </a>
+          )}
           <span className="muted small">{clock(item.ts)}</span>
           {view?.answers ? <Quote a={view.answers} onJump={o.onJump} /> : null}
           <SafeMarkdown className="feed-text" text={item.text} />
@@ -217,7 +230,11 @@ export function ChatItemView(o: {
       return (
         <div className={`chat-msg msg-${item.messageKind}`}>
           <span className="msg-head">
-            Desk → <a href={thread(item.to)}>{view?.toTitle ?? 'a thread'}</a> · {item.messageKind} · {clock(item.ts)}
+            Desk →{' '}
+            <button type="button" className="link msg-who" onClick={() => o.onPair(item.to, item.from)}>
+              {view?.toTitle ?? 'a thread'}
+            </button>{' '}
+            · {item.messageKind} · {clock(item.ts)}
           </span>
           {view?.answers ? <Quote a={view.answers} onJump={o.onJump} /> : null}
           <Clamped text={item.text} />
@@ -235,7 +252,7 @@ export function ChatItemView(o: {
         </div>
       );
     case 'digest':
-      return view?.digest ? <Digest view={view.digest} projectId={o.projectId} now={o.now} /> : null;
+      return view?.digest ? <Digest view={view.digest} now={o.now} onPair={o.onPair} /> : null;
     case 'report':
       return (
         <article className="report-card" aria-labelledby={`report-${item.eventId}`}>
