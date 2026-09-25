@@ -8,6 +8,7 @@ import {
   GLOBAL_PROJECT_ID,
   MESSAGE_FOLD_TYPES,
   messageById,
+  openTo,
   sanitizeLabel,
   ServiceName,
   snippet,
@@ -16,6 +17,7 @@ import {
   type EventInput,
   type MemoryKind,
   type MessagesState,
+  type MessageView,
   type ProjectSettingsPatch,
   type ReasoningEffort,
   type ServiceStopReason,
@@ -30,7 +32,8 @@ import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { pendingInbox } from '../agent/inbox';
 import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
-import { runAgent, SHUTDOWN_REASON } from '../agent/run';
+import { answerText, ANSWER_MAX_STEPS, closureText, WHY } from '../agent/answer';
+import { runAgent, SHUTDOWN_REASON, type RunDeps } from '../agent/run';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { DEFAULT_MODEL_ID, effortFor, type ModelRegistry } from '../model/registry';
@@ -70,7 +73,7 @@ import type { RuntimeServices, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
-import { Scheduler } from './scheduler';
+import { Scheduler, type Job } from './scheduler';
 import { toolsForRole } from './toolsets';
 import { wakeDecision, type Item, type WakeState } from './wake';
 
@@ -209,8 +212,8 @@ export class Runtime {
       modelConcurrency: (model) => o.models.get(model).concurrency,
       projectConcurrency: (projectId) =>
         o.maxConcurrentThreads ?? getProject(o.store.db, projectId)?.settings.max_concurrent_threads ?? 4,
-      run: (job, signal) => this.execute(job.agentId, signal),
-      afterRun: (job) => this.afterRun(job.agentId),
+      run: (job, signal) => this.execute(job, signal),
+      afterRun: (job) => this.afterRun(job),
       onError: (err, job) => (o.onError ?? ((e, c) => console.error(`[desk] ${c}:`, e)))(err, `agent ${job.agentId}`),
     });
   }
@@ -805,12 +808,22 @@ export class Runtime {
     return t;
   }
 
-  /** The user's message to an agent. Refused (409) for an archived thread and for any agent of an archived project. */
-  sendMessage(agentId: string, text: string): void {
+  /**
+   * The user's message to an agent. With `question`, the user's Ask to a thread: an idle, done or failed thread
+   * answers it in an answer run without reopening (design spec §4.8); any other thread reads it as a message.
+   * Refused (409) for an archived thread and for any agent of an archived project, and (400) for an Ask to Desk.
+   */
+  sendMessage(agentId: string, text: string, opts: { question?: boolean } = {}): void {
     const agent = this.requireAgent(agentId);
     if (agent.archived_at) throw new ConflictError(`Thread ${agentId} is archived`);
     this.requireOpenProject(agent.project_id);
-    this.o.store.append({ project_id: agent.project_id, agent_id: agentId, type: 'message.user', payload: { text } });
+    if (opts.question && agent.role !== 'thread') throw new ValidationError('Only a thread can be asked a question; write to Desk instead');
+    this.o.store.append({
+      project_id: agent.project_id,
+      agent_id: agentId,
+      type: 'message.user',
+      payload: { text, ...(opts.question ? { question: true as const } : {}) },
+    });
     this.wake(agentId);
   }
 
@@ -1117,6 +1130,21 @@ export class Runtime {
     return this.messageEvent(from, this.requireAgent(q.from), 'answer', text, { replyTo: questionId, auto: opts.auto, toolCallId: opts.toolCallId });
   }
 
+  /**
+   * The events that close an answer run's question, appended with its `run.finished` (§4.5, §4.6): the answer for the
+   * reply `text` (trimmed and clipped; an empty text becomes the "did not answer" closure), or with `auto` the closure
+   * `(<title> <text>.)`. answerEvent's guard applies: nothing once the question has an answer, and a closure only while
+   * it is open. The user's question gets none: the run's own text is its answer.
+   */
+  private answerEnding(thread: AgentRow, q: MessageView, text: string, auto = false): EventInput[] {
+    if (q.kind !== 'question') return [];
+    const answer = auto ? '' : answerText(text);
+    const event = answer
+      ? this.answerEvent(q.id, thread.id, answer, {})
+      : this.answerEvent(q.id, thread.id, closureText(thread.title, auto ? text : WHY.noAnswer), { auto: true });
+    return event ? [event] : [];
+  }
+
   /** Unknown models are assumed to see images; the endpoint answers for itself. */
   private modelSeesImages(model: string): boolean {
     return this.o.models.has(model) ? this.o.models.get(model).vision : true;
@@ -1194,21 +1222,32 @@ export class Runtime {
     });
   }
 
-  /** Schedules the agent when wakeDecision says it should run now (design spec §3.2). Returns whether it did. */
+  /**
+   * Starts what wakeDecision says the agent should do now (design spec §3.2, §3.4): a full run through schedule(), or
+   * an answer job for one question, which appends no status event. Returns whether it enqueued a job.
+   */
   private wake(agentId: string): boolean {
     if (this.shuttingDown || this.scheduler.isActive(agentId)) return false;
     const agent = this.requireAgent(agentId);
-    if (wakeDecision(this.wakeState(agent)).kind === 'none') return false;
-    this.schedule(agent);
+    const d = wakeDecision(this.wakeState(agent));
+    if (d.kind === 'none') return false;
+    if (d.kind === 'answer') {
+      this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role, kind: 'answer', answering: d.question });
+    } else {
+      this.schedule(agent);
+    }
     return true;
   }
 
-  /** What wakeDecision reads about an agent: its row, its project, its pending approvals and its pending inbox. */
+  /**
+   * What wakeDecision reads about an agent: its row, its project, its pending approvals, its pending inbox (the user's
+   * Asks as `user_question`) and the open questions to it.
+   */
   private wakeState(agent: AgentRow): WakeState {
     const { store } = this.o;
     const roles = new Map(listAgents(store.db, agent.project_id).map((a) => [a.id, a.role]));
     const pending = pendingInbox(store, agent.id).flatMap((e): Item[] => {
-      if (e.type === 'message.user') return [{ id: e.id, from: 'user', kind: 'user' }];
+      if (e.type === 'message.user') return [{ id: e.id, from: 'user', kind: e.payload.question ? 'user_question' : 'user' }];
       if (e.type === 'message.agent') return [{ id: e.id, from: roles.get(e.payload.from_agent_id) === 'desk' ? 'desk' : 'thread', kind: e.payload.kind }];
       return [];
     });
@@ -1220,8 +1259,8 @@ export class Runtime {
       projectArchived: Boolean(getProject(store.db, agent.project_id)?.archived_at),
       pendingApprovals: pendingApprovalsFor(store.db, agent.id).length + (this.resolving.get(agent.id) ?? 0),
       pending,
-      // S2.7 lists the open questions here, together with wake() starting answer jobs.
-      open: [],
+      // Open tracked questions to it, read (at or below its cursor) or not.
+      open: openTo(this.messages(agent.project_id), agent.id).map((q) => ({ id: q.id, seen: q.id <= agent.inbox_cursor })),
     };
   }
 
@@ -1232,17 +1271,38 @@ export class Runtime {
     if (!this.shuttingDown) this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role, kind: 'run' });
   }
 
-  private async execute(agentId: string, signal: AbortSignal): Promise<void> {
-    const agent = this.requireAgent(agentId);
+  /**
+   * Runs one job. An answer job first checks that wakeDecision still picks its question: when the question was
+   * answered or withdrawn, or a revision or a user message now comes first, it returns without appending anything
+   * and afterRun decides again (§3.4). It then runs in answer mode (§4): the same tools, system prompt and effort as a
+   * full run, at most ANSWER_MAX_STEPS steps, no status change, and an ending that closes the question.
+   */
+  private async execute(job: Job, signal: AbortSignal): Promise<void> {
+    const agent = this.requireAgent(job.agentId);
+    let answer: RunDeps['answer'];
+    if (job.kind === 'answer') {
+      const d = wakeDecision(this.wakeState(agent));
+      if (d.kind !== 'answer' || d.question !== job.answering) return;
+      const q = messageById(this.messages(agent.project_id), d.question)!;
+      answer = {
+        question: q.id,
+        asker: q.from,
+        // The question itself if it is still pending (with anything older), else nothing new: never below the cursor.
+        upTo: Math.max(agent.inbox_cursor, q.id),
+        ending: (text, auto) => this.answerEnding(agent, q, text, auto),
+      };
+    }
     const maxSteps = this.o.maxSteps ?? { desk: 60, thread: 200 };
     const sandboxAvailable = await this.sandboxAvailable();
+    const gate: RunDeps['gate'] = (tool, input, project, a) =>
+      evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) });
     await runAgent(
       {
         store: this.o.store,
         adapter: this.o.adapter,
         tools: this.toolsFor(agent),
         systemPrompt: (a, p) => this.systemPrompt(a, p),
-        maxSteps: agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
+        maxSteps: answer ? ANSWER_MAX_STEPS : agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),
         contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),
@@ -1252,14 +1312,14 @@ export class Runtime {
           maxBytes: (model) => this.imageBudgets.get(model),
           lowerMaxBytes: (model, bytes) => this.imageBudgets.set(model, Math.min(bytes, this.imageBudgets.get(model) ?? Infinity)),
         },
-        reasoningEffort: (agent, project, model) =>
+        reasoningEffort: (a, project, model) =>
           effortFor(
             this.o.models.has(model) ? this.o.models.get(model) : undefined,
-            agent.role === 'desk' ? project.settings.desk_reasoning_effort : (agent.reasoning_effort ?? project.settings.thread_reasoning_effort),
+            a.role === 'desk' ? project.settings.desk_reasoning_effort : (a.reasoning_effort ?? project.settings.thread_reasoning_effort),
           ),
-        gate: (tool, input, project, a) =>
-          evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) }),
-        toolContext: (a, runId, toolCallId, sig) => buildToolContext(a, runId, toolCallId, sig, {
+        gate,
+        toolContext: (a, runId, toolCallId, sig) =>
+          buildToolContext(a, runId, toolCallId, sig, {
             sandboxEnabled: sandboxAvailable,
             jobs: this.jobs,
             services: this.services,
@@ -1268,25 +1328,36 @@ export class Runtime {
             guard: this.guard,
             gitDirs: (x) => this.gitDirs(x),
           }),
+        ...(answer ? { answer } : {}),
       },
-      agentId,
+      agent.id,
       signal,
     );
   }
 
-  /** After every job: kills a finished agent's jobs, tells its Desk, reminds Desk about What's up, then decides what runs next. */
-  private afterRun(agentId: string): void {
+  /**
+   * After every job: kills a finished agent's jobs; after a full run tells its Desk, after an answer run wakes the
+   * asker (the answer or closure was appended with the run's end, not delivered); reminds Desk about What's up; then
+   * decides what the agent does next (§3.4). An answer run never reports, so a done thread never sends a second
+   * `completed`.
+   */
+  private afterRun(job: Job): void {
     try {
-      const agent = this.requireAgent(agentId);
-      if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
-      this.notifyParent(agent, true);
+      const agent = this.requireAgent(job.agentId);
+      if (TERMINAL.has(agent.status)) this.jobs.killAll(agent.id);
+      if (job.kind === 'run') {
+        this.notifyParent(agent, true);
+      } else if (job.answering !== undefined) {
+        const asker = messageById(this.messages(agent.project_id), job.answering)?.from;
+        if (asker && asker !== 'user') this.wake(asker);
+      }
       // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
-      this.silentStops.delete(agentId);
+      this.silentStops.delete(agent.id);
       this.remindWhatsUp(agent);
-      this.wake(agentId);
+      this.wake(agent.id);
     } finally {
       // The stop point served this wake; from here on the `cancelled` event marks the stop.
-      this.stoppedAt.delete(agentId);
+      this.stoppedAt.delete(job.agentId);
     }
   }
 
