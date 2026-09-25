@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyTimeline, reduceTimeline, type ThreadView } from '@desk/client';
 import type { StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
-import { LANE_COLOR, lineGeometry } from './lineGeometry';
+import { LANE_COLOR, lineGeometry } from './line-geometry';
 
 const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
 const thread = (id: string, status: ThreadView['status'], activity: string | null = null) => ({ id, status, activity }) as ThreadView;

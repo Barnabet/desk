@@ -1,7 +1,7 @@
 import { groupAttention, type AttentionBays } from '@desk/client';
 import type { AttentionItem } from '@desk/protocol';
 import { STRIP_CODE } from '@desk/bff/contract';
-import { duration } from '../format';
+import { duration } from './format';
 
 export const BAYS: Array<{ key: keyof AttentionBays; name: string; sub: string }> = [
   { key: 'clearance', name: 'CLEARANCE', sub: 'Approvals' },

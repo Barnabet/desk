@@ -3,7 +3,7 @@ import type { AgentStatus } from '@desk/protocol';
 
 export type MapTone = 'running' | 'waiting' | 'idle';
 export type PlacedSkill = { key: string; x: number; y: number; r: number };
-export type Territory = { projectId: string; name: string; tone: MapTone; x: number; y: number; r: number; count: number };
+export type SkillTerritory = { projectId: string; name: string; tone: MapTone; x: number; y: number; r: number; count: number };
 export type UsageMarker = { threadId: string; projectId: string; title: string; status: AgentStatus; x: number; y: number; to: Array<{ x: number; y: number }> };
 export type ShadowLink = { fromKey: string; toKey: string; d: string; mx: number; my: number };
 export type SkillsMapLayout = {
@@ -12,7 +12,7 @@ export type SkillsMapLayout = {
   center: { x: number; y: number };
   globalRadius: number;
   skills: PlacedSkill[];
-  territories: Territory[];
+  territories: SkillTerritory[];
   markers: UsageMarker[];
   shadows: ShadowLink[];
 };
@@ -37,7 +37,7 @@ export function layoutSkillsMap(o: { nodes: SkillNode[]; projects: Array<{ id: s
     skills.set(n.key, { key: n.key, x: center.x + Math.cos(a) * globalRadius, y: center.y + Math.sin(a) * globalRadius, r: skillR(n, 38) });
   });
 
-  const territories: Territory[] = o.projects.map((p, i) => {
+  const territories: SkillTerritory[] = o.projects.map((p, i) => {
     const own = o.nodes.filter((n) => n.scope === 'project' && n.projectId === p.id);
     const r = 56 + 24 * Math.sqrt(own.length);
     const a = (i / Math.max(1, o.projects.length)) * Math.PI * 2 - Math.PI / 3;

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { WorkspaceEntry } from '@desk/protocol';
+import { bytes } from '@desk/ui-core';
 import { call, DeskCallError } from '../../bridge';
 import { EmptyState } from '../../components/EmptyState';
 import { FileViewer } from '../../components/FileViewer';
 import { describeError, toastError } from '../../components/Toast';
-import { bytes } from '../../format';
 
 type Listing = { status: 'loading' } | { status: 'ready'; entries: WorkspaceEntry[] } | { status: 'gone' } | { status: 'error'; message: string };
 type Open = { path: string; data: Uint8Array } | null;

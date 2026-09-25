@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import type { ArtifactKind } from '@desk/protocol';
+import { clock, extOf, fileToBase64, filterLibrary, href, imageMime, libraryFromEvents, MAX_UPLOAD, originAgent, plural, type LibraryItem } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { FileViewer } from '../components/FileViewer';
 import { toast, toastError } from '../components/Toast';
-import { extOf, fileToBase64, imageMime, MAX_UPLOAD } from '../files';
-import { clock, plural } from '../format';
-import { href, replaceRoute } from '../router';
+import { replaceRoute } from '../router';
 import { useSession } from '../state/session';
-import { filterLibrary, libraryFromEvents, originAgent, type LibraryItem } from './library';
 import './knowledge.css';
 
 const KINDS: Array<ArtifactKind | 'all'> = ['all', 'report', 'code', 'data', 'file', 'other'];

@@ -1,6 +1,11 @@
 import { agentTitle, digestView, messageById, questionView, type ChatItem, type MessagesState, type QuestionView, type ToolCallView } from '@desk/client';
 import { clip } from '@desk/protocol';
-import { chatEventId } from './ChatItems';
+
+/** The event id a chat item came from (streaming runs sort last). */
+export function chatEventId(item: ChatItem): number {
+  const n = Number(item.id.split(':')[1]);
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
 
 /** The question an answer answers, quoted on one line: "↩ Auth API's question: “Which token format…”". */
 export type AnswerQuote = { question: number; asker: string; text: string };

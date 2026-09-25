@@ -1,4 +1,4 @@
-import { href, PROJECT_TABS, type ProjectTab } from '../router';
+import { href, PROJECT_TABS, type ProjectTab } from '@desk/ui-core';
 
 const LABEL: Record<ProjectTab, string> = { conversation: 'Conversation', threads: 'Threads', library: 'Library', memory: 'Memory', settings: 'Settings' };
 

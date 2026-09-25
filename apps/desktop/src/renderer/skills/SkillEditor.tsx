@@ -1,14 +1,13 @@
 import { useRef, useState } from 'react';
 import type { SkillDetail } from '@desk/client';
 import { SkillName } from '@desk/protocol';
+import { bytes, fileToBase64, MAX_UPLOAD, textToBase64, type SkillRef } from '@desk/ui-core';
 import { call, DeskCallError } from '../bridge';
 import { Button } from '../components/Button';
 import { Field } from '../components/Field';
 import { Sheet } from '../components/Sheet';
 import { toastError } from '../components/Toast';
-import { fileToBase64, MAX_UPLOAD, textToBase64 } from '../files';
-import { bytes } from '../format';
-import { scopeArg, type SkillRef } from './data';
+import { scopeArg } from './data';
 
 type NewFile = { path: string; content: string | File };
 

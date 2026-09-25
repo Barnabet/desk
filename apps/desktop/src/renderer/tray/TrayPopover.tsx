@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ApprovalRow } from '@desk/client';
 import type { AttentionItem } from '@desk/protocol';
+import { href, rackOrder, STRIP_CODE, waited } from '@desk/ui-core';
 import { call, DeskCallError } from '../bridge';
 import { describeArgs } from '../attention/Inspector';
 import { FlightStrip } from '../attention/FlightStrip';
-import { rackOrder, STRIP_CODE, waited } from '../attention/strips';
 import { Button } from '../components/Button';
 import { describeError } from '../components/Toast';
-import { href } from '../router';
 import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { miniLine } from './miniLine';

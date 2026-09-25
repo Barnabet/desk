@@ -1,6 +1,7 @@
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
+import { createStore } from '@desk/ui-core';
 import { call, onPush } from '../bridge';
-import { createStore, useStore } from '../store';
+import { useStore } from '../store';
 
 export const globalStore = createStore<GlobalState>(initialGlobalState());
 

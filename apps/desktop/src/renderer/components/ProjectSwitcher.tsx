@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { ProjectSummary } from '@desk/protocol';
+import { href } from '@desk/ui-core';
 import { projectSummaryLine } from '../map/OrbitMap';
-import { href, navigate } from '../router';
+import { navigate } from '../router';
 import { useGlobal } from '../state/global';
 import { unreadIn, useSeen } from '../state/unread';
 

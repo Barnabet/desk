@@ -1,15 +1,13 @@
 import { useState } from 'react';
 import { waitingOn, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
+import { ago, answeringLabel, href, waitHop, waitLabel, waitsOnYou, type WaitHop } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { HopLink } from '../components/HopLink';
 import { PairSheet } from '../components/PairSheet';
 import { EmptyState } from '../components/EmptyState';
 import { SkillBadge } from '../components/SkillBadge';
 import { StatusChip } from '../components/StatusChip';
-import { ago } from '../format';
-import { href } from '../router';
 import { useGlobal } from '../state/global';
-import { answeringLabel, waitHop, waitLabel, waitsOnYou, type WaitHop } from '../waits';
 
 const ORDER: Record<string, number> = { waiting: 0, running: 1, queued: 2, idle: 3, failed: 4, done: 5, cancelled: 6 };
 

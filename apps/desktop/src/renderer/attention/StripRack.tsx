@@ -1,6 +1,6 @@
 import type { AttentionBays } from '@desk/client';
+import { BAYS } from '@desk/ui-core';
 import { FlightStrip } from './FlightStrip';
-import { BAYS } from './strips';
 
 /** The rack: four bays, each a recessed tray holding its strips. */
 export function StripRack(o: { bays: AttentionBays; now: number; selectedId: string | null; threadTitle(id: string): string | null; onSelect(id: string): void }) {

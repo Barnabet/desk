@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { SkillDetail } from '@desk/client';
+import { parseSkillKey, skillKey, type SkillRef } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
@@ -13,7 +14,7 @@ import { AskDesk } from './AskDesk';
 import { CatalogView, LayoutSwitch, useCatalogLayout } from './catalog/CatalogView';
 import { catalogIndex, useCatalog } from './catalog/data';
 import { ReviewSheet } from './catalog/ReviewSheet';
-import { parseSkillKey, skillKey, useSkills, type SkillRef } from './data';
+import { useSkills } from './data';
 import { SkillEditor } from './SkillEditor';
 import { SkillList } from './SkillList';
 import { SkillPanel } from './SkillPanel';

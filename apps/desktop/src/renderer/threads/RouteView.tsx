@@ -1,8 +1,7 @@
 import { useRef } from 'react';
 import type { MessagesState } from '@desk/client';
-import { plural } from '../format';
+import { plural, routeLayout, senderDisc, senderName, stopText, type Stop, type StopKind } from '@desk/ui-core';
 import { useWidth } from '../state/width';
-import { routeLayout, senderDisc, senderName, stopText, type Stop, type StopKind } from './route';
 
 const INNER: Record<StopKind, (s: Stop, m: MessagesState) => string> = {
   brief: () => 'Brief',

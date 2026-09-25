@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AttentionItem } from '@desk/protocol';
+import { href, plural, rackOrder, STRIP_CODE, waited } from '@desk/ui-core';
 import { call, DeskCallError } from '../bridge';
 import { EmptyState } from '../components/EmptyState';
 import { toast, toastError } from '../components/Toast';
-import { plural } from '../format';
-import { href, navigate, replaceRoute } from '../router';
+import { navigate, replaceRoute } from '../router';
 import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { Inspector } from './Inspector';
 import { StripRack } from './StripRack';
-import { rackOrder, STRIP_CODE, waited } from './strips';
 import './attention.css';
 
 const WHO: Record<string, string> = { user: 'you, in another window', desk: 'Desk', system: 'Desk (the thread was stopped)' };

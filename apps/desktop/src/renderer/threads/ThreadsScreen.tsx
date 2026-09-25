@@ -1,5 +1,5 @@
 import { EmptyState } from '../components/EmptyState';
-import { href } from '../router';
+import { href } from '@desk/ui-core';
 import { useNow } from '../state/now';
 import { useSession } from '../state/session';
 import { ThreadDetail } from './ThreadDetail';

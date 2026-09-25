@@ -1,5 +1,6 @@
 import { call, DeskCallError } from '../bridge';
-import { createStore, useStore } from '../store';
+import { createStore } from '@desk/ui-core';
+import { useStore } from '../store';
 
 export type Toast = { id: number; tone: 'error' | 'info'; message: string; action?: { label: string; run(): void } };
 

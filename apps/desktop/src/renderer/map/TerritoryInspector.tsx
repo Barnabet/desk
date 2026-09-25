@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AttentionItem, PlanItem, ProjectSummary } from '@desk/protocol';
+import { ago, clock, href, waitsOnYou } from '@desk/ui-core';
 import { call } from '../bridge';
-import { ago, clock } from '../format';
-import { href } from '../router';
-import { waitsOnYou } from '../waits';
 import { projectSummaryLine, projectTone } from './OrbitMap';
 
 const BADGE = { running: 'chip-run', waiting: 'chip-wait', idle: 'chip-idle' } as const;

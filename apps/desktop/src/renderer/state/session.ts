@@ -19,8 +19,9 @@ import {
   type TranscriptState,
 } from '@desk/client';
 import type { EphemeralEvent, StoredEvent } from '@desk/protocol';
+import { createStore, type Store } from '@desk/ui-core';
 import { call, DeskCallError, onPush } from '../bridge';
-import { createStore, useStore, type Store } from '../store';
+import { useStore } from '../store';
 
 export type SessionState = {
   status: 'loading' | 'ready' | 'missing' | 'error';

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { emptyTranscript, foldMessages, messageById, reduceTranscript } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AgentMessageKind, EventOf, RunFinishReason, StoredEvent } from '@desk/protocol';
-import { clock } from '../format';
-import { cardTitle, inCard, isCard, narrate, outCard, routeLayout, senderDisc, senderName, sentCalls, stopAt, stopsOf, stopText, type CardView } from './route';
+import { clock } from './format';
+import { cardTitle, inCard, isCard, narrate, outCard, routeLayout, senderDisc, senderName, sentCalls, stopAt, stopsOf, stopText, type CardView } from './thread-route';
 
 const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
 const a = { agent: 't' };

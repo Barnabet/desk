@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { CatalogInstall, CatalogItem } from '@desk/protocol';
-import { href } from '../../router';
-import { skillKey } from '../data';
+import { href, skillKey } from '@desk/ui-core';
 import { actionFor, BAYS, installRef, runtimeWords, sourceLabel } from './data';
 import { RuntimeLine } from './RuntimeLine';
 

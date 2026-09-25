@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RISKY_COMMAND_PATTERN } from '@desk/protocol';
-import { policyReason } from './policyReason';
+import { policyReason } from './policy-reason';
 
 describe('policyReason', () => {
   it('explains the risky-command rule in words', () => {

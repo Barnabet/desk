@@ -1,7 +1,5 @@
 import { agentTitle, type MessagesState, type MessageView } from '@desk/client';
-import { clock, duration } from '../format';
-import { pairView, type PairEntry } from '../pairs';
-import { href } from '../router';
+import { clock, duration, href, pairView, type PairEntry } from '@desk/ui-core';
 import { useNow } from '../state/now';
 import { Button } from './Button';
 import { SafeMarkdown } from './SafeMarkdown';

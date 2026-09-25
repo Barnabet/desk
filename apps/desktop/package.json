@@ -15,6 +15,7 @@
     "@desk/bff": "workspace:*",
     "@desk/client": "workspace:*",
     "@desk/protocol": "workspace:*",
+    "@desk/ui-core": "workspace:*",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@fontsource-variable/newsreader": "^5.3.0",

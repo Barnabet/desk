@@ -1,5 +1,5 @@
 import type { AttentionItem } from '@desk/protocol';
-import { gauge, STRIP_CODE, stripWho, waited } from './strips';
+import { gauge, STRIP_CODE, stripWho, waited } from '@desk/ui-core';
 import './attention.css';
 
 /** The wait gauge's colour: vermilion for approvals and failures, amber for holds (stalled threads, paused projects). */

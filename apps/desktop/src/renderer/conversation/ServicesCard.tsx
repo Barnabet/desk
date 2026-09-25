@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectState, ServiceRow } from '@desk/client';
+import { ago, duration } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { Sheet } from '../components/Sheet';
 import { toastError } from '../components/Toast';
-import { ago, duration } from '../format';
 import { useNow } from '../state/now';
 
 const STOP_REASON: Record<string, string> = {

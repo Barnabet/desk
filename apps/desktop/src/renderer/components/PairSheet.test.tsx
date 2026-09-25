@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { foldMessages } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AgentMessageKind, EventOf } from '@desk/protocol';
-import { clock } from '../format';
+import { clock } from '@desk/ui-core';
 import { PairSheet } from './PairSheet';
 
 afterEach(cleanup);

@@ -1,4 +1,5 @@
-import { createStore, useStore } from '../store';
+import { createStore } from '@desk/ui-core';
+import { useStore } from '../store';
 
 const KEY = 'desk.lastProject';
 

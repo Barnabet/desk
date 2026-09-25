@@ -1,5 +1,5 @@
 import type { ProjectSummary } from '@desk/protocol';
-import { href } from '../router';
+import { href } from '@desk/ui-core';
 import { useUnread } from '../state/unread';
 import { projectSummaryLine } from './OrbitMap';
 

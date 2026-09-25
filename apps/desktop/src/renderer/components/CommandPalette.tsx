@@ -1,9 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { SkillSummary } from '@desk/client';
 import { clip, type ArtifactKind, type CatalogItem } from '@desk/protocol';
+import { GROUP_ORDER, href, rankPalette, type PaletteItem } from '@desk/ui-core';
 import { call } from '../bridge';
-import { GROUP_ORDER, rankPalette, type PaletteItem } from '../palette';
-import { href, navigate } from '../router';
+import { navigate } from '../router';
 import { useGlobal } from '../state/global';
 
 type Loaded = {

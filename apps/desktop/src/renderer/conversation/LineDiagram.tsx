@@ -1,11 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
+import { ago, answeringLabel, clock, duration, href, waitHop, waitLabel, type LaneGeometry, type LineGeometry } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/AnsweringBadge';
-import { ago, clock, duration } from '../format';
-import { href } from '../router';
-import { answeringLabel, waitHop, waitLabel } from '../waits';
-import type { LaneGeometry, LineGeometry } from './lineGeometry';
 
 type StationG = LineGeometry['stations'][number];
 

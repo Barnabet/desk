@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem } from '@desk/protocol';
+import { skillKey, type SkillRef } from '@desk/ui-core';
 import { call } from '../../bridge';
 import { describeError } from '../../components/Toast';
 import { useGlobal } from '../../state/global';
-import { skillKey, type SkillRef } from '../data';
 
 export const BAYS: Array<{ category: CatalogCategory; title: string; blurb: string }> = [
   { category: 'research', title: 'Research', blurb: 'Find sources, check facts, read the web.' },

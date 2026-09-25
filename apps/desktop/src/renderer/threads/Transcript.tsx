@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { agentTitle, messageById, type MessagesState, type ToolCallView, type TranscriptEntry } from '@desk/client';
 import { clip } from '@desk/protocol';
+import { cardTitle, clock, href, inCard, isCard, outCard, policyReason, stopText, type CardView, type NarrativeRow, type Stop } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
@@ -9,10 +10,6 @@ import { ImageThumbs } from '../components/ImageThumbs';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
 import { ToolGroup, ToolStatus } from '../components/ToolGroup';
-import { clock } from '../format';
-import { policyReason } from '../policyReason';
-import { href } from '../router';
-import { cardTitle, inCard, isCard, outCard, stopText, type CardView, type NarrativeRow, type Stop } from './route';
 
 export type Depth = 'narrative' | 'steps';
 

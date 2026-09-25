@@ -1,5 +1,4 @@
-import { href } from '../router';
-import type { WaitHop } from '../waits';
+import { href, type WaitHop } from '@desk/ui-core';
 
 /** One hop past a wait: a vermilion dot and "→ needs your approval", linking to that attention item (design spec §8 item 11). */
 export function HopLink({ hop }: { hop: WaitHop }) {

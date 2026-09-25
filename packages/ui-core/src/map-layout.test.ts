@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutMap, type MapProject } from './layout';
+import { layoutMap, type MapProject } from './map-layout';
 
 const projects = (n: number): MapProject[] =>
   Array.from({ length: n }, (_, i) => ({ id: `p${i}`, activity: (i * 7) % 11 + 1, threads: Array.from({ length: i % 4 }, (_, j) => ({ id: `t${i}-${j}`, status: 'running' as const })) }));

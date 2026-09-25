@@ -1,7 +1,7 @@
 import type { ThreadView } from '@desk/client';
+import { href } from '@desk/ui-core';
 import { EmptyState } from '../../components/EmptyState';
 import { SafeMarkdown } from '../../components/SafeMarkdown';
-import { href } from '../../router';
 
 export function ResultTab({ projectId, thread }: { projectId: string; thread: ThreadView }) {
   if (!thread.result_summary)

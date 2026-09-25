@@ -5,10 +5,10 @@ import type { ProjectOverview } from '@desk/client';
 import type { StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { initialGlobalState } from '@desk/bff/contract';
+import { activeEntries, chainOf, memoryFromEvents } from '@desk/ui-core';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
 import { installBridge } from '../test/bridge';
-import { activeEntries, chainOf, memoryFromEvents } from './memory';
 import { MemoryScreen } from './MemoryScreen';
 
 afterEach(cleanup);

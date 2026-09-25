@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { asText, bytes, extOf, imageMime, isMarkdown } from '@desk/ui-core';
 import { call } from '../bridge';
-import { asText, extOf, imageMime, isMarkdown } from '../files';
-import { bytes } from '../format';
 import { Button } from './Button';
 import { CodeBlock } from './CodeBlock';
 import { SafeMarkdown } from './SafeMarkdown';

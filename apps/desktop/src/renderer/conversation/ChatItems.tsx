@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import { WAKES_PAUSED, type AttentionItem } from '@desk/protocol';
 import type { ChatItem, QuestionView } from '@desk/client';
+import { chatEventId, clock, duration, href, plural, type AnswerQuote, type RowView } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
 import { ToolGroup } from '../components/ToolGroup';
-import { clock, duration, plural } from '../format';
-import { href } from '../router';
-import type { AnswerQuote, RowView } from './rowViews';
 
 const FEED: Record<string, string> = {
   note: 'Note',
@@ -28,12 +26,6 @@ const FEED: Record<string, string> = {
 export const agentLabel = (label: string) => /^thread "(.*)" \([\w-]+\)$/.exec(label)?.[1] ?? label;
 
 export const chatDomId = (id: string) => `chat-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-
-/** The event id a chat item came from (streaming runs sort last). */
-export function chatEventId(item: ChatItem): number {
-  const n = Number(item.id.split(':')[1]);
-  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
-}
 
 /** Time since `iso` on the shared clock: "42s", "4m". */
 const age = (iso: string, now: number) => duration(Math.max(0, now - Date.parse(iso)));

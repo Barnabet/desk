@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CatalogItem, CatalogReview, ReviewWarningKind } from '@desk/protocol';
+import { bytes, skillKey, type SkillRef } from '@desk/ui-core';
 import { call } from '../../bridge';
 import { Button } from '../../components/Button';
 import { ExternalLink } from '../../components/ExternalLink';
@@ -7,9 +8,7 @@ import { Field } from '../../components/Field';
 import { FileViewer } from '../../components/FileViewer';
 import { Sheet } from '../../components/Sheet';
 import { describeError, toast, toastError } from '../../components/Toast';
-import { bytes } from '../../format';
 import { navigate } from '../../router';
-import { skillKey, type SkillRef } from '../data';
 import { actionFor, installRef, runtimePackages, runtimeWords, sourceLabel } from './data';
 import { RuntimeLine } from './RuntimeLine';
 

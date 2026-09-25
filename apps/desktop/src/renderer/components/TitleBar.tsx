@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { href, type Route } from '../router';
+import { href, type Route } from '@desk/ui-core';
 import { useGlobal } from '../state/global';
 import { rememberProject, useLastProject } from '../state/lastProject';
 import { ProjectSwitcher } from './ProjectSwitcher';

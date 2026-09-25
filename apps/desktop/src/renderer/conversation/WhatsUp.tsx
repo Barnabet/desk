@@ -1,6 +1,6 @@
 import type { ProjectState } from '@desk/client';
+import { ago, plural } from '@desk/ui-core';
 import { SafeMarkdown } from '../components/SafeMarkdown';
-import { ago, plural } from '../format';
 
 /** Desk's What's up at the top of the conversation's left column; until Desk has written one, the thread counts. */
 export function WhatsUp({ project, now }: { project: ProjectState; now: number }) {

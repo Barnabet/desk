@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
+import { activityOf, layoutMap, plural } from '@desk/ui-core';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { Sheet } from '../components/Sheet';
-import { plural } from '../format';
 import { navigate } from '../router';
 import { ProjectForm } from '../screens/ProjectForm';
 import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
-import { activityOf, layoutMap } from './layout';
 import { MapCanvas } from './MapCanvas';
 import { OrbitMap } from './OrbitMap';
 import { ProjectList } from './ProjectList';

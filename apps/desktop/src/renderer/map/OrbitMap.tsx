@@ -1,8 +1,6 @@
 import type { AgentStatus, AttentionItem, ProjectSummary } from '@desk/protocol';
-import { ago } from '../format';
-import { href } from '../router';
+import { ago, href, type MapLayout, type Territory } from '@desk/ui-core';
 import { useUnread } from '../state/unread';
-import type { MapLayout, Territory } from './layout';
 
 export type Tone = 'running' | 'waiting' | 'idle';
 

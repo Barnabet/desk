@@ -88,6 +88,9 @@ importers:
       '@desk/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@desk/ui-core':
+        specifier: workspace:*
+        version: link:../../packages/ui-core
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -242,6 +245,18 @@ importers:
       zod:
         specifier: ^4.6.5
         version: 4.6.5
+
+  packages/ui-core:
+    dependencies:
+      '@desk/bff':
+        specifier: workspace:*
+        version: link:../bff
+      '@desk/client':
+        specifier: workspace:*
+        version: link:../client
+      '@desk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   test/fake-model:
     devDependencies:

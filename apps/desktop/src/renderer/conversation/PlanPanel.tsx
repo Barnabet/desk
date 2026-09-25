@@ -1,8 +1,7 @@
 import type { ProjectState } from '@desk/client';
 import type { AttentionItem, PlanItem } from '@desk/protocol';
+import { href, waitsOnYou } from '@desk/ui-core';
 import { StatusChip } from '../components/StatusChip';
-import { href } from '../router';
-import { waitsOnYou } from '../waits';
 
 const STATUS: Record<PlanItem['status'], string> = { todo: 'To do', in_progress: 'In progress', done: 'Done', dropped: 'Dropped' };
 

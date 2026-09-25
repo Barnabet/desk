@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SkillNode } from '@desk/client';
-import { layoutSkillsMap } from './skillsMap';
+import { layoutSkillsMap } from './skills-map';
 
 const node = (key: string, extra: Partial<SkillNode> = {}): SkillNode => {
   const [scope, a, b] = key.split(':');

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SkillDetail, SkillHistoryEntry, SkillNode } from '@desk/client';
 import type { CatalogInstall, CatalogItem } from '@desk/protocol';
+import { bytes, diffFiles, diffLines, href, since, withContext, type SkillRef } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -8,13 +9,11 @@ import { EmptyState } from '../components/EmptyState';
 import { FileViewer } from '../components/FileViewer';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { describeError, toast, toastError } from '../components/Toast';
-import { bytes, since } from '../format';
-import { href, navigate } from '../router';
+import { navigate } from '../router';
 import { useNow } from '../state/now';
-import { scopeArg, whoLabel, type SkillRef } from './data';
+import { scopeArg, whoLabel } from './data';
 import { runtimeWords, sourceLabel } from './catalog/data';
 import { RuntimeLine } from './catalog/RuntimeLine';
-import { diffFiles, diffLines, withContext } from './diff';
 
 type Tab = 'overview' | 'instructions' | 'files' | 'history';
 

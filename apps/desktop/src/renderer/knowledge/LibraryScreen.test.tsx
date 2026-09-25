@@ -5,11 +5,11 @@ import type { ProjectOverview } from '@desk/client';
 import type { StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { initialGlobalState } from '@desk/bff/contract';
+import { libraryFromEvents } from '@desk/ui-core';
 import { useRoute } from '../router';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
 import { installBridge } from '../test/bridge';
-import { libraryFromEvents } from './library';
 import { LibraryScreen } from './LibraryScreen';
 
 afterEach(cleanup);

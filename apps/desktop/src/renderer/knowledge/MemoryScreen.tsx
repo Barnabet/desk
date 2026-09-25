@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { MemoryKind } from '@desk/protocol';
+import { activeEntries, chainOf, clock, href, MEMORY_KINDS, memoryFromEvents, originAgent, plural, type MemoryEntry } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyState } from '../components/EmptyState';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { toastError } from '../components/Toast';
-import { clock, plural } from '../format';
-import { href, replaceRoute } from '../router';
+import { replaceRoute } from '../router';
 import { useSession } from '../state/session';
-import { originAgent } from './library';
-import { activeEntries, chainOf, MEMORY_KINDS, memoryFromEvents, type MemoryEntry } from './memory';
 import './knowledge.css';
 
 function Source({ projectId, source, label }: { projectId: string; source: string; label(id: string): string }) {

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import type { Route } from '@desk/ui-core';
 import { onPush } from './bridge';
 import { CommandPalette } from './components/CommandPalette';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -6,7 +7,7 @@ import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { ProjectNav } from './components/ProjectNav';
 import { TitleBar } from './components/TitleBar';
 import { Toaster } from './components/Toast';
-import { navigate, useRoute, type Route } from './router';
+import { navigate, useRoute } from './router';
 import { AttentionScreen } from './attention/AttentionScreen';
 import { ConversationScreen } from './conversation/ConversationScreen';
 import { LibraryScreen } from './knowledge/LibraryScreen';

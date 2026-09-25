@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyChat, foldMessages, reduceChat } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AgentMessageKind, EventOf, StoredEvent } from '@desk/protocol';
-import { keepStable, rowViews, ticks } from './rowViews';
+import { keepStable, rowViews, ticks } from './row-views';
 
 /** `ev()` stamps event `id` this many seconds after 10:00:00Z on 2026-09-24. */
 const ts = (id: number) => new Date(Date.UTC(2026, 8, 24, 10, 0, id)).toISOString();

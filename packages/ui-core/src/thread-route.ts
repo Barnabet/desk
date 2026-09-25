@@ -1,7 +1,7 @@
 import { agentTitle, emptyMessages, messageById, type MessagesState, type MessageView, type ToolCallView, type TranscriptEntry } from '@desk/client';
 import { clip, type RunFinishReason } from '@desk/protocol';
-import { toolNames } from '../components/ToolGroup';
-import { clock } from '../format';
+import { clock } from './format';
+import { toolNames } from './tool-names';
 
 export type StopKind = 'brief' | 'work' | 'detour' | 'result' | 'revision' | 'steer' | 'approval' | 'incoming' | 'answer';
 

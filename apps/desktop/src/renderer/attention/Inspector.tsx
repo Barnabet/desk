@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { AttentionItem } from '@desk/protocol';
+import { clock, href, KIND_NAME, policyReason, STRIP_CODE, waited } from '@desk/ui-core';
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
 import { SafeMarkdown } from '../components/SafeMarkdown';
-import { clock } from '../format';
-import { policyReason } from '../policyReason';
-import { href } from '../router';
 import { useSession, useTranscript } from '../state/session';
-import { KIND_NAME, STRIP_CODE, waited } from './strips';
 
 const SHELL = new Set(['bash', 'bash_background', 'bash_readonly']);
 

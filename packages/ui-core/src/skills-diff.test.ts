@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffFiles, diffLines, withContext } from './diff';
+import { diffFiles, diffLines, withContext } from './skills-diff';
 
 describe('diffLines', () => {
   it('finds added and removed lines', () => {
