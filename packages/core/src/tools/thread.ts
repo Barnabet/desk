@@ -86,8 +86,9 @@ export const messageDeskTool = defineTool({
 });
 
 /**
- * What a waiting thread waits on, for its status reason (design spec §2.1; the CLI and list_threads show it): the
- * recipients of its open questions, threads first and Desk last, or "Desk or the user" when it asked nothing.
+ * What a waiting thread waits on, for its status reason (design spec §2.1; the CLI shows it, list_threads shows only
+ * the status): the recipients of its open questions, threads first and Desk last, or "Desk or the user" when it asked
+ * nothing.
  */
 export function waitingReason(s: MessagesState, agentId: string): string {
   const to = [...new Set(openFrom(s, agentId).map((q) => q.to))];

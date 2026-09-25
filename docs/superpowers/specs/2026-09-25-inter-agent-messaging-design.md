@@ -189,7 +189,7 @@ export const snippet = (text: string, max: number) => JSON.stringify(clip(text.r
 | `read_thread` | `{thread_id}` | Built by `makeReadThreadTool({ full: false })`, so it has no `mode` input. Description: "Inspect another thread of this project: status, brief, result, artifacts, branch and its last message." |
 | `message_thread` | `{thread_id, kind: 'note'\|'question' = 'note', text}` | "Send a message to another thread of this project (thread_id: its id or exact title). `question`: ask about its own work (an interface, file, format or finding it owns); it may be woken just to answer you, so ask only what its brief, its result or read_thread don't tell you. `note`: tell it something that changes its work. If that thread asked you a question, your next message to it is recorded as the answer. At most 4000 characters: publish long content with library_publish and send the path." It has a gate, `{ subject: () => ({}), unmatched: 'auto' }`, so a project policy can deny it, require approval for it, or delegate it to Desk. |
 | `message_desk` | `{kind: 'update'\|'question'\|'blocker', text}` | "Send a message to Desk, the project coordinator: a progress `update`, a `question`, or a `blocker`. If Desk asked you a question, your next update is recorded as the answer. After a question or blocker, call wait_for_reply unless you can keep working meanwhile. At most 4000 characters." |
-| `wait_for_reply` | `{}` | "Pause until an answer to a question you asked arrives, or Desk or the user writes to you. Notes from other threads do not end the wait." The yield reason names what the thread waits on, taken from `openFrom(self)`: `Waiting on "Frontend"`, `Waiting on Desk`, `Waiting on "Frontend" and Desk`, or `Waiting on Desk or the user` when it has no open question. It never errors (§11, L10). The reason string serves the CLI and `list_threads`; the desktop UI reads the fold (§7). |
+| `wait_for_reply` | `{}` | "Pause until an answer to a question you asked arrives, or Desk or the user writes to you. Notes from other threads do not end the wait." The yield reason names what the thread waits on, taken from `openFrom(self)`: `Waiting on "Frontend"`, `Waiting on Desk`, `Waiting on "Frontend" and Desk`, or `Waiting on Desk or the user` when it has no open question. It never errors (§11, L10). The reason string serves the CLI (`list_threads` is unchanged and shows only the status); the desktop UI reads the fold (§7). |
 | `complete` | unchanged | unchanged |
 
 ### 2.2 Desk (`tools/desk.ts`)
@@ -1081,7 +1081,7 @@ Each critique item was checked against the code first. Every item held.
 - `project.answering` in `reduceProject` is dropped in favour of the session fold.
 - v1's "Between threads" becomes "Thread traffic".
 - The `checkStalls` exemption is removed, and so is the "busy" pair tag.
-- The UI no longer relies on the `wait_for_reply` reason string, which now only serves the CLI and `list_threads`.
+- The UI no longer relies on the `wait_for_reply` reason string, which now only serves the CLI.
 - Closures are written in fewer places: `stopAgent` for any stopped thread, `archiveThread`, and the ending of an answer run. The `afterRun` closure is gone.
 
 ---
