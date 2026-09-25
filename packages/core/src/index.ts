@@ -62,15 +62,21 @@ export { serviceTools, SERVICE_START_WAIT_MS } from './tools/services';
 export { detectLoopbackUrl, ServiceProcesses, stripAnsi, tailLog } from './services/manager';
 export { formatServiceLine } from './coordination/render';
 export {
+  bingProvider,
   braveProvider,
+  createWebFetchTool,
   createWebSearchTool,
   defaultSearchProvider,
   duckDuckGoProvider,
+  fallbackSearchProvider,
+  isPublicHost,
+  marginaliaProvider,
   webFetchTool,
   webSearchTool,
   webTools,
   type SearchProvider,
   type SearchResult,
+  type WebFetchOptions,
 } from './tools/web';
 export { evaluatePolicy, globToRegExp, type PolicyDecision } from './policy/evaluate';
 export { buildToolContext, type ToolEnvironment } from './agent/context';

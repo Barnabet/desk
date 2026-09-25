@@ -294,11 +294,11 @@ All tools are defined once with a zod input schema (converted to JSON Schema for
 | `write_file(path, content)` | Workspace only. |
 | `edit_file(path, old, new, replace_all?)` | Workspace only; exact match, must be unique unless `replace_all`. |
 | `list_dir(path)`, `glob(pattern, root?)`, `grep(pattern, root?, glob?)` | Readable roots only. `grep` uses ripgrep if present, else a JS fallback. |
+| `view_image(paths[1–8], purpose?)` | Readable roots only. PNG, JPEG, GIF, WebP (≤ 3.75 MB and 8000 px per image, 20 MB per call); other formats get a hint naming the file skill that renders them. Images are stored content-addressed and shown to the model in a user message after the results (the 8 most recent as pixels). Added by the file-type skills spec (2026-09-24). |
 | `bash(command, timeout_s?=120)` | cwd = workspace; sandboxed (§7.4); stdout/stderr streamed as tool progress events and captured. |
 | `bash_background(command)` → job id; `bash_output(job_id)`; `bash_kill(job_id)` | For servers/long builds. Killed when the thread ends. |
-| `view_image(paths[1–8], purpose?)` | Readable roots only. PNG, JPEG, GIF, WebP (≤ 3.75 MB and 8000 px per image, 20 MB per call); other formats get a hint naming the file skill that renders them. Images are stored content-addressed and shown to the model in a user message after the results (the 8 most recent as pixels). Added by the file-type skills spec (2026-09-24). |
-| `web_fetch(url)` | Fetch + HTML→Markdown (Readability + Turndown), 100k char cap. |
-| `web_search(query)` | Pluggable provider: Brave Search API if `BRAVE_API_KEY` is set, else DuckDuckGo HTML endpoint. |
+| `web_fetch(url)` | Fetch + HTML→Markdown (Readability + Turndown), 100k char cap. On 403/404/410/451 or an unreachable public host, returns the closest Wayback Machine snapshot, labelled "Archived copy from <date>" (web research spec §4.2). |
+| `web_search(query)` | Provider chain: Brave Search API when `BRAVE_API_KEY` is set, then DuckDuckGo HTML → Bing RSS → Marginalia; a provider that errors, answers 202/429 or finds nothing passes to the next, and the result names the provider that answered (web research spec §4.1). |
 | `git_status`, `git_diff(ref?)`, `git_commit(message, paths?)`, `git_push()`, `open_pr(title, body, base?)` | Only when workspace is a worktree. `open_pr` uses `gh`. |
 | `memory_search(query)`, `memory_write(kind, content, supersedes?)` | |
 | `library_list()`, `library_read(path)`, `library_publish(workspace_path, title, kind, description)` | Publish copies a workspace file into the library. |
