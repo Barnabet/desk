@@ -88,7 +88,8 @@ describe('thread lifecycle notifications', () => {
     begin(threadId);
     await rt.whenIdle();
     const [ap] = listApprovals(h.store.db, projectId, 'pending');
-    expect(lastDeskInput()).toContain(`— approval]\n> Approval ${ap!.id} needed for bash(`);
+    // The thread's arguments go in as one JSON-quoted line (a snippet), so they cannot start a line of the notice.
+    expect(lastDeskInput()).toContain(`— approval]\n> Approval ${ap!.id} needed for bash("{\\"command\\":\\"sudo ls\\"}"): `);
     expect(lastDeskInput()).toContain('Waiting for the user to decide');
   });
 
