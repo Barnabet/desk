@@ -1,6 +1,10 @@
 import type { AgentRole } from '@desk/protocol';
 
-export type Job = { agentId: string; projectId: string; model: string; role: AgentRole };
+/**
+ * One agent's job: a full run, or an answer run (`answering`: the question it answers), which never changes the
+ * agent's status (design spec §4).
+ */
+export type Job = { agentId: string; projectId: string; model: string; role: AgentRole; kind: 'run' | 'answer'; answering?: number };
 
 export type SchedulerOptions = {
   modelConcurrency: (model: string) => number;
@@ -11,7 +15,11 @@ export type SchedulerOptions = {
   onError?: (err: unknown, job: Job) => void;
 };
 
-type Running = { job: Job; controller: AbortController };
+/** A running job. `done` settles once its afterRun has returned. */
+type Running = { job: Job; controller: AbortController; done: Promise<void> };
+
+/** Queue order: Desk first, then answer jobs (short and read-only), then thread runs. */
+const rank = (job: Job) => (job.role === 'desk' ? 0 : job.kind === 'answer' ? 1 : 2);
 
 export class Scheduler {
   private queue: Job[] = [];
@@ -31,8 +39,8 @@ export class Scheduler {
   enqueue(job: Job): void {
     if (this.isActive(job.agentId)) return;
     this.queue.push(job);
-    // Stable sort: desk before thread, FIFO within each role.
-    this.queue.sort((a, b) => Number(b.role === 'desk') - Number(a.role === 'desk'));
+    // Stable sort: Desk, then answer jobs, then thread runs, FIFO within each.
+    this.queue.sort((a, b) => rank(a) - rank(b));
     this.pump();
   }
 
@@ -40,19 +48,27 @@ export class Scheduler {
     return this.running.has(agentId) || this.queue.some((j) => j.agentId === agentId);
   }
 
-  stop(agentId: string): 'queued' | 'running' | 'none' {
+  /** Dequeues the agent's job, or aborts it if it is running. Returns where the job was, and the job. */
+  stop(agentId: string): { state: 'queued' | 'running' | 'none'; job?: Job } {
     const index = this.queue.findIndex((j) => j.agentId === agentId);
     if (index >= 0) {
-      this.queue.splice(index, 1);
+      const [job] = this.queue.splice(index, 1);
       this.pump();
-      return 'queued';
+      return { state: 'queued', job: job! };
     }
     const running = this.running.get(agentId);
     if (running) {
       running.controller.abort();
-      return 'running';
+      return { state: 'running', job: running.job };
     }
-    return 'none';
+    return { state: 'none' };
+  }
+
+  /** Stops like stop(), then resolves once a running job's afterRun has returned (at once when nothing was running). */
+  stopAndWait(agentId: string): Promise<void> {
+    const running = this.running.get(agentId);
+    this.stop(agentId);
+    return running ? running.done : Promise.resolve();
   }
 
   /** Drops every queued job and aborts every running one with `reason`. Returns the dropped queued jobs. */
@@ -72,8 +88,9 @@ export class Scheduler {
   private canStart(job: Job): boolean {
     const active = [...this.running.values()].map((r) => r.job);
     if (active.filter((j) => j.model === job.model).length >= this.opts.modelConcurrency(job.model)) return false;
-    if (job.role === 'thread') {
-      const threads = active.filter((j) => j.role === 'thread' && j.projectId === job.projectId).length;
+    // Answer jobs neither count toward the project's thread cap nor wait for it (design spec §3.4).
+    if (job.role === 'thread' && job.kind === 'run') {
+      const threads = active.filter((j) => j.role === 'thread' && j.kind === 'run' && j.projectId === job.projectId).length;
       if (threads >= this.opts.projectConcurrency(job.projectId)) return false;
     }
     return true;
@@ -81,7 +98,9 @@ export class Scheduler {
 
   private start(job: Job): void {
     const controller = new AbortController();
-    this.running.set(job.agentId, { job, controller });
+    let settle!: () => void;
+    const done = new Promise<void>((resolve) => (settle = resolve));
+    this.running.set(job.agentId, { job, controller, done });
     Promise.resolve()
       .then(() => this.opts.run(job, controller.signal))
       .catch((err: unknown) => this.opts.onError?.(err, job))
@@ -93,6 +112,7 @@ export class Scheduler {
           this.opts.onError?.(err, job);
         }
         this.pump();
+        settle();
       });
   }
 

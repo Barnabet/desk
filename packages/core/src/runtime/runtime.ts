@@ -827,7 +827,7 @@ export class Runtime {
   stopAgent(agentId: string, opts: { by?: string; reason?: string } = {}): void {
     const agent = this.requireAgent(agentId);
     this.jobs.killAll(agentId);
-    const state = this.scheduler.stop(agentId);
+    const { state } = this.scheduler.stop(agentId);
     for (const ap of pendingApprovalsFor(this.o.store.db, agentId)) {
       this.o.store.append([
         { project_id: agent.project_id, agent_id: agentId, type: 'approval.resolved', payload: { approval_id: ap.id, decision: 'denied', resolved_by: 'system', note: 'Agent stopped' } },
@@ -1229,7 +1229,7 @@ export class Runtime {
   private schedule(agent: AgentRow): void {
     if (agent.status !== 'queued') this.o.store.append({ project_id: agent.project_id, agent_id: agent.id, type: 'agent.status_changed', payload: { status: 'queued' } });
     // While shutting down, `queued` is recorded so the next daemon's recover() runs it.
-    if (!this.shuttingDown) this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role });
+    if (!this.shuttingDown) this.scheduler.enqueue({ agentId: agent.id, projectId: agent.project_id, model: agent.model, role: agent.role, kind: 'run' });
   }
 
   private async execute(agentId: string, signal: AbortSignal): Promise<void> {
