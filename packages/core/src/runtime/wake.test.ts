@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRole, AgentStatus } from '@desk/protocol';
-import { wakeDecision, type Item, type Wake, type WakeState } from './wake';
+import { takeWake, WAKE_WINDOW_MS, wakeDecision, type Item, type Wake, type WakeState } from './wake';
 
 const show = (w: Wake) => (w.kind === 'none' ? 'none' : `${w.kind}:${w.trigger}`);
 const item = (id: number, from: Item['from'], kind: Item['kind']): Item => ({ id, from, kind });
@@ -155,5 +155,25 @@ describe('wakeDecision: Desk', () => {
     expect(decide('desk', 'idle', [item(1, 'user', 'user')], { pendingApprovals: 1 })).toBe('none');
     expect(decide('desk', 'idle', [item(1, 'user', 'user')], { projectArchived: true })).toBe('none');
     expect(decide('desk', 'queued', [])).toBe('run:queued');
+  });
+});
+
+describe('takeWake', () => {
+  it('counts wakes up to the budget in a rolling hour', () => {
+    const t0 = 1_000_000;
+    const times: number[] = [];
+    expect([0, 1, 2].map((i) => takeWake(times, t0 + i * 60_000, 3))).toEqual([true, true, true]);
+    expect(takeWake(times, t0 + 30 * 60_000, 3)).toBe(false);
+    expect(times).toEqual([t0, t0 + 60_000, t0 + 2 * 60_000]);
+    // The first wake leaves the window exactly an hour after it was counted.
+    expect(takeWake(times, t0 + WAKE_WINDOW_MS - 1, 3)).toBe(false);
+    expect(takeWake(times, t0 + WAKE_WINDOW_MS, 3)).toBe(true);
+    expect(times).toEqual([t0 + 60_000, t0 + 2 * 60_000, t0 + WAKE_WINDOW_MS]);
+  });
+
+  it('counts nothing with a budget of zero', () => {
+    const times: number[] = [];
+    expect(takeWake(times, 1, 0)).toBe(false);
+    expect(times).toEqual([]);
   });
 });

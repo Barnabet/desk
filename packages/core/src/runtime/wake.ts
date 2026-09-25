@@ -91,3 +91,18 @@ export function wakeDecision(s: WakeState): Wake {
   // raced a completion.
   return NONE;
 }
+
+/** How far back the wake budgets count (design spec §5.4). */
+export const WAKE_WINDOW_MS = 60 * 60_000;
+
+/**
+ * Counts one wake at `now` in a rolling hour: `times` holds the window's wake times, oldest first. Drops the ones an
+ * hour old or more, then records `now` and returns true, unless `budget` wakes are left: then it records nothing and
+ * returns false (the project pauses).
+ */
+export function takeWake(times: number[], now: number, budget: number): boolean {
+  while (times.length && times[0]! <= now - WAKE_WINDOW_MS) times.shift();
+  if (times.length >= budget) return false;
+  times.push(now);
+  return true;
+}
