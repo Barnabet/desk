@@ -3,6 +3,7 @@ import type { AttentionItem, PlanItem, ProjectSummary } from '@desk/protocol';
 import { call } from '../bridge';
 import { ago, clock } from '../format';
 import { href } from '../router';
+import { waitsOnYou } from '../waits';
 import { projectSummaryLine, projectTone } from './OrbitMap';
 
 const BADGE = { running: 'chip-run', waiting: 'chip-wait', idle: 'chip-idle' } as const;
@@ -79,7 +80,7 @@ export function TerritoryInspector({ p, items, now }: { p: ProjectSummary; items
             <a key={t.id} className="territory-thread" href={href({ name: 'project', id: p.project.id, tab: 'threads', threadId: t.id })}>
               <span className={`status-dot status-dot-${t.status}`} aria-hidden="true" />
               <span className="grow">{t.title ?? 'Thread'}</span>
-              <span className={`territory-thread-status status-text-${t.status}`}>{threadLine(t, items.some((i) => i.ref.thread_id === t.id), now)}</span>
+              <span className={`territory-thread-status status-text-${t.status}`}>{threadLine(t, items.some((i) => i.ref.thread_id === t.id && waitsOnYou(i)), now)}</span>
             </a>
           ))}
         </div>

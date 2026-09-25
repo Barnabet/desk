@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { foldMessages } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AttentionItem } from '@desk/protocol';
-import { answeringLabel, waitLabel } from './waits';
+import { answeringLabel, waitLabel, waitsOnYou } from './waits';
 
 const NOW = Date.UTC(2026, 8, 24, 11, 0, 0);
 /** `m` minutes before NOW. */
@@ -40,6 +40,13 @@ describe('waitLabel', () => {
     expect(waitLabel(m, 'f', [item('f', 3)], NOW)).toBe('waiting on you · 3m');
     // Desk's own question to the user does not make a thread that waits on Desk wait on you.
     expect(waitLabel(m, 'b', [item('d', 2, 'question')], NOW)).toBe('waiting on Desk · 1m');
+  });
+
+  it('keeps naming what a stalled thread waits on: a stall asks nothing of the user', () => {
+    const m = foldMessages([...team(), ask(5, 'a', 'b', 16)]);
+    expect(waitLabel(m, 'a', [item('a', 0, 'stalled')], NOW)).toBe('waiting on Billing · 16m');
+    expect(waitsOnYou(item('a', 0, 'stalled'))).toBe(false);
+    expect(waitsOnYou(item('a', 0, 'approval'))).toBe(true);
   });
 });
 

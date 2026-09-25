@@ -5,12 +5,19 @@ import { duration } from './format';
 const age = (iso: string, now: number) => duration(Math.max(0, now - Date.parse(iso)));
 
 /**
+ * Whether an attention item holds its agent until the user acts: an approval, or Desk's question. A stall, a report's
+ * hand-off or a failure asks the user to look, but the agent does not wait on it.
+ */
+export const waitsOnYou = (i: AttentionItem) => i.kind === 'approval' || i.kind === 'question';
+
+/**
  * What a waiting agent waits on, from the session's message fold (design spec §8 item 4): "waiting on you · 3m" when it
- * has an attention item (only then: vermilion means an attention item), "waiting on Frontend · 4m" or "waiting on
- * Frontend and Desk · 4m" from its open questions (the oldest one's age), or null when neither says anything.
+ * has an attention item that waits on the user (only then: vermilion means an attention item), "waiting on Frontend ·
+ * 4m" or "waiting on Frontend and Desk · 4m" from its open questions (the oldest one's age), or null when neither says
+ * anything.
  */
 export function waitLabel(m: MessagesState, agentId: string, attention: readonly AttentionItem[], now: number): string | null {
-  const own = attention.find((i) => i.agent_id === agentId);
+  const own = attention.find((i) => i.agent_id === agentId && waitsOnYou(i));
   if (own) return `waiting on you · ${age(own.created_at, now)}`;
   const targets = waitingOn(m, agentId, attention);
   if (!targets.length) return null;

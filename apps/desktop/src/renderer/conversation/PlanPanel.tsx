@@ -2,6 +2,7 @@ import type { ProjectState } from '@desk/client';
 import type { AttentionItem, PlanItem } from '@desk/protocol';
 import { StatusChip } from '../components/StatusChip';
 import { href } from '../router';
+import { waitsOnYou } from '../waits';
 
 const STATUS: Record<PlanItem['status'], string> = { todo: 'To do', in_progress: 'In progress', done: 'Done', dropped: 'Dropped' };
 
@@ -24,8 +25,9 @@ export function PlanPanel({ project, proxyDown, attention }: { project: ProjectS
           {items.map((i) => {
             const linked = i.thread_ids.map((id) => threads.get(id)).filter((t) => t !== undefined);
             const waiting = linked.some((t) => t.status === 'waiting');
-            // "waiting on you" only for a thread with an attention item, TerritoryInspector's check (design spec §8 item 4).
-            const onYou = linked.some((t) => t.status === 'waiting' && attention.some((a) => a.ref.thread_id === t.id));
+            // "waiting on you" only for a thread with an attention item that waits on the user, TerritoryInspector's check
+            // (design spec §8 item 4).
+            const onYou = linked.some((t) => t.status === 'waiting' && attention.some((a) => a.ref.thread_id === t.id && waitsOnYou(a)));
             const tone = i.status === 'in_progress' ? (waiting ? 'wait' : 'run') : i.status;
             return (
               <li key={i.id} className={`plan-stop plan-${tone}`}>
