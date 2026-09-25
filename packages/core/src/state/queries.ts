@@ -170,6 +170,18 @@ export function lastStallFor(db: Db, projectId: string, threadId: string): Event
   return row ? ({ ...row } as unknown as EventOf<'message.agent'>) : undefined;
 }
 
+/** The project's latest `system.notice` with `code`. */
+export function lastProjectNotice(db: Db, projectId: string, code: string): EventOf<'system.notice'> | undefined {
+  const row = db
+    .select()
+    .from(events)
+    .where(and(eq(events.project_id, projectId), eq(events.type, 'system.notice'), sql`json_extract(${events.payload}, '$.code') = ${code}`))
+    .orderBy(desc(events.id))
+    .limit(1)
+    .get();
+  return row ? ({ ...row } as unknown as EventOf<'system.notice'>) : undefined;
+}
+
 /** How many of a project's latest tool results findToolImage searches: bounded, since it reads their payloads. */
 export const RECENT_TOOL_RESULTS = 5000;
 

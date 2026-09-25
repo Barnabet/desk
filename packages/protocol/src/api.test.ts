@@ -21,7 +21,7 @@ describe('API schemas', () => {
   });
 });
 
-import { AttentionItem, DaemonConfigPatch, ModelEndpointPutRequest } from '@desk/protocol';
+import { AttentionItem, DaemonConfigPatch, ModelEndpointPutRequest, WAKES_PAUSED } from '@desk/protocol';
 
 describe('UI API schemas', () => {
   it('parses an attention item', () => {
@@ -51,5 +51,15 @@ describe('UI API schemas', () => {
   it('patches daemon config', () => {
     expect(DaemonConfigPatch.parse({ notifications: 'off' })).toEqual({ notifications: 'off' });
     expect(() => DaemonConfigPatch.parse({ notifications: 'sometimes' })).toThrow();
+  });
+
+  it('parses a paused-project attention item', () => {
+    const item = AttentionItem.parse({
+      id: 'paused:42', kind: 'paused', project_id: 'p1', project_name: 'Demo', agent_id: null,
+      title: 'Agents in Demo are paused: too many automatic wakes this hour', detail: 'Their messages are kept. Resume, or write to any agent.',
+      created_at: '2026-09-25T10:00:00.000Z', ref: { event_id: 42 },
+    });
+    expect(item.kind).toBe('paused');
+    expect(WAKES_PAUSED).toBe('wakes_paused');
   });
 });

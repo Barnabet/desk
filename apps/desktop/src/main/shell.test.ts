@@ -43,6 +43,10 @@ describe('notifications', () => {
     expect(notificationFor(item('approval', 'approval:a1', 'Signup checklist wants to run bash'))).toEqual({ title: 'Onboarding: approval needed', body: 'Signup checklist wants to run bash' });
     expect(notificationFor(item('question', 'q')).title).toBe('Onboarding: Desk has a question');
     expect(notificationFor(item('failed', 'f')).title).toBe('Onboarding: a thread failed');
+    expect(notificationFor(item('paused', 'paused:9', 'Agents in Onboarding are paused: too many automatic wakes this hour'))).toEqual({
+      title: 'Onboarding: agents paused',
+      body: 'Agents in Onboarding are paused: too many automatic wakes this hour',
+    });
     expect(notificationFor(item('question', 'q', 'x'.repeat(500))).body.length).toBeLessThanOrEqual(200);
     expect(attentionRoute(item('approval', 'approval:a/1'))).toBe('#/attention?item=approval%3Aa%2F1');
   });

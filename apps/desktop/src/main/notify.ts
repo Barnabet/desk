@@ -6,6 +6,7 @@ const HEADLINE: Record<AttentionItem['kind'], string> = {
   needs_you: 'needs you',
   stalled: 'a thread stalled',
   failed: 'a thread failed',
+  paused: 'agents paused',
 };
 
 /** The system notification for a new attention item (agent text is clipped, never rendered as markup). */

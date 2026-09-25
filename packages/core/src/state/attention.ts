@@ -1,9 +1,12 @@
-import type { AttentionItem } from '@desk/protocol';
+import { eq } from 'drizzle-orm';
+import { WAKES_PAUSED, type AttentionItem, type EventOf } from '@desk/protocol';
 import type { Db } from '../db/open';
 import { attentionDismissals } from '../db/schema';
 import {
+  hasProjectEventAfter,
   lastEvent,
   lastProjectEvent,
+  lastProjectNotice,
   lastStallFor,
   listAgents,
   listApprovals,
@@ -13,6 +16,18 @@ import {
 } from './queries';
 
 const label = (agent: AgentRow | undefined) => (agent?.role === 'desk' ? 'Desk' : (agent?.title ?? 'A thread'));
+
+/**
+ * The project's `wakes_paused` notice while the pause it announced holds (design spec §5.4): no `message.user` in the
+ * project since, and its `paused:<notice id>` item not dismissed. The runtime re-derives its paused projects from it
+ * after a restart.
+ */
+export function pausedNotice(db: Db, projectId: string): EventOf<'system.notice'> | undefined {
+  const notice = lastProjectNotice(db, projectId, WAKES_PAUSED);
+  if (!notice || hasProjectEventAfter(db, projectId, 'message.user', notice.id)) return undefined;
+  const dismissed = db.select({ id: attentionDismissals.item_id }).from(attentionDismissals).where(eq(attentionDismissals.item_id, `paused:${notice.id}`)).get();
+  return dismissed ? undefined : notice;
+}
 
 /**
  * Everything that currently needs the user, derived from state (see the design spec §4.1).
@@ -63,6 +78,20 @@ export function listAttention(db: Db, opts: { projectId?: string } = {}): Attent
       if (dismissed.has(id)) return;
       items.push({ ...base, id, kind: 'needs_you', agent_id: report.agent_id, title: text, detail: report.payload.headline, created_at: report.ts, ref: { event_id: report.id } });
     });
+
+    const paused = pausedNotice(db, p.id);
+    if (paused) {
+      items.push({
+        ...base,
+        id: `paused:${paused.id}`,
+        kind: 'paused',
+        agent_id: null,
+        title: `Agents in ${p.name} are paused: too many automatic wakes this hour`,
+        detail: 'Their messages are kept. Resume, or write to any agent.',
+        created_at: paused.ts,
+        ref: { event_id: paused.id },
+      });
+    }
 
     for (const t of listThreads(db, p.id)) {
       if (t.archived_at) continue;

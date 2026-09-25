@@ -97,10 +97,13 @@ export type StreamServerMessage =
 
 // ── UI endpoints ─────────────────────────────────────────────────────
 
-export const AttentionKind = z.enum(['approval', 'question', 'needs_you', 'stalled', 'failed']);
+export const AttentionKind = z.enum(['approval', 'question', 'needs_you', 'stalled', 'failed', 'paused']);
 export type AttentionKind = z.infer<typeof AttentionKind>;
 
-/** One thing that needs the user. `id` is stable: `approval:<id>`, `question:<event>`, `report:<event>:<i>`, `stalled:<thread>:<event>`, `failed:<thread>`. */
+/** The `system.notice` code of a project whose automatic wakes the runtime paused (design spec §5.4). */
+export const WAKES_PAUSED = 'wakes_paused';
+
+/** One thing that needs the user. `id` is stable: `approval:<id>`, `question:<event>`, `report:<event>:<i>`, `stalled:<thread>:<event>`, `failed:<thread>`, `paused:<notice event>`. */
 export const AttentionItem = z.object({
   id: z.string(),
   kind: AttentionKind,

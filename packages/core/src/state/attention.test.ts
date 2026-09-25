@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHarness, newRuntime, type Harness } from '../testing';
 import { getDeskAgent } from './queries';
-import { listAttention } from './attention';
+import { listAttention, pausedNotice } from './attention';
 
 let h: Harness;
 afterEach(async () => h?.cleanup());
@@ -96,5 +96,40 @@ describe('listAttention', () => {
     expect(listAttention(h.store.db).map((i) => i.id)).toEqual([`question:${q!.id}`]);
     append({ project_id: projectId, agent_id: desk.id, type: 'message.user', payload: { text: 'EU' } });
     expect(listAttention(h.store.db)).toEqual([]);
+  });
+
+  it('lists a paused project until the user writes to any of its agents or dismisses the item', async () => {
+    const { runtime, projectId, thread, append } = await setup();
+    const t = thread('Signup checklist');
+    const notice = (code: string) =>
+      append({ project_id: projectId, agent_id: null, type: 'system.notice', payload: { level: 'warning', code, message: `${code} notice` } })[0]!;
+    notice('proxy_down');
+    expect(listAttention(h.store.db)).toEqual([]);
+
+    const first = notice('wakes_paused');
+    expect(listAttention(h.store.db)).toEqual([
+      {
+        id: `paused:${first.id}`,
+        kind: 'paused',
+        project_id: projectId,
+        project_name: 'Onboarding revamp',
+        agent_id: null,
+        title: 'Agents in Onboarding revamp are paused: too many automatic wakes this hour',
+        detail: 'Their messages are kept. Resume, or write to any agent.',
+        created_at: first.ts,
+        ref: { event_id: first.id },
+      },
+    ]);
+    expect(pausedNotice(h.store.db, projectId)?.id).toBe(first.id);
+    // Any message from the user in the project ends the pause, a message to a thread included.
+    append({ project_id: projectId, agent_id: t, type: 'message.user', payload: { text: 'Carry on.' } });
+    expect(listAttention(h.store.db)).toEqual([]);
+    expect(pausedNotice(h.store.db, projectId)).toBeUndefined();
+
+    const second = notice('wakes_paused');
+    expect(listAttention(h.store.db).map((i) => i.id)).toEqual([`paused:${second.id}`]);
+    runtime.dismissAttention(`paused:${second.id}`);
+    expect(listAttention(h.store.db)).toEqual([]);
+    expect(pausedNotice(h.store.db, projectId)).toBeUndefined();
   });
 });

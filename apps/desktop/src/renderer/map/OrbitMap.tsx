@@ -46,6 +46,7 @@ const CALLOUT: Record<AttentionItem['kind'], { label: string; glyph: string }> =
   needs_you: { label: 'From a report', glyph: '' },
   stalled: { label: 'Stalled', glyph: '' },
   failed: { label: 'Failed', glyph: '!' },
+  paused: { label: 'Agents paused', glyph: '' },
 };
 
 function ProjectLabel({ p, t }: { p: ProjectSummary; t: Territory }) {

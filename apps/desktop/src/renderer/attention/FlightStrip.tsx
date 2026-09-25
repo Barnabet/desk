@@ -2,7 +2,15 @@ import type { AttentionItem } from '@desk/protocol';
 import { gauge, STRIP_CODE, stripWho, waited } from './strips';
 import './attention.css';
 
-const CAP_COLOR: Record<AttentionItem['kind'], string> = { approval: 'var(--accent)', question: 'var(--ink)', needs_you: 'var(--ink)', stalled: 'var(--wait)', failed: 'var(--accent)' };
+/** The wait gauge's colour: vermilion for approvals and failures, amber for holds (stalled threads, paused projects). */
+const CAP_COLOR: Record<AttentionItem['kind'], string> = {
+  approval: 'var(--accent)',
+  question: 'var(--ink)',
+  needs_you: 'var(--ink)',
+  stalled: 'var(--wait)',
+  failed: 'var(--accent)',
+  paused: 'var(--wait)',
+};
 
 /** One flight strip: end cap (code and age), project and title, who, the wait gauge, and a chevron. */
 export function FlightStrip(o: { item: AttentionItem; now: number; selected: boolean; threadTitle(id: string): string | null; onSelect(): void; compact?: boolean }) {

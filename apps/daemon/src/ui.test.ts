@@ -41,6 +41,20 @@ describe('attention routes', () => {
     expect((await api('POST', '/attention/approval%3Ax/dismiss')).status).toBe(409);
     expect((await api('POST', '/attention/report%3A1%3A9/dismiss')).status).toBe(404);
   });
+
+  it('lists a paused project and dismisses it', async () => {
+    const { api, projectId } = await setup();
+    const [notice] = h.store.append({
+      project_id: projectId,
+      agent_id: null,
+      type: 'system.notice',
+      payload: { level: 'warning', code: 'wakes_paused', message: 'Agents woke each other 60 times in the last hour, so automatic wakes are paused.' },
+    });
+    const id = `paused:${notice!.id}`;
+    expect((await api('GET', '/attention')).body.items).toEqual([expect.objectContaining({ id, kind: 'paused', agent_id: null, ref: { event_id: notice!.id } })]);
+    expect((await api('POST', `/attention/${encodeURIComponent(id)}/dismiss`)).status).toBe(200);
+    expect((await api('GET', '/attention')).body.items).toEqual([]);
+  });
 });
 
 describe('overview', () => {
