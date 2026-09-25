@@ -1754,10 +1754,12 @@ export class Runtime {
       .list({ agentId: agent.id, types: ['run.finished'] })
       .filter((e) => full(e) && (current === undefined || e.id < current))
       .at(-1);
-    // The user's Asks are questions the thread answered without changing its work: not named (design spec §3.6).
+    // An Ask an answer run answered left the thread's work as it was: not named (design spec §3.6). An Ask a full run
+    // read as a message (it resumed a stopped thread, or reached a running or waiting one) is named like any other.
+    const answered = new Set(starts.flatMap((e) => (e.type === 'run.started' && e.payload.answering !== undefined ? [e.payload.answering] : [])));
     const texts = store
       .list({ agentId: agent.id, after: previous?.id ?? 0, types: ['message.user'] })
-      .flatMap((e) => (e.type === 'message.user' && !e.payload.question ? [e.payload.text] : []));
+      .flatMap((e) => (e.type === 'message.user' && !answered.has(e.id) ? [e.payload.text] : []));
     if (!texts.length) return '';
     return `(The user wrote to it since its last report: ${snippet(texts[0]!, 100)}${texts.length > 1 ? ` and ${texts.length - 1} more` : ''}.)\n`;
   }

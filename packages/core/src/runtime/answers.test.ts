@@ -835,4 +835,21 @@ describe("the user's Asks in notices", () => {
     await rt.whenIdle();
     expect(notices(desk.id, t, 'completed')).toEqual(['Summary: "v1"', '(The user wrote to it since its last report: "Add the EU prices.".)\nSummary: "v2"']);
   });
+
+  it('names an Ask that resumed a stopped thread: a full run read it as a message', async () => {
+    const { desk, thread, begin } = await setup({
+      Pricing: (req) => (answering(req) ? text('Per seat.') : turns(req) === 0 ? tools(call('act')) : tools(call('complete', { summary: 'v2' }))),
+    });
+    const t = thread('Pricing');
+    during = (id) => rt.stop(id);
+    begin(t);
+    await rt.whenIdle();
+    expect(status(t)).toBe('cancelled');
+    during = () => {};
+    rt.sendMessage(t, 'Can you also add EU prices?', { question: true });
+    await rt.whenIdle();
+    expect(answerRuns(t)).toEqual([]);
+    expect(status(t)).toBe('done');
+    expect(notices(desk.id, t, 'completed')).toEqual(['(The user wrote to it since its last report: "Can you also add EU prices?".)\nSummary: "v2"']);
+  });
 });

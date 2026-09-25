@@ -379,7 +379,7 @@ This table follows from §3.2. The unit test for `wakeDecision` is generated fro
   - A shutdown still honours the yield, so a thread that completed is not run again after the restart.
 - **`silentStops`.** Entries are added only as described in §3.5. `afterRun` always deletes the entry, so none leaks.
 - **Unread messages on completion.** The `completed` notice ends with `Unread messages that arrived after it finished: #141, #142` when the thread holds pending items. This covers a Desk note that races `complete`.
-- **The user's messages to a thread.** Every notice `notifyParent` sends starts with the line below when the thread's stream holds `message.user` events (Asks excluded) after the `run.finished` of its previous full run. This covers a thread the user reopened, and user steers.
+- **The user's messages to a thread.** Every notice `notifyParent` sends starts with the line below when the thread's stream holds `message.user` events after the `run.finished` of its previous full run, leaving out the Asks an answer run answered. This covers a thread the user reopened, and user steers. An Ask a full run read as a message (one that resumed a stopped thread) is named like any other.
   ```
   (The user wrote to it since its last report: "<snippet, 100>"[ and N more].)
   ```
