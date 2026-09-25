@@ -61,6 +61,12 @@ describe('EventBody', () => {
     const started = { run_id: 'r1', model: 'm', answering: 12 };
     expect(EventBody.parse({ type: 'run.started', payload: started }).payload).toEqual(started);
   });
+
+  it("parses the user's Ask", () => {
+    const ask = { text: 'How did you price it?', question: true };
+    expect(EventBody.parse({ type: 'message.user', payload: ask }).payload).toEqual(ask);
+    expect(() => EventBody.parse({ type: 'message.user', payload: { text: 'x', question: false } })).toThrow();
+  });
 });
 
 describe('EphemeralEvent', () => {

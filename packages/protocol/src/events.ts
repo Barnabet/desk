@@ -101,7 +101,14 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({ headline: z.string().min(1), progress: z.string(), needs_you: z.array(z.string()), results: z.array(z.string()) }),
   ),
   event('question.asked', z.object({ question: z.string().min(1), options: z.array(z.string()).optional() })),
-  event('message.user', z.object({ text: z.string().min(1) })),
+  event(
+    'message.user',
+    z.object({
+      text: z.string().min(1),
+      /** The user's Ask to a thread: an idle, done or failed thread answers it without reopening (design spec §4.8). */
+      question: z.literal(true).optional(),
+    }),
+  ),
   event(
     'message.agent',
     z.object({

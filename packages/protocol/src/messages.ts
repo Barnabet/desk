@@ -188,7 +188,9 @@ function step(d: Draft, e: StoredEvent): void {
     }
     case 'message.user':
       // The user's messages to threads only: the user's conversation with Desk is not traffic.
-      if (e.agent_id && d.s.agents[e.agent_id]?.role === 'thread') add(d, { id: e.id, ts: e.ts, from: 'user', to: e.agent_id, kind: 'user', text: e.payload.text });
+      if (e.agent_id && d.s.agents[e.agent_id]?.role === 'thread') {
+        add(d, { id: e.id, ts: e.ts, from: 'user', to: e.agent_id, kind: e.payload.question ? 'user_question' : 'user', text: e.payload.text });
+      }
       return;
     case 'run.started': {
       const q = e.payload.answering === undefined ? undefined : messageById(d.s, e.payload.answering);

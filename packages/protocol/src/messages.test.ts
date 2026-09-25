@@ -198,3 +198,15 @@ describe('message selectors', () => {
     expect(sentSince(s, 'F', at(0))).toEqual([]);
   });
 });
+
+describe("the user's Ask", () => {
+  it('folds as user_question, and its answer run answers the user', () => {
+    const t = team();
+    const userAsk = ev('F', { type: 'message.user', payload: { text: 'What did you change?', question: true } }, 2);
+    const start = ev('F', { type: 'run.started', payload: { run_id: 'r1', model: 'm', answering: userAsk.id } }, 3);
+    const s = foldMessages([...t, userAsk, start]);
+    expect(messageById(s, userAsk.id)).toEqual({ id: userAsk.id, ts: at(2), from: 'user', to: 'F', kind: 'user_question', text: 'What did you change?' });
+    expect(answeringOf(s, 'F')).toEqual({ runId: 'r1', question: userAsk.id, asker: 'user', since: at(3) });
+    expect(ids(traffic(s, 12))).toEqual([userAsk.id]);
+  });
+});
