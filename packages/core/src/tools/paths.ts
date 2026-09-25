@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { isWithin, realOrSelf, type SandboxGuard } from './sandbox';
+import { isWithin, matchesSecretPattern, realOrSelf, type SandboxGuard } from './sandbox';
 import { ToolDenied, type ToolContext } from './types';
 
 async function realpathLenient(abs: string): Promise<string> {
@@ -38,7 +38,10 @@ export async function resolveInside(p: string, roots: string[], cwd: string): Pr
  */
 export function guardRefusal(real: string, access: 'read' | 'search' | 'write', guard: SandboxGuard | undefined, own: string[] = []): string | null {
   if (!guard) return null;
-  const secret = access === 'search' ? guard.secrets.some((s) => isWithin(s, real)) : guard.secrets.includes(real);
+  const secret =
+    access === 'search'
+      ? guard.secrets.some((s) => isWithin(s, real)) || guard.secretPatterns.some((p) => isWithin(p.dir, real))
+      : guard.secrets.includes(real) || matchesSecretPattern(real, guard.secretPatterns);
   if (secret) return access === 'search' ? 'it contains Desk credentials' : 'it holds Desk credentials';
   const inOwn = own.some((r) => r !== guard.dataDir && isWithin(r, guard.dataDir) && isWithin(real, r));
   if (access === 'write' && isWithin(real, guard.dataDir) && !inOwn) return "it is inside Desk's data folder";

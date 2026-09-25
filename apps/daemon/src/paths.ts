@@ -13,6 +13,8 @@ export function daemonPaths(dataDir: string) {
     lock: join(dataDir, 'daemon.lock'),
     models: join(dataDir, 'models.json'),
     config: join(dataDir, 'config.json'),
+    /** desk web's pid and port (written by `desk web`, read by the sandbox guard). */
+    webJson: join(dataDir, 'web.json'),
     logs: join(dataDir, 'logs'),
     logFile: join(dataDir, 'logs', 'deskd.log'),
   };

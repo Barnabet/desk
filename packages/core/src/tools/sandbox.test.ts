@@ -177,11 +177,40 @@ describe('guard', () => {
     expect(out).toContain('end');
     expect(out).not.toContain('tok-123');
   });
+
+  it("blocks desk web's port from its web.json, read as each command starts, and keeps its login files unreadable", async (t) => {
+    if (!available) t.skip();
+    const server = createServer((_req, res) => res.end('hello from desk web'));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as AddressInfo).port;
+    const login = join(data, 'web-login-3f9a.html');
+    const sandbox: SandboxSpec = {
+      enabled: true,
+      writable: [work, root],
+      guard: sandboxGuard({ dataDir: data, secrets: [secret], secretPatterns: [{ dir: data, prefix: 'web-login-', suffix: '.html' }], portFiles: [join(data, 'web.json')] }),
+    };
+    const probe = `curl -s -m 5 http://127.0.0.1:${port}/; echo " curl=$?"`;
+    try {
+      // desk web has not written web.json yet, so nothing names its port.
+      expect(await run(probe, sandbox)).toContain('hello from desk web');
+      await writeFile(join(data, 'web.json'), JSON.stringify({ pid: process.pid, port }));
+      await writeFile(login, '<meta http-equiv="refresh" content="0; url=http://127.0.0.1/login?code=code-xyz">');
+      const out = await run(`${probe}; cat '${login}'; cp '${login}' copy; ln '${login}' hard; echo end`, sandbox);
+      expect(out).not.toContain('hello from desk web');
+      expect(out).toContain('curl=7');
+      expect(out).toContain('end');
+      expect(out).not.toContain('code-xyz');
+      expect(existsSync(join(work, 'copy'))).toBe(false);
+      expect(existsSync(join(work, 'hard'))).toBe(false);
+    } finally {
+      server.close();
+    }
+  });
 });
 
 describe('profile and invocation', () => {
   it('puts the guard after the writable roots: data dir, secrets and the folders above them, the Keychain CLI, ports', () => {
-    const g: SandboxGuard = { dataDir: '/d', secrets: ['/d/daemon.json', '/h/.config/cliproxyapi.env'], readOnly: ['/h/.gitconfig', '/h/.ssh'], ports: [7433] };
+    const g: SandboxGuard = { dataDir: '/d', secrets: ['/d/daemon.json', '/h/.config/cliproxyapi.env'], secretPatterns: [], readOnly: ['/h/.gitconfig', '/h/.ssh'], ports: [7433], portFiles: [] };
     const p = buildSandboxProfile(['/d/workspaces/t', '/h'], g);
     expect(p.indexOf('(deny file-write*\n  (subpath "/d")\n)')).toBeGreaterThan(p.indexOf('  (subpath "/h")'));
     // Only roots inside the data dir are allowed again; a root around it (like a home folder) is not.
@@ -194,6 +223,27 @@ describe('profile and invocation', () => {
     expect(buildSandboxProfile(['/w'])).not.toContain('deny file-read');
     const withGit = buildSandboxProfile(['/w'], g, ['/r/.git']);
     expect(withGit).toContain('(deny file-write*\n  (literal "/r/.git")\n  (subpath "/r/.git/hooks")\n  (literal "/r/.git/config")\n  (regex #"^/r/\\.git/(worktrees/');
+  });
+
+  it('denies reading or moving the files a secret pattern covers, and the ports that port files name when the profile is built', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'desk-ports-')));
+    try {
+      const web = join(dir, 'web.json');
+      const g = sandboxGuard({ dataDir: '/d', secrets: [], secretPatterns: [{ dir: '/d', prefix: 'web-login-', suffix: '.html' }], ports: [7433], portFiles: [web] });
+      const login = '  (regex #"^/d/web-login-[^/]*\\.html$")';
+      const before = buildSandboxProfile([], g);
+      expect(before).toContain(`(deny file-write*\n  (literal "/d")\n${login}\n)`);
+      expect(before).toContain(`(deny file-read*\n${login}\n)`);
+      expect(before.trimEnd().endsWith('(deny network-outbound (remote ip "localhost:7433"))')).toBe(true);
+      await writeFile(web, JSON.stringify({ pid: 1, port: 7434 }));
+      expect(buildSandboxProfile([], g).trimEnd().endsWith('(remote ip "localhost:7433"))\n(deny network-outbound (remote ip "localhost:7434"))')).toBe(true);
+      await writeFile(web, 'not json');
+      expect(buildSandboxProfile([], g)).not.toContain('localhost:7434');
+      await writeFile(web, JSON.stringify({ port: '7434' }));
+      expect(buildSandboxProfile([], g)).not.toContain('localhost:7434');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('carries the guard into the profile, including for a read-only shell', () => {

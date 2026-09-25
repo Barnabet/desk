@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { testToolContext } from '../testing/context';
 import { readAgentFile, readAgentFileSync, writeAgentFile } from './agent-files';
 import { readFileTool, writeFileTool } from './fs';
+import { guardRefusal } from './paths';
 import { NO_SANDBOX, sandboxGuard, type SandboxGuard } from './sandbox';
 import { ToolDenied } from './types';
 
@@ -43,6 +44,26 @@ describe('reading and writing files agents control', () => {
     await expect(writeAgentFile(join(work, 'hard'), 'x', guard)).rejects.toThrow(/holds Desk credentials/);
     expect(() => readAgentFileSync(join(work, 'hard'), lstatSync(join(work, 'hard')), guard)).toThrow(/holds Desk credentials/);
     expect(readFileSync(secret, 'utf8')).toBe('{"token":"tok-123"}');
+  });
+
+  it("refuses desk web's login files by name and by identity, even through a hard link", async () => {
+    const login = join(data, 'web-login-3f9a.html');
+    writeFileSync(login, 'code-xyz');
+    const patterns = [{ dir: data, prefix: 'web-login-', suffix: '.html' }];
+    const web = sandboxGuard({ dataDir: data, secrets: [secret], secretPatterns: patterns });
+    linkSync(login, join(work, 'hard'));
+    await expect(readAgentFile(login, web)).rejects.toThrow(/holds Desk credentials/);
+    await expect(readAgentFile(join(work, 'hard'), web)).rejects.toThrow(/holds Desk credentials/);
+    await expect(writeAgentFile(join(work, 'hard'), 'x', web)).rejects.toThrow(/holds Desk credentials/);
+    expect(() => readAgentFileSync(join(work, 'hard'), lstatSync(join(work, 'hard')), web)).toThrow(/holds Desk credentials/);
+    expect(readFileSync(login, 'utf8')).toBe('code-xyz');
+    const loginOnly = sandboxGuard({ dataDir: data, secrets: [], secretPatterns: patterns });
+    expect(guardRefusal(login, 'read', loginOnly)).toBe('it holds Desk credentials');
+    expect(guardRefusal(login, 'write', loginOnly)).toBe('it holds Desk credentials');
+    expect(guardRefusal(data, 'search', loginOnly)).toBe('it contains Desk credentials');
+    expect(guardRefusal(join(data, 'web.json'), 'read', loginOnly)).toBeNull();
+    expect(guardRefusal(join(data, 'web-login-3f9a.htm'), 'read', loginOnly)).toBeNull();
+    expect(guardRefusal(work, 'search', loginOnly)).toBeNull();
   });
 
   it('never changes the file a swapped path led to', async () => {

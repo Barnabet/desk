@@ -56,7 +56,7 @@ export { AttachmentStore } from './attachments/store';
 export { imageProblem, imageTokens, readDataUrlInfo, readImageInfo, sniffImageType, type ImageInfo } from './attachments/image';
 export { bashTool, scrubbedEnv, withSkillEnv } from './tools/bash';
 export { completeTool } from './tools/thread';
-export { buildSandboxProfile, detectSandbox, NO_SANDBOX, sandboxGuard, shellInvocation, type SandboxGuard, type SandboxSpec } from './tools/sandbox';
+export { buildSandboxProfile, detectSandbox, NO_SANDBOX, sandboxGuard, shellInvocation, type SandboxGuard, type SandboxSpec, type SecretPattern } from './tools/sandbox';
 export { bashBackgroundTool, bashKillTool, bashOutputTool, JobManager, jobTools, type JobSnapshot, type JobStatus } from './tools/jobs';
 export { serviceTools, SERVICE_START_WAIT_MS } from './tools/services';
 export { detectLoopbackUrl, ServiceProcesses, stripAnsi, tailLog } from './services/manager';

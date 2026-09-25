@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync, type Stats } from 'node:fs';
 import { open, realpath, stat, type FileHandle } from 'node:fs/promises';
-import type { SandboxGuard } from './sandbox';
+import { secretFiles, type SandboxGuard } from './sandbox';
 import { ToolDenied } from './types';
 
 // deskd reads and writes files that agents control, outside the sandbox. A path checked first and opened later can be
@@ -12,9 +12,12 @@ const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 // anything that is not a regular file.
 const NONBLOCK = constants.O_NONBLOCK ?? 0;
 
-/** True when `st` is one of the guard's secret files. Compared by identity, so no path, link or swap gets around it. */
+/**
+ * True when `st` is one of the guard's secret files, its patterns' files included. Compared by identity, so no path, link
+ * or swap gets around it.
+ */
 function isSecret(st: Stats, guard: SandboxGuard | undefined): boolean {
-  return !!guard?.secrets.some((s) => {
+  return !!guard && secretFiles(guard).some((s) => {
     try {
       const x = statSync(s);
       return x.dev === st.dev && x.ino === st.ino;

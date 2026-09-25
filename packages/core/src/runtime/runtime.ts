@@ -74,7 +74,7 @@ import { JobManager } from '../tools/jobs';
 import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { readAgentFile } from '../tools/agent-files';
-import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard } from '../tools/sandbox';
+import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard, type SecretPattern } from '../tools/sandbox';
 import type { RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
@@ -109,6 +109,10 @@ export type RuntimeOptions = {
   secrets?: string[];
   /** Files and folders agents may never write, whatever their roots: the git and ssh config deskd's git runs with. */
   readOnly?: string[];
+  /** Secrets whose names are not known in advance, such as desk web's one-time login files (see `SecretPattern`). */
+  secretPatterns?: SecretPattern[];
+  /** JSON files naming a `port` agents may never connect to, read each time a sandbox profile is built: desk web's `web.json`. */
+  portFiles?: string[];
   /** The user's home folder (default `os.homedir()`), which can never be a source. */
   home?: string;
   /** Wakes of one agent by another a project may have in a rolling hour before its automatic wakes pause (default 60). */
@@ -197,7 +201,7 @@ export class Runtime {
           }),
         )
       : undefined;
-    this.guard = sandboxGuard({ dataDir: o.dataDir, secrets: o.secrets ?? [], readOnly: o.readOnly ?? [] });
+    this.guard = sandboxGuard({ dataDir: o.dataDir, secrets: o.secrets ?? [], secretPatterns: o.secretPatterns ?? [], readOnly: o.readOnly ?? [], portFiles: o.portFiles ?? [] });
     this.skills = new SkillStore(o.dataDir, this.guard);
     this.attachments = new AttachmentStore(join(o.dataDir, 'attachments'));
     this.services = {
