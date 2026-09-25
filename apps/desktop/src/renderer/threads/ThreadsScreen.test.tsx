@@ -338,4 +338,49 @@ describe('ThreadsScreen', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Resume' }));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'threads.send')?.input).toEqual({ id: 't', text: 'Carry on with the footer.' }));
   });
+
+  it("puts the sender's initials on a message's disc and shows a live answer run with its question and tools", async () => {
+    setup([
+      ...base,
+      ...finished,
+      ...answeringFrontend(8),
+      ev(11, 'tool.call', { run_id: 'r2', tool_call_id: 'c9', name: 'read_file', arguments: '{"path":"emails/01.md"}' }, t),
+    ]);
+    const asked = await screen.findByRole('button', { name: /^Stop \d+: Frontend asked/ });
+    expect(asked.textContent).toBe('Fr');
+    expect(screen.getByRole('button', { name: /^Stop 1: Brief from Desk/ }).textContent).toBe('Brief');
+    const run = screen.getByRole('button', { name: /^Stop \d+: Answering Frontend/ });
+    expect(run.className).toContain('live');
+    expect(run.parentElement!.querySelector('.route-label-title .live-dot')).toBeTruthy();
+    // An answer run never gets the "Now" tail or "Next: report to Desk".
+    expect(screen.queryByText('Next: report to Desk')).toBeNull();
+    const tr = screen.getByRole('complementary', { name: 'Transcript' });
+    const entry = within(tr).getByText(/^Answering Frontend/).closest('.tr-entry') as HTMLElement;
+    expect(entry.querySelector('.tr-title .live-dot')).toBeTruthy();
+    expect(entry.querySelector('.tr-asked')!.textContent).toBe('Frontend asked: “Which currency?”');
+    expect(entry.textContent).toContain('read_file');
+  });
+
+  it("mutes an answer run that could not answer and shows the runtime's closure", async () => {
+    setup([
+      ...base,
+      ...finished,
+      ...answeringFrontend(8),
+      // The closure lands on the asker's stream; only the fold links it to the run.
+      ev(11, 'message.agent', { from_agent_id: 't', from_label: 'thread "Welcome emails" (t)', kind: 'answer', text: '(Welcome emails was stopped before answering.)', reply_to: 9, auto: true }, f),
+      ev(12, 'run.finished', { run_id: 'r2', reason: 'stopped' }, t),
+    ]);
+    const run = await screen.findByRole('button', { name: /^Stop \d+: Couldn't answer Frontend/ });
+    expect(run.className).toContain('muted');
+    expect(run.className).not.toContain('live');
+    expect(run.parentElement!.querySelector('.route-label-title.muted')).toBeTruthy();
+    const tr = screen.getByRole('complementary', { name: 'Transcript' });
+    const entry = within(tr).getByText(/^Couldn't answer Frontend/).closest('.tr-entry') as HTMLElement;
+    expect(entry.querySelector('.tr-title.muted')).toBeTruthy();
+    expect(entry.querySelector('.tr-title .live-dot')).toBeNull();
+    expect(entry.textContent).toContain('Frontend asked: “Which currency?”');
+    expect(entry.querySelector('.tr-text.muted')!.textContent).toBe('(Welcome emails was stopped before answering.)');
+    fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
+    expect(within(tr).getByText(/^Woke to answer message #9 · /)).toBeTruthy();
+  });
 });

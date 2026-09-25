@@ -222,6 +222,19 @@
   background: var(--accent);
   font-size: 16px;
 }
+/* An answer run: the thread woke only to answer, so its disc is drawn open. */
+.route-stop-answer {
+  border: 1.5px dashed var(--ink);
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+}
+/* An answer that did not happen: the runtime's closure, or an answer run that could not answer. */
+.route-stop.muted {
+  border-color: var(--muted);
+  background: var(--ground);
+  color: var(--text-min);
+}
 .route-stop.live {
   box-shadow: 0 0 0 4px rgba(47, 91, 211, 0.22);
 }
@@ -260,6 +273,15 @@
 .route-label-title {
   font-size: 12px;
   font-weight: 500;
+}
+.route-label-title.muted {
+  color: var(--text-min);
+  font-weight: 400;
+}
+.route-label-title .live-dot,
+.tr-title .live-dot {
+  margin-right: 6px;
+  vertical-align: 1px;
 }
 .route-label-title.run {
   color: var(--run-text);
@@ -405,6 +427,16 @@
 }
 .tr-text {
   margin: 0;
+}
+.tr-title.muted {
+  color: var(--text-min);
+}
+/* The question an answer run answers. */
+.tr-asked {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--text);
 }
 .tr-voice {
   font-size: 15px;

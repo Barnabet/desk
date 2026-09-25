@@ -3,7 +3,7 @@ import { emptyTranscript, foldMessages, reduceTranscript } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AgentMessageKind, EventOf, RunFinishReason, StoredEvent } from '@desk/protocol';
 import { clock } from '../format';
-import { narrate, routeLayout, stopsOf, stopText } from './route';
+import { narrate, routeLayout, senderDisc, senderName, stopsOf, stopText } from './route';
 
 const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
 const a = { agent: 't' };
@@ -238,5 +238,22 @@ describe('messages and answer runs on the route', () => {
       ['steer', `You asked · ${clock(ts(29))}`, false],
       ['incoming', 'Old stream: update', false],
     ]);
+  });
+});
+
+describe('senders', () => {
+  it("names a sender from the fold's directory, else from its label", () => {
+    const m = foldMessages([ev(1, 'agent.created', { role: 'thread', model: 'm', title: 'Auth API', brief: 'b', workspace_path: '/a', parent_id: 'd' }, { agent: 'a' })]);
+    expect(senderName(m, 'a', 'thread "Old name" (a)')).toBe('Auth API');
+    expect(senderName(m, 'x', 'thread "Billing" (x)')).toBe('Billing');
+    expect(senderName(m, 'd', 'Desk')).toBe('Desk');
+  });
+
+  it("puts Desk, or the sender's initials, on a message's disc", () => {
+    expect(senderDisc('Desk')).toBe('Desk');
+    expect(senderDisc('Auth API')).toBe('AA');
+    expect(senderDisc('welcome emails for the EU')).toBe('WE');
+    expect(senderDisc('Frontend')).toBe('Fr');
+    expect(senderDisc('')).toBe('?');
   });
 });

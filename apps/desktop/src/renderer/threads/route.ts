@@ -88,9 +88,17 @@ export type StopText = { title: string; sub: string; quote?: string; muted?: tru
 const NO_MESSAGES = emptyMessages();
 
 /** A message sender's name: the fold's directory (archived threads keep their titles), else what its label says. */
-function senderName(m: MessagesState, id: string, label: string): string {
+export function senderName(m: MessagesState, id: string, label: string): string {
   if (m.agents[id]) return agentTitle(m, id);
   return label === 'Desk' ? 'Desk' : (/^thread "(.*)" \(/.exec(label)?.[1] ?? label);
+}
+
+/** The text on a message stop's disc: "Desk", or the sender's initials ("AA" for Auth API, "Fr" for Frontend). */
+export function senderDisc(title: string): string {
+  if (title === 'Desk') return 'Desk';
+  const [a = '?', b] = title.split(/[\s_-]+/).filter(Boolean);
+  if (b) return `${Array.from(a)[0] ?? ''}${Array.from(b)[0] ?? ''}`.toUpperCase();
+  return Array.from(a).slice(0, 2).join('');
 }
 
 /** Why an answer run for the user's Ask ended without an answer. */

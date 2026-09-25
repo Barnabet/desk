@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { MessagesState, ToolCallView, TranscriptEntry } from '@desk/client';
+import { agentTitle, messageById, type MessagesState, type ToolCallView, type TranscriptEntry } from '@desk/client';
 import { clip } from '@desk/protocol';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
@@ -92,6 +92,12 @@ function EntryFull({ e, projectId }: { e: TranscriptEntry; projectId: string }) 
       );
     case 'compacted':
       return null;
+    case 'answer':
+      return (
+        <span className="muted small">
+          Woke to answer message #{e.question} · {clock(e.ts)}
+        </span>
+      );
     default:
       return <EntrySummary e={e} projectId={projectId} />;
   }
@@ -152,11 +158,11 @@ function EntrySummary({ e, projectId }: { e: TranscriptEntry; projectId: string 
   }
 }
 
-function StopBody({ s, projectId }: { s: Stop; projectId: string }) {
-  if (s.kind !== 'work') return <EntrySummary e={s.entries[0]!} projectId={projectId} />;
+/** A run's text and tool groups, as a work stop shows them. */
+function RunBody({ entries }: { entries: TranscriptEntry[] }) {
   return (
     <>
-      {s.entries.map((e) =>
+      {entries.map((e) =>
         e.kind === 'assistant' && e.text ? (
           <SafeMarkdown key={e.id} className="md-voice tr-voice" text={e.text} />
         ) : e.kind === 'tools' ? (
@@ -165,6 +171,33 @@ function StopBody({ s, projectId }: { s: Stop; projectId: string }) {
       )}
     </>
   );
+}
+
+/**
+ * An answer run's stop (design spec §8 item 6): the question it answers, the run's text and tools, and the runtime's
+ * closure when the thread could not answer another agent. The user's Ask has no closure: its title says why.
+ */
+function AnswerBody({ s, messages }: { s: Stop; messages: MessagesState }) {
+  const e = s.entries[0];
+  const q = e?.kind === 'answer' ? messageById(messages, e.question) : undefined;
+  const reply = q?.answerId === undefined ? undefined : messageById(messages, q.answerId);
+  return (
+    <>
+      {q ? (
+        <p className="tr-asked">
+          {q.from === 'user' ? 'You' : agentTitle(messages, q.from)} asked: “{clip(q.text, 200)}”
+        </p>
+      ) : null}
+      <RunBody entries={s.entries} />
+      {reply?.auto ? <p className="tr-text muted">{reply.text}</p> : null}
+    </>
+  );
+}
+
+function StopBody({ s, projectId, messages }: { s: Stop; projectId: string; messages: MessagesState }) {
+  if (s.kind === 'answer') return <AnswerBody s={s} messages={messages} />;
+  if (s.kind !== 'work') return <EntrySummary e={s.entries[0]!} projectId={projectId} />;
+  return <RunBody entries={s.entries} />;
 }
 
 export const stopDomId = (n: number) => `tr-stop-${n}`;
@@ -277,12 +310,13 @@ export function Transcript(o: {
                 >
                   {numBadge(r.stop.n)}
                   <div className="tr-body">
-                    <span className="tr-title">
+                    <span className={`tr-title${stopText(r.stop, o.reviewRounds, o.messages).muted ? ' muted' : ''}`}>
+                      {r.stop.kind === 'answer' && r.stop.live ? <span className="live-dot" aria-hidden="true" /> : null}
                       {stopText(r.stop, o.reviewRounds, o.messages).title}
                       {r.stop.kind === 'work' || r.stop.kind === 'brief' || r.stop.kind === 'steer' ? null : ` · ${clock(r.stop.from)}`}
                       {r.stop.kind === 'work' ? <span className="muted"> · {stopText(r.stop, o.reviewRounds, o.messages).sub}</span> : null}
                     </span>
-                    <StopBody s={r.stop} projectId={o.projectId} />
+                    <StopBody s={r.stop} projectId={o.projectId} messages={o.messages} />
                   </div>
                 </div>
               ),

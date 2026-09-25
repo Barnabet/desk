@@ -1,9 +1,9 @@
 import { useRef } from 'react';
 import type { MessagesState } from '@desk/client';
 import { useWidth } from '../state/width';
-import { routeLayout, stopText, type Stop, type StopKind } from './route';
+import { routeLayout, senderDisc, senderName, stopText, type Stop, type StopKind } from './route';
 
-const INNER: Record<StopKind, (s: Stop) => string> = {
+const INNER: Record<StopKind, (s: Stop, m: MessagesState) => string> = {
   brief: () => 'Brief',
   work: (s) => (s.tools.length ? `${s.tools.length} ${s.tools.length === 1 ? 'tool' : 'tools'}` : '¶'),
   detour: () => 'detour',
@@ -14,7 +14,10 @@ const INNER: Record<StopKind, (s: Stop) => string> = {
   },
   steer: () => 'You',
   approval: () => '!',
-  incoming: () => 'Desk',
+  incoming: (s, m) => {
+    const e = s.entries[0];
+    return e?.kind === 'incoming' ? senderDisc(senderName(m, e.fromAgentId, e.fromLabel)) : 'Desk';
+  },
   answer: () => '↩',
 };
 
@@ -49,19 +52,22 @@ export function RouteView(o: {
             <div key={p.stop.n}>
               <button
                 type="button"
-                className={`route-stop route-stop-${p.stop.kind}${p.stop.live ? ' live' : ''}${o.selected === p.stop.n ? ' selected' : ''}`}
+                className={`route-stop route-stop-${p.stop.kind}${p.stop.live ? ' live' : ''}${t.muted ? ' muted' : ''}${o.selected === p.stop.n ? ' selected' : ''}`}
                 style={{ left: p.x, top: p.y, width: p.r * 2, height: p.r * 2 }}
                 aria-label={label}
                 aria-pressed={o.selected === p.stop.n}
                 onClick={() => o.onSelect(p.stop.n)}
               >
-                <span aria-hidden="true">{INNER[p.stop.kind](p.stop)}</span>
+                <span aria-hidden="true">{INNER[p.stop.kind](p.stop, o.messages)}</span>
               </button>
               <span className="route-num" aria-hidden="true" style={{ left: p.x + p.r * 0.8, top: p.y - p.r * 0.8 }}>
                 {p.stop.n}
               </span>
               <div className={`route-label${above ? ' above' : ''}`} style={{ left: p.x, top: above ? p.y - p.r - 6 : p.y + p.r + 6 }}>
-                <span className="route-label-title">{t.title}</span>
+                <span className={`route-label-title${t.muted ? ' muted' : ''}`}>
+                  {p.stop.kind === 'answer' && p.stop.live ? <span className="live-dot" aria-hidden="true" /> : null}
+                  {t.title}
+                </span>
                 {t.sub ? <span className="route-label-sub">{t.sub}</span> : null}
                 {t.quote ? <span className="route-label-quote">“{t.quote}”</span> : null}
               </div>
