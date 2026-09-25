@@ -219,3 +219,25 @@ describe('archives', () => {
     expect([status(waiter), status(runner)]).toEqual(['cancelled', 'cancelled']);
   });
 });
+
+describe('silent stops', () => {
+  it("a stop by Desk on a done thread does not silence the user's later stop", async () => {
+    const { rt, desk, thread, begin } = await setup({
+      Pricing: (req) => (turns(req) === 0 ? tools(call('complete', { summary: 'Found pricing' })) : tools(call('act'))),
+    });
+    const t = thread('Pricing');
+    begin(t);
+    await rt.whenIdle();
+    rt.stopAgent(t, { by: desk.id, reason: 'No longer needed' });
+    expect(status(t)).toBe('done');
+
+    // The user reopens it, then stops it while it runs.
+    during = (id) => rt.stop(id);
+    rt.sendMessage(t, 'Keep going: add the enterprise tier.');
+    await rt.whenIdle();
+    expect(status(t)).toBe('cancelled');
+    const cancelled = notices(desk.id, t, 'cancelled');
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0]).toMatch(/Stopped by the user\.$/);
+  });
+});

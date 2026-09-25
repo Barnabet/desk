@@ -755,10 +755,13 @@ export class Runtime {
     this.stopAgent(agentId);
   }
 
-  /** Stops an agent: kills its jobs, denies its pending approvals, aborts or dequeues its run. `by` = stopping agent (not reported back to it). */
+  /**
+   * Stops an agent: kills its jobs, aborts or dequeues its run and denies its pending approvals. A running run ends
+   * `cancelled` by itself; otherwise an agent that has not finished is cancelled here. `by` is the agent that stopped
+   * it (Desk, or the project's archive): the cancellation is not reported back to it.
+   */
   stopAgent(agentId: string, opts: { by?: string; reason?: string } = {}): void {
     const agent = this.requireAgent(agentId);
-    if (opts.by) this.silentStops.add(agentId);
     this.jobs.killAll(agentId);
     const state = this.scheduler.stop(agentId);
     for (const ap of pendingApprovalsFor(this.o.store.db, agentId)) {
@@ -772,15 +775,19 @@ export class Runtime {
         },
       ]);
     }
-    if (state !== 'running' && !TERMINAL.has(this.requireAgent(agentId).status)) {
-      this.o.store.append({
-        project_id: agent.project_id,
-        agent_id: agentId,
-        type: 'agent.status_changed',
-        payload: { status: 'cancelled', reason: opts.reason ?? (state === 'queued' ? 'Stopped before starting' : 'Stopped') },
-      });
-      this.notifyParent(this.requireAgent(agentId));
+    if (state === 'running') {
+      // The run's own ending appends `cancelled`; afterRun's notifyParent consumes this entry.
+      if (opts.by) this.silentStops.add(agentId);
+      return;
     }
+    if (TERMINAL.has(this.requireAgent(agentId).status)) return;
+    this.o.store.append({
+      project_id: agent.project_id,
+      agent_id: agentId,
+      type: 'agent.status_changed',
+      payload: { status: 'cancelled', reason: opts.reason ?? (state === 'queued' ? 'Stopped before starting' : 'Stopped') },
+    });
+    if (!opts.by) this.notifyParent(this.requireAgent(agentId));
   }
 
   /** Reports running/waiting threads with no activity for `thresholdMs` to their Desk, once per stall. Returns reported thread ids. */
@@ -1091,6 +1098,8 @@ export class Runtime {
     const agent = this.requireAgent(agentId);
     if (TERMINAL.has(agent.status)) this.jobs.killAll(agentId);
     this.notifyParent(agent);
+    // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
+    this.silentStops.delete(agentId);
     this.remindWhatsUp(agent);
     this.wake(agentId);
   }
