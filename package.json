@@ -8,9 +8,9 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @desk/web-ui test",
     "test:live": "DESK_LIVE=1 vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && pnpm --filter @desk/web-ui typecheck",
     "desk": "node --import tsx apps/cli/src/main.ts",
     "deskd": "node --import tsx apps/daemon/src/main.ts",
     "test:e2e": "pnpm --filter @desk/desktop build && vitest run --config vitest.e2e.config.ts",
