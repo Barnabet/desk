@@ -85,6 +85,10 @@ export const AgentMessageKind = z.enum([
   'stalled',
   /** From the runtime to Desk itself: a nudge (e.g. to update What's up); never shown in the chat. */
   'reminder',
+  /** The answer to a question: `reply_to` names the question. */
+  'answer',
+  /** Desk's first message to a thread it spawned. */
+  'start',
 ]);
 export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 

@@ -104,10 +104,32 @@ export const EventBody = z.discriminatedUnion('type', [
   event('message.user', z.object({ text: z.string().min(1) })),
   event(
     'message.agent',
-    z.object({ from_agent_id: z.string(), from_label: z.string(), kind: AgentMessageKind, text: z.string().min(1) }),
+    z.object({
+      from_agent_id: z.string(),
+      from_label: z.string(),
+      kind: AgentMessageKind,
+      text: z.string().min(1),
+      /** The question this message answers (kind `answer`). */
+      reply_to: z.number().int().optional(),
+      /** An answer the runtime wrote for the question's recipient (a closure), not the recipient itself. */
+      auto: z.literal(true).optional(),
+      /** A question sent through the send path: only these have a state (open, answered, closed, withdrawn). */
+      tracked: z.literal(true).optional(),
+      /** The tool call that sent it; absent on runtime notices and closures. */
+      tool_call_id: z.string().optional(),
+    }),
   ),
   event('inbox.drained', z.object({ run_id: z.string(), up_to: z.number().int() })),
-  event('run.started', z.object({ run_id: z.string(), model: z.string(), reasoning_effort: ReasoningEffort.optional() })),
+  event(
+    'run.started',
+    z.object({
+      run_id: z.string(),
+      model: z.string(),
+      reasoning_effort: ReasoningEffort.optional(),
+      /** Set on an answer run: the question it answers (a `message.agent` question, or the user's Ask). */
+      answering: z.number().int().optional(),
+    }),
+  ),
   event('run.finished', z.object({ run_id: z.string(), reason: RunFinishReason, detail: z.string().optional() })),
   event(
     'assistant.message',

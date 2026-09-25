@@ -49,6 +49,18 @@ describe('EventBody', () => {
   it('rejects an invalid agent status', () => {
     expect(() => EventBody.parse({ type: 'agent.status_changed', payload: { status: 'sleeping' } })).toThrow();
   });
+
+  it('parses the messaging fields of message.agent and run.started', () => {
+    const answer = { from_agent_id: 'T1', from_label: 'thread "Auth API" (T1)', kind: 'answer', text: 'JWT.', reply_to: 12, auto: true, tool_call_id: 'call_1' };
+    expect(EventBody.parse({ type: 'message.agent', payload: answer }).payload).toEqual(answer);
+    const question = { from_agent_id: 'T1', from_label: 'thread "Auth API" (T1)', kind: 'question', text: 'Which format?', tracked: true };
+    expect(EventBody.parse({ type: 'message.agent', payload: question }).payload).toEqual(question);
+    expect(EventBody.parse({ type: 'message.agent', payload: { from_agent_id: 'D', from_label: 'Desk', kind: 'start', text: 'Begin your assignment.' } }).type).toBe('message.agent');
+    expect(() => EventBody.parse({ type: 'message.agent', payload: { ...question, tracked: false } })).toThrow();
+    expect(() => EventBody.parse({ type: 'message.agent', payload: { ...answer, reply_to: 1.5 } })).toThrow();
+    const started = { run_id: 'r1', model: 'm', answering: 12 };
+    expect(EventBody.parse({ type: 'run.started', payload: started }).payload).toEqual(started);
+  });
 });
 
 describe('EphemeralEvent', () => {
