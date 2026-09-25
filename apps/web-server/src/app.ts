@@ -24,6 +24,8 @@ export function createWebApp(d: WebAppDeps): Hono {
   app.use('*', hostCheck(d.port));
   app.get('/healthz', () => new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } }));
   app.get('/login', (c) => {
+    // Hono answers HEAD with the GET route: a HEAD (a link preview, a prefetch) must not spend the code.
+    if (c.req.method === 'HEAD') return page(200, '');
     const r = d.codes.redeem(c.req.query('code') ?? '');
     if (r.ok) return page(200, loginPage(r.secret));
     if (r.reason === 'replayed') d.onReplay?.();

@@ -9,7 +9,7 @@ import { createApp, startServer, type RunningServer } from '@desk/daemon';
 import type { StoredEvent } from '@desk/protocol';
 import { readWebInfo, writeWebInfo } from './files';
 import { startWebServer, type StartWebServerOptions, type WebServer } from './server';
-import { connected, rawRequest, redeem, refusedUpgrade, rpc, sleep, until } from './testing';
+import { connected, openPush, rawRequest, redeem, refusedUpgrade, rpc, sleep, until } from './testing';
 
 let h: Harness | undefined;
 let deskd: RunningServer | undefined;
@@ -30,6 +30,19 @@ const tempDir = (prefix: string) => {
   dirs.push(d);
   return d;
 };
+
+/** A port on 127.0.0.1 that was free a moment ago. */
+const freePort = () =>
+  new Promise<number>((resolve) => {
+    const s = createNetServer();
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address() as AddressInfo;
+      s.close(() => resolve(port));
+    });
+  });
+
+/** Open fs.watch handles in this process (desk web --dev watches the build folder). */
+const watchers = () => process.getActiveResourcesInfo().filter((r) => r === 'FSEventWrap').length;
 
 /** An in-process deskd with one project, and desk web on a free port in front of it; the broker's stream is captured. */
 async function setup(o: Partial<StartWebServerOptions> = {}) {
@@ -202,6 +215,33 @@ describe('startWebServer', () => {
     writeWebInfo(dataDir, { pid: 2 ** 22 + 12345, port: 1 });
     web = await startWebServer({ dataDir, port: 0, uiDir, log: () => {}, client: () => null });
     expect(readWebInfo(dataDir)).toEqual({ pid: process.pid, port: web.port });
+  });
+
+  it('closes promptly while a signed-in /push socket and a --dev reload socket are open', async () => {
+    await setup({ dev: true });
+    const push = await connected(web!.port, await redeem(web!.loginLink()));
+    const reload = openPush(web!.port, { path: '/__dev/reload' });
+    await reload.opened;
+    const closing = web!.close();
+    web = undefined;
+    await Promise.race([
+      closing,
+      sleep(2000).then(() => {
+        throw new Error('close() was still waiting for the open sockets after 2 s');
+      }),
+    ]);
+    expect(await push.closed).toBe(1006);
+    expect(await reload.closed).toBe(1006);
+  });
+
+  it('closes what it opened when a step after listen fails (web.json is a folder)', async () => {
+    const dataDir = tempDir('desk-web-fail-');
+    mkdirSync(join(dataDir, 'web.json'));
+    const port = await freePort();
+    const before = watchers();
+    await expect(startWebServer({ dataDir, port, uiDir: join(dataDir, 'ui', 'browser'), dev: true, log: () => {}, client: () => null })).rejects.toMatchObject({ code: 'EISDIR' });
+    await expect(fetch(`http://127.0.0.1:${port}/healthz`)).rejects.toThrow();
+    await until(() => watchers() === before);
   });
 
   it('says to choose another port with --port when the port is taken, and never moves on its own', async () => {

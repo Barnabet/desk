@@ -212,9 +212,20 @@ export async function startWebServer(o: StartWebServerOptions): Promise<WebServe
   }
   boundPort = (server.address() as AddressInfo).port;
   const dev = o.dev ? new DevReload(uiDir) : null;
-  dev?.start();
-  attachUpgrades(server, { port: () => boundPort, routes: { '/push': hub.handleUpgrade, ...(dev ? { '/__dev/reload': dev.handleUpgrade } : {}) } });
-  writeWebInfo(o.dataDir, { pid: process.pid, port: boundPort });
+  try {
+    dev?.start();
+    attachUpgrades(server, { port: () => boundPort, routes: { '/push': hub.handleUpgrade, ...(dev ? { '/__dev/reload': dev.handleUpgrade } : {}) } });
+    writeWebInfo(o.dataDir, { pid: process.pid, port: boundPort });
+  } catch (err) {
+    // Leave nothing behind: the CLI never calls process.exit, and deskd's sandbox guard knows the port only from web.json.
+    hub.close();
+    dev?.close();
+    await new Promise<void>((resolve) => {
+      server.closeAllConnections();
+      server.close(() => resolve());
+    });
+    throw err;
+  }
   void broker.start();
 
   const url = `http://127.0.0.1:${boundPort}`;

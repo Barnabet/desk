@@ -82,6 +82,19 @@ describe('the desk web app', () => {
     expect(replays).toEqual([1]);
   });
 
+  it('answers HEAD /login without spending the code, so the browser\'s GET still signs in', async () => {
+    const { app, codes, sessions, replays, secretOf } = setup();
+    const code = codes.issue();
+    const head = await app.request(`/login?code=${code}`, { method: 'HEAD', headers: HOST });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+    expect(sessions.size).toBe(0);
+    const res = await app.request(`/login?code=${code}`, { headers: HOST });
+    expect(res.status).toBe(200);
+    expect(sessions.valid(await secretOf(res))).toBe(true);
+    expect(replays).toEqual([]);
+  });
+
   it('puts the security headers on every response and never sets a cookie', async () => {
     const { app, codes } = setup();
     const responses = [
