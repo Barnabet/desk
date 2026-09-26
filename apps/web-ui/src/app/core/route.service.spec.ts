@@ -16,12 +16,13 @@ describe('RouteService', () => {
 
   it('navigates with a history entry and replaces without one', () => {
     const routes = TestBed.inject(RouteService);
+    const depth = history.length;
     routes.navigate({ name: 'attention', item: 'a1' });
+    expect(history.length).toBe(depth + 1);
     expect(window.location.hash).toBe('#/attention?item=a1');
     expect(routes.route()).toEqual({ name: 'attention', item: 'a1' });
-    const depth = history.length;
     routes.replace('#/skills/weekly-report');
-    expect(history.length).toBe(depth);
+    expect(history.length).toBe(depth + 1);
     expect(window.location.hash).toBe('#/skills/weekly-report');
     expect(routes.route()).toEqual({ name: 'skills', skill: 'weekly-report' });
   });
