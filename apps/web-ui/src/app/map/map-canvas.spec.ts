@@ -52,9 +52,9 @@ describe('MapCanvas', () => {
   it('zooms around the centre from its buttons, between 0.5 and 2.5, and resets', async () => {
     const { layer, sizes, user } = await setup();
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
-    // jsdom lays nothing out: the canvas keeps 1000 × 700, so the centre is (500, 350), and reports no size.
+    // jsdom lays nothing out: the canvas keeps 1000 × 700, so the centre is (500, 350), and reports that size once.
     await waitFor(() => expect(layer.style.transform).toBe('translate(-100px, -70px) scale(1.2)'));
-    expect(sizes).toEqual([]);
+    expect(sizes).toEqual([{ width: 1000, height: 700 }]);
     for (let i = 0; i < 8; i++) await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await waitFor(() => expect(layer.style.transform).toMatch(/ scale\(2\.5\)$/));
     await user.click(screen.getByRole('button', { name: 'Reset' }));
@@ -119,14 +119,17 @@ describe('MapCanvas', () => {
     await view.fixture.whenStable();
     const observer = FakeObserver.last!;
     expect(observer.target).toBe(canvas);
-    expect(sizes).toEqual([]);
+    expect(sizes).toEqual([{ width: 1000, height: 700 }]);
     Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1200 });
     Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 600 });
     observer.callback();
-    expect(sizes).toEqual([{ width: 1200, height: 600 }]);
+    expect(sizes).toEqual([
+      { width: 1000, height: 700 },
+      { width: 1200, height: 600 },
+    ]);
     // The same size again reports nothing.
     observer.callback();
-    expect(sizes).toHaveLength(1);
+    expect(sizes).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await waitFor(() => expect(layer.style.transform).toBe('translate(-120px, -60px) scale(1.2)'));
     expect(observer.disconnect).not.toHaveBeenCalled();

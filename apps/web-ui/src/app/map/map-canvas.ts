@@ -11,8 +11,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 /**
  * A pannable, zoomable surface (drag the background, scroll to pan, pinch or ⌘-scroll to zoom), ported from
  * MapCanvas.tsx. The content is projected into the moving `.map-layer`. React handed the measured size to a render
- * prop; here the parent gets it from `resized`, emitted whenever it differs from the last size (the first one being
- * DEFAULT_CANVAS_SIZE). A browser zooms the whole page on a pinch or ⌘-scroll, so those wheel events are cancelled.
+ * prop; here the parent gets it from `resized`: the first measurement, always (so a parent that outlives the canvas,
+ * like MapScreen's Map/List switch, never keeps an earlier canvas's size), then each change. A browser zooms the whole
+ * page on a pinch or ⌘-scroll, so those wheel events are cancelled.
  */
 @Component({
   selector: 'div[deskMapCanvas]',
@@ -43,7 +44,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export class MapCanvas {
   /** The surface's accessible name. */
   readonly label = input.required<string>();
-  /** The measured size, each time it changes. */
+  /** The measured size: the first measurement, then each change. */
   readonly resized = output<CanvasSize>();
 
   private readonly host: HTMLElement = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
@@ -63,16 +64,18 @@ export class MapCanvas {
   constructor() {
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => {
-      const measure = () => {
-        const next = { width: this.host.clientWidth || DEFAULT_CANVAS_SIZE.width, height: this.host.clientHeight || DEFAULT_CANVAS_SIZE.height };
-        const current = this.size();
-        if (next.width === current.width && next.height === current.height) return;
+      const measure = (): CanvasSize => ({ width: this.host.clientWidth || DEFAULT_CANVAS_SIZE.width, height: this.host.clientHeight || DEFAULT_CANVAS_SIZE.height });
+      const report = (next: CanvasSize) => {
         this.size.set(next);
         this.resized.emit(next);
       };
-      measure();
+      report(measure());
       if (typeof ResizeObserver === 'undefined') return;
-      const ro = new ResizeObserver(measure);
+      const ro = new ResizeObserver(() => {
+        const next = measure();
+        const current = this.size();
+        if (next.width !== current.width || next.height !== current.height) report(next);
+      });
       ro.observe(this.host);
       destroyRef.onDestroy(() => ro.disconnect());
     });

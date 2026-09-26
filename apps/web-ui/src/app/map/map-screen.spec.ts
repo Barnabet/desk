@@ -150,6 +150,21 @@ describe('MapScreen', () => {
     expect(screen.getByRole('button', { name: 'deskd, running, model proxy unknown' })).toBeTruthy();
     expect(Array.from(document.querySelector('.orbit-sun-label')!.children, (c) => c.textContent)).toEqual(['1.0.0 · running', 'proxy unknown · 1 thread running']);
   });
+
+  it('lays the orbit map out at the size of the canvas that comes back after the list, not the last one', async () => {
+    const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1300);
+    const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(800);
+    const { user } = await setup({ seeded: true });
+    await waitFor(() => expect(document.querySelector('svg.orbit-svg')?.getAttribute('width')).toBe('920'));
+    await user.click(screen.getByRole('button', { name: 'List' }));
+    await waitFor(() => expect(document.querySelector('.map-canvas')).toBeNull());
+    // The window shrank meanwhile, and the new canvas measures exactly DEFAULT_CANVAS_SIZE.
+    width.mockReturnValue(1000);
+    height.mockReturnValue(700);
+    await user.click(screen.getByRole('button', { name: 'Map' }));
+    await waitFor(() => expect(document.querySelector('svg.orbit-svg')?.getAttribute('width')).toBe('620'));
+    expect(document.querySelector('svg.orbit-svg')!.getAttribute('height')).toBe('700');
+  });
 });
 
 describe('projectSummaryLine', () => {
