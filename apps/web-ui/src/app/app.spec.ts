@@ -11,6 +11,12 @@ const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id:
 const go = (hash: string) => history.replaceState(null, '', hash);
 /** The element the screen boundary renders: the screen's host while healthy. */
 const screenHost = () => document.querySelector('main.screen > [deskErrorBoundary] > *');
+/** A drag event as a browser sends it (jsdom has no DragEvent): `types` holds 'Files' when files are dragged. */
+function drag(type: 'dragover' | 'drop', types: string[], files: File[] = []): Event {
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'dataTransfer', { value: { types, files, dropEffect: 'copy' } });
+  return e;
+}
 
 async function renderApp(bridge = new FakeDeskBridge()) {
   const view = await render(App, { providers: [...bridge.providers, ...provideErrorBoundaries()] });
@@ -121,6 +127,48 @@ describe('App', () => {
     await renderApp();
     await waitFor(() => expect(window.location.hash).toBe('#/map'));
     expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+  });
+
+  it('keeps a file dropped outside a drop zone from replacing the page, and lets other drags be', async () => {
+    go('#/map');
+    const { view } = await renderApp();
+    const over = drag('dragover', ['Files']);
+    document.body.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect((over as Event & { dataTransfer: DataTransfer }).dataTransfer.dropEffect).toBe('none');
+    const drop = drag('drop', ['Files'], [new File(['x'], 'x.txt')]);
+    screen.getByRole('heading', { name: 'Projects', level: 1 }).dispatchEvent(drop);
+    expect(drop.defaultPrevented).toBe(true);
+    const text = drag('dragover', ['text/plain']);
+    document.body.dispatchEvent(text);
+    expect(text.defaultPrevented).toBe(false);
+    view.fixture.destroy();
+    const after = drag('drop', ['Files']);
+    document.body.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+
+  it('still hands files dropped on the Library to it', async () => {
+    go('#/p/p/library');
+    const overview = { project: { id: 'p', name: 'P', goal: '', instructions: '', settings: {}, created_at: 't', updated_at: 't', archived_at: null }, desk: null, sources: [], plan: null, threads: [], approvals: [], last_seq: 0 };
+    const bridge = new FakeDeskBridge({
+      'broker.snapshot': () => ({ ...initialGlobalState(), connection: { status: 'live' } }),
+      'projects.get': () => overview,
+      'broker.watch': () => ({ ok: true }),
+      'broker.unwatch': () => ({ ok: true }),
+      'library.upload': ({ file }: { file: { name: string } }) => ({ path: file.name }),
+      'library.file': () => new Uint8Array([104, 105]),
+    });
+    await renderApp(bridge);
+    await screen.findByRole('heading', { name: 'Library', level: 1 });
+    const library = document.querySelector<HTMLElement>('.library')!;
+    const over = drag('dragover', ['Files']);
+    library.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect((over as Event & { dataTransfer: DataTransfer }).dataTransfer.dropEffect).toBe('copy');
+    library.dispatchEvent(drag('drop', ['Files'], [new File(['hi'], 'notes.txt')]));
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'library.upload')).toHaveLength(1));
+    await waitFor(() => expect(window.location.hash).toBe('#/p/p/library?file=notes.txt'));
   });
 
   it('shows desk:notify items as browser notifications while the page is in the background', async () => {

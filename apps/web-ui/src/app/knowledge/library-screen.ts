@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, computed, effect, inject, input, signal, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewEncapsulation, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import type { ArtifactKind } from '@desk/protocol';
 import { clock, extOf, fileToBase64, filterLibrary, href, imageMime, libraryFromEvents, MAX_UPLOAD, originAgent, plural, type LibraryItem } from '@desk/ui-core';
 import { Button } from '../components/button';
@@ -31,7 +31,6 @@ type Preview = { status: 'loading' } | { status: 'ready'; data: Uint8Array } | {
     '[class]': 'hostClass()',
     '[class.dragging]': "view() === 'ready' && dragging()",
     '[class.with-preview]': "view() === 'ready' && !!file()",
-    '(dragover)': 'onDragOver($event)',
     '(dragleave)': 'onDragLeave($event)',
     '(drop)': 'onDrop($event)',
   },
@@ -110,6 +109,9 @@ export class LibraryScreen {
   readonly file = input<string>();
 
   private readonly bridge = inject(DeskBridge);
+  private readonly host: HTMLElement = inject(ElementRef).nativeElement;
+  /** Set once the screen is gone: a late upload must not pull the viewer back here. */
+  private destroyed = false;
   private readonly routes = inject(RouteService);
   private readonly toasts = inject(ToastService);
   private readonly picker = viewChild<ElementRef<HTMLInputElement>>('picker');
@@ -162,6 +164,14 @@ export class LibraryScreen {
   protected readonly originAgent = originAgent;
 
   constructor() {
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(() => (this.destroyed = true));
+    // Not a host (dragover) listener: dragover fires many times a second, and each would schedule change detection.
+    afterNextRender(() => {
+      const onDragOver = (e: DragEvent) => this.onDragOver(e);
+      this.host.addEventListener('dragover', onDragOver);
+      destroyRef.onDestroy(() => this.host.removeEventListener('dragover', onDragOver));
+    });
     effect((onCleanup) => {
       const projectId = this.projectId();
       const file = this.file();
@@ -207,6 +217,7 @@ export class LibraryScreen {
 
   protected async upload(files: FileList | File[] | null): Promise<void> {
     const list = Array.from(files ?? []);
+    let uploaded = 0;
     for (const f of list) {
       if (f.size > MAX_UPLOAD) {
         this.toasts.error(new Error(`${f.name} is larger than 25 MB.`));
@@ -215,26 +226,30 @@ export class LibraryScreen {
       this.uploading.update((n) => n + 1);
       try {
         const a = await this.bridge.call('library.upload', { projectId: this.projectId(), file: { name: f.name, content_base64: await fileToBase64(f) } });
-        if (list.length === 1) this.select(a.path);
+        uploaded++;
+        if (list.length === 1 && !this.destroyed) this.select(a.path);
       } catch (err) {
         this.toasts.error(err);
       } finally {
         this.uploading.update((n) => n - 1);
       }
     }
-    if (list.length > 1) this.toasts.toast({ tone: 'info', message: `Uploaded ${plural(list.length, 'file')}.` });
+    // Refused and failed files have had their own toasts.
+    if (list.length > 1 && uploaded > 0) this.toasts.toast({ tone: 'info', message: `Uploaded ${plural(uploaded, 'file')}.` });
     const picker = this.picker()?.nativeElement;
     if (picker) picker.value = '';
   }
 
-  protected onDragOver(e: DragEvent): void {
+  private onDragOver(e: DragEvent): void {
     if (this.view() !== 'ready') return;
     e.preventDefault();
-    this.dragging.set(true);
+    if (!this.dragging()) this.dragging.set(true);
   }
 
+  /** Leaving for a child is still over the screen; leaving for outside it, or off the window (no related target), is not. */
   protected onDragLeave(e: DragEvent): void {
-    if (e.currentTarget === e.target) this.dragging.set(false);
+    const to = e.relatedTarget;
+    if (!(to instanceof Node) || !this.host.contains(to)) this.dragging.set(false);
   }
 
   protected onDrop(e: DragEvent): void {

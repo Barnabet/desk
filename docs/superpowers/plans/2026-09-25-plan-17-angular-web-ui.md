@@ -28891,7 +28891,7 @@ Note: W2a.1's review fix (`fix(desktop): a nameless path saves as 'file', …`, 
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Angular commands go through `scripts/ng.mjs` (it picks a Node that satisfies `^22.22.3`); while iterating run only the named specs: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: no parallel test runs, and only Tasks W2b.5 and W2b.6 start Chromium (never together with another Chromium or Electron run).
 
-**Runs after W0 (W0a–W0d)** and after **W2a.1** (`FileViewer`, which `LibraryScreen` shows its preview in). It runs alongside W2a otherwise. Task W2b.6 (the W2 exit check) runs after W2a.7 as well, because it runs the whole web e2e suite, W2a's "thread detail and diff" scenarios in `flows.e2e.test.ts` included. Nothing in `apps/desktop` changes: the React files and their tests stay as they are.
+**Runs after W0 (W0a–W0d)** and after **W2a.1** (`FileViewer`, which `LibraryScreen` shows its preview in). It runs alongside W2a otherwise. Task W2b.6 (the W2 exit check) runs after W2a.7 as well, because it runs the whole web e2e suite, W2a's "thread detail and diff" scenarios in `flows.e2e.test.ts` included. Nothing in `apps/desktop` changes: the React files and their tests stay as they are. (Deviation: W2b.1's review fix changes `LibraryScreen.tsx` and its test so both apps agree: the drag hint resets when the drag leaves the window, "Uploaded N files." counts the files that uploaded, and a single upload that finishes after leaving the Library no longer navigates back.)
 
 **How the pieces land (one commit per task):**
 
@@ -28916,7 +28916,7 @@ Note: W2a.1's review fix (`fix(desktop): a nameless path saves as 'file', …`, 
 
 **Produces (shared names beyond the contract):**
 
-- `apps/web-ui/src/app/knowledge/library-screen.ts`: `LibraryScreen` — `div[deskLibraryScreen]`, inputs `projectId` (required) and `file?: string`. Its host is the React root in each state: class `page muted` while loading, `page` when the project cannot load, `library` (plus ` dragging`, ` with-preview`) when ready; the drag listeners sit on the host.
+- `apps/web-ui/src/app/knowledge/library-screen.ts`: `LibraryScreen` — `div[deskLibraryScreen]`, inputs `projectId` (required) and `file?: string`. Its host is the React root in each state: class `page muted` while loading, `page` when the project cannot load, `library` (plus ` dragging`, ` with-preview`) when ready; the drag listeners sit on the host (`dragover` added with `addEventListener`, W2b.1's review fix).
 - `apps/web-ui/src/app/knowledge/memory-screen.ts`: `MemoryScreen` — `div[deskMemoryScreen]` (host class `page muted` / `page` / `page memory`), inputs `projectId` (required) and `q?: string`; `Entry` (React's name) — `li[deskMemoryEntry]` (host class `memory-entry card`, `aria-label` "<kind>: <content, 80 chars>"), inputs `projectId`, `m: MemoryEntry`, `chain: MemoryEntry[]`, `label: (id: string) => string`.
 - `apps/web-ui/src/app/settings/policy-editor.ts`: `PolicyEditor` — `div[deskPolicyEditor]` (host class `policy`), input `rules: PolicyRule[]` (required), output `changed: PolicyRule[]` (React's `onChange`); `sameRules(a, b)`.
 - `apps/web-ui/src/app/settings/settings-screen.ts`: `SettingsScreen` — `div[deskSettingsScreen]` (host class `page muted` / `page` / `page settings`), input `projectId` (required).
@@ -29356,6 +29356,14 @@ export class LibraryScreen {
 
 (The drag listeners sit on the host, which is the React root; they do nothing until the screen is ready, since the React loading and failure roots have no drop handlers.)
 
+> **Deviation (review fix, after 5c35fb0).** The committed `library-screen.ts` departs from the code above in four places; committed code wins:
+> - **`dragover` is not a host listener.** It fires many times a second, and a host listener schedules change detection for each one (the port conventions' listener rule). The constructor adds it with `addEventListener` on the host element (`inject(ElementRef).nativeElement`) in `afterNextRender` and removes it through `DestroyRef`; `onDragOver` (now private) sets `dragging` only when it is not already set. `dragleave` and `drop` stay host listeners.
+> - **Leaving the window resets `dragging`.** `onDragLeave` resets it when `e.relatedTarget` is null (off the window, whatever element the pointer was over) or outside the host, not only when the event's target is the host: before, dragging off the window from over a card left "Drop to upload" stuck.
+> - **"Uploaded N files." counts the files that uploaded.** `upload` counts successes (`uploaded`), and toasts only when several files were given and at least one uploaded; refused and failed files keep their own error toasts.
+> - **A late single upload no longer pulls the viewer back.** A `destroyed` flag set through `DestroyRef` skips `select(a.path)` once the screen is gone.
+>
+> The same review added an app-wide guard to W0c.14's `App` (`app.ts`, `guardFileDrops`): a browser opens a file dropped where nothing takes it, replacing the page (Electron refuses that navigation). `document` listeners for `dragover` and `drop` cancel any drag that carries files (`dataTransfer.types` includes `Files`), after drop zones such as the Library have had it, and set `dropEffect = 'none'` on a `dragover` nothing took; the listeners are removed when `App` is destroyed. `app.spec.ts` gains two cases (the guard, and the Library still getting its drops through the shell). The React `LibraryScreen.tsx` takes the dragleave, count and unmounted-upload fixes too (a `mounted` ref), with three new cases in `LibraryScreen.test.tsx`. `library-screen.spec.ts` gains seven cases: the failure count, one render per drag start (plain `dispatchEvent`, counted with `afterEveryRender`), leaving the window, a failing `library.upload` (its toast, the button enabled again), a late upload after leaving the Library (its `Routed` now unmounts the screen off the Library tab), a failing `library.file` ("Couldn't open this file"), and selection and ✕ through `replace` (history length unchanged); the drop case expects `'Uploaded 1 file.'`.
+
 - [ ] **Step 4: Show it for `#/p/<id>/library`**
 
 In `apps/web-ui/src/app/screen-for.ts`, add the import among the relative imports, right after `import { NotYet } from './screens/not-yet';`:
@@ -29383,7 +29391,7 @@ After:
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/knowledge/library-screen.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 5 library cases, and `screen-for.spec.ts` as it was (its "every project tab has a screen" still holds).
+Expected: PASS: the 5 library cases, and `screen-for.spec.ts` as it was (its "every project tab has a screen" still holds). (After the review fix: 12 cases.)
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -30933,7 +30941,7 @@ Expected: PASS. This section changes nothing the root suite runs (bff, ui-core w
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (5), `knowledge/memory-screen.spec.ts` (5), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (6); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (12 after W2b.1's review fix), `knowledge/memory-screen.spec.ts` (5), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (6); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
