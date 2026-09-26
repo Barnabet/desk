@@ -8,6 +8,7 @@ import { TitleBar } from './components/title-bar';
 import { Toaster } from './components/toast';
 import { DeskBridge } from './core/desk-bridge';
 import { GlobalStore } from './core/global.store';
+import { WebNotifications } from './core/notifications';
 import { isOnboarded } from './core/onboarded';
 import { RouteService } from './core/route.service';
 import { SessionService } from './core/session.service';
@@ -76,9 +77,11 @@ export class App {
     // Routes desk:event, desk:events and desk:ephemeral to project sessions from the start (startSessionRouting).
     inject(SessionService);
     const stopGlobal = inject(GlobalStore).start();
+    const stopNotices = inject(WebNotifications).start();
     const stopNavigate = this.bridge.onPush<string>('desk:navigate', (to) => this.routes.navigate(to));
     inject(DestroyRef).onDestroy(() => {
       stopGlobal();
+      stopNotices();
       stopNavigate();
     });
     effect(() => {

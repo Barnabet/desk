@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/angular';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { AttentionItem } from '@desk/protocol';
 import { App } from './app';
@@ -18,7 +18,11 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('desk.onboarded', '1');
 });
-afterEach(() => history.replaceState(null, '', window.location.pathname));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  history.replaceState(null, '', window.location.pathname);
+});
 
 describe('App', () => {
   it('shows only how to sign in while this browser has no session', async () => {
@@ -80,5 +84,23 @@ describe('App', () => {
     await renderApp();
     await waitFor(() => expect(window.location.hash).toBe('#/map'));
     expect(await screen.findByText('The map is not in the web UI yet')).toBeTruthy();
+  });
+
+  it('shows desk:notify items as browser notifications while the page is in the background', async () => {
+    const titles: string[] = [];
+    class BrowserNotification {
+      static permission = 'granted';
+      onclick: (() => void) | null = null;
+      constructor(title: string) {
+        titles.push(title);
+      }
+      close(): void {}
+    }
+    vi.stubGlobal('Notification', BrowserNotification);
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    go('#/map');
+    const { bridge } = await renderApp();
+    bridge.emit('desk:notify', [{ tag: 'question:1', title: 'Launch: Desk has a question', body: 'Which first?', route: '#/attention?item=question%3A1' }]);
+    expect(titles).toEqual(['Launch: Desk has a question']);
   });
 });
