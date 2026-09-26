@@ -18,6 +18,7 @@ import {
   type TimelineState,
   type TranscriptState,
 } from '@desk/client';
+import type { GlobalState } from '@desk/bff/contract';
 import type { EphemeralEvent, StoredEvent } from '@desk/protocol';
 import { createStore, type Store } from '@desk/ui-core';
 import { DeskBridge, DeskCallError } from './desk-bridge';
@@ -78,6 +79,10 @@ class ProjectSession {
   /** The highest event id received: where a watch after a reconnect resumes. */
   private cursor = 0;
   private base: Pick<SessionState, 'project' | 'chat' | 'timeline' | 'messages'> | null = null;
+  /** Set while a watch after a reconnect has failed (deskd was offline): `retryWatch` tries again. */
+  private watchFailed = false;
+  /** Counts rewatches, so only the latest one's outcome sets or clears `watchFailed`. */
+  private watches = 0;
 
   constructor(
     readonly projectId: string,
@@ -106,10 +111,26 @@ class ProjectSession {
     clearTimeout(this.releaseTimer);
   }
 
-  /** After /push reconnects (a new broker sender), watch again from the last event this session received. */
+  /**
+   * After /push reconnects (a new broker sender), watch again from the last event this session received. The broker cannot
+   * register a watch while deskd is offline, so a failed one is remembered for `retryWatch`.
+   */
   rewatch(): void {
     if (!this.synced) return;
-    void this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: this.cursor }).catch(() => {});
+    const n = ++this.watches;
+    this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: this.cursor }).then(
+      () => {
+        if (n === this.watches) this.watchFailed = false;
+      },
+      () => {
+        if (n === this.watches) this.watchFailed = true;
+      },
+    );
+  }
+
+  /** Watches again if the last rewatch failed (called when deskd is live again). */
+  retryWatch(): void {
+    if (this.watchFailed) this.rewatch();
   }
 
   transcript(agentId: string): Signal<TranscriptState> {
@@ -206,6 +227,7 @@ export class SessionService {
   private readonly bridge = inject(DeskBridge);
   private readonly releaseDelayMs = inject(SESSION_RELEASE_DELAY);
   private readonly sessions = new Map<string, ProjectSession>();
+  private connection: GlobalState['connection']['status'] | null = null;
 
   constructor() {
     const offs = [
@@ -217,6 +239,12 @@ export class SessionService {
       this.bridge.onPush<EphemeralEvent>('desk:ephemeral', (e) => this.sessions.get(e.project_id)?.onDelta(e)),
       this.bridge.onReconnect(() => {
         for (const s of this.sessions.values()) s.rewatch();
+      }),
+      // A rewatch fails while deskd is offline; once desk:global reports deskd live again, those sessions watch again.
+      this.bridge.onPush<GlobalState>('desk:global', (g) => {
+        const was = this.connection;
+        this.connection = g.connection.status;
+        if (this.connection === 'live' && was !== 'live') for (const s of this.sessions.values()) s.retryWatch();
       }),
     ];
     inject(DestroyRef).onDestroy(() => {

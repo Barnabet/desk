@@ -1,6 +1,7 @@
 import { Component, computed, inject, input } from '@angular/core';
 import { render, screen, waitFor } from '@testing-library/angular';
 import { describe, expect, it } from 'vitest';
+import { initialGlobalState, type ConnectionStatus } from '@desk/bff/contract';
 import { agentTitle, answeringOf, waitingOn, type ProjectOverview } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { StoredEvent } from '@desk/protocol';
@@ -17,7 +18,9 @@ const overview = (): ProjectOverview => ({
   last_seq: 2,
 });
 
-const providers = (bridge: FakeDeskBridge) => [...bridge.providers, { provide: SESSION_RELEASE_DELAY, useValue: 0 }];
+const providers = (bridge: FakeDeskBridge, releaseDelay = 0) => [...bridge.providers, { provide: SESSION_RELEASE_DELAY, useValue: releaseDelay }];
+const watches = (bridge: FakeDeskBridge) => bridge.calls.filter((c) => c.channel === 'broker.watch').map((c) => c.input);
+const connection = (bridge: FakeDeskBridge, status: ConnectionStatus) => bridge.emit('desk:global', { ...initialGlobalState(), connection: { status } });
 
 /** The desktop test's Probe: status | chat kinds | lanes | threads | the agent's transcript | Desk's live text. */
 @Component({ selector: 'desk-probe', template: '<p data-testid="probe">{{ line() }}</p>' })
@@ -88,10 +91,98 @@ describe('project session', () => {
     events.push(ev(3, 'message.user', { text: 'Kick off' }, { agent: 'd' }));
     bridge.reconnect();
     await waitFor(() => expect(screen.getByTestId('probe').textContent?.split('|')[1]).toBe('user'));
-    expect(bridge.calls.filter((c) => c.channel === 'broker.watch').map((c) => c.input)).toEqual([
+    expect(watches(bridge)).toEqual([
       { projectId: 'p', afterSeq: 0 },
       { projectId: 'p', afterSeq: 2 },
     ]);
+  });
+
+  it('watches again when a watch after a reconnect failed: on the next reconnect, and once deskd is live again', async () => {
+    const events: StoredEvent[] = [ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' })];
+    let deskd = true;
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': ({ afterSeq }: { afterSeq: number }) => {
+        if (!deskd) throw { code: 'daemon_not_running', message: 'deskd is not running' };
+        for (const e of events) if (e.id > afterSeq) bridge.emit('desk:event', e);
+        return { ok: true };
+      },
+    });
+    await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.startsWith('ready|')).toBe(true));
+    // /push comes back while deskd is down: the broker cannot register the watch.
+    deskd = false;
+    connection(bridge, 'offline');
+    bridge.reconnect();
+    await waitFor(() => expect(watches(bridge)).toHaveLength(2));
+    bridge.reconnect();
+    await waitFor(() => expect(watches(bridge)).toHaveLength(3));
+    deskd = true;
+    events.push(ev(2, 'message.user', { text: 'Kick off' }, { agent: 'd' }));
+    connection(bridge, 'connecting');
+    await Promise.resolve();
+    expect(watches(bridge)).toHaveLength(3);
+    connection(bridge, 'live');
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.split('|')[1]).toBe('user'));
+    expect(watches(bridge)).toEqual([
+      { projectId: 'p', afterSeq: 0 },
+      { projectId: 'p', afterSeq: 1 },
+      { projectId: 'p', afterSeq: 1 },
+      { projectId: 'p', afterSeq: 1 },
+    ]);
+    // That watch held: later pushes of a live deskd watch nothing again.
+    connection(bridge, 'offline');
+    connection(bridge, 'live');
+    await Promise.resolve();
+    expect(watches(bridge)).toHaveLength(4);
+  });
+
+  it('follows the project id: releases the old session and loads the new one', async () => {
+    const qThread = { ...overview().desk!, id: 'qt', role: 'thread' as const, title: 'Q work', parent_id: 'd' };
+    const bridge = new FakeDeskBridge({
+      'projects.get': ({ id }: { id: string }) => (id === 'q' ? { ...overview(), threads: [qThread] } : overview()),
+      'broker.watch': () => ({ ok: true }),
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    const view = await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready||0|0||'));
+    view.fixture.componentRef.setInput('id', 'q');
+    // The signal follows the id: q's overview has one thread.
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready||0|1||'));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'broker.unwatch')).toBe(true));
+    const calls = bridge.calls.map((c) => [c.channel, c.input]);
+    expect(calls.slice(0, 2)).toEqual([
+      ['projects.get', { id: 'p' }],
+      ['broker.watch', { projectId: 'p', afterSeq: 0 }],
+    ]);
+    expect(calls.slice(2)).toHaveLength(3);
+    expect(calls.slice(2)).toEqual(
+      expect.arrayContaining([
+        ['projects.get', { id: 'q' }],
+        ['broker.watch', { projectId: 'q', afterSeq: 0 }],
+        ['broker.unwatch', { projectId: 'p' }],
+      ]),
+    );
+  });
+
+  it('watches a warm session again when /push reconnects (its last viewer gone, the release still pending)', async () => {
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': () => {
+        bridge.emit('desk:event', ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' }));
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    const view = await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge, 60_000) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.startsWith('ready|')).toBe(true));
+    view.fixture.destroy();
+    bridge.reconnect();
+    await waitFor(() => expect(watches(bridge)).toEqual([
+      { projectId: 'p', afterSeq: 0 },
+      { projectId: 'p', afterSeq: 1 },
+    ]));
+    expect(bridge.calls.some((c) => c.channel === 'broker.unwatch')).toBe(false);
   });
 });
 
