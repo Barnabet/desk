@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { render, screen, waitFor, within } from '@testing-library/angular';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import { ev } from '@desk/client/testing';
@@ -278,5 +278,20 @@ describe('App', () => {
     const { bridge } = await renderApp();
     bridge.emit('desk:notify', [{ tag: 'question:1', title: 'Launch: Desk has a question', body: 'Which first?', route: '#/attention?item=question%3A1' }]);
     expect(titles).toEqual(['Launch: Desk has a question']);
+  });
+
+  it('opens the command palette with ⌘K and the project switcher with ⌘P, and adds no palette element while it is closed', async () => {
+    go('#/map');
+    const { view } = await renderApp();
+    const app = (view.fixture.nativeElement as HTMLElement).querySelector('.app')!;
+    expect(app.querySelector('.palette-backdrop')).toBeNull();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const palette = await screen.findByRole('dialog', { name: 'Search Desk' });
+    expect(palette.parentElement?.parentElement).toBe(app);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search Desk' })).toBeNull());
+    expect(app.querySelector('.palette-backdrop')).toBeNull();
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Switch project' })).toBeTruthy();
   });
 });

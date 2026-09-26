@@ -1,5 +1,6 @@
 import { DOCUMENT, NgComponentOutlet, NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, ViewEncapsulation } from '@angular/core';
+import { CommandPalette, PaletteToggle } from './components/command-palette';
 import { ConnectionOverlay } from './components/connection-overlay';
 import { ErrorBoundary } from './components/error-boundary';
 import { ProjectFrame } from './conversation/project-frame';
@@ -39,7 +40,7 @@ function guardFileDrops(doc: Document): () => void {
 /** The web UI: the signed-out page, onboarding, or the shell (title bar, project tabs, screen, connection overlay, toasts). */
 @Component({
   selector: 'desk-root',
-  imports: [NgComponentOutlet, NgTemplateOutlet, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectFrame, ProjectNav, SignedOut, TitleBar, Toaster],
+  imports: [NgComponentOutlet, NgTemplateOutlet, CommandPalette, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectFrame, ProjectNav, SignedOut, TitleBar, Toaster],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: block; height: 100%' },
@@ -74,6 +75,9 @@ function guardFileDrops(doc: Document): () => void {
                 }
                 <div deskConnectionOverlay></div>
               </main>
+              @if (palette.open()) {
+                <div deskCommandPalette></div>
+              }
               <div deskToaster></div>
             </div>
           }
@@ -96,6 +100,8 @@ function guardFileDrops(doc: Document): () => void {
 })
 export class App {
   protected readonly bridge = inject(DeskBridge);
+  /** ⌘K / Ctrl-K: the command palette, rendered while it is open. */
+  protected readonly palette = inject(PaletteToggle);
   private readonly routes = inject(RouteService);
   protected readonly route = this.routes.route;
   protected readonly project = computed(() => {

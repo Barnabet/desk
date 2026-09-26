@@ -39574,13 +39574,13 @@ describe('CommandPalette', () => {
 In `apps/web-ui/src/app/app.spec.ts`, the Testing Library import. Before:
 
 ```ts
-import { render, screen, waitFor } from '@testing-library/angular';
+import { render, screen, waitFor, within } from '@testing-library/angular';
 ```
 
 After:
 
 ```ts
-import { fireEvent, render, screen, waitFor } from '@testing-library/angular';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 ```
 
 and add this case as the last one in `describe('App', …)`:
@@ -39889,16 +39889,16 @@ import { CommandPalette, PaletteToggle } from './components/command-palette';
 import { ConnectionOverlay } from './components/connection-overlay';
 ```
 
-The `@Component` decorator's `imports` array (W0c.14's, with W0d.7's `FolderBrowser`), before:
+The `@Component` decorator's `imports` array (W0c.14's, with W0d.7's `FolderBrowser` and W1b.13's `NgTemplateOutlet` and `ProjectFrame`), before:
 
 ```ts
-  imports: [NgComponentOutlet, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectNav, SignedOut, TitleBar, Toaster],
+  imports: [NgComponentOutlet, NgTemplateOutlet, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectFrame, ProjectNav, SignedOut, TitleBar, Toaster],
 ```
 
 After:
 
 ```ts
-  imports: [NgComponentOutlet, CommandPalette, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectNav, SignedOut, TitleBar, Toaster],
+  imports: [NgComponentOutlet, NgTemplateOutlet, CommandPalette, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectFrame, ProjectNav, SignedOut, TitleBar, Toaster],
 ```
 
 The template's shell branch, before:
@@ -39939,6 +39939,12 @@ Expected: PASS: the 4 palette cases, and `app.spec.ts` with its new shortcuts ca
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation (as run):** `command-palette.ts`, `command-palette.spec.ts` and the new `app.spec.ts` case are the blocks above, unchanged. Two anchors had moved, and the blocks above now quote them as they are:
+- `app.spec.ts`'s Testing Library import already named `within` (an earlier task's case uses it), so the edit adds only `fireEvent`.
+- `App`'s `imports` array holds W1b.13's `NgTemplateOutlet` and `ProjectFrame`; `CommandPalette` joins it in the same place. The template anchor (`</main>` before `<div deskToaster></div>`) matched as written: W1b.13's project frame sits inside `main.screen`.
+
+The React sources were re-read on `web-ui` after the merge of master (8883229). `CommandPalette.tsx` and `CommandPalette.test.tsx` are as this task describes them (the built-in skills group is the only item master added), and the React `Shell` renders `<CommandPalette />` between `main.screen` and the toaster, as `App` does now. Its ⌘K listener does not skip text boxes, so `PaletteToggle` doesn't either: ⌘K / Ctrl-K toggles the palette while the composer or any box has focus, as on the desktop. ⌘P is `ProjectSwitcher`'s (`(window:keydown)`, W0c.12), which also skips Shift. The ranking is `@desk/ui-core`'s `rankPalette`, which returns matches in `GROUP_ORDER`, so the option index counted across groups is the index in `shown` that Enter opens. The palette looks nothing up by an item id or a project or skill name: each id is only a `track` key. Step 2 failed with `Could not resolve "./command-palette"`, with the Angular compiler's `TS2307` and `NG1010` (the host's `imports` refer to the missing class) beside it.
 
 - [ ] **Step 6: Commit**
 
