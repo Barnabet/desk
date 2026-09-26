@@ -26322,6 +26322,8 @@ git commit -m "feat(web-ui): a thread's route: numbered stops on a serpentine, m
 
 `Transcript.tsx` is the detail's aside. Narrative shows the numbered stops (the numbers match the route): a work stop's text, tool groups and message cards in place of the sends' tool rows; an answer run's stop with the question it answers ("Frontend asked: “…”"), its run, and the runtime's closure when it could not answer another agent; every other stop's own body. Every step shows each entry: status changes, full tool calls (arguments, output cut at 6,000 characters behind "Show all N characters", images), cards, and "Woke to answer message #N". Clicking an entry selects its stop; the selected stop scrolls into view, and the list follows new entries unless the user scrolled up. A card's counterpart opens the pair sheet without selecting the stop. The box under it steers a working thread, asks a done, failed or idle one (its secondary action reopens or resumes it after a confirm), or is off for an archived one; a send shows as "You · steering…" / "You · asking…" until its steer entry lands. The actions (Stop, Archive) are projected into the head. The React file has no test of its own (W2a.6 ports `ThreadsScreen.test.tsx`, which drives it through the screen); this spec is new.
 
+**Deviation (port conventions):** three changes from the first draft of this block, which the code below already has. (1) The list's `scroll` listener only sets `pinned`, which nothing renders, so it follows the port conventions' rule (W1b.7's `LogsSheet`): `addEventListener` in `afterNextRender`, removed through `DestroyRef`, instead of a template `(scroll)` that schedules change detection on every event. A seventh case (follows new entries at the bottom, stays where it was scrolled up to, and a scroll renders nothing) fails with the template listener (1 render) and with no listener (the list jumps to the bottom). (2) The five `ng-template`s (`summary`, `run`, `answer`, `stopBody`, `full`) type their context with `TemplateOf` (W1b.4), so strict templates narrow `e` by `kind` and check its fields. (3) `titleOf` looks the id up with `Object.hasOwn`, as W1b.9's does after W2a.1's review: the id is an agent's `thread_id` argument. No prototype member has a `title`, so the plain lookup was harmless here; this is for consistency.
+
 **Files:**
 - Create: `apps/web-ui/src/app/threads/transcript.ts`
 - Test: `apps/web-ui/src/app/threads/transcript.spec.ts`
@@ -26335,7 +26337,8 @@ git commit -m "feat(web-ui): a thread's route: numbered stops on a serpentine, m
 Create `apps/web-ui/src/app/threads/transcript.spec.ts`:
 
 ```ts
-import { computed, signal } from '@angular/core';
+import { afterEveryRender, computed, Injector, signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { describe, expect, it, vi } from 'vitest';
 import { emptyMessages, type TranscriptEntry } from '@desk/client';
@@ -26459,6 +26462,33 @@ describe('Transcript', () => {
     expect(r.onPair).toHaveBeenCalledWith('f');
     expect(r.onSelect).not.toHaveBeenCalled();
   });
+
+  it('follows new entries while the list is at its bottom, stays where it was scrolled up to, and never renders on a scroll', async () => {
+    const r = await mount([brief, read('the brief')]);
+    const list = r.tr.querySelector<HTMLElement>('.transcript-list')!;
+    // jsdom lays nothing out: a 1000 px list in a 100 px box.
+    Object.defineProperty(list, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(list, 'clientHeight', { value: 100 });
+    let renders = 0;
+    afterEveryRender(() => renders++, { injector: TestBed.inject(Injector) });
+    await new Promise((res) => setTimeout(res, 50)); // adding a render hook schedules a render itself
+    renders = 0;
+
+    // Plain DOM events: testing-library's fireEvent would run change detection itself.
+    const scroll = () => list.dispatchEvent(new Event('scroll'));
+    list.scrollTop = 200;
+    for (let i = 0; i < 5; i++) scroll();
+    await new Promise((res) => setTimeout(res, 50));
+    expect(renders).toBe(0);
+    r.entries.set([brief, read('the brief'), result]);
+    await waitFor(() => expect(r.tr.querySelectorAll('.tr-entry')).toHaveLength(3));
+    expect(list.scrollTop).toBe(200);
+
+    list.scrollTop = 880;
+    scroll();
+    r.entries.set([brief, read('the brief'), result, { kind: 'steer', id: 'e:9', ts: TS, text: 'Shorter, please' }]);
+    await waitFor(() => expect(list.scrollTop).toBe(1000));
+  });
 });
 ```
 
@@ -26474,10 +26504,12 @@ Create `apps/web-ui/src/app/threads/transcript.ts`:
 ```ts
 import { NgTemplateOutlet } from '@angular/common';
 import {
+  afterNextRender,
   afterRenderEffect,
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -26496,6 +26528,7 @@ import { CodeBlock } from '../components/code-block';
 import { ConfirmDialog } from '../components/confirm-dialog';
 import { ImageThumbs } from '../components/image-thumbs';
 import { SafeMarkdown } from '../components/safe-markdown';
+import { TemplateOf, templateOf } from '../components/template-of';
 import { ToastService } from '../components/toast';
 import { ToolGroup, ToolStatus } from '../components/tool-group';
 import { DeskBridge } from '../core/desk-bridge';
@@ -26589,13 +26622,13 @@ export class MessageCard {
 /** The transcript aside: Narrative (numbered stops) or Every step, plus the box that steers, asks or reopens the thread. */
 @Component({
   selector: 'aside[deskTranscript]',
-  imports: [NgTemplateOutlet, Button, ConfirmDialog, SafeMarkdown, ToolGroup, ToolCallFull, MessageCard],
+  imports: [NgTemplateOutlet, TemplateOf, Button, ConfirmDialog, SafeMarkdown, ToolGroup, ToolCallFull, MessageCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'card transcript', 'aria-label': 'Transcript' },
   template: `
     <!-- EntrySummary: the body both depths show for an entry that is its own stop. -->
-    <ng-template #summary let-e>
+    <ng-template #summary let-e [deskTemplateOf]="entryType">
       @switch (e.kind) {
         @case ('brief') {
           <div deskSafeMarkdown [text]="e.text"></div>
@@ -26637,7 +26670,7 @@ export class MessageCard {
     </ng-template>
 
     <!-- RunBody: a run's text and tool groups, with its message cards in place of the sends' tool rows (design spec §8 item 9). -->
-    <ng-template #run let-entries>
+    <ng-template #run let-entries [deskTemplateOf]="entriesType">
       @for (e of entries; track e.id) {
         @if (e.kind === 'assistant') {
           @if (e.text) {
@@ -26658,7 +26691,7 @@ export class MessageCard {
     </ng-template>
 
     <!-- AnswerBody: the question an answer run answers, its run, and the runtime's closure when it could not answer (design spec §8 item 6). -->
-    <ng-template #answer let-s>
+    <ng-template #answer let-s [deskTemplateOf]="stopType">
       @let a = answerOf()(s);
       @if (a.asked) {
         <p class="tr-asked">{{ a.asked }}</p>
@@ -26669,7 +26702,7 @@ export class MessageCard {
       }
     </ng-template>
 
-    <ng-template #stopBody let-s>
+    <ng-template #stopBody let-s [deskTemplateOf]="stopType">
       @switch (s.kind) {
         @case ('answer') {
           <ng-container *ngTemplateOutlet="answer; context: { $implicit: s }" />
@@ -26684,7 +26717,7 @@ export class MessageCard {
     </ng-template>
 
     <!-- EntryFull: one entry at full detail (Every step). -->
-    <ng-template #full let-e>
+    <ng-template #full let-e [deskTemplateOf]="entryType">
       @switch (e.kind) {
         @case ('brief') {
           <span class="eyebrow">Brief from Desk · {{ clock(e.ts) }}</span>
@@ -26734,7 +26767,7 @@ export class MessageCard {
       </div>
       <ng-content />
     </div>
-    <div class="transcript-list" #list (scroll)="onScroll()">
+    <div class="transcript-list" #list>
       @if (depth() === 'narrative') {
         @for (r of narrative(); track r.id) {
           @if (r.stop; as stop) {
@@ -26855,10 +26888,14 @@ export class Transcript {
   protected readonly clip = clip;
   protected readonly isCard = isCard;
   protected readonly stopDomId = stopDomId;
+  protected readonly entryType = templateOf<TranscriptEntry>();
+  protected readonly entriesType = templateOf<TranscriptEntry[]>();
+  protected readonly stopType = templateOf<Stop>();
   /** Names a thread by its id in tool rows (design spec §8 item 12). */
   protected readonly titleOf = computed(() => {
-    const m = this.messages();
-    return (id: string): string | undefined => m.agents[id]?.title ?? undefined;
+    const agents = this.messages().agents;
+    // Own keys only: the id is the agent's thread_id argument, and 'constructor' must not find Object.prototype's.
+    return (id: string): string | undefined => (Object.hasOwn(agents, id) ? (agents[id]?.title ?? undefined) : undefined);
   });
 
   protected readonly narrative = computed<NarrativeView[]>(() => {
@@ -26969,11 +27006,16 @@ export class Transcript {
       if (n === null) return;
       document.getElementById(stopDomId(n))?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
     });
-  }
-
-  protected onScroll(): void {
-    const el = this.list().nativeElement;
-    this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // Not a template (scroll) listener: that would schedule change detection on every scroll event, for nothing.
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      const el = this.list().nativeElement;
+      const onScroll = () => {
+        this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      };
+      el.addEventListener('scroll', onScroll, { passive: true });
+      destroyRef.onDestroy(() => el.removeEventListener('scroll', onScroll));
+    });
   }
 
   protected pick(n: number | undefined): void {
@@ -27037,7 +27079,7 @@ export class Transcript {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/threads/transcript.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -28692,7 +28734,7 @@ Expected: PASS. This section's tasks change nothing the root suite runs (bff, ui
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (4), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (4), `threads/transcript.spec.ts` (7), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the e2e**
 
