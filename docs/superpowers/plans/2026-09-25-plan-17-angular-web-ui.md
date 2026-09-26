@@ -38109,7 +38109,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 - `@desk/protocol`: `REASONING_EFFORTS`, `ModelInfo`, `ReasoningEffort`, `RuntimesReport`, `UsageResponse`, `ProjectSummary`, `clip`, `ArtifactKind`, `CatalogItem`. `@desk/client`: `SkillSummary`.
 - W0c: `DeskBridge` (`call`), `FakeDeskBridge` (`providers`, `calls`, `handle`, `notifyPermissions`), `FakeHandlers`, `provideGlobal(state)`; `GlobalStore` (`state`); `RouteService` (`navigate`); `WebNotifications` (`permission: Signal<NotifyPermission>`, `request(): Promise<NotifyPermission>`, which must be called inside the click; W0c.15 also starts it from `App`, shows `desk:notify` items only while the page has no focus, with the item id as `tag`, and reports every permission change to desk web); `ToastService` (`toast`, `error`), `describeError`; `Button` (`button[deskButton]`: `variant`, `size`, `pending`, `disabled`), `ConfirmDialog` (`div[deskConfirmDialog]`: `title`, `confirmLabel`, `danger`; outputs `confirm`, `cancel`); `ProjectSwitcher` (⌘P / Ctrl-P, dialog "Switch project"); `App` (W0c.14) and its `app.spec.ts`; `screen-for.ts` (`screenFor`, `screenKey`, `ScreenView`) with the line `      return notYet('System');`; `screen-for.spec.ts`; `screens/not-yet.ts` (`NotYet`). The `scripts/web-dev.mjs` dev loop and the root `web` script (W0c.16).
 - W0d: `EndpointPanel` (`div[deskEndpointPanel]`, host class `endpoint`; "Change key", "API key"); `Onboarding` (`screens/onboarding.ts`, `div[deskOnboarding]`); `MapScreen` (`map/map-screen.ts`, `newProject = input(false)`); the e2e harness `startWebE2E`, `WebE2E` (`dataDir`, `web.url`, `client()`, `signIn()`, `shot()`, `close()`), `SignedIn` (`context`, `page`, `problems`); `vitest.web-e2e.config.ts` and `pnpm test:web-e2e`.
-- The screens other sections wired into `screenFor` (W3b.4 restates them in one file): `AttentionScreen` (`attention/attention-screen.ts`, `itemId`), `ConversationScreen` (`conversation/conversation-screen.ts`, `projectId`), `ThreadsScreen` (`threads/threads-screen.ts`, `projectId`, `threadId`, `at`), `LibraryScreen` (`knowledge/library-screen.ts`, `projectId`, `file`), `MemoryScreen` (`knowledge/memory-screen.ts`, `projectId`, `q`), `SettingsScreen` (`settings/settings-screen.ts`, `projectId`), `SkillsScreen` (`skills/skills-screen.ts`, `skill`, `catalog`, `review`).
+- The screens other sections wired into `screenFor` (W3b.4 restates them in one file): `AttentionScreen` (`attention/attention-screen.ts`, `itemId`), `ConversationScreen` (`conversation/conversation-screen.ts`, `projectId`, `at` since W1b.13), `ThreadsScreen` (`threads/threads-screen.ts`, `projectId`, `threadId`, `at`), `LibraryScreen` (`knowledge/library-screen.ts`, `projectId`, `file`), `MemoryScreen` (`knowledge/memory-screen.ts`, `projectId`, `q`), `SettingsScreen` (`settings/settings-screen.ts`, `projectId`), `SkillsScreen` (`skills/skills-screen.ts`, `skill`, `catalog`, `review`).
 - W2a.2: `tokens(n: number): string` (`threads/tabs/usage-tab.ts`, the React `UsageTab.tsx`'s). W3a.2: `catalogItems(installs?)`, `install(o?)` (`testing/catalog.ts`).
 
 **Produces (shared names beyond the contract):**
@@ -40151,7 +40151,7 @@ describe('screenFor', () => {
     expect(screenFor({ name: 'skills', skill: 'global:weekly-report' })).toEqual({ component: SkillsScreen, inputs: { skill: 'global:weekly-report', catalog: false, review: undefined } });
     expect(screenFor({ name: 'catalog', review: 'pdf-toolkit' })).toEqual({ component: SkillsScreen, inputs: { skill: undefined, catalog: true, review: 'pdf-toolkit' } });
     expect(screenFor({ name: 'system' })).toEqual({ component: SystemScreen, inputs: {} });
-    expect(screenFor({ name: 'project', id: 'p', tab: 'conversation' })).toEqual({ component: ConversationScreen, inputs: { projectId: 'p' } });
+    expect(screenFor({ name: 'project', id: 'p', tab: 'conversation', at: 3 })).toEqual({ component: ConversationScreen, inputs: { projectId: 'p', at: 3 } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'threads', threadId: 't', at: 7 })).toEqual({ component: ThreadsScreen, inputs: { projectId: 'p', threadId: 't', at: 7 } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'library', file: 'notes/a.md' })).toEqual({ component: LibraryScreen, inputs: { projectId: 'p', file: 'notes/a.md' } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'memory', q: 'auth' })).toEqual({ component: MemoryScreen, inputs: { projectId: 'p', q: 'auth' } });
@@ -40230,7 +40230,7 @@ export function screenFor(route: Route): ScreenView | null {
     case 'project':
       switch (route.tab) {
         case 'conversation':
-          return { component: ConversationScreen, inputs: { projectId: route.id } };
+          return { component: ConversationScreen, inputs: { projectId: route.id, at: route.at } };
         case 'threads':
           return { component: ThreadsScreen, inputs: { projectId: route.id, threadId: route.threadId, at: route.at } };
         case 'library':
@@ -40249,8 +40249,8 @@ Expected: `rm 'apps/web-ui/src/app/screens/not-yet.ts'`.
 
 - [ ] **Step 4: Nothing else names the placeholder**
 
-Run: `git grep -nE "NotYet|notYet|not in the web UI yet" -- apps/web-ui`
-Expected: no output (exit 1). The sections that wired those screens replaced W0c.14's placeholder expectations in `app.spec.ts` (W0d.7 onboarding and the map, W2a.6 threads, W3b.2 system). Should a rebase have brought one of these lines back, replace it as shown (each is W0c.14's text):
+Run: `git grep -nE "NotYet|notYet|not in the web UI yet" -- apps/web-ui ':!apps/web-ui/src/app/screen-for.spec.ts'`
+Expected: no output (exit 1); `screen-for.spec.ts` is left out, as its placeholder case names the pattern. The sections that wired those screens replaced W0c.14's placeholder expectations in `app.spec.ts` (W0d.7 onboarding and the map, W2a.6 threads, W3b.2 system). Should a rebase have brought one of these lines back, replace it as shown (each is W0c.14's text):
 
 Before:
 
@@ -40289,13 +40289,13 @@ After:
     expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
 ```
 
-Run: `git grep -nE "NotYet|notYet|not in the web UI yet" -- apps/web-ui`
-Expected: no output (exit 1).
+Run: `git grep -nE "NotYet|notYet|not in the web UI yet" -- apps/web-ui ':!apps/web-ui/src/app/screen-for.spec.ts'`
+Expected: no output (exit 1). (`screen-for.spec.ts` is left out: its "leaves no placeholder screen behind" case names the pattern it guards against.)
 
 - [ ] **Step 5: Run the table and the shell**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/screen-for.spec.ts --include src/app/app.spec.ts --include src/app/app.onboarding.spec.ts)`
-Expected: PASS: 3 `screen-for` cases, every `app.spec.ts` case, and W0d.7's 7 `app.onboarding.spec.ts` cases.
+Expected: PASS: 3 `screen-for` cases, every `app.spec.ts` case (18), and W0d.7's 7 `app.onboarding.spec.ts` cases.
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0 (nothing imports `screens/not-yet` any more).
@@ -40308,6 +40308,12 @@ git commit -m "feat(web-ui): every route shows its screen; the NotYet placeholde
 ```
 
 (`git rm` in Step 3 already staged the deletion; `app.spec.ts` is in the list even when Step 4 changed nothing, which `git add` accepts.)
+
+**Deviation (as run):** the blocks above are the committed files. Every screen's inputs were checked against the committed screens (`input()` declarations): `Onboarding` and `SystemScreen` take none; `MapScreen` `newProject`; `AttentionScreen` `itemId`; `SkillsScreen` `skill`, `catalog`, `review`; `ThreadsScreen` `projectId`, `threadId`, `at`; `LibraryScreen` `projectId`, `file`; `MemoryScreen` `projectId`, `q`; `SettingsScreen` `projectId`. One mismatch with the plan's first text, where the committed code wins:
+- `ConversationScreen` has taken `at` since W1b.13 (the conversation's `at` route, the desktop's `ConversationScreen` `at` prop in `App.tsx`), and the committed table passed `at: route.at`; the plan's replacement dropped it, which would have lost `#/p/<id>/conversation?at=<seq>`'s scroll target. The table keeps `{ projectId: route.id, at: route.at }`, and the spec's conversation line reads `screenFor({ name: 'project', id: 'p', tab: 'conversation', at: 3 })` → `{ projectId: 'p', at: 3 }` (the plan's `{ projectId: 'p' }` expectation passes either way, since `toEqual` ignores an undefined `at`, so it could not catch the loss). The section's Consumes names `at` too.
+- Step 4's grep (and W3b.8 Step 4's) expected no output, but Step 1's own spec names the pattern (`not.toMatch(/notYet|NotYet/)`), so it always had one hit. Both greps now leave `screen-for.spec.ts` out with a pathspec; with it, the grep printed nothing (exit 1). No `app.spec.ts` placeholder expectation was left, so Step 4 changed nothing there and `app.spec.ts` is not in the commit.
+
+Step 2 failed as expected: "leaves no placeholder screen behind" (`expected true to be false`), the other two passing. Step 5: 3 files, 28 tests (3, 18 and 7); `pnpm --filter @desk/web-ui typecheck` and `ngc -p tsconfig.spec.json --noEmit` exit 0.
 
 ### Task W3b.5: the parity guard
 
@@ -40929,8 +40935,8 @@ Expected: PASS, including this section's `system/models-editor.spec.ts` (7), `sy
 
 - [ ] **Step 4: The invariants, by grep**
 
-Run: `git grep -nE "NotYet|notYet|not in the web UI yet" -- apps/web-ui`
-Expected: no output (exit 1).
+Run: `git grep -nE "NotYet|notYet|not in the web UI yet" -- apps/web-ui ':!apps/web-ui/src/app/screen-for.spec.ts'`
+Expected: no output (exit 1). (`screen-for.spec.ts` is left out: its "leaves no placeholder screen behind" case names the pattern it guards against.)
 
 Run (single quotes: the pattern holds backticks and a `$`):
 

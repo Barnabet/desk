@@ -1,16 +1,15 @@
 import type { Type } from '@angular/core';
 import type { Route } from '@desk/ui-core';
 import { AttentionScreen } from './attention/attention-screen';
-import { MapScreen } from './map/map-screen';
 import { ConversationScreen } from './conversation/conversation-screen';
-import { NotYet } from './screens/not-yet';
-import { SystemScreen } from './system/system-screen';
-import { SettingsScreen } from './settings/settings-screen';
-import { MemoryScreen } from './knowledge/memory-screen';
 import { LibraryScreen } from './knowledge/library-screen';
-import { SkillsScreen } from './skills/skills-screen';
-import { ThreadsScreen } from './threads/threads-screen';
+import { MemoryScreen } from './knowledge/memory-screen';
+import { MapScreen } from './map/map-screen';
 import { Onboarding } from './screens/onboarding';
+import { SettingsScreen } from './settings/settings-screen';
+import { SkillsScreen } from './skills/skills-screen';
+import { SystemScreen } from './system/system-screen';
+import { ThreadsScreen } from './threads/threads-screen';
 
 /** A screen for App to render with NgComponentOutlet: the component, and the inputs this route gives it. */
 export type ScreenView = { component: Type<unknown>; inputs: Record<string, unknown> };
@@ -21,11 +20,10 @@ export function screenKey(route: Route): string {
   return route.name === 'catalog' ? 'skills' : route.name;
 }
 
-const notYet = (label: string): ScreenView => ({ component: NotYet, inputs: { label } });
-
 /**
- * The screen each route shows, with the inputs the desktop's `Screen` switch (App.tsx) passes. Screens arrive phase by
- * phase (spec §6); until then a route shows NotYet. The tray has no web screen: App sends it to the map.
+ * The screen each route shows, with the inputs the desktop's `Screen` switch (App.tsx) passes. Every input key is present
+ * even when undefined: NgComponentOutlet resets an input that disappears from its inputs object. The tray is the
+ * desktop's menu-bar popover and has no web screen: App sends it to the map. `parity.spec.ts` checks every route name.
  */
 export function screenFor(route: Route): ScreenView | null {
   switch (route.name) {
