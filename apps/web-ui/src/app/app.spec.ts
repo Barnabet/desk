@@ -179,7 +179,7 @@ describe('App', () => {
     expect(screen.getByRole('alertdialog', { name: 'Desk isn’t running' })).toBeTruthy();
     expect(screen.getByText('deskd not running')).toBeTruthy();
     bridge.emit('desk:navigate', '#/system');
-    await waitFor(() => expect(screen.getByText('System is not in the web UI yet')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'System', level: 1 })).toBeTruthy());
     expect(window.location.hash).toBe('#/system');
   });
 

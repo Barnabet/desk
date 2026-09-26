@@ -38093,7 +38093,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 | Task | What | Proof |
 |---|---|---|
 | W3b.1 | `ModelsEditor`, `toggleEffort`, `modelProblems` | `system/models-editor.spec.ts` (the `modelProblems` and "edits the model registry" cases of `SystemScreen.test.tsx`, plus `toggleEffort`, loading, failure, discard and save) |
-| W3b.2 | `SystemScreen` and its sections (no Repair on the web; the browser's notification permission); `#/system` shows it | `system/system-screen.spec.ts` (the other four cases of `SystemScreen.test.tsx`, plus four web cases); `app.spec.ts` updated |
+| W3b.2 | `SystemScreen` and its sections (no Repair on the web; the browser's notification permission); `#/system` shows it | `system/system-screen.spec.ts` (the other four cases of `SystemScreen.test.tsx`, plus five web cases, the fifth master's appearance case in its web form, and two for a late status read and a failed switch); `app.spec.ts` updated |
 | W3b.3 | `CommandPalette` and `PaletteToggle` (⌘K / Ctrl-K); `App` renders the palette while it is open | `components/command-palette.spec.ts` (`CommandPalette.test.tsx` ported, plus closing); `app.spec.ts`: ⌘K and ⌘P in the shell |
 | W3b.4 | every route shows its real screen; `NotYet` deleted | `screen-for.spec.ts` (replaced) |
 | W3b.5 | the parity guard; the React `SystemScreen` names its daemon operations literally | `parity.spec.ts` (new); `SystemScreen.test.tsx` unchanged and passing |
@@ -38115,7 +38115,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 **Produces (shared names beyond the contract):**
 
 - `apps/web-ui/src/app/system/models-editor.ts`: `ModelsEditor` — `div[deskModelsEditor]` (host class `models-editor` once the registry is loaded; `display: contents` while it shows "Loading…" or its error, which React renders as the root `p`); `toggleEffort(m, level)`, `modelProblems(list)` (as exported by the React `ModelsEditor.tsx`).
-- `apps/web-ui/src/app/system/system-screen.ts`: `SystemScreen` — `div[deskSystemScreen]` (host class `page system`); its sections, each on the React section's root `section` (host `class="card sys-section"` and its `aria-labelledby`): `DaemonSection` — `section[deskDaemonSection]`, `UsageSection` — `section[deskUsageSection]`, `NoticesSection` — `section[deskNoticesSection]`, `NotificationsSection` — `section[deskNotificationsSection]`, `AboutSection` — `section[deskAboutSection]` (the React `RuntimesFacts` is inlined there: its root `div` sits inside `dl.sys-facts`, where `.sys-facts div` is a flex row, so a component host would add a second box). `screenFor({ name: 'system' })` → `{ component: SystemScreen, inputs: {} }`.
+- `apps/web-ui/src/app/system/system-screen.ts`: `SystemScreen` — `div[deskSystemScreen]` (host class `page system`); its sections, each on the React section's root `section` (host `class="card sys-section"` and its `aria-labelledby`): `DaemonSection` — `section[deskDaemonSection]`, `UsageSection` — `section[deskUsageSection]`, `NoticesSection` — `section[deskNoticesSection]`, `AppearanceSection` — `section[deskAppearanceSection]` (master's dark mode, W3b.2), `NotificationsSection` — `section[deskNotificationsSection]`, `AboutSection` — `section[deskAboutSection]` (the React `RuntimesFacts` is inlined there: its root `div` sits inside `dl.sys-facts`, where `.sys-facts div` is a flex row, so a component host would add a second box). `screenFor({ name: 'system' })` → `{ component: SystemScreen, inputs: {} }`.
 - `apps/web-ui/src/app/components/command-palette.ts`: `PaletteToggle` (injectable, root: `open: Signal<boolean>`, `toggle()`, `close()`; it listens for ⌘K / Ctrl-K on `window` from its creation), `CommandPalette` — `div[deskCommandPalette]` (host class `palette-backdrop`), rendered by `App` only while `PaletteToggle.open()`, so a closed palette adds no element, as the React one returns `null`.
 - `apps/web-ui/src/app/parity.spec.ts`: the parity guard (no exports).
 - `apps/web-ui/e2e/system.e2e.test.ts` (its own `go`, `openAt`, `hashOf`, `webSettings`).
@@ -38544,7 +38544,7 @@ git commit -m "feat(web-ui): the model registry editor (ModelsEditor)" -m "Co-Au
 **Files:**
 - Create: `apps/web-ui/src/app/system/system-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts` (the `system` line), `apps/web-ui/src/app/app.spec.ts` (W0c.14's `System is not in the web UI yet` expectation)
-- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added)
+- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added, and two cases for the deviations below)
 
 **Interfaces:**
 - Consumes: `DeskBridge` (`call` with `daemon.status`, `daemon.start`, `daemon.restart`, `daemon.stop`, `usage`, `app.settings`, `app.updateSettings`, `config.get`, `config.patch`, `system.runtimes`, `system.runtimesCleanup`, `app.info`, `app.revealLogs`), `GlobalStore` (`state().overview`, `state().system.notices`), `WebNotifications` (`permission`, `request`), `ToastService`, `describeError`, `Button`, `ConfirmDialog`, `FakeDeskBridge`, `provideGlobal` (W0c); `EndpointPanel` (W0d.3); `ModelsEditor` (W3b.1); `tokens` (W2a.2); `bytes`, `clock`, `duration`, `href`, `plural` (`@desk/ui-core`); `ChannelOutput` (`@desk/bff/contract`); `RuntimesReport`, `UsageResponse` (`@desk/protocol`).
@@ -38559,10 +38559,12 @@ A port of `SystemScreen.tsx`. deskd's section polls `daemon.status` every 10 sec
 Create `apps/web-ui/src/app/system/system-screen.spec.ts`:
 
 ```ts
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ModelInfo, ProjectSummary } from '@desk/protocol';
+import { ToastService } from '../components/toast';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
 import { SystemScreen } from './system-screen';
 
@@ -38620,6 +38622,51 @@ describe('SystemScreen', () => {
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Stop deskd?' })).getByRole('button', { name: 'Stop' }));
     expect(await within(d).findByRole('button', { name: 'Start' })).toBeTruthy();
     expect(bridge.calls.map((c) => c.channel)).not.toContain('daemon.repair');
+  });
+
+  it('keeps what Stop answered when a status read from before it lands later', async () => {
+    // The 10-second poll, run by hand: its read waits until the test answers it.
+    const polls: Array<() => void> = [];
+    const realSetInterval = globalThis.setInterval;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => {
+      if (ms !== 10_000) return realSetInterval(fn, ms, ...rest);
+      polls.push(fn);
+      return 0;
+    }) as typeof setInterval);
+    let answer: (v: unknown) => void = () => {};
+    let reads = 0;
+    const bridge = await setup({ 'daemon.status': () => (++reads === 1 ? status : new Promise((resolve) => (answer = resolve))) });
+    const d = screen.getByRole('region', { name: 'deskd' });
+    await within(d).findByText(/pid 42/);
+    expect(polls).toHaveLength(1);
+    polls[0]!();
+    polls[0]!();
+    fireEvent.click(within(d).getByRole('button', { name: 'Stop' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Stop deskd?' })).getByRole('button', { name: 'Stop' }));
+    expect(await within(d).findByRole('button', { name: 'Start' })).toBeTruthy();
+    // The read from before Stop says deskd runs: it is dropped. The second poll waited for it and asks again.
+    answer(status);
+    await waitFor(() => expect(reads).toBe(3));
+    expect(bridge.calls.filter((c) => c.channel === 'daemon.status')).toHaveLength(3);
+    expect(within(d).getByRole('button', { name: 'Start' })).toBeTruthy();
+    expect(within(d).queryByRole('button', { name: 'Restart' })).toBeNull();
+    answer({ ...status, running: false });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(within(d).getByRole('button', { name: 'Start' })).toBeTruthy();
+  });
+
+  it('puts a notification switch back when its write fails', async () => {
+    await setup({
+      'config.patch': () => {
+        throw { code: 'daemon_down', message: 'deskd is not running.' };
+      },
+    });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
+    await waitFor(() => expect(fromDeskd.checked).toBe(true));
+    fireEvent.click(fromDeskd);
+    await waitFor(() => expect(fromDeskd.checked).toBe(true));
+    expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['deskd is not running.']);
   });
 
   it("says when desk web runs this repository's deskd", async () => {
@@ -38744,6 +38791,7 @@ import { Button } from '../components/button';
 import { ConfirmDialog } from '../components/confirm-dialog';
 import { EndpointPanel } from '../components/endpoint-panel';
 import { describeError, ToastService } from '../components/toast';
+import { singleFlight } from '../core/refresh';
 import { DeskBridge } from '../core/desk-bridge';
 import { GlobalStore } from '../core/global.store';
 import { WebNotifications } from '../core/notifications';
@@ -38843,11 +38891,18 @@ export class DaemonSection {
   protected readonly proxy = proxyText;
   protected readonly mode = modeText;
   protected readonly login = loginText;
+  /** Counts the answers Start, Restart and Stop gave, so a status read that started before one cannot undo it. */
+  private acted = 0;
+  /** The 10-second poll: a slow deskd never piles up status reads, and nothing loads once the section is gone. */
+  private readonly refresh = singleFlight(() => this.load());
 
   constructor() {
-    this.load();
-    const poll = setInterval(() => this.load(), 10_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(poll));
+    void this.refresh.run();
+    const poll = setInterval(() => void this.refresh.run(), 10_000);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(poll);
+      this.refresh.stop();
+    });
   }
 
   protected tone(s: DaemonStatusView): string {
@@ -38864,22 +38919,28 @@ export class DaemonSection {
     try {
       // Literal operation names: the parity guard (parity.spec.ts) reads them.
       const next = what === 'start' ? await this.bridge.call('daemon.start', {}) : what === 'restart' ? await this.bridge.call('daemon.restart', {}) : await this.bridge.call('daemon.stop', {});
+      this.acted++;
       this.status.set(next);
     } catch (err) {
+      this.acted++;
       this.toasts.error(err);
-      this.load();
+      void this.refresh.run();
     } finally {
       this.busy.set(null);
     }
   }
 
-  private load(): void {
-    this.bridge.call('daemon.status', {}).then(
+  private load(): Promise<void> {
+    const acted = this.acted;
+    return this.bridge.call('daemon.status', {}).then(
       (v) => {
+        if (acted !== this.acted) return;
         this.status.set(v);
         this.error.set(null);
       },
-      (err: unknown) => this.error.set(describeError(err).message),
+      (err: unknown) => {
+        if (acted === this.acted) this.error.set(describeError(err).message);
+      },
     );
   }
 }
@@ -39077,8 +39138,10 @@ export class NotificationsSection {
       if (asking) await asking;
       this.appOn.set((await this.bridge.call('app.updateSettings', { notifications: on })).notifications);
     } catch (err) {
-      box.checked = this.appOn() ?? false;
       this.toasts.error(err);
+    } finally {
+      // Angular writes [checked] only when appOn changes: the box shows what is stored, as React's controlled one does.
+      box.checked = this.appOn() ?? false;
     }
   }
 
@@ -39091,8 +39154,9 @@ export class NotificationsSection {
     try {
       this.daemon.set((await this.bridge.call('config.patch', { notifications: box.checked ? 'auto' : 'off' })).notifications);
     } catch (err) {
-      box.checked = this.daemon() === 'auto';
       this.toasts.error(err);
+    } finally {
+      box.checked = this.daemon() === 'auto';
     }
   }
 }
@@ -39234,7 +39298,7 @@ export class SystemScreen {}
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts)`
-Expected: PASS (9 tests).
+Expected: PASS (11 tests: the plan's 9, and the deviations' 2).
 
 - [ ] **Step 5: Show it for `#/system`**
 
@@ -39273,7 +39337,7 @@ After:
 - [ ] **Step 6: Run the screen, the route table and the shell**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts --include src/app/screen-for.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 9 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
+Expected: PASS: the 11 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -39284,6 +39348,12 @@ Expected: exit 0.
 git add apps/web-ui/src/app/system/system-screen.ts apps/web-ui/src/app/system/system-screen.spec.ts apps/web-ui/src/app/screen-for.ts apps/web-ui/src/app/app.spec.ts
 git commit -m "feat(web-ui): the System screen: deskd without repair, endpoint, browser notifications, data, registry, usage and notices" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+**Deviation (spec):** the blocks above are the committed files. The React sources were re-read on `web-ui` after the merge of master (8883229): `SystemScreen.tsx` and `SystemScreen.test.tsx` are as the section describes them, with master's `AppearanceSection` and its "switches the appearance" case, which this task already ports in its web form (desk web's `app.settings` answers `appearance: 'system'` and its `app.updateSettings` refuses `light` and `dark` with `not_offered`, `apps/web-server/src/web-context.ts`), so the web differences are the ones the porting notes list: no Repair or Install LaunchAgent button and no "Repair installs the bundled one" hints; the Mode and "Starts at login" rows in desk web's terms; the browser permission and its two hints under "From the app", whose hint text (and deskd's) speaks of tabs instead of windows and the menu bar; "since desk web started"; and Appearance with System pressed, all three disabled, and the web's hint instead of macOS's. Two changes from the plan's first code, each with its case (the review fixes' patterns: refreshes use `singleFlight`, late answers are dropped, a bound control shows what is stored):
+- `DaemonSection`'s 10-second poll runs through `singleFlight` (a slow deskd never piles up status reads, and `DestroyRef` stops it), and a status read that started before Start, Restart or Stop answered is dropped (`acted` counts the answers), so a poll that lands after Stop no longer brings Restart back until the next poll, a race the React section has. "keeps what Stop answered when a status read from before it lands later" runs the poll by hand (a `setInterval` spy) and failed on the plan's first code (Restart came back).
+- Both notification switches put their box back in a `finally`, not only after a failure: Angular writes `[checked]` only when the signal changes, so a box whose answer differs from the click (or whose write failed) shows what is stored, as React's controlled checkbox does (the number boxes' review fix in W3b.1, for checkboxes). "puts a notification switch back when its write fails" covers the failure; it passed on the plan's first code too, whose `catch` already did it.
+
+What the screen shows stays clear of secrets: `daemon.status` is `DaemonStatus` (running, version, pid, uptime, proxy, mode, versions, builds, agent), the endpoint panel shows `config.endpoint`'s base URL and source (it carries no key) and only sends a new key, typed into a password box, with `config.saveEndpoint`, Reveal logs asks desk web to open `<data>/logs` on this computer and shows nothing, and `app.info` is the version, platform and data directory. Step 2 failed on `Could not resolve "./system-screen"`, with the Angular compiler's `TS2307` beside it. `screen-for.ts` keeps the now unused `notYet` helper and `NotYet` import until W3b.4 deletes them (no `noUnusedLocals`).
 
 ### Task W3b.3: `CommandPalette` and ⌘K; the shell's shortcuts
 

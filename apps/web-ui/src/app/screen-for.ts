@@ -4,6 +4,7 @@ import { AttentionScreen } from './attention/attention-screen';
 import { MapScreen } from './map/map-screen';
 import { ConversationScreen } from './conversation/conversation-screen';
 import { NotYet } from './screens/not-yet';
+import { SystemScreen } from './system/system-screen';
 import { SettingsScreen } from './settings/settings-screen';
 import { MemoryScreen } from './knowledge/memory-screen';
 import { LibraryScreen } from './knowledge/library-screen';
@@ -41,7 +42,7 @@ export function screenFor(route: Route): ScreenView | null {
     case 'catalog':
       return { component: SkillsScreen, inputs: { skill: undefined, catalog: true, review: route.review } };
     case 'system':
-      return notYet('System');
+      return { component: SystemScreen, inputs: {} };
     case 'project':
       switch (route.tab) {
         case 'conversation':
