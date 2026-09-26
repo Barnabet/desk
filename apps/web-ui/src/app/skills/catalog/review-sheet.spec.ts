@@ -113,13 +113,19 @@ describe('ReviewSheet', () => {
   });
 
   it("says why a skill can't be prepared, and keeps Install off", async () => {
+    // Held until the loading text is checked, so the case proves that text is shown and then goes.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     const { sheet } = await setup({
       handlers: {
-        'catalog.prepare': () => {
+        'catalog.prepare': async () => {
+          await gate;
           throw { code: 'invalid', message: 'paper-lookup does not match the catalog', status: 400 };
         },
       },
     });
+    expect(within(sheet).getByText('Fetching the pinned files and checking them…')).toBeTruthy();
+    release();
     expect((await within(sheet).findByRole('alert')).textContent).toBe("Couldn't prepare this skill: paper-lookup does not match the catalog");
     expect((within(sheet).getByRole('button', { name: 'Install' }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(sheet).queryByText('Fetching the pinned files and checking them…')).toBeNull();

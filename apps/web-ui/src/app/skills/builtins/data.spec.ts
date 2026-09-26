@@ -115,16 +115,21 @@ describe('injectBuiltins', () => {
 
   it('clears its poll once its component is gone, and neither focus nor time lists again', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    // The focus handler the hook adds, so the case checks that exactly that one is removed.
+    const added = vi.spyOn(window, 'addEventListener');
     const { fixture, builtins, lists } = await setup({ 'builtins.list': () => [b('ready')] });
     await vi.waitFor(() => expect(builtins.status()).toBe('ready'));
     await fixture.whenStable();
     await settle();
     const before = lists();
     expect(vi.getTimerCount()).toBe(1);
+    const onFocus = added.mock.calls.filter(([type]) => type === 'focus').at(-1)?.[1];
+    added.mockRestore();
+    expect(onFocus).toBeTypeOf('function');
     const removed = vi.spyOn(window, 'removeEventListener');
     fixture.destroy();
     expect(vi.getTimerCount()).toBe(0);
-    expect(removed).toHaveBeenCalledWith('focus', expect.any(Function));
+    expect(removed).toHaveBeenCalledWith('focus', onFocus);
     removed.mockRestore();
     window.dispatchEvent(new Event('focus'));
     vi.advanceTimersByTime(60_000);

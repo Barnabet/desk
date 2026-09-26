@@ -9,17 +9,20 @@ const node = (key: string, extra: Partial<SkillNode> = {}): SkillNode => {
 };
 const t1 = { threadId: 't1', title: 'Welcome emails', status: 'running' as const, projectId: 'p1' };
 
-async function setup() {
+/** The four skills most cases use: a used global one, a shadowed global one, the project skill shadowing it, and a catalog one. */
+const NODES = (): SkillNode[] => [
+  node('global:email-sequence', { version: 2, usedBy: [t1] }),
+  node('global:brand-voice', { shadowedIn: ['p1'] }),
+  node('project:p1:brand-voice', { projectName: 'Onboarding', version: 3, shadows: true, usedBy: [t1] }),
+  node('project:p2:receipts', { projectName: 'Tax' }),
+];
+
+async function setup(o: { nodes?: SkillNode[] } = {}) {
   const picked: string[] = [];
   await render(`<div deskSkillsMapView [nodes]="nodes" [projects]="projects" [catalogKeys]="keys" [selected]="selected" (selectSkill)="picked.push($event)"></div>`, {
     imports: [SkillsMapView],
     componentProperties: {
-      nodes: [
-        node('global:email-sequence', { version: 2, usedBy: [t1] }),
-        node('global:brand-voice', { shadowedIn: ['p1'] }),
-        node('project:p1:brand-voice', { projectName: 'Onboarding', version: 3, shadows: true, usedBy: [t1] }),
-        node('project:p2:receipts', { projectName: 'Tax' }),
-      ],
+      nodes: o.nodes ?? NODES(),
       projects: [
         { id: 'p1', name: 'Onboarding', tone: 'running' },
         { id: 'p2', name: 'Tax', tone: 'waiting' },
@@ -59,11 +62,30 @@ describe('SkillsMapView', () => {
     expect(svg.querySelectorAll('path[stroke-dasharray="5 5"]')).toHaveLength(1);
     expect(svg.querySelectorAll('path[stroke="var(--run)"]')).toHaveLength(2);
     expect([...map.querySelectorAll('.skills-territory-label')].map((l) => l.textContent)).toEqual(['Onboarding', 'Tax', 'Notes · no project skills']);
-    expect((map.querySelector('.skills-territory-label') as HTMLElement).style.color).not.toBe('');
+    expect([...map.querySelectorAll<HTMLElement>('.skills-territory-label')].map((l) => l.style.color)).toEqual(['var(--run-text)', 'var(--wait-text)', 'var(--text-min)']);
     expect(map.querySelector('.skills-global-label')?.textContent).toBe('GLOBAL');
     expect(map.querySelector('.skills-shadow-label')?.textContent).toBe('shadowed by');
     const marker = within(map).getByRole('link', { name: 'Welcome emails' });
     expect(marker.getAttribute('href')).toBe('#/p/p1/threads/t1');
     expect(marker.className).toBe('skill-marker status-running');
+  });
+
+  it("marks a broken skill, and draws a waiting or queued thread's line dashed", async () => {
+    const waiting = { threadId: 't2', title: 'Tax receipts', status: 'waiting' as const, projectId: 'p2' };
+    const queued = { threadId: 't3', title: 'Filing', status: 'queued' as const, projectId: 'p2' };
+    const { map } = await setup({
+      nodes: [node('global:email-sequence', { error: 'SKILL.md has no description' }), node('project:p2:receipts', { projectName: 'Tax', usedBy: [waiting, queued] })],
+    });
+    const broken = within(map).getByRole('button', { name: 'email-sequence, global, version 1' });
+    expect(broken.className).toBe('skill-node global broken');
+    const svg = map.querySelector('svg.skills-svg')!;
+    expect(svg.querySelectorAll('path[stroke="var(--run)"]')).toHaveLength(0);
+    const lines = [...svg.querySelectorAll('path[stroke="var(--wait)"]')];
+    expect(lines.map((l) => [l.getAttribute('stroke-dasharray'), l.getAttribute('stroke-width')])).toEqual([
+      ['4 4', '2'],
+      ['4 4', '2'],
+    ]);
+    expect(within(map).getByRole('link', { name: 'Tax receipts' }).className).toBe('skill-marker status-waiting');
+    expect(within(map).getByRole('link', { name: 'Filing' }).className).toBe('skill-marker status-queued');
   });
 });

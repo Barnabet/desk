@@ -32789,7 +32789,7 @@ git commit -m "feat(web-ui): catalog data: bays, install refs, runtime words, ac
 
 ### Task W3a.2b: `skills/builtins/data.ts`, Desk's built-in skills, and their fixture
 
-Added after the merge of master (8883229), which brought Plan 18's built-in skills: Desk's first-party file-type skills and web research ship with the app, read-only, each with a switch and an environment set up on first use. A port of `renderer/skills/builtins/data.ts`: the selection key a built-in gets on the skills screen (`builtin:<name>`, next to `global:` and `project:` keys), the words for its environment, and `injectBuiltins()` (React's `useBuiltins`: lists on start, on window focus, every 30 s, and every 2 s while one is being set up). The pure helpers (`builtinKey`, `parseBuiltinKey`, `runtimeLabel`) go into `@desk/ui-core` (`builtins.ts`, CLAUDE.md "Two UIs"), where `builtins/data.test.ts` is ported; the desktop's `builtins/data.ts` and the web's re-export them. Like `injectSkills` and `injectCatalog` after the review follow-ups, `injectBuiltins` lists through `singleFlight` (`core/refresh.ts`): one list at a time, and an ask while one runs lists once more when it ends. The hook's cases are new. The code below was written and run (the web spec's 4 tests and the ui-core test's 2, on the tree of the review follow-ups) before it went into the plan; the task commits it.
+Added after the merge of master (8883229), which brought Plan 18's built-in skills: Desk's first-party file-type skills and web research ship with the app, read-only, each with a switch and an environment set up on first use. A port of `renderer/skills/builtins/data.ts`: the selection key a built-in gets on the skills screen (`builtin:<name>`, next to `global:` and `project:` keys), the words for its environment, and `injectBuiltins()` (React's `useBuiltins`: lists on start, on window focus, every 30 s, and every 2 s while one is being set up). The pure helpers (`builtinKey`, `parseBuiltinKey`, `runtimeLabel`) go into `@desk/ui-core` (`builtins.ts`, CLAUDE.md "Two UIs"), where `builtins/data.test.ts` is ported; the desktop's `builtins/data.ts` and the web's re-export them. Like `injectSkills` and `injectCatalog` after the review follow-ups, `injectBuiltins` lists through `singleFlight` (`core/refresh.ts`): one list at a time, and an ask while one runs lists once more when it ends. The hook's cases are new. The code below was written and run (the web spec's 4 tests, 6 since the review fixes below, and the ui-core test's 2, on the tree of the review follow-ups) before it went into the plan; the task commits it.
 
 **Files:**
 - Create: `packages/ui-core/src/builtins.ts`, `apps/web-ui/src/app/skills/builtins/data.ts`, `apps/web-ui/src/app/testing/builtins.ts`
@@ -33001,6 +33001,46 @@ describe('injectBuiltins', () => {
     expect(lists()).toBe(2);
   });
 
+  it('lists nothing more once its component is gone, not even a list asked for while one ran', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { fixture, lists } = await setup({
+      'builtins.list': async () => {
+        await gate;
+        return [b('ready')];
+      },
+    });
+    window.dispatchEvent(new Event('focus'));
+    fixture.destroy();
+    release();
+    await settle();
+    expect(lists()).toBe(1);
+  });
+
+  it('clears its poll once its component is gone, and neither focus nor time lists again', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    // The focus handler the hook adds, so the case checks that exactly that one is removed.
+    const added = vi.spyOn(window, 'addEventListener');
+    const { fixture, builtins, lists } = await setup({ 'builtins.list': () => [b('ready')] });
+    await vi.waitFor(() => expect(builtins.status()).toBe('ready'));
+    await fixture.whenStable();
+    await settle();
+    const before = lists();
+    expect(vi.getTimerCount()).toBe(1);
+    const onFocus = added.mock.calls.filter(([type]) => type === 'focus').at(-1)?.[1];
+    added.mockRestore();
+    expect(onFocus).toBeTypeOf('function');
+    const removed = vi.spyOn(window, 'removeEventListener');
+    fixture.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(removed).toHaveBeenCalledWith('focus', onFocus);
+    removed.mockRestore();
+    window.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(lists()).toBe(before);
+  });
+
   it("is an error until a list arrives", async () => {
     const { builtins } = await setup({ 'builtins.list': () => Promise.reject({ code: 'internal', message: 'deskd is not answering' }) });
     await vi.waitFor(() => expect(builtins.status()).toBe('error'));
@@ -33079,10 +33119,12 @@ export function injectBuiltins(): BuiltinsState {
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins/data.spec.ts)`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation (review fix):** the spec block above is the committed `data.spec.ts`. The plan first had 4 cases; the review follow-ups added the two teardown cases (76062de added one, 9a18f08 split it into these two: a list asked for while one ran is not run once the component is gone, and the poll and the focus listener are cleared on destroy; 54c9a15 pinned the listener's removal), so 6 tests. The review after W3a.6 made the teardown case exact: it spies on `window.addEventListener`, keeps the focus handler the hook added, and expects that very function to be removed (it failed when the removal was given another function).
 
 - [ ] **Step 6: Commit**
 
@@ -33756,13 +33798,19 @@ describe('ReviewSheet', () => {
   });
 
   it("says why a skill can't be prepared, and keeps Install off", async () => {
+    // Held until the loading text is checked, so the case proves that text is shown and then goes.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     const { sheet } = await setup({
       handlers: {
-        'catalog.prepare': () => {
+        'catalog.prepare': async () => {
+          await gate;
           throw { code: 'invalid', message: 'paper-lookup does not match the catalog', status: 400 };
         },
       },
     });
+    expect(within(sheet).getByText('Fetching the pinned files and checking them…')).toBeTruthy();
+    release();
     expect((await within(sheet).findByRole('alert')).textContent).toBe("Couldn't prepare this skill: paper-lookup does not match the catalog");
     expect((within(sheet).getByRole('button', { name: 'Install' }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(sheet).queryByText('Fetching the pinned files and checking them…')).toBeNull();
@@ -34093,7 +34141,7 @@ Expected: PASS (6 tests).
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
-**Deviation (review fix):** two fixes. (1) The last case ended with `await waitFor(() => expect(sheet.querySelector('.review')).toBeNull())`, which always passed: the error branch never renders `.review`. It now checks that "Fetching the pinned files and checking them…" is gone. (2) The prepare `effect` called `catalog.prepare` while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would prepare the entry again when it changed. The call now runs in `untracked`, as `TerritoryInspector`'s plan fetch and `injectSkills` do, and a sixth case (a handler that reads a signal, which then changes) fails without it (6 tests).
+**Deviation (review fix):** two fixes. (1) The last case ended with `await waitFor(() => expect(sheet.querySelector('.review')).toBeNull())`, which always passed: the error branch never renders `.review`. It now checks that "Fetching the pinned files and checking them…" is gone. (2) The prepare `effect` called `catalog.prepare` while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would prepare the entry again when it changed. The call now runs in `untracked`, as `TerritoryInspector`'s plan fetch and `injectSkills` do, and a sixth case (a handler that reads a signal, which then changes) fails without it (6 tests). The review after W3a.6 added the proof that the loading text appears at all: the failure case holds its prepare handler on a promise, checks "Fetching the pinned files and checking them…" is shown, then releases it and checks the text is gone once the error shows (still 6 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -34195,17 +34243,20 @@ const node = (key: string, extra: Partial<SkillNode> = {}): SkillNode => {
 };
 const t1 = { threadId: 't1', title: 'Welcome emails', status: 'running' as const, projectId: 'p1' };
 
-async function setup() {
+/** The four skills most cases use: a used global one, a shadowed global one, the project skill shadowing it, and a catalog one. */
+const NODES = (): SkillNode[] => [
+  node('global:email-sequence', { version: 2, usedBy: [t1] }),
+  node('global:brand-voice', { shadowedIn: ['p1'] }),
+  node('project:p1:brand-voice', { projectName: 'Onboarding', version: 3, shadows: true, usedBy: [t1] }),
+  node('project:p2:receipts', { projectName: 'Tax' }),
+];
+
+async function setup(o: { nodes?: SkillNode[] } = {}) {
   const picked: string[] = [];
   await render(`<div deskSkillsMapView [nodes]="nodes" [projects]="projects" [catalogKeys]="keys" [selected]="selected" (selectSkill)="picked.push($event)"></div>`, {
     imports: [SkillsMapView],
     componentProperties: {
-      nodes: [
-        node('global:email-sequence', { version: 2, usedBy: [t1] }),
-        node('global:brand-voice', { shadowedIn: ['p1'] }),
-        node('project:p1:brand-voice', { projectName: 'Onboarding', version: 3, shadows: true, usedBy: [t1] }),
-        node('project:p2:receipts', { projectName: 'Tax' }),
-      ],
+      nodes: o.nodes ?? NODES(),
       projects: [
         { id: 'p1', name: 'Onboarding', tone: 'running' },
         { id: 'p2', name: 'Tax', tone: 'waiting' },
@@ -34245,12 +34296,31 @@ describe('SkillsMapView', () => {
     expect(svg.querySelectorAll('path[stroke-dasharray="5 5"]')).toHaveLength(1);
     expect(svg.querySelectorAll('path[stroke="var(--run)"]')).toHaveLength(2);
     expect([...map.querySelectorAll('.skills-territory-label')].map((l) => l.textContent)).toEqual(['Onboarding', 'Tax', 'Notes · no project skills']);
-    expect((map.querySelector('.skills-territory-label') as HTMLElement).style.color).not.toBe('');
+    expect([...map.querySelectorAll<HTMLElement>('.skills-territory-label')].map((l) => l.style.color)).toEqual(['var(--run-text)', 'var(--wait-text)', 'var(--text-min)']);
     expect(map.querySelector('.skills-global-label')?.textContent).toBe('GLOBAL');
     expect(map.querySelector('.skills-shadow-label')?.textContent).toBe('shadowed by');
     const marker = within(map).getByRole('link', { name: 'Welcome emails' });
     expect(marker.getAttribute('href')).toBe('#/p/p1/threads/t1');
     expect(marker.className).toBe('skill-marker status-running');
+  });
+
+  it("marks a broken skill, and draws a waiting or queued thread's line dashed", async () => {
+    const waiting = { threadId: 't2', title: 'Tax receipts', status: 'waiting' as const, projectId: 'p2' };
+    const queued = { threadId: 't3', title: 'Filing', status: 'queued' as const, projectId: 'p2' };
+    const { map } = await setup({
+      nodes: [node('global:email-sequence', { error: 'SKILL.md has no description' }), node('project:p2:receipts', { projectName: 'Tax', usedBy: [waiting, queued] })],
+    });
+    const broken = within(map).getByRole('button', { name: 'email-sequence, global, version 1' });
+    expect(broken.className).toBe('skill-node global broken');
+    const svg = map.querySelector('svg.skills-svg')!;
+    expect(svg.querySelectorAll('path[stroke="var(--run)"]')).toHaveLength(0);
+    const lines = [...svg.querySelectorAll('path[stroke="var(--wait)"]')];
+    expect(lines.map((l) => [l.getAttribute('stroke-dasharray'), l.getAttribute('stroke-width')])).toEqual([
+      ['4 4', '2'],
+      ['4 4', '2'],
+    ]);
+    expect(within(map).getByRole('link', { name: 'Tax receipts' }).className).toBe('skill-marker status-waiting');
+    expect(within(map).getByRole('link', { name: 'Filing' }).className).toBe('skill-marker status-queued');
   });
 });
 ```
@@ -34463,12 +34533,14 @@ export class SkillsMapView {
 - [ ] **Step 4: Run them**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-list.spec.ts --include src/app/skills/skills-map-view.spec.ts)`
-Expected: PASS (2 files, 4 tests).
+Expected: PASS (2 files, 5 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
 **Deviation:** the plan first kept React's `LINE` as a `Partial<Record<AgentStatus, …>>` read with `LINE[m.status]`. Lookups keyed by strings from outside the UI use a `Map` or `Object.hasOwn` (W2a.1's prototype-lookup sweep), so `LINE` is a `ReadonlyMap` read with `get`; a thread status comes from deskd's zod-checked enum, so this only makes the rule hold without relying on that. The rest is `SkillList.tsx` and `SkillsMapView.tsx` as they are on `web-ui` after the merge of master (8883229): neither changed since, and the merge's built-in skills never reach them (`SkillNode`'s scope is still `'global' | 'project'`; `SkillsScreen` renders the built-ins in their own group, W3a.8b). Two small departures from React are the plan's own: a layout skill with no node is skipped rather than asserted (`byKey.get(s.key)!`; `layoutSkillsMap` places only the nodes it is given, so it never happens), and the groups are tracked by index rather than keyed by title. The failing build reports `TS2307` (the Angular compiler resolves the imports before esbuild). 4 tests.
+
+**Deviation (review fix):** the map spec above gained coverage after W3a.6's review: the territory labels' colors are checked exactly (`var(--run-text)`, `var(--wait-text)`, `var(--text-min)` for running, waiting and idle, `TERRITORY`'s `text` in `skills-map-view.ts` and `SkillsMapView.tsx`) instead of non-empty, and a third case checks a broken skill (class `skill-node global broken`; its label says nothing more, as in React) and a waiting and a queued thread's lines (`var(--wait)`, `stroke-dasharray` `4 4`, width 2, `LINE`'s entries). `setup` takes the nodes, with the old four as `NODES()`. 5 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -37401,7 +37473,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (4 together), `skills/skill-panel.spec.ts` (7), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (7), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
