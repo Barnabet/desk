@@ -284,7 +284,7 @@ The plan has 105 tasks in 11 sections, one commit per task. The sections follow 
   - Links go through `ExternalLink` and `safeExternalUrl`.
   - DOMPurify is not needed.
 - **`index.html` has no `<base href>`.** The CSP says `base-uri 'none'`, and nothing needs it without the Router.
-- **Error boundaries are fed by `ErrorHandler`.** Angular has no error boundaries. `DeskErrorHandler` hands each caught error to the innermost `ErrorBoundary` that is not already failing, and a new `resetKey` (the next `screenKey`) renders that boundary afresh.
+- **Error boundaries are fed by `ErrorHandler`.** Angular has no error boundaries. `DeskErrorHandler` hands each caught error to the innermost `ErrorBoundary` that is not already failing, and any change of `resetKey` (another `screenKey`, or back to the one that crashed) renders that boundary afresh.
 - **`project-summary.ts` (`projectTone`, `projectSummaryLine`) moves early** (W0c.12), so the project switcher can use it before the map is ported.
 - **`SESSION_RELEASE_DELAY` is an injection token** (30 000 by default). Specs set it to 0.
 - **`SettingsFields` is ported in W0** (W0d.1), because the project form's "More options" needs it. W2b's `SettingsScreen` reuses it.
@@ -11153,6 +11153,8 @@ git commit -m "feat(web-ui): Button, Field, EmptyState, StatusChip and CodeBlock
 
 The React `Sheet` renders through a portal into `document.body`. Angular has none without the CDK, so `Sheet` moves its own host element to `document.body` after its first render (after the view that contains it has been inserted, so Angular does not put it back) and removes it when destroyed, which also covers a `Sheet` nested in another component whose host Angular removes. Focus moves to the first input, textarea, select or button inside, and returns to the previously focused element on close, as in React.
 
+**Deviation (review fix):** `confirm-dialog.spec.ts` gains a close case. `sheet.spec.ts` wraps the `Sheet` itself in `@if`, so its host is a root node of the view Angular removes and Angular takes it out of `document.body` on its own; the `Sheet` inside a `ConfirmDialog` is not, and only `Sheet`'s own `onDestroy` (`this.host.remove()`) takes its backdrop out. Nothing covered that path, which every closed `ExternalLink` confirmation (W0c.10) takes. The case renders the dialog inside `@if`, closes it, and expects no `.sheet-backdrop` left and the focus back on the element that had it; it fails without `this.host.remove()` (5 tests).
+
 - [ ] **Step 1: Write the failing tests**
 
 Create `apps/web-ui/src/app/components/sheet.spec.ts`:
@@ -11246,6 +11248,24 @@ describe('ConfirmDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(cancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes its sheet out of the body and gives the focus back when it closes', async () => {
+    const before = document.createElement('button');
+    document.body.append(before);
+    before.focus();
+    const view = await render(`@if (open) { <div deskConfirmDialog title="Stop deskd?" confirmLabel="Stop"><p>Running threads pause.</p></div> }`, {
+      imports: [ConfirmDialog],
+      componentProperties: { open: true },
+    });
+    await view.fixture.whenStable();
+    // The Sheet is nested in ConfirmDialog, so only its own onDestroy takes it back out of document.body.
+    expect(screen.getByRole('dialog', { name: 'Stop deskd?' }).parentElement!.parentElement).toBe(document.body);
+    await view.rerender({ componentProperties: { open: false } });
+    await view.fixture.whenStable();
+    expect(document.querySelector('.sheet-backdrop')).toBeNull();
+    expect(document.activeElement).toBe(before);
+    before.remove();
   });
 });
 ```
@@ -11353,7 +11373,7 @@ export class ConfirmDialog {
 - [ ] **Step 4: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/sheet.spec.ts --include src/app/components/confirm-dialog.spec.ts)`
-Expected: PASS (2 files, 4 tests).
+Expected: PASS (2 files, 5 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -11526,14 +11546,16 @@ git commit -m "feat(web-ui): toasts, with Reveal logs for server failures" -m "C
 
 Spec §4.10. `toBlocks` runs `marked.lexer(text, { gfm: true })` and turns the tokens into a small view model; `SafeMarkdown` renders that model with recursive `<ng-template>`s, so every piece of agent text reaches the page through interpolation. As with the React component (`react-markdown`, `remark-gfm`, `skipHtml`, `defaultUrlTransform`):
 - `html` tokens, block and inline, are dropped; the text around them stays;
-- links become `ExternalLink`; images become an `ExternalLink` labelled `Image: <alt>` (or the alt text alone when there is no source); fenced and indented code become `CodeBlock`, with the first word of the info string as its language; inline code is `code.md-code`;
+- links become `ExternalLink`; images become an `ExternalLink` labelled `Image: <alt>` (or the alt text alone, in a plain `span`, when there is no source or `defaultUrlTransform` drops it: any scheme but http, https, irc, ircs, mailto and xmpp); fenced and indented code become `CodeBlock`, with the first word of the info string as its language; inline code is `code.md-code`;
 - GFM tables (with column alignment), strikethrough, task lists (a disabled checkbox, then a space, first in the item's first paragraph, as `mdast-util-to-hast` puts it) and autolinks;
 - list items of a tight list render their text without `<p>`, loose ones with it.
-The view model reads only the token fields it needs, by name, so it does not depend on how a `marked` version groups its token types; unknown tokens (for example a separate `checkbox` token) are skipped. Entity references are decoded in text (`&amp;` shows `&`, `&lt;b&gt;` shows `<b>` as text), never in code, as CommonMark does; the result is interpolated, so it stays text.
+The view model reads only the token fields it needs, by name, so it does not depend on how a `marked` version groups its token types; unknown tokens (for example a separate `checkbox` token) are skipped. Entity references are decoded once in text (`&amp;` shows `&`, `&lt;b&gt;` shows `<b>` as text, `&#38;amp;` shows `&amp;`) and in link and image destinations, never in code or autolinks, as CommonMark does; the result is interpolated, so it stays text. An image's alt is the plain text of its inline content.
 
 `ExternalLink`'s host is a `span` because the React component renders either a fragment (the button and its dialog) or a span: when the link is allowed the host is `display: contents` and holds the button, otherwise the host is the `md-link-disabled` span itself.
 
 **Deviation (review fix):** two fixes after review. (1) `decodeEntities` first looked names up with `NAMED[ref] ?? whole`, and `NAMED` is a plain object literal, so `&constructor;`, `&toString;`, `&valueOf;`, `&hasOwnProperty;` and the other `Object.prototype` names resolved to inherited functions and showed their source text (`Use &valueOf; here` rendered "Use function valueOf() { [native code] } here"). The lookup is now `Object.hasOwn(NAMED, ref) ? NAMED[ref]! : whole`; the entities case expects those names to stay as written. It was never an injection (the result is interpolated), only wrong text. (2) The task checkbox was rendered by `listItems` before the item's blocks, so a loose task list came out as `<li class="task-list-item"><input …> <p>a</p></li>` and the checkbox sat on its own line above the text, while react-markdown (`mdast-util-to-hast`'s `list-item.js`) puts it, then a space, inside the first paragraph: `<li class="task-list-item"><p><input …> a</p></li>` (§5, same DOM). `toBlocks` now does the same: `MdInline` gains `{ kind: 'checkbox', checked }`, and for a task item `withCheckbox` puts it, then `' '` when there is content, at the start of the item's first `paragraph` or `text` block, or adds a block holding only the checkbox when the item starts with anything else. `inlineList` renders it as `<input type="checkbox" disabled [checked]>` and `listItems` no longer has its own input. Tight lists render as before. A `markdown.spec.ts` case covers tight and loose task items, and a `safe-markdown.spec.ts` case checks the loose `li > p > input` and the tight `li > input` (17 tests).
+
+**Deviation (review fix):** a second review brought `toBlocks` closer to the desktop; the same inputs were rendered through the desktop's `SafeMarkdown` (react-markdown 10.1) and through `toBlocks` with the templates' rules, and now match. (1) Text was decoded twice: marked 18 already decodes numeric references in an inline text token's `text`, so `&#38;amp;` showed `&` where the desktop shows `&amp;`. Text tokens are now decoded from their source (`Raw` gains `raw`; the synthetic token `blocks()` builds has none and falls back to `text`). (2) Link and image destinations are entity-decoded, as CommonMark does: `[c](https://x.test/?a=1&amp;b=2)` opens `?a=1&b=2`. Autolinks (`<…>`, bare URLs and emails, which marked marks `autolink: true`) keep their text and destination as written, as the desktop shows them. (3) An image's alt is the plain text of its inline content (`plainText`), not marked's raw alt source: `![a *b* \* c](u)` reads `Image: a b * c`. (4) Image sources go through `safeUrl`, a copy of react-markdown's `defaultUrlTransform` (relative URLs and http, https, irc, ircs, mailto and xmpp stay; any other scheme becomes `''`). So `![logo](javascript:alert(1))` renders as the desktop renders it, a plain `<span>logo</span>`, not an inert `Image: logo` link; both are inert. Links need no such transform: `ExternalLink` opens only http, https and mailto, so a link the transform would empty is inert already. (5) An ordered list with task items gets `contains-task-list`, as `mdast-util-to-hast` gives any list. (6) `security.spec.ts` also forbids `setHTMLUnsafe`, `parseHTMLUnsafe` and `DOMParser`, which parse a string as HTML past Angular's escaping just as `innerHTML` does; the self-test case has a line for each, and the `git grep` checks in W0c.17 and W3b.8 look for them too. `markdown.spec.ts` gains two cases (destinations, alts and autolinks; image schemes) and `safe-markdown.spec.ts` one (the ordered task list); the entities and other-schemes cases are extended (20 tests). The one difference left in that comparison is a newline text node the desktop keeps after a hard line break, which renders the same.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -11602,6 +11624,28 @@ describe('toBlocks', () => {
     ]);
   });
 
+  it('decodes entities in link and image destinations but not in autolinks, and reads an image alt as plain text', () => {
+    expect(toBlocks('[c](https://x.test/?a=1&amp;b=2) https://x.test/?a=1&amp;b=2 ![a *b* \\* `c` [d](u) &#38;amp;](https://x.test/i.png?w=1&amp;h=2)')).toEqual([
+      {
+        kind: 'paragraph',
+        children: [
+          { kind: 'link', href: 'https://x.test/?a=1&b=2', children: [text('c')] },
+          text(' '),
+          { kind: 'link', href: 'https://x.test/?a=1&amp;b=2', children: [text('https://x.test/?a=1&amp;b=2')] },
+          text(' '),
+          { kind: 'image', src: 'https://x.test/i.png?w=1&h=2', alt: 'a b * c d &amp;' },
+        ],
+      },
+    ]);
+  });
+
+  it('drops an image source whose scheme react-markdown drops, and keeps relative ones', () => {
+    const image = (src: string, alt: string): MdInline => ({ kind: 'image', src, alt });
+    expect(toBlocks('![a](javascript:alert(1)) ![b](data:image/png;base64,AAA) ![c](javascript&#58;alert(1)) ![d](/p.png) ![e](mailto:hi@desk.dev)')).toEqual([
+      { kind: 'paragraph', children: [image('', 'a'), text(' '), image('', 'b'), text(' '), image('', 'c'), text(' '), image('/p.png', 'd'), text(' '), image('mailto:hi@desk.dev', 'e')] },
+    ]);
+  });
+
   it('keeps code whole, naming its language by the first word of the info string', () => {
     expect(toBlocks('```bash title=install\ncurl -fsSL https://bun.sh/install | bash\n```\n\n    indented')).toEqual([
       { kind: 'code', code: 'curl -fsSL https://bun.sh/install | bash', language: 'bash' },
@@ -11623,9 +11667,9 @@ describe('toBlocks', () => {
     expect(blocks[5]).toEqual({ kind: 'paragraph', children: [text('line one'), { kind: 'br' }, text('line two')] });
   });
 
-  it('decodes entities in text, never in code', () => {
-    expect(toBlocks('Tom &amp; Jerry &lt;b&gt; &#169; &#x1F600; &bogus; &constructor; &toString; `&amp;`')).toEqual([
-      { kind: 'paragraph', children: [text('Tom & Jerry <b> © 😀 &bogus; &constructor; &toString; '), { kind: 'code', text: '&amp;' }] },
+  it('decodes entities in text once, never in code', () => {
+    expect(toBlocks('Tom &amp; Jerry &lt;b&gt; &#169; &#x1F600; &#38;amp; &bogus; &constructor; &toString; `&amp;`')).toEqual([
+      { kind: 'paragraph', children: [text('Tom & Jerry <b> © 😀 &amp; &bogus; &constructor; &toString; '), { kind: 'code', text: '&amp;' }] },
     ]);
     expect(decodeEntities('&valueOf;&hasOwnProperty;&isPrototypeOf;')).toBe('&valueOf;&hasOwnProperty;&isPrototypeOf;');
     expect(decodeEntities('&#0;&quot;&apos;&nbsp;')).toBe('�"\' ');
@@ -11633,7 +11677,7 @@ describe('toBlocks', () => {
 });
 ```
 
-Create `apps/web-ui/src/app/components/safe-markdown.spec.ts` (the desktop's four cases, then three more):
+Create `apps/web-ui/src/app/components/safe-markdown.spec.ts` (the desktop's four cases, then four more):
 
 ```ts
 import { fireEvent, render, screen, waitFor } from '@testing-library/angular';
@@ -11665,6 +11709,13 @@ describe('SafeMarkdown', () => {
     expect(tightItem.textContent).toBe(' tight');
   });
 
+  it('marks an ordered list with task items as a task list too', async () => {
+    const { container } = await renderMarkdown('1. [x] ordered\n2. [ ] two');
+    const list = container.querySelector('ol')!;
+    expect(list.classList.contains('contains-task-list')).toBe(true);
+    expect([...list.querySelectorAll(':scope > li.task-list-item')].map((li) => li.textContent)).toEqual([' ordered', ' two']);
+  });
+
   it('never renders raw HTML, scripts or remote images', async () => {
     const { container } = await renderMarkdown('<script>alert(1)</script><img src=x onerror=alert(1)>\n\n![chart](https://evil.test/p.png)\n\n<b>bold?</b>');
     expect(container.querySelector('script')).toBeNull();
@@ -11690,11 +11741,13 @@ describe('SafeMarkdown', () => {
     expect(container.querySelector('.codeblock-lang')?.textContent).toBe('bash');
   });
 
-  it('leaves links and images of other schemes inert', async () => {
-    const { container } = await renderMarkdown('<javascript:alert(1)> [x](data:text/html,hi) ![logo](javascript:alert(1)) [rel](/etc/passwd)');
+  it('leaves links and images of other schemes inert, an image as its alt text alone', async () => {
+    const { container } = await renderMarkdown('<javascript:alert(1)> [x](data:text/html,hi) ![logo](javascript:alert(1)) [rel](/etc/passwd) ![map](/map.png)');
     expect(screen.queryAllByRole('button')).toEqual([]);
     expect(container.querySelector('a')).toBeNull();
-    expect([...container.querySelectorAll('.md-link-disabled')].map((e) => e.textContent)).toEqual(['javascript:alert(1)', 'x', 'Image: logo', 'rel']);
+    expect([...container.querySelectorAll('.md-link-disabled')].map((e) => e.textContent)).toEqual(['javascript:alert(1)', 'x', 'rel', 'Image: map']);
+    // react-markdown's defaultUrlTransform empties the javascript: source, and the desktop then shows the alt in a plain span.
+    expect([...container.querySelectorAll('p > span:not(.md-link-disabled)')].map((e) => [e.attributes.length, e.textContent])).toEqual([[0, 'logo']]);
   });
 
   it('shows markup in agent text as text', async () => {
@@ -11724,6 +11777,9 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   ['innerHTML', /\binnerHTML\b/],
   ['outerHTML', /\bouterHTML\b/],
   ['insertAdjacentHTML', /\binsertAdjacentHTML\b/],
+  ['setHTMLUnsafe', /\bsetHTMLUnsafe\b/],
+  ['parseHTMLUnsafe', /\bparseHTMLUnsafe\b/],
+  ['DOMParser', /\bDOMParser\b/],
   ['bypassSecurityTrust', /bypassSecurityTrust/],
   ['DomSanitizer', /\bDomSanitizer\b/],
   ['document.write', /\bdocument\.write(ln)?\s*\(/],
@@ -11755,6 +11811,8 @@ describe('agent text stays text', () => {
     expect(offences('this.sanitizer.bypassSecurityTrustHtml(text)')).toEqual(['bypassSecurityTrust']);
     expect(offences('el.insertAdjacentHTML("beforeend", text); el.outerHTML = text;')).toEqual(['outerHTML', 'insertAdjacentHTML']);
     expect(offences('<iframe srcdoc="x"></iframe> eval(code) new Function(code)')).toEqual(['srcdoc', 'eval', 'new Function']);
+    expect(offences('el.setHTMLUnsafe(text); document.body.append(Document.parseHTMLUnsafe(text).body);')).toEqual(['setHTMLUnsafe', 'parseHTMLUnsafe']);
+    expect(offences('el.append(...new DOMParser().parseFromString(text, "text/html").body.childNodes);')).toEqual(['DOMParser']);
     expect(offences('<p>{{ text }}</p> evaluate(x)')).toEqual([]);
   });
 
@@ -11806,8 +11864,12 @@ export type MdBlock =
 /** The token fields read here, by name, whatever a marked version calls its token types. */
 type Raw = {
   type: string;
+  /** The token's source; an inline text token's `text` already has marked's numeric references decoded. */
+  raw?: string;
   text?: string;
   href?: string;
+  /** A GFM or `<…>` autolink: CommonMark keeps its text and destination as written, entities included. */
+  autolink?: boolean;
   lang?: string;
   depth?: number;
   ordered?: boolean;
@@ -11871,6 +11933,27 @@ export function decodeEntities(text: string): string {
   });
 }
 
+const SAFE_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
+
+/**
+ * react-markdown's `defaultUrlTransform`: a relative URL, or one whose scheme is http(s), irc(s), mailto or xmpp, stays;
+ * any other scheme (`javascript:`, `data:`, …) becomes ''. The desktop runs it on every image source.
+ */
+function safeUrl(value: string): string {
+  const colon = value.indexOf(':');
+  const questionMark = value.indexOf('?');
+  const numberSign = value.indexOf('#');
+  const slash = value.indexOf('/');
+  const relative =
+    colon === -1 || (slash !== -1 && colon > slash) || (questionMark !== -1 && colon > questionMark) || (numberSign !== -1 && colon > numberSign);
+  return relative || SAFE_PROTOCOL.test(value.slice(0, colon)) ? value : '';
+}
+
+/** Inline content as plain text (text, code and nested alts, no markup), as mdast gives an image's alt. */
+function plainText(items: MdInline[]): string {
+  return items.map((i) => (i.kind === 'text' || i.kind === 'code' ? i.text : i.kind === 'image' ? i.alt : 'children' in i ? plainText(i.children) : '')).join('');
+}
+
 function pushText(out: MdInline[], text: string): void {
   if (!text) return;
   const last = out.at(-1);
@@ -11888,7 +11971,7 @@ function inline(tokens: Raw[] | undefined): MdInline[] {
             if (piece.kind === 'text') pushText(out, piece.text);
             else out.push(piece);
           }
-        } else pushText(out, decodeEntities(t.text ?? ''));
+        } else pushText(out, decodeEntities(t.raw ?? t.text ?? ''));
         break;
       case 'escape':
         pushText(out, t.text ?? '');
@@ -11905,10 +11988,14 @@ function inline(tokens: Raw[] | undefined): MdInline[] {
         out.push({ kind: 'br' });
         break;
       case 'link':
-        out.push({ kind: 'link', href: t.href ?? '', children: inline(t.tokens) });
+        out.push(
+          t.autolink
+            ? { kind: 'link', href: t.href ?? '', children: t.text ? [{ kind: 'text', text: t.text }] : [] }
+            : { kind: 'link', href: decodeEntities(t.href ?? ''), children: inline(t.tokens) },
+        );
         break;
       case 'image':
-        out.push({ kind: 'image', src: t.href ?? '', alt: decodeEntities(t.text ?? '') });
+        out.push({ kind: 'image', src: safeUrl(decodeEntities(t.href ?? '')), alt: plainText(inline(t.tokens)) });
         break;
       default:
         // html: raw HTML is never rendered (the desktop's skipHtml). Unknown tokens are skipped too.
@@ -11989,7 +12076,10 @@ function blocks(tokens: Raw[] | undefined, loose: boolean): MdBlock[] {
   return out;
 }
 
-/** Agent markdown as blocks for SafeMarkdown's templates: GFM, raw HTML dropped, entities decoded in text only. */
+/**
+ * Agent markdown as blocks for SafeMarkdown's templates: GFM, raw HTML dropped, entities decoded once in text and in link
+ * and image destinations (never in code or autolinks), image sources of other schemes dropped, as react-markdown does.
+ */
 export function toBlocks(text: string): MdBlock[] {
   return blocks(marked.lexer(text, { gfm: true }) as unknown as Raw[], true);
 }
@@ -12122,7 +12212,7 @@ import { toBlocks } from './markdown';
           }
           @case ('list') {
             @if (b.ordered) {
-              <ol [attr.start]="b.start"><ng-container *ngTemplateOutlet="listItems; context: { $implicit: b.items }" /></ol>
+              <ol [attr.start]="b.start" [class.contains-task-list]="b.tasks"><ng-container *ngTemplateOutlet="listItems; context: { $implicit: b.items }" /></ol>
             } @else {
               <ul [class.contains-task-list]="b.tasks"><ng-container *ngTemplateOutlet="listItems; context: { $implicit: b.items }" /></ul>
             }
@@ -12203,7 +12293,7 @@ export { SafeMarkdown as SafeMarkdownComponent };
 - [ ] **Step 5: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/markdown.spec.ts --include src/app/components/safe-markdown.spec.ts --include src/app/security.spec.ts)`
-Expected: PASS (3 files, 17 tests).
+Expected: PASS (3 files, 20 tests).
 
 If a `markdown.spec.ts` expectation differs only in how `marked` 18 splits a piece of text (for example a trailing space inside a task item), fix `toBlocks` (not the expectation) so the rendered text matches what the desktop's `react-markdown` shows for the same input.
 
@@ -12231,7 +12321,9 @@ git commit -m "feat(web-ui): SafeMarkdown renders marked tokens through template
   - `ScreenView = { component: Type<unknown>; inputs: Record<string, unknown> }`, `screenFor(route): ScreenView | null`, `screenKey(route): string` (`screen-for.ts`; `screenKey` is the desktop's, moved out of `App.tsx`).
   - `NotYet` — `div[deskNotYet]`; input `label`: "<label> is not in the web UI yet".
 
-Angular has no error boundaries. Every error Angular catches (a template that throws during change detection, an event handler that throws) goes to the root `ErrorHandler`; `DeskErrorHandler` logs it as the desktop does (`console.error('Desk screen error', error)`) and hands it to the innermost boundary that is not already showing one. That boundary stops rendering its template, which destroys the broken screen, and shows the desktop's fallback: "This screen hit an error" with Try again and Reload Desk, or for `scope="whole"` "Desk hit an error" with Reload Desk only. Try again renders the template afresh; a new `resetKey` (the next screen) does the same, because the failure is remembered with the key it happened under. While healthy the host is `display: contents`, so it adds no box; when it fails it becomes the desktop's `div.error-boundary[role=alert]`. The difference from React: an error thrown in an event handler also trips the boundary (React only catches render errors); an unhandled promise rejection does not.
+Angular has no error boundaries. Every error Angular catches (a template that throws during change detection, an event handler that throws) goes to the root `ErrorHandler`; `DeskErrorHandler` logs it as the desktop does (`console.error('Desk screen error', error)`) and hands it to the innermost boundary that is not already showing one. That boundary stops rendering its template, which destroys the broken screen, and shows the desktop's fallback: "This screen hit an error" with Try again and Reload Desk, or for `scope="whole"` "Desk hit an error" with Reload Desk only. Try again renders the template afresh; so does any change of `resetKey` (another screen, or back to the one that crashed), because the failure is dropped whenever the key changes, as the desktop's keyed boundary remounts. While healthy the host is `display: contents`, so it adds no box; when it fails it becomes the desktop's `div.error-boundary[role=alert]`. The difference from React: an error thrown in an event handler also trips the boundary (React only catches render errors); an unhandled promise rejection does not.
+
+**Deviation (review fix):** two changes to `error-boundary.ts`, and its registry's comments. (1) `fail()` also asks for the fallback's render: it adds a `PendingTasks` task, calls `markForCheck()` in a microtask unless the boundary was destroyed meanwhile (the `destroyed` flag, set in its `onDestroy`), then ends the task. In Angular 22.2 a render, effect or `afterRender` error reaches the `ErrorHandler` from the zoneless scheduler's `tick()` `catch`, while `runningTick` is still true, so `shouldScheduleTick()` refuses the notify that `failure.set()` makes and nothing re-rendered: the broken screen stayed blank instead of showing the fallback. The task keeps the app unstable (`whenStable()` waits) until the render is asked for. (2) The failure was remembered with the key it happened under, so going from a crashed screen to another and back showed the old error and never rendered the screen again, while the desktop's `<ErrorBoundary key={screenKey(route)}>` remounts on every key change. `failure` is now `linkedSignal({ source: resetKey, computation: () => null })`, dropped by any change of key; a new `error-boundary.spec.ts` case comes back to the crashed key (6 tests with `screen-for.spec.ts`). The `ErrorBoundaries` comments now say the stack is in registration order (a nested boundary registers after the one around it), not outermost first, and that `report()` is not told where an error came from, so an error from outside a screen (a title-bar click handler, a root effect) lands on the screen's boundary too; that follows the recorded decision and needs no change.
 
 `screenFor` is where each phase wires its screens. In W0c every route shows `NotYet`; a later section replaces one `return notYet(…)` line with its screen and the inputs the React `Screen` switch in `App.tsx` passes. The lines, exactly as written below:
 
@@ -12336,6 +12428,20 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('Registry')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  it('renders a crashed screen again when the key comes back to it, as a remounted React boundary would', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    broken = true;
+    const fixture = await mount('screen');
+    expect(screen.getByRole('alert')).toBeTruthy();
+    broken = false;
+    fixture.componentInstance.key.set('project/p/threads');
+    await fixture.whenStable();
+    fixture.componentInstance.key.set('system');
+    await fixture.whenStable();
+    expect(screen.getByText('Registry')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });
 ```
 
@@ -12370,6 +12476,7 @@ Create `apps/web-ui/src/app/components/error-boundary.ts`:
 import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   computed,
   contentChild,
@@ -12379,7 +12486,8 @@ import {
   Injectable,
   Injector,
   input,
-  signal,
+  linkedSignal,
+  PendingTasks,
   TemplateRef,
   untracked,
   ViewEncapsulation,
@@ -12393,7 +12501,8 @@ const WHOLE_BODY = 'Reload to continue. Your projects and threads are safe; they
 
 /**
  * Catches a render error so one broken screen never blanks the page. Its content is a single `<ng-template>`, rendered while
- * healthy; give it the screen's key so navigating elsewhere starts clean. "Try again" renders it afresh, "Reload Desk" reloads.
+ * healthy; give it the screen's key so navigating elsewhere, or back, starts clean. "Try again" renders it afresh, "Reload
+ * Desk" reloads.
  */
 @Component({
   selector: 'div[deskErrorBoundary]',
@@ -12427,19 +12536,22 @@ export class ErrorBoundary {
   readonly scope = input<'screen' | 'whole'>('screen');
   readonly resetKey = input('');
   protected readonly content = contentChild.required(TemplateRef, { descendants: false });
-  /** The failure and the screen key it happened under: a new key (the next screen) starts clean. */
-  private readonly failure = signal<{ key: string; error: Error } | null>(null);
-  protected readonly error = computed(() => {
-    const f = this.failure();
-    return f && f.key === this.resetKey() ? f.error : null;
-  });
+  /** The failure, dropped whenever the key changes, as the desktop's `<ErrorBoundary key=…>` remounts on a new key. */
+  private readonly failure = linkedSignal<string, Error | null>({ source: this.resetKey, computation: () => null });
+  protected readonly error = this.failure.asReadonly();
   protected readonly whole = computed(() => this.scope() === 'whole');
   protected readonly screenBody = SCREEN_BODY;
   protected readonly wholeBody = WHOLE_BODY;
+  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly pendingTasks = inject(PendingTasks);
+  private destroyed = false;
 
   constructor() {
     const unregister = inject(ErrorBoundaries).register(this);
-    inject(DestroyRef).onDestroy(unregister);
+    inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
+      unregister();
+    });
   }
 
   /** Whether it is showing an error (then it takes no more). */
@@ -12448,7 +12560,14 @@ export class ErrorBoundary {
   }
 
   fail(error: unknown): void {
-    this.failure.set({ key: untracked(this.resetKey), error: error instanceof Error ? error : new Error(String(error)) });
+    this.failure.set(error instanceof Error ? error : new Error(String(error)));
+    // A render error reaches the ErrorHandler before the zoneless scheduler has finished its tick, and it schedules nothing
+    // then: ask for the fallback's render once that tick is over, and keep the app unstable until it is asked for.
+    const done = this.pendingTasks.add();
+    queueMicrotask(() => {
+      if (!this.destroyed) this.cdr.markForCheck();
+      done();
+    });
   }
 
   protected retry(): void {
@@ -12460,7 +12579,7 @@ export class ErrorBoundary {
   }
 }
 
-/** The boundaries on the page, outermost first. */
+/** The boundaries on the page, in the order they registered (a nested boundary registers after the one around it). */
 @Injectable({ providedIn: 'root' })
 export class ErrorBoundaries {
   private readonly stack: ErrorBoundary[] = [];
@@ -12473,7 +12592,10 @@ export class ErrorBoundaries {
     };
   }
 
-  /** Hands the error to the innermost boundary that is not already showing one; false when none took it. */
+  /**
+   * Hands the error to the last registered boundary that is not already showing one (the innermost, where they nest); false
+   * when none took it. The ErrorHandler is not told where an error came from, so one from outside the screen lands there too.
+   */
   report(error: unknown): boolean {
     for (let i = this.stack.length - 1; i >= 0; i--) {
       const boundary = this.stack[i]!;
@@ -12603,7 +12725,7 @@ export const appConfig: ApplicationConfig = {
 - [ ] **Step 4: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/error-boundary.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS (2 files, 5 tests).
+Expected: PASS (2 files, 6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -12631,9 +12753,11 @@ git commit -m "feat(web-ui): error boundaries through the app's ErrorHandler, an
 
 Ports of `TitleBar.tsx`, `ProjectSwitcher.tsx` and `ProjectNav.tsx`. `projectSummaryLine` and `projectTone` live in the React `OrbitMap.tsx`, which W1 ports; they move to `map/project-summary.ts` now so the switcher can show each project's line, and W1's map components import them from there. Two web differences: the title bar never gets the `mac` class (there are no window buttons to leave room for in a browser), and ⌘P / Ctrl-P is taken from the browser's print shortcut while the app has focus, as in the desktop app. The React test changes the search box with `fireEvent.change`, which React maps to its `onChange`; Angular listens to the `input` event, so the port uses `fireEvent.input`.
 
+**Deviation (review fix):** two changes. (1) The last `title-bar.spec.ts` case awaits `view.fixture.whenStable()` after its first `rerender`: `@testing-library/angular` 19.5's `rerender` runs `detectChanges()` on `TitleBar`'s own view, not on the host view that owns its constructor `effect()`, so the effect that calls `LastProject.remember` had not run before the second `rerender` (React's `rerender` flushes effects inside `act()`). A port that rerenders a component with an input-driven effect follows the same pattern. (2) `ProjectSwitcher.onWindowKey` clears `byHover` before it toggles, as the React listener does, and `show()` clears a close timer an earlier hover armed. Before, a list opened by hovering, closed with ⌘P, left, then reopened with ⌘P within 250 ms was closed by the timer the leave armed. A new case walks that sequence and a second one (hover, leave, ⌘P, ⌘P within 250 ms), which closes the reopened list in the desktop too; the web keeps it open. With `show()` clearing the timer, a stale `byHover` has no visible effect left, and the reset is kept for parity with the React source (6 tests).
+
 - [ ] **Step 1: Write the failing tests**
 
-Create `apps/web-ui/src/app/components/title-bar.spec.ts` (the desktop's four cases):
+Create `apps/web-ui/src/app/components/title-bar.spec.ts` (the desktop's four cases, then the ⌘P and hover sequences):
 
 ```ts
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
@@ -12717,6 +12841,8 @@ describe('TitleBar', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Switch project' })).toBeNull());
 
     await view.rerender({ inputs: { route: { name: 'project', id: 'a', tab: 'threads' } } });
+    // The effect that remembers the project runs on the next tick (React's rerender flushes effects in act()).
+    await view.fixture.whenStable();
     await view.rerender({ inputs: { route: { name: 'skills' } } });
     const name = screen.getByRole('link', { name: 'anyfight' });
     expect(name.getAttribute('href')).toBe('#/p/a/conversation');
@@ -12731,6 +12857,29 @@ describe('TitleBar', () => {
     fireEvent.mouseEnter(pop);
     fireEvent.click(within(pop).getByRole('option', { name: /P1/ }));
     expect(window.location.hash).toBe('#/p/b/conversation');
+  });
+
+  it('keeps a list that ⌘P opened when the pointer leaves, even after hovering had opened it', async () => {
+    const view = await renderBar({ name: 'map' }, initialGlobalState());
+    const trigger = screen.getByRole('button', { name: 'Switch project (⌘P)' });
+    const dialog = () => screen.queryByRole('dialog', { name: 'Switch project' });
+    const afterHoverClose = () => new Promise((r) => setTimeout(r, 300)).then(() => view.fixture.whenStable());
+    // Hovered open, closed with ⌘P, left, then ⌘P again: the leave arms no close.
+    fireEvent.mouseEnter(trigger);
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    expect(dialog()).toBeNull();
+    fireEvent.mouseLeave(trigger.parentElement!);
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    await afterHoverClose();
+    expect(dialog()).not.toBeNull();
+    // Hovered open and left (a close is armed), then ⌘P twice before it fires: the reopened list stays.
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    fireEvent.mouseEnter(trigger);
+    fireEvent.mouseLeave(trigger.parentElement!);
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    await afterHoverClose();
+    expect(dialog()).not.toBeNull();
   });
 });
 ```
@@ -12924,6 +13073,8 @@ export class ProjectSwitcher {
   protected onWindowKey(e: KeyboardEvent): void {
     if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
       e.preventDefault();
+      // As the React listener: the list is no longer one the pointer opened, so leaving it closes nothing.
+      this.byHover = false;
       if (this.open()) this.open.set(false);
       else this.show(false);
     }
@@ -12988,6 +13139,8 @@ export class ProjectSwitcher {
   }
 
   private show(byHover: boolean): void {
+    // A close armed by an earlier hover never closes the list it opens now.
+    clearTimeout(this.closeTimer);
     this.byHover = byHover;
     this.query.set('');
     this.active.set(0);
@@ -13108,7 +13261,7 @@ export class ProjectNav {
 - [ ] **Step 4: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/title-bar.spec.ts --include src/app/components/project-nav.spec.ts)`
-Expected: PASS (2 files, 5 tests).
+Expected: PASS (2 files, 6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -13135,6 +13288,8 @@ A port of `ConnectionOverlay.tsx`: deskd reconnecting shows a calm `role="status
 One web-only state: when the page's own `/push` socket is lost (`DeskBridge.pushStatus() === 'reconnecting'`, for example after Ctrl-C in desk web's terminal), the global state is stale, so the banner says "Reconnecting to desk web… If you stopped it, run desk web again." instead.
 
 `SignedOut` is the page without a session secret (spec §2): only "Open Desk from your terminal" and how to do it; `App` shows it (W0c.14).
+
+**Deviation (review fix):** two spec changes. The restart case asserted there was no alert as soon as the call was recorded, before `daemon.restart` had settled, so a restart that failed a moment later passed; it now waits for the button to leave its busy state (`aria-busy`) and checks the call's input. A new case pairs a reconnecting `/push` with a stale `offline` deskd state, the case `mode()` checks `pushStatus` first for: the "Reconnecting to desk web…" banner shows, and no Start dialog. It fails if the deskd check moves ahead (7 tests).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -13189,8 +13344,12 @@ describe('ConnectionOverlay', () => {
     const bridge = await renderOverlay(at('mismatch', 'deskd speaks protocol 3; this Desk needs 4.'), new FakeDeskBridge({ 'daemon.restart': () => ({ running: true }) }));
     const dialog = screen.getByRole('alertdialog', { name: 'Desk and deskd are out of step' });
     expect(dialog.textContent).toContain('deskd speaks protocol 3; this Desk needs 4. Restart the daemon from this install, or update Desk.');
-    fireEvent.click(screen.getByRole('button', { name: 'Restart deskd' }));
-    await waitFor(() => expect(bridge.calls.map((c) => c.channel)).toEqual(['daemon.restart']));
+    const restart = screen.getByRole('button', { name: 'Restart deskd' });
+    fireEvent.click(restart);
+    expect(restart.getAttribute('aria-busy')).toBe('true');
+    // The call is recorded at once; wait until it has settled before saying no error came back.
+    await waitFor(() => expect(restart.hasAttribute('aria-busy')).toBe(false));
+    expect(bridge.calls).toEqual([{ channel: 'daemon.restart', input: {} }]);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -13206,6 +13365,15 @@ describe('ConnectionOverlay', () => {
     await renderOverlay(at('live'), bridge);
     expect(screen.getByRole('status').textContent).toBe('Reconnecting to desk web… If you stopped it, run desk web again.');
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('says desk web is gone rather than offering Start while the stale state still reads deskd offline', async () => {
+    const bridge = new FakeDeskBridge();
+    bridge.setPushStatus('reconnecting');
+    await renderOverlay(at('offline'), bridge);
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting to desk web… If you stopped it, run desk web again.');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start Desk' })).toBeNull();
   });
 });
 ```
@@ -13326,7 +13494,7 @@ export class SignedOut {}
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/connection-overlay.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -13353,21 +13521,26 @@ git commit -m "feat(web-ui): the connection overlay with Start and Restart, a ba
 
 The screen is rendered with `NgComponentOutlet` from `screenFor(route)`, inside a one-item `@for` tracked by `screenKey(route)`: a new key (another project, another tab) mounts a fresh screen, as the desktop's `key={route.id}` does, while navigation inside a screen only updates its inputs. The host is `display: block; height: 100%`, standing in for the desktop's `#root`, so `.app { height: 100% }` fills the page; the whole-page boundary is `display: contents` while healthy. Two app-wide pieces join this template later: the folder browser (W0d.7, after the whole-page boundary in the signed-in branch, so it covers onboarding too) and the command palette (W3b.3, inside `.app` between `main.screen` and the toaster).
 
+**Deviation (review fix):** coming back to a screen that had crashed showed its old error and never rendered it again: the screen boundary outlives the `@for` and kept the failure with its key, while the desktop's `<ErrorBoundary key={screenKey(route)}>` remounts on every key change. W0c.11's `ErrorBoundary` now drops its failure whenever `resetKey` changes, so this template is unchanged. `app.spec.ts` changes. The signed-out case clears `desk.onboarded` first, so its unchanged `#/map` proves the signed-out guard (an onboarded viewer on `#/map` was never redirected anyway, and the case passed without the guard). One new case checks that navigation inside one screen key (`#/p/p1/threads` to `#/p/p1/threads/t1`) keeps the screen's host element and another key (`#/p/p2/threads`) replaces it; it fails with `track $index`. Another crashes the screen through `ErrorBoundaries.report` (what `DeskErrorHandler` does, minus its log), goes to another project and back, and expects the screen again. The new cases find the screen as the boundary's first child and open only threads routes, so they hold when W2a.6's `ThreadsScreen` replaces `NotYet` there (8 tests).
+
 - [ ] **Step 1: Write the failing test**
 
 Replace `apps/web-ui/src/app/app.spec.ts` (the W0c.2 placeholder test) with:
 
 ```ts
+import { TestBed } from '@angular/core/testing';
 import { render, screen, waitFor } from '@testing-library/angular';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { AttentionItem } from '@desk/protocol';
 import { App } from './app';
-import { provideErrorBoundaries } from './components/error-boundary';
+import { ErrorBoundaries, provideErrorBoundaries } from './components/error-boundary';
 import { FakeDeskBridge } from './testing/fake-bridge';
 
 const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
 const go = (hash: string) => history.replaceState(null, '', hash);
+/** The element the screen boundary renders: the screen's host while healthy. */
+const screenHost = () => document.querySelector('main.screen > [deskErrorBoundary] > *');
 
 async function renderApp(bridge = new FakeDeskBridge()) {
   const view = await render(App, { providers: [...bridge.providers, ...provideErrorBoundaries()] });
@@ -13384,6 +13557,8 @@ describe('App', () => {
   it('shows only how to sign in while this browser has no session', async () => {
     const bridge = new FakeDeskBridge();
     bridge.signOut();
+    // Not onboarded either, so only the signed-out guard keeps this deep link from being sent to #/onboarding.
+    localStorage.removeItem('desk.onboarded');
     go('#/map');
     await renderApp(bridge);
     expect(screen.getByRole('heading', { name: 'Open Desk from your terminal' })).toBeTruthy();
@@ -13417,6 +13592,37 @@ describe('App', () => {
     ]);
   });
 
+  it('keeps the screen while the route stays on it, and mounts a fresh one for another screen key', async () => {
+    go('#/p/p1/threads');
+    const { bridge, view } = await renderApp();
+    const first = screenHost();
+    expect(first).not.toBeNull();
+    bridge.emit('desk:navigate', '#/p/p1/threads/t1');
+    await view.fixture.whenStable();
+    expect(window.location.hash).toBe('#/p/p1/threads/t1');
+    expect(screenHost()).toBe(first);
+    bridge.emit('desk:navigate', '#/p/p2/threads');
+    await view.fixture.whenStable();
+    expect(screenHost()).not.toBeNull();
+    expect(screenHost()).not.toBe(first);
+  });
+
+  it('renders a crashed screen again when the viewer comes back to it', async () => {
+    go('#/p/p1/threads');
+    const { bridge, view } = await renderApp();
+    // What DeskErrorHandler does with the screen's render error, minus its console.error: the screen's boundary takes it.
+    TestBed.inject(ErrorBoundaries).report(new Error('boom'));
+    await view.fixture.whenStable();
+    expect(screen.getByText('This screen hit an error')).toBeTruthy();
+    bridge.emit('desk:navigate', '#/p/p2/threads');
+    await view.fixture.whenStable();
+    expect(screen.queryByText('This screen hit an error')).toBeNull();
+    bridge.emit('desk:navigate', '#/p/p1/threads');
+    await view.fixture.whenStable();
+    expect(screen.queryByText('This screen hit an error')).toBeNull();
+    expect(screenHost()).not.toBeNull();
+  });
+
   it('follows desk:global and desk:navigate', async () => {
     go('#/map');
     const { bridge, view } = await renderApp();
@@ -13447,7 +13653,7 @@ describe('App', () => {
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
-Expected: FAIL. All six tests fail: the placeholder renders `Desk · starting · #/map`, so there is no heading, no Places navigation, no redirect (`expected '#/map' to be '#/onboarding'`).
+Expected: FAIL. All eight tests fail: the placeholder renders `Desk · starting · #/map`, so there is no heading, no Places navigation, no screen boundary, no redirect (`expected '#/map' to be '#/onboarding'`).
 
 - [ ] **Step 3: Write the shell**
 
@@ -13552,7 +13758,7 @@ export class App {
 - [ ] **Step 4: Run it, then every web-ui spec**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (8 tests).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false)`
 Expected: PASS (every spec so far: 30 files).
@@ -13746,7 +13952,7 @@ and add this case at the end of `describe('App', …)`, after the tray case:
 - [ ] **Step 2: Run them and watch them fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/core/notifications.spec.ts --include src/app/app.spec.ts)`
-Expected: FAIL. `notifications.spec.ts` cannot resolve `./notifications`; in `app.spec.ts` the new case fails with `expected [] to deeply equal [ 'Launch: Desk has a question' ]` (nothing listens on `desk:notify` yet) and the six others pass.
+Expected: FAIL. `notifications.spec.ts` cannot resolve `./notifications`; in `app.spec.ts` the new case fails with `expected [] to deeply equal [ 'Launch: Desk has a question' ]` (nothing listens on `desk:notify` yet) and the eight others pass.
 
 - [ ] **Step 3: Write the service and start it from App**
 
@@ -13868,7 +14074,7 @@ after:
 - [ ] **Step 4: Run them again**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/core/notifications.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS (3 + 7 tests).
+Expected: PASS (3 + 9 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -14296,9 +14502,9 @@ Expected: PASS. It includes `scripts/ng.test.ts` and `scripts/web-dev.test.ts`, 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false)`
-Expected: PASS: 32 spec files, 106 tests. `pnpm test` runs Step 2 and this step in that order; running them separately keeps `--maxWorkers=2` on the root suite.
+Expected: PASS: 32 spec files, 115 tests. `pnpm test` runs Step 2 and this step in that order; running them separately keeps `--maxWorkers=2` on the root suite.
 
-The files, as a checklist (all under `apps/web-ui/src`): `build-config.spec.ts`; `app/app.spec.ts` (7); `app/app.config.spec.ts`; `app/security.spec.ts`; `app/screen-for.spec.ts`; `app/testing/fake-bridge.spec.ts`; `app/core/`: `desk-bridge`, `route.service`, `store-signal`, `global.store`, `now.service`, `last-project`, `unread`, `onboarded`, `media`, `width`, `session.service`, `notifications`; `app/components/`: `button`, `field`, `empty-state`, `status-chip`, `code-block`, `sheet`, `confirm-dialog`, `toast`, `markdown`, `safe-markdown`, `error-boundary`, `title-bar`, `project-nav`, `connection-overlay`.
+The files, as a checklist (all under `apps/web-ui/src`): `build-config.spec.ts`; `app/app.spec.ts` (9); `app/app.config.spec.ts`; `app/security.spec.ts`; `app/screen-for.spec.ts`; `app/testing/fake-bridge.spec.ts`; `app/core/`: `desk-bridge`, `route.service`, `store-signal`, `global.store`, `now.service`, `last-project`, `unread`, `onboarded`, `media`, `width`, `session.service`, `notifications`; `app/components/`: `button`, `field`, `empty-state`, `status-chip`, `code-block`, `sheet`, `confirm-dialog`, `toast`, `markdown`, `safe-markdown`, `error-boundary`, `title-bar`, `project-nav`, `connection-overlay`.
 
 - [ ] **Step 4: The production build and its CSP checks**
 
@@ -14314,7 +14520,7 @@ Expected: PASS, including "finds none in the built web UI" (`findInlineCode` on 
 
 - [ ] **Step 5: The invariants, by grep**
 
-Run: `git grep -nE "innerHTML|outerHTML|insertAdjacentHTML|bypassSecurityTrust|DomSanitizer|srcdoc" -- apps/web-ui/src ':!apps/web-ui/src/app/security.spec.ts'`
+Run: `git grep -nE "innerHTML|outerHTML|insertAdjacentHTML|setHTMLUnsafe|parseHTMLUnsafe|DOMParser|bypassSecurityTrust|DomSanitizer|srcdoc" -- apps/web-ui/src ':!apps/web-ui/src/app/security.spec.ts'`
 Expected: no output (exit 1).
 
 Run: `git grep -nE "@Input|@Output|@HostListener|@HostBinding|@ViewChild|@NgModule|zone\.js|provideRouter|RouterModule" -- apps/web-ui/src`
@@ -16347,7 +16553,7 @@ The folder browser's host is `display: contents` and its `.sheet-backdrop` moves
 - [ ] **Step 5: Run the specs**
 
 Run: `cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.onboarding.spec.ts --include src/app/app.spec.ts --include src/app/screen-for.spec.ts`
-Expected: PASS (5 cases here, W0c's 7 `app.spec.ts` cases with the two replaced expectations, and `screen-for.spec.ts`).
+Expected: PASS (5 cases here, W0c's 9 `app.spec.ts` cases with the two replaced expectations, and `screen-for.spec.ts`).
 
 Run: `git grep -n "Onboarding is not in the web UI yet\|The map is not in the web UI yet" -- apps/web-ui`
 Expected: no output (exit 1).
@@ -16794,7 +17000,7 @@ Expected: every file passes (`packages/*`, `apps/*/src`, `test/*`; `@desk/bff`, 
 - [ ] **Step 3: The web UI's suite**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: every spec passes, W0d's among them: `settings-fields` (4), `project-form` (6), `endpoint-panel` (5), `onboarding` (4), `folder-browser` (7), `map-screen` (4), `app.onboarding` (5), and W0c's `app.spec.ts` (7) and `screen-for.spec.ts` with W0d.7's changes.
+Expected: every spec passes, W0d's among them: `settings-fields` (4), `project-form` (6), `endpoint-panel` (5), `onboarding` (4), `folder-browser` (7), `map-screen` (4), `app.onboarding` (5), and W0c's `app.spec.ts` (9) and `screen-for.spec.ts` with W0d.7's changes.
 
 - [ ] **Step 4: The Electron e2e suite (the desktop app is unchanged)**
 
@@ -33866,7 +34072,7 @@ Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 
 Expected: PASS: the 5 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line.
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
-Expected: PASS, unchanged: no `app.spec.ts` case renders `#/skills` or `#/skills/catalog` (W0c.14's cases open the map, onboarding, a project's threads, System and the tray; W3b.3's shortcut case opens the map).
+Expected: PASS, unchanged: no `app.spec.ts` case renders `#/skills` or `#/skills/catalog` (W0c.14's cases open the map, onboarding, two projects' threads, System and the tray; W3b.3's shortcut case opens the map).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -36674,7 +36880,7 @@ Expected: no output (exit 1): no operation name is built at run time in either U
 Run: `git grep -nE "'app\.openMain'|'daemon\.repair'" -- apps/web-ui/src ':!*.spec.ts'`
 Expected: no output (exit 1): the web UI calls neither host-only operation.
 
-Run: `git grep -nE "innerHTML|outerHTML|insertAdjacentHTML|bypassSecurityTrust|DomSanitizer|srcdoc" -- apps/web-ui/src ':!apps/web-ui/src/app/security.spec.ts'`
+Run: `git grep -nE "innerHTML|outerHTML|insertAdjacentHTML|setHTMLUnsafe|parseHTMLUnsafe|DOMParser|bypassSecurityTrust|DomSanitizer|srcdoc" -- apps/web-ui/src ':!apps/web-ui/src/app/security.spec.ts'`
 Expected: no output (exit 1).
 
 Run: `git grep -nE "TODO|FIXME|TBD" -- apps/web-ui/src apps/web-ui/e2e docs/web.md`
