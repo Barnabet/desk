@@ -40537,10 +40537,12 @@ Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 
 Expected: PASS (7 tests).
 
 Run: `pnpm vitest run apps/desktop/src/renderer/system/SystemScreen.test.tsx --maxWorkers=2`
-Expected: PASS (6 tests, unchanged: Restart, Repair and Stop still reach `daemon.restart`, `daemon.repair` and `daemon.stop`).
+Expected: PASS (7 tests, unchanged, master's "switches the appearance" among them: Restart, Repair and Stop still reach `daemon.restart`, `daemon.repair` and `daemon.stop`).
 
 Run: `pnpm typecheck`
 Expected: exit 0 (the desktop `tsc` checks the new expression: every branch is a `Promise<DaemonStatus>`).
+
+**Deviation (as run):** `parity.spec.ts` and the `SystemScreen.tsx` edit are the blocks above, unchanged, and the anchor matched as written. Step 2 failed exactly as expected (2 of 7: `daemon.repair` in the honest-list case, ``system/SystemScreen.tsx: call(`daemon.${what}` `` in the literal-names case); Step 4 passed 7 of 7. `SystemScreen.test.tsx` has 7 cases since the merge of master (its appearance case), not 6; it is unchanged and passes. What the guard reads, after every W3a and W3b screen (built-ins, catalog, skills, system, palette): the renderer calls 76 operations once `act` is literal (`daemon.stop` and `daemon.repair` join the 74 it named before), and the web UI calls 75. The renderer's only operations the web UI does not call are `app.openMain` (the tray's) and `daemon.repair`, which is `HOST_ONLY`, as spec §3 says (`app.openExternal`, `app.pickFolder` and `app.saveFile` are called, and answered inside the web `DeskBridge`). The web UI's only operation the renderer does not call is `fs.listDirs` (the folder browser, `webChannels`' one entry). The one conditional between literals on each side is the connection overlay's Start/Restart; the only other `call(` matches with no literal are the two bridges' own `call` declarations and a doc comment in `builtin-panel.ts`. Neither UI calls `health`, `overview`, `projects.list`, `projects.chat`, `projects.usage`, `projects.events`, `threads.list`, `threads.get`, `threads.transcript`, `attention.list` or `skills.versionFile`, which the guard leaves alone (spec §6).
 
 - [ ] **Step 5: Commit**
 

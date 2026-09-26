@@ -36,7 +36,8 @@ function DaemonSection() {
     setConfirmStop(false);
     setBusy(what);
     try {
-      setS(await call(`daemon.${what}`, {}));
+      // Literal operation names: the web UI's parity guard (apps/web-ui/src/app/parity.spec.ts) reads them.
+      setS(await (what === 'start' ? call('daemon.start', {}) : what === 'restart' ? call('daemon.restart', {}) : what === 'stop' ? call('daemon.stop', {}) : call('daemon.repair', {})));
     } catch (err) {
       toastError(err);
       load();
