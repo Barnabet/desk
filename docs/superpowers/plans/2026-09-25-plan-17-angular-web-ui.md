@@ -35536,7 +35536,7 @@ type Errors = Partial<Record<'name' | 'description' | 'instructions' | 'form', s
         @if (existing().length || added().length) {
           <ul class="skill-files-edit">
             @for (f of existing(); track f.path) {
-              <li [attr.class]="remove().has(f.path) ? 'removing' : null">
+              <li [class.removing]="remove().has(f.path)">
                 <span class="mono grow">{{ f.path }}</span>
                 <span class="muted small">{{ bytes(f.size) }}</span>
                 <label class="small"><input type="checkbox" [checked]="remove().has(f.path)" (change)="toggleRemove(f.path, $event)" /> Remove</label>
@@ -35879,6 +35879,8 @@ Expected: PASS (3 files, 6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation:** one change from the plan's first code; the blocks above are the committed files. An existing file's row bound `[attr.class]="remove().has(f.path) ? 'removing' : null"`; it is now `[class.removing]="remove().has(f.path)"`, the port conventions' way to write a dynamic class (the row has no fixed one, so its `className` reads `removing` or nothing, as React's does). Otherwise the three sheets are `SkillEditor.tsx`, `AskDesk.tsx` and `SkillsScreen.tsx`'s `ImportSheet` as they are on `web-ui` after the merge of master (8883229): none of the three changed in or after it (their last changes are e8ab53e's import moves). The merge's built-in skills never reach them: the editor's and the import's scope pickers still offer Global or one project (`WritableSkillScope`, which a user may write to), a global skill named like a built-in is saved as an ordinary one that shadows it (deskd's rule, with no warning in React's editor), and Duplicate is `BuiltinPanel`'s own sheet (W3a.8b). The only intended departure from React stays the plan's: `ImportSheet` names the imported skill after the last segment of `dir` split on `/` or `\`. The specs failed first on `Could not resolve "./skill-editor"`, `"./ask-desk"` and `"./import-sheet"`, with the Angular compiler's `TS2307` beside each.
 
 - [ ] **Step 5: Commit**
 
