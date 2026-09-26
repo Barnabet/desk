@@ -27,6 +27,13 @@ describe('SafeMarkdown', () => {
     expect(tightItem.textContent).toBe(' tight');
   });
 
+  it('marks an ordered list with task items as a task list too', async () => {
+    const { container } = await renderMarkdown('1. [x] ordered\n2. [ ] two');
+    const list = container.querySelector('ol')!;
+    expect(list.classList.contains('contains-task-list')).toBe(true);
+    expect([...list.querySelectorAll(':scope > li.task-list-item')].map((li) => li.textContent)).toEqual([' ordered', ' two']);
+  });
+
   it('never renders raw HTML, scripts or remote images', async () => {
     const { container } = await renderMarkdown('<script>alert(1)</script><img src=x onerror=alert(1)>\n\n![chart](https://evil.test/p.png)\n\n<b>bold?</b>');
     expect(container.querySelector('script')).toBeNull();
@@ -52,11 +59,13 @@ describe('SafeMarkdown', () => {
     expect(container.querySelector('.codeblock-lang')?.textContent).toBe('bash');
   });
 
-  it('leaves links and images of other schemes inert', async () => {
-    const { container } = await renderMarkdown('<javascript:alert(1)> [x](data:text/html,hi) ![logo](javascript:alert(1)) [rel](/etc/passwd)');
+  it('leaves links and images of other schemes inert, an image as its alt text alone', async () => {
+    const { container } = await renderMarkdown('<javascript:alert(1)> [x](data:text/html,hi) ![logo](javascript:alert(1)) [rel](/etc/passwd) ![map](/map.png)');
     expect(screen.queryAllByRole('button')).toEqual([]);
     expect(container.querySelector('a')).toBeNull();
-    expect([...container.querySelectorAll('.md-link-disabled')].map((e) => e.textContent)).toEqual(['javascript:alert(1)', 'x', 'Image: logo', 'rel']);
+    expect([...container.querySelectorAll('.md-link-disabled')].map((e) => e.textContent)).toEqual(['javascript:alert(1)', 'x', 'rel', 'Image: map']);
+    // react-markdown's defaultUrlTransform empties the javascript: source, and the desktop then shows the alt in a plain span.
+    expect([...container.querySelectorAll('p > span:not(.md-link-disabled)')].map((e) => [e.attributes.length, e.textContent])).toEqual([[0, 'logo']]);
   });
 
   it('shows markup in agent text as text', async () => {

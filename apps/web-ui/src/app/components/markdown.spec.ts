@@ -60,6 +60,28 @@ describe('toBlocks', () => {
     ]);
   });
 
+  it('decodes entities in link and image destinations but not in autolinks, and reads an image alt as plain text', () => {
+    expect(toBlocks('[c](https://x.test/?a=1&amp;b=2) https://x.test/?a=1&amp;b=2 ![a *b* \\* `c` [d](u) &#38;amp;](https://x.test/i.png?w=1&amp;h=2)')).toEqual([
+      {
+        kind: 'paragraph',
+        children: [
+          { kind: 'link', href: 'https://x.test/?a=1&b=2', children: [text('c')] },
+          text(' '),
+          { kind: 'link', href: 'https://x.test/?a=1&amp;b=2', children: [text('https://x.test/?a=1&amp;b=2')] },
+          text(' '),
+          { kind: 'image', src: 'https://x.test/i.png?w=1&h=2', alt: 'a b * c d &amp;' },
+        ],
+      },
+    ]);
+  });
+
+  it('drops an image source whose scheme react-markdown drops, and keeps relative ones', () => {
+    const image = (src: string, alt: string): MdInline => ({ kind: 'image', src, alt });
+    expect(toBlocks('![a](javascript:alert(1)) ![b](data:image/png;base64,AAA) ![c](javascript&#58;alert(1)) ![d](/p.png) ![e](mailto:hi@desk.dev)')).toEqual([
+      { kind: 'paragraph', children: [image('', 'a'), text(' '), image('', 'b'), text(' '), image('', 'c'), text(' '), image('/p.png', 'd'), text(' '), image('mailto:hi@desk.dev', 'e')] },
+    ]);
+  });
+
   it('keeps code whole, naming its language by the first word of the info string', () => {
     expect(toBlocks('```bash title=install\ncurl -fsSL https://bun.sh/install | bash\n```\n\n    indented')).toEqual([
       { kind: 'code', code: 'curl -fsSL https://bun.sh/install | bash', language: 'bash' },
@@ -81,9 +103,9 @@ describe('toBlocks', () => {
     expect(blocks[5]).toEqual({ kind: 'paragraph', children: [text('line one'), { kind: 'br' }, text('line two')] });
   });
 
-  it('decodes entities in text, never in code', () => {
-    expect(toBlocks('Tom &amp; Jerry &lt;b&gt; &#169; &#x1F600; &bogus; &constructor; &toString; `&amp;`')).toEqual([
-      { kind: 'paragraph', children: [text('Tom & Jerry <b> © 😀 &bogus; &constructor; &toString; '), { kind: 'code', text: '&amp;' }] },
+  it('decodes entities in text once, never in code', () => {
+    expect(toBlocks('Tom &amp; Jerry &lt;b&gt; &#169; &#x1F600; &#38;amp; &bogus; &constructor; &toString; `&amp;`')).toEqual([
+      { kind: 'paragraph', children: [text('Tom & Jerry <b> © 😀 &amp; &bogus; &constructor; &toString; '), { kind: 'code', text: '&amp;' }] },
     ]);
     expect(decodeEntities('&valueOf;&hasOwnProperty;&isPrototypeOf;')).toBe('&valueOf;&hasOwnProperty;&isPrototypeOf;');
     expect(decodeEntities('&#0;&quot;&apos;&nbsp;')).toBe('�"\' ');

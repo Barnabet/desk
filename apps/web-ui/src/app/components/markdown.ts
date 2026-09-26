@@ -27,8 +27,12 @@ export type MdBlock =
 /** The token fields read here, by name, whatever a marked version calls its token types. */
 type Raw = {
   type: string;
+  /** The token's source; an inline text token's `text` already has marked's numeric references decoded. */
+  raw?: string;
   text?: string;
   href?: string;
+  /** A GFM or `<…>` autolink: CommonMark keeps its text and destination as written, entities included. */
+  autolink?: boolean;
   lang?: string;
   depth?: number;
   ordered?: boolean;
@@ -92,6 +96,27 @@ export function decodeEntities(text: string): string {
   });
 }
 
+const SAFE_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
+
+/**
+ * react-markdown's `defaultUrlTransform`: a relative URL, or one whose scheme is http(s), irc(s), mailto or xmpp, stays;
+ * any other scheme (`javascript:`, `data:`, …) becomes ''. The desktop runs it on every image source.
+ */
+function safeUrl(value: string): string {
+  const colon = value.indexOf(':');
+  const questionMark = value.indexOf('?');
+  const numberSign = value.indexOf('#');
+  const slash = value.indexOf('/');
+  const relative =
+    colon === -1 || (slash !== -1 && colon > slash) || (questionMark !== -1 && colon > questionMark) || (numberSign !== -1 && colon > numberSign);
+  return relative || SAFE_PROTOCOL.test(value.slice(0, colon)) ? value : '';
+}
+
+/** Inline content as plain text (text, code and nested alts, no markup), as mdast gives an image's alt. */
+function plainText(items: MdInline[]): string {
+  return items.map((i) => (i.kind === 'text' || i.kind === 'code' ? i.text : i.kind === 'image' ? i.alt : 'children' in i ? plainText(i.children) : '')).join('');
+}
+
 function pushText(out: MdInline[], text: string): void {
   if (!text) return;
   const last = out.at(-1);
@@ -109,7 +134,7 @@ function inline(tokens: Raw[] | undefined): MdInline[] {
             if (piece.kind === 'text') pushText(out, piece.text);
             else out.push(piece);
           }
-        } else pushText(out, decodeEntities(t.text ?? ''));
+        } else pushText(out, decodeEntities(t.raw ?? t.text ?? ''));
         break;
       case 'escape':
         pushText(out, t.text ?? '');
@@ -126,10 +151,14 @@ function inline(tokens: Raw[] | undefined): MdInline[] {
         out.push({ kind: 'br' });
         break;
       case 'link':
-        out.push({ kind: 'link', href: t.href ?? '', children: inline(t.tokens) });
+        out.push(
+          t.autolink
+            ? { kind: 'link', href: t.href ?? '', children: t.text ? [{ kind: 'text', text: t.text }] : [] }
+            : { kind: 'link', href: decodeEntities(t.href ?? ''), children: inline(t.tokens) },
+        );
         break;
       case 'image':
-        out.push({ kind: 'image', src: t.href ?? '', alt: decodeEntities(t.text ?? '') });
+        out.push({ kind: 'image', src: safeUrl(decodeEntities(t.href ?? '')), alt: plainText(inline(t.tokens)) });
         break;
       default:
         // html: raw HTML is never rendered (the desktop's skipHtml). Unknown tokens are skipped too.
@@ -210,7 +239,10 @@ function blocks(tokens: Raw[] | undefined, loose: boolean): MdBlock[] {
   return out;
 }
 
-/** Agent markdown as blocks for SafeMarkdown's templates: GFM, raw HTML dropped, entities decoded in text only. */
+/**
+ * Agent markdown as blocks for SafeMarkdown's templates: GFM, raw HTML dropped, entities decoded once in text and in link
+ * and image destinations (never in code or autolinks), image sources of other schemes dropped, as react-markdown does.
+ */
 export function toBlocks(text: string): MdBlock[] {
   return blocks(marked.lexer(text, { gfm: true }) as unknown as Raw[], true);
 }

@@ -54,7 +54,7 @@ import { toBlocks } from './markdown';
           }
           @case ('list') {
             @if (b.ordered) {
-              <ol [attr.start]="b.start"><ng-container *ngTemplateOutlet="listItems; context: { $implicit: b.items }" /></ol>
+              <ol [attr.start]="b.start" [class.contains-task-list]="b.tasks"><ng-container *ngTemplateOutlet="listItems; context: { $implicit: b.items }" /></ol>
             } @else {
               <ul [class.contains-task-list]="b.tasks"><ng-container *ngTemplateOutlet="listItems; context: { $implicit: b.items }" /></ul>
             }
