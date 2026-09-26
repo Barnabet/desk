@@ -12,6 +12,9 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   ['innerHTML', /\binnerHTML\b/],
   ['outerHTML', /\bouterHTML\b/],
   ['insertAdjacentHTML', /\binsertAdjacentHTML\b/],
+  ['setHTMLUnsafe', /\bsetHTMLUnsafe\b/],
+  ['parseHTMLUnsafe', /\bparseHTMLUnsafe\b/],
+  ['DOMParser', /\bDOMParser\b/],
   ['bypassSecurityTrust', /bypassSecurityTrust/],
   ['DomSanitizer', /\bDomSanitizer\b/],
   ['document.write', /\bdocument\.write(ln)?\s*\(/],
@@ -43,6 +46,8 @@ describe('agent text stays text', () => {
     expect(offences('this.sanitizer.bypassSecurityTrustHtml(text)')).toEqual(['bypassSecurityTrust']);
     expect(offences('el.insertAdjacentHTML("beforeend", text); el.outerHTML = text;')).toEqual(['outerHTML', 'insertAdjacentHTML']);
     expect(offences('<iframe srcdoc="x"></iframe> eval(code) new Function(code)')).toEqual(['srcdoc', 'eval', 'new Function']);
+    expect(offences('el.setHTMLUnsafe(text); document.body.append(Document.parseHTMLUnsafe(text).body);')).toEqual(['setHTMLUnsafe', 'parseHTMLUnsafe']);
+    expect(offences('el.append(...new DOMParser().parseFromString(text, "text/html").body.childNodes);')).toEqual(['DOMParser']);
     expect(offences('<p>{{ text }}</p> evaluate(x)')).toEqual([]);
   });
 
