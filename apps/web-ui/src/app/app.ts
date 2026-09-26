@@ -56,7 +56,7 @@ import { screenFor, screenKey } from './screen-for';
           }
         </ng-template>
       </div>
-      @if (bridge.folderRequest(); as request) {
+      @for (request of folderRequests(); track request) {
         <div deskFolderBrowser [purpose]="request.purpose" (picked)="bridge.answerFolder($event)"></div>
       }
     }
@@ -75,6 +75,12 @@ export class App {
   protected readonly screen = computed(() => {
     const view = screenFor(this.route());
     return view ? [{ ...view, key: this.key() }] : [];
+  });
+
+  /** The open folder request as a one-item list tracked by the request, so a new request gets a fresh folder browser. */
+  protected readonly folderRequests = computed(() => {
+    const request = this.bridge.folderRequest();
+    return request ? [request] : [];
   });
 
   constructor() {
