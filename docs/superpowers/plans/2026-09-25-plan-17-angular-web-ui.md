@@ -36020,10 +36020,13 @@ Added after the merge of master (8883229). Ports of `builtins/BuiltinGroup.tsx` 
 Create `apps/web-ui/src/app/skills/builtins/builtins.spec.ts`:
 
 ```ts
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { BuiltinSkillInfo } from '@desk/protocol';
+import { ToastService } from '../../components/toast';
 import { builtin } from '../../testing/builtins';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../../testing/fake-bridge';
 import { BuiltinGroup } from './builtin-group';
@@ -36047,6 +36050,8 @@ const detail = {
     { path: 'scripts/pdf_read.py', size: 12 },
   ],
 };
+const failed = { state: 'failed', reason: 'no network' } as const;
+const copy = { dir: '/data/skills/pdf-toolkit', created: true, version: 1 };
 
 async function group(o: { items: BuiltinSkillInfo[]; selected?: string | null; collapsible?: boolean; handlers?: FakeHandlers; progress?: Record<string, { step: string }> }) {
   const bridge = new FakeDeskBridge(o.handlers ?? {});
@@ -36073,9 +36078,15 @@ async function panel(item: BuiltinSkillInfo, handlers: FakeHandlers = {}, projec
   return { bridge, view, outputs };
 }
 
+/** Another built-in opens in the same panel; `on` again, since rerender drops the output listeners it is not given. */
+async function open(view: Awaited<ReturnType<typeof panel>>['view'], outputs: Awaited<ReturnType<typeof panel>>['outputs'], item: BuiltinSkillInfo) {
+  await view.rerender({ inputs: { item }, on: outputs, partialUpdate: true });
+  await waitFor(() => expect(screen.getByRole('article').getAttribute('aria-label')).toBe(`Built-in skill ${item.name}`));
+}
+
 describe('Built into Desk (Builtins.test.tsx)', () => {
   it('shows each built-in with its environment and switch, and folds away on the map', async () => {
-    const items = [pdf, builtin('images', { title: 'Images and fonts', broken: 'images does not match' }), builtin('archives', { enabled: false, runtime: { state: 'failed', reason: 'no network' } })];
+    const items = [pdf, builtin('images', { title: 'Images and fonts', broken: 'images does not match' }), builtin('archives', { enabled: false, runtime: failed })];
     const { bridge, view, outputs } = await group({
       items,
       selected: 'builtin:pdf-toolkit',
@@ -36086,6 +36097,7 @@ describe('Built into Desk (Builtins.test.tsx)', () => {
     expect(within(region).getByText('Set up on first use')).toBeTruthy();
     expect(within(region).getByText('Damaged: reinstall Desk')).toBeTruthy();
     expect(within(region).getByText('Setup failed: no network')).toBeTruthy();
+    expect([...region.querySelectorAll('.runtime-line')].map((l) => l.className)).toEqual(['runtime-line none', 'runtime-line failed', 'runtime-line failed']);
     expect(within(region).queryByRole('switch', { name: 'Images and fonts' })).toBeNull();
     expect(within(region).getByRole('switch', { name: 'Archives' }).getAttribute('aria-checked')).toBe('false');
     expect(region.querySelectorAll('.builtin-card.selected')).toHaveLength(1);
@@ -36110,7 +36122,7 @@ describe('Built into Desk (Builtins.test.tsx)', () => {
 
   it('reads instructions and files, retries a failed setup, and duplicates into a project', async () => {
     const { bridge, outputs } = await panel(
-      { ...pdf, runtime: { state: 'failed', reason: 'no network' } },
+      { ...pdf, runtime: failed },
       {
         'builtins.file': () => new TextEncoder().encode('print("pdf")'),
         'builtins.retry': () => ({ state: 'preparing', reason: null }),
@@ -36144,6 +36156,95 @@ describe('Built into Desk (Builtins.test.tsx)', () => {
     await view.rerender({ inputs: { item: { ...pdf, broken: 'pdf-toolkit does not match' } }, partialUpdate: true });
     expect(screen.getByRole('alert').textContent).toContain('Reinstall Desk');
     expect(screen.queryByRole('switch')).toBeNull();
+  });
+});
+
+describe('BuiltinPanel, beyond the React cases', () => {
+  it('fetches each built-in once, even when the call reads a signal that changes later', async () => {
+    // The real bridge can read its signedOut signal inside call() (a sign-in retry); the fetch must not track it.
+    const signedIn = signal(true);
+    const { bridge } = await panel(pdf, {
+      'builtins.get': () => {
+        signedIn();
+        return detail;
+      },
+    });
+    await within(screen.getByRole('article')).findByText('Read and write PDFs.');
+    signedIn.set(false);
+    TestBed.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bridge.calls.filter((c) => c.channel === 'builtins.get')).toHaveLength(1);
+  });
+
+  it('drops a file that lands after another built-in opened', async () => {
+    let release: (data: Uint8Array) => void = () => {};
+    const { view, outputs } = await panel(pdf, { 'builtins.file': () => new Promise<Uint8Array>((resolve) => (release = resolve)) });
+    const article = screen.getByRole('article');
+    fireEvent.click(await within(article).findByRole('tab', { name: 'Files · 2' }));
+    fireEvent.click(within(article).getByRole('button', { name: /scripts\/pdf_read\.py/ }));
+    await open(view, outputs, builtin('archives'));
+    release(new TextEncoder().encode('print("pdf")'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(within(article).getByRole('tab', { name: 'Files · 2' }));
+    expect(within(article).getByText('Pick a file to view it.')).toBeTruthy();
+    expect(within(article).queryByText('print("pdf")')).toBeNull();
+  });
+
+  it("keeps each built-in's running Retry and switch to itself, however the user moves between them", async () => {
+    const held: Array<() => void> = [];
+    function hold<T>(value: T): Promise<T> {
+      return new Promise<T>((resolve) => held.push(() => resolve(value)));
+    }
+    const { view, outputs } = await panel(
+      { ...pdf, runtime: failed },
+      {
+        'builtins.retry': () => hold({ state: 'preparing', reason: null }),
+        'builtins.setEnabled': ({ name }: { name: string }) => hold(builtin(name, { enabled: false })),
+      },
+    );
+    const article = screen.getByRole('article');
+    const retryBusy = () => within(article).getByRole('button', { name: 'Retry' }).getAttribute('aria-busy');
+    const switchOff = () => (within(article).getByRole('switch') as HTMLButtonElement).disabled;
+    fireEvent.click(within(article).getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(article).getByRole('switch'));
+    expect([retryBusy(), switchOff()]).toEqual(['true', true]);
+    await open(view, outputs, builtin('archives', { runtime: failed }));
+    expect([retryBusy(), switchOff()]).toEqual([null, false]);
+    await open(view, outputs, { ...pdf, runtime: failed });
+    expect([retryBusy(), switchOff()]).toEqual(['true', true]);
+    held.forEach((release) => release());
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect([retryBusy(), switchOff()]).toEqual([null, false]));
+  });
+
+  it('keeps the duplicate sheet open while the copy is made, then opens the copy', async () => {
+    let release: (r: typeof copy) => void = () => {};
+    const { outputs } = await panel(pdf, { 'builtins.duplicate': () => new Promise<typeof copy>((resolve) => (release = resolve)) });
+    fireEvent.click(within(screen.getByRole('article')).getByRole('button', { name: 'Duplicate to my skills' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Duplicate' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(screen.getByRole('dialog', { name: 'Duplicate pdf-toolkit' })).toBeTruthy();
+    release(copy);
+    await waitFor(() => expect(outputs.duplicated).toHaveBeenCalledWith({ scope: 'global', name: 'pdf-toolkit' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('closes the duplicate sheet when another built-in opens, and a late copy only refreshes the lists', async () => {
+    let release: (r: typeof copy) => void = () => {};
+    const { view, outputs } = await panel(pdf, { 'builtins.duplicate': () => new Promise<typeof copy>((resolve) => (release = resolve)) });
+    fireEvent.click(within(screen.getByRole('article')).getByRole('button', { name: 'Duplicate to my skills' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' })).getByRole('button', { name: 'Duplicate' }));
+    await open(view, outputs, builtin('archives'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    release(copy);
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(1));
+    expect(outputs.duplicated).not.toHaveBeenCalled();
+    expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Duplicated pdf-toolkit. Your copy is used instead of the built-in.']);
   });
 });
 ```
@@ -36191,18 +36292,24 @@ export class BuiltinSwitch {
   readonly changed = output<void>();
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
-  protected readonly pending = signal(false);
+  /** The built-ins whose switch call is running: the panel's switch shows only its own skill's, whichever one it shows now. */
+  private readonly running = signal<ReadonlySet<string>>(new Set());
+  protected readonly pending = computed(() => this.running().has(this.item().name));
 
   protected async toggle(): Promise<void> {
     const item = this.item();
-    this.pending.set(true);
+    this.running.update((r) => new Set(r).add(item.name));
     try {
       await this.bridge.call('builtins.setEnabled', { name: item.name, enabled: !item.enabled });
       this.changed.emit();
     } catch (err) {
       this.toasts.error(err);
     } finally {
-      this.pending.set(false);
+      this.running.update((r) => {
+        const next = new Set(r);
+        next.delete(item.name);
+        return next;
+      });
     }
   }
 }
@@ -36212,16 +36319,23 @@ export class BuiltinSwitch {
   selector: 'span[deskBuiltinRuntime]',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { '[class]': "'runtime-line ' + (item().broken ? 'failed' : item().runtime.state)" },
+  host: { class: 'runtime-line', '[class]': 'state()' },
   template: `<span class="runtime-dot" aria-hidden="true"></span>{{ text() }}`,
 })
 export class BuiltinRuntime {
   readonly item = input.required<BuiltinSkillInfo>();
   private readonly global = inject(GlobalStore);
+  protected readonly state = computed(() => (this.item().broken ? 'failed' : this.item().runtime.state));
+  /** This built-in's live setup step; an own key only, since the name comes from deskd. */
+  private readonly progress = computed(() => {
+    const all = this.global.state().runtimes.progress;
+    const key = runtimeKey('builtin', null, this.item().name);
+    return Object.hasOwn(all, key) ? all[key] : undefined;
+  });
   protected readonly text = computed(() => {
     const item = this.item();
     if (item.broken) return 'Damaged: reinstall Desk';
-    return runtimeLabel(item, this.global.state().runtimes.progress[runtimeKey('builtin', null, item.name)]);
+    return runtimeLabel(item, this.progress());
   });
 }
 
@@ -36298,7 +36412,7 @@ function readOpen(): boolean {
 Create `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import type { SkillDetail } from '@desk/client';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { bytes, href, type SkillRef } from '@desk/ui-core';
@@ -36342,7 +36456,7 @@ type OpenFile = { path: string; data: Uint8Array };
       <div class="builtin-runtime">
         <span deskBuiltinRuntime [item]="item()"></span>
         @if (item().runtime.state === 'failed') {
-          <button deskButton size="sm" [pending]="retrying()" (click)="retry()">Retry</button>
+          <button deskButton size="sm" [pending]="busyHere('retry')" (click)="retry()">Retry</button>
         }
       </div>
     }
@@ -36408,7 +36522,7 @@ type OpenFile = { path: string; data: Uint8Array };
       <span class="grow"></span>
     </div>
     @if (duplicating()) {
-      <div deskSheet [title]="'Duplicate ' + item().name" (close)="duplicating.set(false)">
+      <div deskSheet [title]="'Duplicate ' + item().name" (close)="dismiss()">
         <p class="small">Your copy is an ordinary skill you can edit. Agents use it instead of the built-in until you delete it; its scripts keep using the built-in's Python environment.</p>
         <div deskField id="duplicate-scope" label="Where">
           <select id="duplicate-scope" class="select" (change)="target.set(val($event))">
@@ -36419,8 +36533,8 @@ type OpenFile = { path: string; data: Uint8Array };
           </select>
         </div>
         <div class="sheet-footer">
-          <button deskButton (click)="duplicating.set(false)">Cancel</button>
-          <button deskButton variant="primary" [pending]="pending()" (click)="duplicate()">Duplicate</button>
+          <button deskButton [disabled]="busyHere('duplicate')" (click)="dismiss()">Cancel</button>
+          <button deskButton variant="primary" [pending]="busyHere('duplicate')" (click)="duplicate()">Duplicate</button>
         </div>
       </div>
     }
@@ -36445,21 +36559,22 @@ export class BuiltinPanel {
   protected readonly file = linkedSignal<string, OpenFile | null>({ source: this.name, computation: () => null });
   protected readonly detail = signal<SkillDetail | null>(null);
   protected readonly error = signal<string | null>(null);
-  protected readonly retrying = signal(false);
-  protected readonly duplicating = signal(false);
+  /** The Duplicate sheet; another built-in opening closes it, so it never duplicates that one. */
+  protected readonly duplicating = linkedSignal<string, boolean>({ source: this.name, computation: () => false });
   protected readonly target = signal('global');
-  protected readonly pending = signal(false);
+  /** Every call running, as `<name>|<what>` (`retry`, `duplicate`): each built-in's buttons show only their own. */
+  private readonly busy = signal<ReadonlySet<string>>(new Set());
   protected readonly shadowHref = computed(() => href({ name: 'skills', skill: `global:${this.name()}` }));
 
   constructor() {
-    // React's effect on [item.name]; a late answer for another built-in is dropped.
+    // React's effect on [item.name]; a late answer for another built-in is dropped. The call runs untracked, so a
+    // signal the bridge reads (signedOut on a sign-in retry) never fetches the built-in again.
     effect((onCleanup) => {
       const name = this.name();
       let live = true;
       onCleanup(() => (live = false));
       this.error.set(null);
-      this.bridge
-        .call('builtins.get', { name })
+      untracked(() => this.bridge.call('builtins.get', { name }))
         .then((d) => {
           if (live) this.detail.set(d);
         })
@@ -36473,26 +36588,39 @@ export class BuiltinPanel {
     return (e.target as HTMLSelectElement).value;
   }
 
+  /** Whether `what` (`retry`, `duplicate`) is running on the open built-in. */
+  protected busyHere(what: string): boolean {
+    return this.busy().has(`${this.name()}|${what}`);
+  }
+
+  /** Cancel, Escape and the backdrop do nothing while the copy is being made, so `duplicated` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.busyHere('duplicate')) this.duplicating.set(false);
+  }
+
   protected async openFile(path: string): Promise<void> {
+    const name = this.name();
     try {
-      const data = await this.bridge.call('builtins.file', { name: this.name(), path });
-      this.file.set({ path, data });
+      const data = await this.bridge.call('builtins.file', { name, path });
+      // Another built-in opened meanwhile: this file is not one of its files.
+      if (this.name() === name) this.file.set({ path, data });
     } catch (err) {
-      this.toasts.error(err);
+      if (this.name() === name) this.toasts.error(err);
     }
   }
 
   protected async retry(): Promise<void> {
     const name = this.name();
-    this.retrying.set(true);
+    const done = this.mark(`${name}|retry`);
     try {
       await this.bridge.call('builtins.retry', { name });
+      // It did happen, so its toast and `changed` come even when another built-in opened meanwhile.
       this.toasts.toast({ tone: 'info', message: `Setting up ${name} again.` });
       this.changed.emit();
     } catch (err) {
       this.toasts.error(err);
     } finally {
-      this.retrying.set(false);
+      done();
     }
   }
 
@@ -36506,17 +36634,33 @@ export class BuiltinPanel {
     const name = this.name();
     const target = this.target();
     const projectId = target === 'global' ? undefined : target;
-    this.pending.set(true);
+    const done = this.mark(`${name}|duplicate`);
     try {
       await this.bridge.call('builtins.duplicate', { name, ...(projectId ? { projectId } : {}) });
       this.toasts.toast({ tone: 'info', message: `Duplicated ${name}. Your copy is used instead of the built-in.` });
-      this.duplicating.set(false);
-      this.duplicated.emit(projectId ? { scope: 'project', projectId, name } : { scope: 'global', name });
+      if (this.name() === name) {
+        this.duplicating.set(false);
+        this.duplicated.emit(projectId ? { scope: 'project', projectId, name } : { scope: 'global', name });
+      } else {
+        // Another built-in opened meanwhile: the lists change, but opening the copy would leave the one the user opened.
+        this.changed.emit();
+      }
     } catch (err) {
       this.toasts.error(err);
     } finally {
-      this.pending.set(false);
+      done();
     }
+  }
+
+  /** Marks a call (`<name>|<what>`) as running; the returned function clears only that mark. */
+  private mark(entry: string): () => void {
+    this.busy.update((b) => new Set(b).add(entry));
+    return () =>
+      this.busy.update((b) => {
+        const next = new Set(b);
+        next.delete(entry);
+        return next;
+      });
   }
 }
 ```
@@ -36524,13 +36668,24 @@ export class BuiltinPanel {
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins)`
-Expected: PASS (8 tests: these 4 and W3a.2b's 4).
+Expected: PASS (15 tests: these 9 and W3a.2b's 6).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
 Run: `pnpm exec vitest run packages/ui-styles`
 Expected: PASS: `tokens.test.ts` finds no color literal in the new files.
+
+**Deviation:** the blocks above are the committed files. The plan's first code was run as written and passed the four React cases, but it broke six of the port conventions that W3a.5–W3a.8 and their reviews settled, so it changed. Each change has a case (or, for the first, an assertion added to the first React case) that failed against the first code:
+- **Classes.** `BuiltinRuntime`'s host bound `'[class]': "'runtime-line ' + state"`, which Angular writes sorted (`none runtime-line`). The fixed class is now in the host's `class` and only the state in `[class]` (a `state` computed), so each line reads `runtime-line none` as React's does; the first case now compares the three lines' `className`.
+- **Own keys.** The live step is read with `Object.hasOwn` from `runtimes.progress`, as `RuntimeLine` does. The key always starts `builtin:`, so no prototype member can match it today; there is no case for it.
+- **Untracked fetch.** The `builtins.get` effect called the bridge while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would fetch again when it changed. The call now runs in `untracked`. Case 5 counted 2 calls without it.
+- **Late answers after another built-in opens.** `openFile` captures the name before its `await` and drops a file (and its error toast) that lands for another built-in, as `SkillPanel` does. Case 6: the Files tab of the next built-in showed the old file.
+- **Pending marks per built-in.** The panel's `retrying` and `pending`, and `BuiltinSwitch`'s `pending`, were one flag, and the panel's switch and Retry are the same components whichever built-in it shows, so a running call marked the next built-in's buttons and lost its own mark on the way back. The panel keeps a set of `<name>|<what>` marks (`retry`, `duplicate`) that `busyHere(what)` reads for the open built-in, and the switch keeps a set of names; each call adds its mark and deletes only that one. Retry's toast and `changed` still come when another built-in opened meanwhile, since it did happen. Case 7: pdf-toolkit's held Retry and switch, then archives (neither busy), then pdf-toolkit again (both busy until released).
+- **The Duplicate sheet ignores close while its call runs.** Cancel is `[disabled]` while the copy is made, and both it and the `Sheet`'s `(close)` (Escape, the backdrop) go through `dismiss()`, which does nothing meanwhile, so `duplicated` still reaches the screen (W3a.8's review fix). Case 8: the sheet stayed open through Cancel, Escape and the backdrop, then closed with `duplicated`; against the first code Cancel was never disabled.
+- **The Duplicate sheet resets per built-in.** `duplicating` is `linkedSignal<string, boolean>({ source: this.name, computation: () => false })`, like `SkillPanel`'s `confirming` since W3a.7's second review fix, so an open sheet never duplicates the next built-in. A copy that lands after another built-in opened still toasts, and emits `changed` (the screen lists the built-ins again) instead of `duplicated`, which would open the copy and leave the built-in the user opened, as `SkillPanel`'s late delete keeps its `changed` and drops its `close`. Case 9: the sheet stayed open over archives, and the late copy emitted `duplicated`.
+
+The spec failed first on `Could not resolve "./builtin-group"` and `"./builtin-panel"`. Nothing else departs from `BuiltinGroup.tsx` and `BuiltinPanel.tsx` (master bd87256, unchanged on `web-ui` since the merge but for their imports): the panel never offers Edit or anything that writes a built-in's files, and the switch only asks deskd (`builtins.setEnabled`). 9 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -37666,7 +37821,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
