@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
+import { CatalogCategory } from '@desk/protocol';
 import { GlobalStore } from '../../core/global.store';
 import { catalogItems, install } from '../../testing/catalog';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../../testing/fake-bridge';
@@ -71,6 +72,9 @@ describe('the catalog helpers', () => {
     expect(installRef('pre-mortem', { scope: 'project', project_id: 'p2' })).toEqual({ scope: 'project', projectId: 'p2', name: 'pre-mortem' });
     expect(installRef('pre-mortem', { scope: 'global', project_id: null })).toEqual({ scope: 'global', name: 'pre-mortem' });
     expect(BAYS.map((b) => b.category)).toEqual(['research', 'documents', 'writing', 'planning', 'code']);
+    // Files & media has no bay: its skills are built into Desk (only a stale entry could still name it).
+    expect(CatalogCategory.options.filter((c) => !BAYS.some((b) => b.category === c))).toEqual(['files']);
+    expect(BAYS.find((b) => b.category === 'documents')?.blurb).toBe('Conversion to Markdown, data analysis, Excel automation, HTML slides.');
   });
 });
 

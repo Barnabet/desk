@@ -32,12 +32,13 @@ describe('scopeArg and whoLabel', () => {
     expect(scopeArg({ scope: 'project', projectId: 'p1', name: 'brand-voice' })).toEqual({ projectId: 'p1' });
   });
 
-  it('says who made a version: you, a thread, Desk, or the catalog with its commit', () => {
+  it('says who made a version: you, a thread, Desk, a built-in skill, or the catalog with its commit', () => {
     const titles = new Map([['t1', 'Welcome emails']]);
     expect(whoLabel(null, titles)).toBe('Unknown');
     expect(whoLabel('user', titles)).toBe('You');
     expect(whoLabel('agent:t1', titles)).toBe('Welcome emails');
     expect(whoLabel('agent:d9', titles)).toBe('Desk');
+    expect(whoLabel('builtin:word-documents', titles)).toBe('Built into Desk');
     expect(whoLabel(`catalog:word-documents@${'a'.repeat(40)}`, titles)).toBe('Catalog · aaaaaaa');
     expect(whoLabel('catalog:word-documents@builtin-0123456789ab', titles)).toBe('Catalog');
     expect(whoLabel('import', titles)).toBe('import');

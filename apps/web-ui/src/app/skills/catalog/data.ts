@@ -1,20 +1,21 @@
 import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
-import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem } from '@desk/protocol';
+import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem, WritableSkillScope } from '@desk/protocol';
 import { skillKey, type SkillRef } from '@desk/ui-core';
 import { describeError } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
 import { GlobalStore } from '../../core/global.store';
 
+/** The catalog's bays, in order. `files` has none: Desk's file-type skills are built in now, not catalog entries. */
 export const BAYS: Array<{ category: CatalogCategory; title: string; blurb: string }> = [
   { category: 'research', title: 'Research', blurb: 'Find sources, check facts, read the web.' },
-  { category: 'documents', title: 'Documents & data', blurb: 'Word, PDF, Excel, slides and datasets.' },
+  { category: 'documents', title: 'Documents & data', blurb: 'Conversion to Markdown, data analysis, Excel automation, HTML slides.' },
   { category: 'writing', title: 'Writing & diagrams', blurb: 'Clearer prose, rendered diagrams.' },
   { category: 'planning', title: 'Planning', blurb: 'Meetings, risks and decisions.' },
   { category: 'code', title: 'Code', blurb: 'Debugging, review and testing.' },
 ];
 
-/** The skill a catalog install became. */
-export const installRef = (id: string, i: Pick<CatalogInstall, 'scope' | 'project_id'>): SkillRef =>
+/** The skill a catalog install became (installs are global or in a project, never built in). */
+export const installRef = (id: string, i: { scope: WritableSkillScope; project_id: string | null }): SkillRef =>
   i.scope === 'global' ? { scope: 'global', name: id } : { scope: 'project', projectId: i.project_id!, name: id };
 
 /** Installs that really came from the catalog (not another skill that happens to share the name). */
