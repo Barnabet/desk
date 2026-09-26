@@ -1,8 +1,13 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { call, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
 import { startWebE2E, type SignedIn, type WebE2E } from './harness';
 
 let e2e: WebE2E;
+/** The Checkout project's git source, for its Desk's spawn_thread: the repository case sets it before it briefs Desk. */
+let checkoutSource = '';
 
 const content = (m: Record<string, unknown> | undefined) => (typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? ''));
 const system = (req: ChatRequest) => content(req.messages[0]);
@@ -89,6 +94,28 @@ function frontend(req: ChatRequest): FakeReply {
   return tools(call('message_thread', { thread_id: 'Auth API', kind: 'question', text: 'Which token format does /login return?' }), call('wait_for_reply', {}));
 }
 
+/** Checkout's Desk: one thread on the repository, then thanks. */
+function checkoutDesk(req: ChatRequest): FakeReply {
+  const last = req.messages.at(-1);
+  if (last?.role === 'tool') return text('On it.');
+  if (content(last).includes('Rewrite the checkout copy')) {
+    // The brief avoids the user's words, so the thread's completed notice cannot look like a new brief.
+    return tools(call('spawn_thread', { title: 'Checkout copy', brief: 'Improve copy.md and add a badge.', git_source_id: checkoutSource }));
+  }
+  return text('Thanks.');
+}
+
+/** Checkout copy: writes the copy and a badge in its branch, then completes. */
+function checkoutCopy(req: ChatRequest): FakeReply {
+  if (req.messages.at(-1)?.role === 'tool') {
+    return lastCalls(req).includes('write_file') ? tools(call('complete', { summary: 'Rewrote the checkout copy and added a badge.' })) : text('Done.');
+  }
+  return tools(
+    call('write_file', { path: 'copy.md', content: '# Checkout\n\nPay in one step.\n' }),
+    call('write_file', { path: 'badge.svg', content: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="4"/></svg>\n' }),
+  );
+}
+
 /** One fake model for every scenario: each project's Desk by the project it coordinates, each thread by its assignment. */
 function script(req: ChatRequest): FakeReply {
   const s = system(req);
@@ -97,6 +124,8 @@ function script(req: ChatRequest): FakeReply {
   if (s.includes('## Your assignment: Signup checklist')) return checklist(req);
   if (s.includes('## Your assignment: Auth API')) return authApi(req);
   if (s.includes('## Your assignment: Frontend')) return frontend(req);
+  if (s.startsWith('You are Desk, the coordinator of the project "Checkout"')) return checkoutDesk(req);
+  if (s.includes('## Your assignment: Checkout copy')) return checkoutCopy(req);
   return text('Done.');
 }
 
@@ -121,7 +150,7 @@ async function openAt(hash: string): Promise<SignedIn> {
 }
 
 describe('the core loop in the browser', () => {
-  it('briefs Desk, forks a thread, answers Desk, approves from Attention with ⌘⏎, and the report lands as a hand-off', async () => {
+  it('briefs Desk, forks a thread, answers Desk, approves from Attention with ⌘⏎, the report lands as a hand-off, and the thread reopens with a message', async () => {
     const client = e2e.client();
     const { project } = await client.projects.create({ name: 'Onboarding revamp', goal: 'Relaunch onboarding next month' });
     const { context, page, problems } = await openAt(`#/p/${project.id}/conversation`);
@@ -175,11 +204,30 @@ describe('the core loop in the browser', () => {
     await page.getByRole('heading', { name: 'All clear' }).waitFor({ timeout: 10_000 });
     await page.getByRole('link', { name: 'All clear' }).waitFor();
 
+    // The thread's route shows the revision. The thread is done, so its box asks; reopen it with a message instead.
+    const [t] = await client.threads.list(project.id);
+    await go(page, `#/p/${project.id}/threads/${t!.id}`);
+    await page.getByRole('button', { name: /Desk sent it back/ }).waitFor({ timeout: 15_000 });
+    const transcript = page.getByRole('complementary', { name: 'Transcript' });
+    await transcript.getByLabel('Ask this thread').fill('Keep it short');
+    await transcript.getByRole('button', { name: 'Reopen with this…' }).click();
+    await page.getByRole('dialog', { name: 'Reopen this thread?' }).getByRole('button', { name: 'Reopen', exact: true }).click();
+    await transcript.getByText(/^You steered/).first().waitFor({ timeout: 15_000 });
+    await transcript.getByText('Will do.').waitFor({ timeout: 15_000 });
+    await e2e.shot(page, 'flows-5-thread');
+    // It works in a scratch workspace: Diff says so.
+    await page.getByRole('tab', { name: 'Diff' }).click();
+    await page.getByText('No diff for this thread').waitFor();
+    await go(page, `#/p/${project.id}/threads`);
+    await page.getByRole('heading', { name: 'Threads' }).waitFor();
+    await page.getByRole('link', { name: /Signup checklist/ }).waitFor();
+    await e2e.shot(page, 'flows-6-roster');
+
     expect(problems).toEqual([]);
     await context.close();
   }, 180_000);
 
-  it("shows one thread's question to another on the asker's lane, answered, in the pair sheet and the digest", async () => {
+  it("shows one thread's question to another on the asker's lane, answered, in the pair sheet, the digest and both transcripts, and a done thread answers the user's Ask and stays Done", async () => {
     const client = e2e.client();
     const { project } = await client.projects.create({ name: 'Sign-in', goal: 'Ship a sign-in page' });
     const { context, page, problems } = await openAt(`#/p/${project.id}/conversation`);
@@ -215,6 +263,95 @@ describe('the core loop in the browser', () => {
     const inFront = sheet.getByRole('link', { name: 'show in Frontend transcript' });
     expect(await inFront.getAttribute('href')).toMatch(new RegExp(`/threads/${front.id}\\?at=\\d+$`));
     await e2e.shot(page, 'messaging-3-digest-pair');
+
+    // The answer's link opens Frontend where it received it: its question and Auth API's answer are two cards in one stop.
+    const auth = (await client.threads.list(project.id)).find((t) => t.title === 'Auth API')!;
+    await inFront.click();
+    const both = page.getByRole('button', { name: /^Stop \d+: .*, 2 messages$/ });
+    await both.waitFor({ timeout: 15_000 });
+    await expect.poll(() => both.getAttribute('aria-pressed')).toBe('true');
+    const tr = page.getByRole('complementary', { name: 'Transcript' });
+    await tr.locator('.tr-card', { hasText: 'Answer from Auth API' }).first().waitFor();
+    expect(await tr.locator('.tr-card', { hasText: 'Asked Auth API' }).count()).toBe(1);
+    await e2e.shot(page, 'messaging-4-asker');
+
+    // The answerer's route: Frontend's question is a card, and the answer run is one stop.
+    await go(page, `#/p/${project.id}/threads/${auth.id}`);
+    await page.getByRole('button', { name: /^Stop \d+: Answered Frontend/ }).waitFor({ timeout: 15_000 });
+    expect(await tr.locator('.tr-card', { hasText: 'Frontend asked' }).count()).toBe(1);
+
+    // The user asks the done thread; it answers from its context and stays Done.
+    await tr.getByLabel('Ask this thread').fill('How long do tokens last?');
+    await tr.getByRole('button', { name: 'Ask', exact: true }).click();
+    await page.getByRole('button', { name: /^Stop \d+: You asked/ }).waitFor({ timeout: 15_000 });
+    await page.getByRole('button', { name: /^Stop \d+: Answered you/ }).waitFor({ timeout: 15_000 });
+    await tr.getByText('Tokens last 15 minutes.').first().waitFor();
+    await expect.poll(() => page.locator('.thread-status-line').first().textContent()).toMatch(/^Done/);
+    expect((await client.threads.list(project.id)).find((t) => t.id === auth.id)?.status).toBe('done');
+    await e2e.shot(page, 'messaging-5-ask');
+
+    expect(problems).toEqual([]);
+    await context.close();
+  }, 180_000);
+
+  it('works a thread on a repository: the roster card with its branch, its route, the Diff, and Files with an SVG shown as text and saved as a download', async () => {
+    // A git repository in the harness's home folder, as the project's source: the thread gets a branch of its own.
+    const repo = join(e2e.home, 'code', 'checkout');
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(join(repo, 'README.md'), '# Checkout\n');
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: repo, stdio: 'pipe' });
+    git('init', '-q', '-b', 'main');
+    git('add', '.');
+    git('commit', '-qm', 'init');
+    const client = e2e.client();
+    const { project, sources } = await client.projects.create({ name: 'Checkout', goal: 'Clearer checkout copy', sources: [{ path: repo }] });
+    expect(sources.map((s) => s.kind)).toEqual(['git']);
+    checkoutSource = sources[0]!.id;
+    const { context, page, problems } = await openAt(`#/p/${project.id}/conversation`);
+
+    const composer = page.getByLabel('Message Desk');
+    await composer.fill('Rewrite the checkout copy.');
+    await composer.press('Enter');
+    await expect.poll(async () => (await client.threads.list(project.id)).find((t) => t.title === 'Checkout copy')?.status, { timeout: 30_000 }).toBe('done');
+    const thread = (await client.threads.list(project.id)).find((t) => t.title === 'Checkout copy')!;
+    expect(thread.git_branch).toBeTruthy();
+
+    // The roster card names its branch; it opens the thread.
+    await go(page, `#/p/${project.id}/threads`);
+    const card = page.getByRole('link', { name: /Checkout copy/ });
+    await card.waitFor();
+    expect(await card.textContent()).toContain(thread.git_branch!);
+    expect(await card.textContent()).toContain('Done');
+    await card.click();
+    await page.getByRole('heading', { name: 'Checkout copy', level: 1 }).waitFor();
+    await page.getByRole('button', { name: /^Stop \d+: Reported to Desk/ }).waitFor({ timeout: 15_000 });
+    expect(await page.locator('.thread-chips .chip .mono').textContent()).toBe(thread.git_branch);
+    await e2e.shot(page, 'threads-1-route');
+
+    // Diff: the branch against its base, both files added, and the patch.
+    await page.getByRole('tab', { name: 'Diff' }).click();
+    const note = page.locator('.diff-tab > p.small');
+    await note.waitFor();
+    expect(await note.textContent()).toContain(`${thread.git_branch} against `);
+    expect(await note.textContent()).toContain('2 files changed.');
+    const rows = page.locator('.diff-files tr');
+    expect(await rows.allTextContents()).toEqual([expect.stringMatching(/^Abadge\.svg\+1/), expect.stringMatching(/^Acopy\.md\+3/)]);
+    expect(await page.getByLabel('Patch').textContent()).toContain('+Pay in one step.');
+    await e2e.shot(page, 'threads-2-diff');
+
+    // Files: the SVG is source text, never an image (spec §4.11), and Save a copy… downloads it.
+    await page.getByRole('tab', { name: 'Files' }).click();
+    await page.getByRole('button', { name: /badge\.svg/ }).click();
+    const viewer = page.locator('.file-viewer');
+    await viewer.locator('.codeblock code', { hasText: '<circle' }).waitFor();
+    expect(await viewer.locator('img, svg').count()).toBe(0);
+    const [download] = await Promise.all([page.waitForEvent('download'), viewer.getByRole('button', { name: 'Save a copy…' }).click()]);
+    expect(download.suggestedFilename()).toBe('badge.svg');
+    // Markdown renders.
+    await page.getByRole('button', { name: /copy\.md/ }).click();
+    await viewer.getByRole('heading', { name: 'Checkout' }).waitFor();
+    await viewer.getByText('Pay in one step.').waitFor();
+    await e2e.shot(page, 'threads-3-files');
 
     expect(problems).toEqual([]);
     await context.close();
