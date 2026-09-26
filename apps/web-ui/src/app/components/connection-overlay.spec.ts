@@ -46,8 +46,12 @@ describe('ConnectionOverlay', () => {
     const bridge = await renderOverlay(at('mismatch', 'deskd speaks protocol 3; this Desk needs 4.'), new FakeDeskBridge({ 'daemon.restart': () => ({ running: true }) }));
     const dialog = screen.getByRole('alertdialog', { name: 'Desk and deskd are out of step' });
     expect(dialog.textContent).toContain('deskd speaks protocol 3; this Desk needs 4. Restart the daemon from this install, or update Desk.');
-    fireEvent.click(screen.getByRole('button', { name: 'Restart deskd' }));
-    await waitFor(() => expect(bridge.calls.map((c) => c.channel)).toEqual(['daemon.restart']));
+    const restart = screen.getByRole('button', { name: 'Restart deskd' });
+    fireEvent.click(restart);
+    expect(restart.getAttribute('aria-busy')).toBe('true');
+    // The call is recorded at once; wait until it has settled before saying no error came back.
+    await waitFor(() => expect(restart.hasAttribute('aria-busy')).toBe(false));
+    expect(bridge.calls).toEqual([{ channel: 'daemon.restart', input: {} }]);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -63,5 +67,14 @@ describe('ConnectionOverlay', () => {
     await renderOverlay(at('live'), bridge);
     expect(screen.getByRole('status').textContent).toBe('Reconnecting to desk web… If you stopped it, run desk web again.');
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('says desk web is gone rather than offering Start while the stale state still reads deskd offline', async () => {
+    const bridge = new FakeDeskBridge();
+    bridge.setPushStatus('reconnecting');
+    await renderOverlay(at('offline'), bridge);
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting to desk web… If you stopped it, run desk web again.');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start Desk' })).toBeNull();
   });
 });
