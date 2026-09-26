@@ -23723,9 +23723,9 @@ Run the specs again: PASS. Commit (`feat(web-ui): the conversation and threads s
 
 - [ ] **Step 4: Verify**
 
-Run: `pnpm typecheck`, `pnpm exec vitest run --maxWorkers=2`, `pnpm --filter @desk/web-ui test`: all pass.
+Run: `pnpm typecheck`, `pnpm exec vitest run --maxWorkers=2`, `pnpm --filter @desk/web-ui test`: all pass. When the task landed: exit 0; 197 files, 1317 tests; 76 files, 417 tests.
 
-Run: `pnpm test:web-e2e` once (headless), since the conversation screen changed; and, since `@desk/ui-core` changed under the desktop (`pastedName`, `linkText`), `pnpm test:e2e` once, never both at the same time.
+Run: `pnpm test:web-e2e` once (headless), since the conversation screen changed; and, since `@desk/ui-core` changed under the desktop (`pastedName`, `linkText`), `pnpm test:e2e` once, never both at the same time. When the task landed: the web e2e 4 files, 11 tests (its first run caught the roster's "Checkout copy" link, which the Threads timeline now names too; Step 3's e2e note has the fix); the Electron e2e 8 files and 10 tests passed, 1 skipped (the packaged app's, which needs `pnpm package:desktop`).
 
 ---
 
