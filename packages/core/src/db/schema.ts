@@ -36,7 +36,7 @@ export const agents = sqliteTable(
   {
     id: text('id').primaryKey(),
     project_id: text('project_id').notNull(),
-    role: text('role', { enum: ['desk', 'thread'] }).notNull(),
+    role: text('role', { enum: ['desk', 'thread', 'step'] }).notNull(), // Task 14 audits step agents here.
     status: text('status', { enum: ['idle', 'queued', 'running', 'waiting', 'done', 'failed', 'cancelled'] }).notNull(),
     model: text('model').notNull(),
     /** A reasoning level chosen for this agent (threads, at spawn); null follows the project setting. */

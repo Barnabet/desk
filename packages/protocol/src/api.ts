@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AutomationExport, AutomationLayout, AutomationName, Grant, InputValue, ValidationIssue } from './automations';
 import { AgentStatus, ArtifactKind, MemoryKind, ModelInfo, SkillName } from './domain';
 import { EphemeralEvent } from './events';
 import { ProjectSettingsPatch } from './settings';
@@ -32,7 +33,12 @@ export const MessageRequest = z.object({
 });
 export type MessageRequest = z.input<typeof MessageRequest>;
 
-export const ResolveApprovalRequest = z.object({ decision: z.enum(['approved', 'denied']), note: z.string().optional() });
+export const ResolveApprovalRequest = z.object({
+  decision: z.enum(['approved', 'denied']),
+  note: z.string().optional(),
+  /** Approve and remember for this automation: only for a step agent's approval (spec §5.3). */
+  remember: z.boolean().optional(),
+});
 export type ResolveApprovalRequest = z.input<typeof ResolveApprovalRequest>;
 
 export const MemoryWriteRequest = z.object({ kind: MemoryKind, content: z.string().min(1), supersedes: z.string().optional() });
@@ -101,13 +107,24 @@ export type StreamServerMessage =
 
 // ── UI endpoints ─────────────────────────────────────────────────────
 
-export const AttentionKind = z.enum(['approval', 'question', 'needs_you', 'stalled', 'failed', 'paused']);
+export const AttentionKind = z.enum([
+  'approval',
+  'question',
+  'needs_you',
+  'stalled',
+  'failed',
+  'paused',
+  'automation_ask',
+  'automation_failed',
+  'automation_enable_request',
+  'automation_grants_suspended',
+]);
 export type AttentionKind = z.infer<typeof AttentionKind>;
 
 /** The `system.notice` code of a project whose automatic wakes the runtime paused (design spec §5.4). */
 export const WAKES_PAUSED = 'wakes_paused';
 
-/** One thing that needs the user. `id` is stable: `approval:<id>`, `question:<event>`, `report:<event>:<i>`, `stalled:<thread>:<event>`, `failed:<thread>`, `paused:<notice event>`. */
+/** One thing that needs the user. `id` is stable: `approval:<id>`, `question:<event>`, `report:<event>:<i>`, `stalled:<thread>:<event>`, `failed:<thread>`, `paused:<notice event>`, `automation_ask:<run>:<step>`, `automation_failed:<run>`, `automation_enable:<automation>:<ts>`, `automation_grants:<automation>:<version>`. */
 export const AttentionItem = z.object({
   id: z.string(),
   kind: AttentionKind,
@@ -122,6 +139,9 @@ export const AttentionItem = z.object({
     event_id: z.number().int().optional(),
     thread_id: z.string().optional(),
     options: z.array(z.string()).optional(),
+    automation_id: z.string().optional(),
+    run_id: z.string().optional(),
+    step_id: z.string().optional(),
   }),
 });
 export type AttentionItem = z.infer<typeof AttentionItem>;
@@ -202,3 +222,29 @@ export const DaemonConfig = z.object({ notifications: z.enum(['auto', 'off']) })
 export type DaemonConfig = z.infer<typeof DaemonConfig>;
 export const DaemonConfigPatch = DaemonConfig.partial();
 export type DaemonConfigPatch = z.input<typeof DaemonConfigPatch>;
+
+// ── automations (spec 2026-09-26-automations-design §7.1) ────────────
+
+/** Which client saved: the desktop editor, the CLI, or anything else calling the API. */
+export const ClientVia = z.enum(['editor', 'cli', 'api']);
+export const AutomationCreateRequest = z.object({ name: AutomationName, definition: z.unknown(), change_note: z.string().max(2000).optional(), via: ClientVia.default('api') });
+export type AutomationCreateRequest = z.input<typeof AutomationCreateRequest>;
+export const AutomationSaveRequest = z.object({ definition: z.unknown(), change_note: z.string().max(2000).optional(), base_version: z.number().int().min(1), via: ClientVia.default('api') });
+export type AutomationSaveRequest = z.input<typeof AutomationSaveRequest>;
+export const AutomationValidateRequest = z.object({ definition: z.unknown(), name: AutomationName.optional() });
+export type AutomationValidateRequest = z.input<typeof AutomationValidateRequest>;
+/** `next_times`: the next three times of each valid schedule, by trigger index. */
+export type AutomationValidateResponse = { errors: ValidationIssue[]; warnings: ValidationIssue[]; next_times: Record<string, string[]> };
+export const AutomationLayoutRequest = z.object({ layout: AutomationLayout });
+export type AutomationLayoutRequest = z.input<typeof AutomationLayoutRequest>;
+export const AutomationEnabledRequest = z.object({ enabled: z.boolean() });
+export type AutomationEnabledRequest = z.input<typeof AutomationEnabledRequest>;
+/** `enabled`: set by the Turn-on dialog just before the switch; `edited`: the Grants tab. */
+export const AutomationGrantsRequest = z.object({ grants: z.array(Grant).max(100), reason: z.enum(['edited', 'enabled']).default('edited') });
+export type AutomationGrantsRequest = z.input<typeof AutomationGrantsRequest>;
+export const AutomationRunRequest = z.object({ inputs: z.record(z.string(), InputValue).default({}), test: z.boolean().default(false) });
+export type AutomationRunRequest = z.input<typeof AutomationRunRequest>;
+export const AutomationAnswerRequest = z.object({ decision: z.enum(['approve', 'reject']), note: z.string().max(2000).optional(), remember: z.boolean().optional() });
+export type AutomationAnswerRequest = z.input<typeof AutomationAnswerRequest>;
+export const AutomationImportRequest = AutomationExport;
+export type AutomationImportRequest = z.input<typeof AutomationImportRequest>;

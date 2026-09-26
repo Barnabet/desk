@@ -49,6 +49,10 @@ export const KIND_NAME: Record<AttentionItem['kind'], string> = {
   stalled: 'Stalled thread',
   failed: 'Failed thread',
   paused: 'Paused project',
+  automation_ask: 'Automation question',
+  automation_failed: 'Failed automation',
+  automation_enable_request: 'Automation to turn on',
+  automation_grants_suspended: 'Grants suspended',
 };
 
 export { STRIP_CODE };

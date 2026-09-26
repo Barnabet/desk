@@ -7,6 +7,10 @@ const HEADLINE: Record<AttentionItem['kind'], string> = {
   stalled: 'a thread stalled',
   failed: 'a thread failed',
   paused: 'agents paused',
+  automation_ask: 'an automation has a question',
+  automation_failed: 'an automation failed',
+  automation_enable_request: 'an automation is ready to turn on',
+  automation_grants_suspended: "an automation's grants are suspended",
 };
 
 /** The system notification for a new attention item (agent text is clipped, never rendered as markup). */

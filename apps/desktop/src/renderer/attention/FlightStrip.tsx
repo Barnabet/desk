@@ -10,6 +10,10 @@ const CAP_COLOR: Record<AttentionItem['kind'], string> = {
   stalled: 'var(--wait)',
   failed: 'var(--accent)',
   paused: 'var(--wait)',
+  automation_ask: 'var(--ink)',
+  automation_failed: 'var(--accent)',
+  automation_enable_request: 'var(--ink)',
+  automation_grants_suspended: 'var(--wait)',
 };
 
 /** One flight strip: end cap (code and age), project and title, who, the wait gauge, and a chevron. */
