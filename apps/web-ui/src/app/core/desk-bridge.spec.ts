@@ -41,7 +41,10 @@ class FakeSocket {
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const refused = () => json({ ok: false, error: { code: 'unauthorized', message: 'Sign in again.' } }, 401);
 const lastSocket = (): FakeSocket => FakeSocket.instances.at(-1)!;
+/** The session secret each /rpc call sent, in order. */
+const sentSecrets = () => fetchMock.mock.calls.map(([, init]) => (init.headers as Record<string, string>)['x-desk-session']);
 let fetchMock: Mock<(url: string, init: RequestInit) => Promise<Response>>;
 
 beforeEach(() => {
@@ -88,6 +91,13 @@ describe('DeskBridge.call over /rpc', () => {
     await expect(bridge.call('projects.get', { id: 'x' })).rejects.toMatchObject({ code: 'web_unreachable' });
   });
 
+  it('turns an answer that is not JSON into bad_response, such as the plain-text 421 for a wrong Host', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    fetchMock.mockResolvedValueOnce(new Response('Misdirected Request', { status: 421, headers: { 'content-type': 'text/plain' } }));
+    await expect(bridge.call('overview', {})).rejects.toMatchObject({ name: 'DeskCallError', code: 'bad_response', message: 'desk web answered overview with HTTP 421.', status: 421 });
+    expect(bridge.signedOut()).toBe(false);
+  });
+
   it('signs out on 401: the secret is dropped and later calls never leave the page', async () => {
     fetchMock.mockResolvedValue(json({ ok: false, error: { code: 'unauthorized', message: 'Sign in again.' } }, 401));
     const bridge = TestBed.inject(DeskBridge);
@@ -97,6 +107,44 @@ describe('DeskBridge.call over /rpc', () => {
     expect(localStorage.getItem('desk.session')).toBeNull();
     await expect(bridge.call('overview', {})).rejects.toMatchObject({ code: 'unauthorized' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a secret another tab stored while a call was out: the 401 for the old one retries with it', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    let answer: (res: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answer = resolve)));
+    fetchMock.mockResolvedValueOnce(json({ ok: true, value: { n: 1 } }));
+    const done = bridge.call('overview', {});
+    localStorage.setItem('desk.session', 'fresh');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'desk.session', newValue: 'fresh' }));
+    answer(refused());
+    await expect(done).resolves.toEqual({ n: 1 });
+    expect(sentSecrets()).toEqual(['s3cret', 'fresh']);
+    expect(bridge.signedOut()).toBe(false);
+    expect(localStorage.getItem('desk.session')).toBe('fresh');
+  });
+
+  it('on a 401, adopts a newer secret another tab stored and tries once more with it', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    fetchMock.mockImplementationOnce(async () => {
+      // Another tab signed in again; this page has not seen its storage event yet.
+      localStorage.setItem('desk.session', 'fresh');
+      return refused();
+    });
+    fetchMock.mockResolvedValueOnce(json({ ok: true, value: { n: 1 } }));
+    await expect(bridge.call('overview', {})).resolves.toEqual({ n: 1 });
+    expect(sentSecrets()).toEqual(['s3cret', 'fresh']);
+    expect(bridge.signedOut()).toBe(false);
+
+    fetchMock.mockImplementationOnce(async () => {
+      localStorage.setItem('desk.session', 'newer');
+      return refused();
+    });
+    fetchMock.mockResolvedValueOnce(refused());
+    await expect(bridge.call('overview', {})).rejects.toMatchObject({ code: 'unauthorized', status: 401 });
+    expect(sentSecrets()).toEqual(['s3cret', 'fresh', 'fresh', 'newer']);
+    expect(bridge.signedOut()).toBe(true);
+    expect(localStorage.getItem('desk.session')).toBeNull();
   });
 
   it('starts signed out without a secret, and signs in when another tab stores one', () => {
@@ -229,6 +277,42 @@ describe('DeskBridge over /push', () => {
     expect(bridge.pushStatus()).toBe('live');
     second.receive({ ack: 0, result: { ok: true, value: { ok: true } } });
     await expect(pending).resolves.toEqual({ ok: true });
+  });
+
+  it('waits 0.5, 1, 2 and 5 seconds before each new try, then 10 seconds each time, and starts over once signed in', () => {
+    vi.useFakeTimers();
+    const bridge = TestBed.inject(DeskBridge);
+    bridge.onPush('desk:global', () => {});
+    const waits = (delays: number[]) => {
+      for (const delay of delays) {
+        lastSocket().drop(1006);
+        const sockets = FakeSocket.instances.length;
+        vi.advanceTimersByTime(delay - 1);
+        expect(FakeSocket.instances, `before ${delay} ms`).toHaveLength(sockets);
+        vi.advanceTimersByTime(1);
+        expect(FakeSocket.instances, `at ${delay} ms`).toHaveLength(sockets + 1);
+      }
+    };
+    waits([500, 1000, 2000, 5000, 10_000, 10_000, 10_000]);
+    expect(bridge.pushStatus()).toBe('reconnecting');
+    lastSocket().open();
+    lastSocket().receive({ channel: 'desk:global', payload: {} });
+    expect(bridge.pushStatus()).toBe('live');
+    waits([500, 1000]);
+  });
+
+  it('adopts a newer secret another tab stored when /push refuses the session', () => {
+    const bridge = TestBed.inject(DeskBridge);
+    bridge.onPush('desk:global', () => {});
+    const first = lastSocket();
+    first.open();
+    localStorage.setItem('desk.session', 'fresh');
+    first.drop(4401);
+    expect(bridge.signedOut()).toBe(false);
+    expect(localStorage.getItem('desk.session')).toBe('fresh');
+    expect(FakeSocket.instances).toHaveLength(2);
+    lastSocket().open();
+    expect(lastSocket().sent).toEqual([{ session: 'fresh' }]);
   });
 
   it('signs out when /push refuses the session', async () => {

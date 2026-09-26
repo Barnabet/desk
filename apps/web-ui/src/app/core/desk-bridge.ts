@@ -63,7 +63,8 @@ function notificationPermission(): NotifyPermission {
  * The web UI's only way to desk web (spec §5). `call` posts one operation to /rpc with the session secret; `onPush` listens on
  * the /push socket. The host operations a browser does itself never reach the server (§3): links open here, files download
  * here, and picking a folder opens the folder browser. broker.watch and broker.unwatch travel on the socket, which is their
- * broker sender. A 401, or the socket closed with 4401, drops the secret and signs the page out.
+ * broker sender. A 401, or the socket closed with 4401, drops the secret and signs the page out, unless another tab has stored
+ * a newer secret, which the page then uses; a call refused for a secret the page no longer holds is tried once more.
  */
 @Injectable({ providedIn: 'root' })
 export class DeskBridge {
@@ -219,7 +220,7 @@ export class DeskBridge {
     });
   }
 
-  private async rpc(op: string, input: unknown): Promise<unknown> {
+  private async rpc(op: string, input: unknown, retried = false): Promise<unknown> {
     const secret = this.secret;
     if (!secret) {
       this.signOut();
@@ -236,7 +237,10 @@ export class DeskBridge {
       throw new DeskCallError(UNREACHABLE);
     }
     if (res.status === 401) {
-      this.signOut();
+      // Only the secret that was sent is refused. signOut() drops it, or adopts a newer one another tab stored; when the page
+      // holds another secret by now (adopted during the call, or just now), the call is tried once more with it.
+      if (this.secret === secret) this.signOut();
+      if (this.secret && this.secret !== secret && !retried) return this.rpc(op, input, true);
       throw new DeskCallError(SIGNED_OUT);
     }
     let result: IpcResult<unknown>;
