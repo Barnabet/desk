@@ -34258,7 +34258,7 @@ describe('SkillsMapView', () => {
 - [ ] **Step 2: Run them and watch them fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-list.spec.ts --include src/app/skills/skills-map-view.spec.ts)`
-Expected: FAIL. The test build stops with `Could not resolve "./skill-list"` and `Could not resolve "./skills-map-view"`.
+Expected: FAIL. The test build stops with `TS2307: Cannot find module './skill-list'` and `TS2307: Cannot find module './skills-map-view'`.
 
 - [ ] **Step 3: Write `SkillList` and `SkillsMapView`**
 
@@ -34346,11 +34346,12 @@ const TERRITORY: Record<MapTone, { fill: string; stroke: string; text: string }>
   waiting: { fill: 'var(--wait-pastel)', stroke: 'var(--wait-ring)', text: 'var(--wait-text)' },
   idle: { fill: 'var(--idle-pastel)', stroke: 'var(--rule)', text: 'var(--text-min)' },
 };
-const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: number }>> = {
-  running: { stroke: 'var(--run)', width: 2.5 },
-  waiting: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
-  queued: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
-};
+/** A live thread's line by its status (a Map, so a status from outside the UI never reads a prototype member). */
+const LINE: ReadonlyMap<AgentStatus, { stroke: string; dash?: string; width: number }> = new Map<AgentStatus, { stroke: string; dash?: string; width: number }>([
+  ['running', { stroke: 'var(--run)', width: 2.5 }],
+  ['waiting', { stroke: 'var(--wait)', width: 2, dash: '4 4' }],
+  ['queued', { stroke: 'var(--wait)', width: 2, dash: '4 4' }],
+]);
 
 /**
  * Global skills in the middle, project skills inside their project, live threads linked to the skills they use
@@ -34414,7 +34415,7 @@ export class SkillsMapView {
   protected readonly lines = computed(() =>
     this.layout().markers.flatMap((m) =>
       m.to.map((p, i) => {
-        const line = LINE[m.status] ?? { stroke: 'var(--muted)', width: 2 };
+        const line = LINE.get(m.status) ?? { stroke: 'var(--muted)', width: 2 };
         return { id: `${m.threadId}-${i}`, d: `M${m.x} ${m.y} L ${p.x} ${p.y}`, stroke: line.stroke, width: line.width, dash: line.dash ?? null };
       }),
     ),
@@ -34466,6 +34467,8 @@ Expected: PASS (2 files, 4 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation:** the plan first kept React's `LINE` as a `Partial<Record<AgentStatus, …>>` read with `LINE[m.status]`. Lookups keyed by strings from outside the UI use a `Map` or `Object.hasOwn` (W2a.1's prototype-lookup sweep), so `LINE` is a `ReadonlyMap` read with `get`; a thread status comes from deskd's zod-checked enum, so this only makes the rule hold without relying on that. The rest is `SkillList.tsx` and `SkillsMapView.tsx` as they are on `web-ui` after the merge of master (8883229): neither changed since, and the merge's built-in skills never reach them (`SkillNode`'s scope is still `'global' | 'project'`; `SkillsScreen` renders the built-ins in their own group, W3a.8b). Two small departures from React are the plan's own: a layout skill with no node is skipped rather than asserted (`byKey.get(s.key)!`; `layoutSkillsMap` places only the nodes it is given, so it never happens), and the groups are tracked by index rather than keyed by title. The failing build reports `TS2307` (the Angular compiler resolves the imports before esbuild). 4 tests.
 
 - [ ] **Step 5: Commit**
 
