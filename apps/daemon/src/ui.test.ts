@@ -117,12 +117,14 @@ describe('raw files over HTTP', () => {
     try {
       const get = async (path: string) => {
         const res = await fetch(`http://127.0.0.1:${server.port}/v1${path}`, { headers: { authorization: `Bearer ${TOKEN}` } });
-        return [res.status, await res.text()];
+        const body = await res.text();
+        // Each response carries its own type and its own length, not the previous file's.
+        return [res.status, body, res.headers.get('content-type'), res.headers.get('content-length')];
       };
-      expect(await get(`/threads/${t}/files/raw/a.txt`)).toEqual([200, 'one']);
-      expect(await get(`/threads/${t}/files/raw/b.md`)).toEqual([200, '# two, and longer']);
-      expect(await get('/skills/notes/versions/1/files/x.md')).toEqual([200, 'x']);
-      expect(await get('/skills/notes/versions/1/files/y.md')).toEqual([200, 'yy, and longer']);
+      expect(await get(`/threads/${t}/files/raw/a.txt`)).toEqual([200, 'one', 'application/octet-stream', '3']);
+      expect(await get(`/threads/${t}/files/raw/b.md`)).toEqual([200, '# two, and longer', 'application/octet-stream', '17']);
+      expect(await get('/skills/notes/versions/1/files/x.md')).toEqual([200, 'x', 'application/octet-stream', '1']);
+      expect(await get('/skills/notes/versions/1/files/y.md')).toEqual([200, 'yy, and longer', 'application/octet-stream', '14']);
     } finally {
       await server.close();
     }

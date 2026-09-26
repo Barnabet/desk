@@ -571,7 +571,11 @@ describe('ThreadsScreen', () => {
     expect(disc(2).getAttribute('aria-pressed')).toBe('true');
     const tr = screen.getByRole('complementary', { name: 'Transcript' });
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
-    await waitFor(() => expect(document.getElementById('tr-stop-1')?.querySelector('.tr-num-blank, .tr-num')).toBeTruthy());
+    // Both depths render #tr-stop-1 with a .tr-num; only Every step has the pressed button and unnumbered entries.
+    await waitFor(() => {
+      expect(within(tr).getByRole('button', { name: 'Every step' }).getAttribute('aria-pressed')).toBe('true');
+      expect(tr.querySelector('.tr-num-blank')).toBeTruthy();
+    });
     const brief = document.getElementById('tr-stop-1')!;
     expect(brief.className).toBe('tr-entry');
     fireEvent.click(brief);

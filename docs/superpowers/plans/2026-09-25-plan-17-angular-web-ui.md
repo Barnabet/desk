@@ -28024,7 +28024,11 @@ describe('ThreadsScreen', () => {
     expect(disc(2).getAttribute('aria-pressed')).toBe('true');
     const tr = screen.getByRole('complementary', { name: 'Transcript' });
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
-    await waitFor(() => expect(document.getElementById('tr-stop-1')?.querySelector('.tr-num-blank, .tr-num')).toBeTruthy());
+    // Both depths render #tr-stop-1 with a .tr-num; only Every step has the pressed button and unnumbered entries.
+    await waitFor(() => {
+      expect(within(tr).getByRole('button', { name: 'Every step' }).getAttribute('aria-pressed')).toBe('true');
+      expect(tr.querySelector('.tr-num-blank')).toBeTruthy();
+    });
     const brief = document.getElementById('tr-stop-1')!;
     expect(brief.className).toBe('tr-entry');
     fireEvent.click(brief);
@@ -28569,7 +28573,7 @@ after:
 
 ```ts
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { call, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
@@ -28603,6 +28607,9 @@ function checkoutDesk(req: ChatRequest): FakeReply {
   return text('Thanks.');
 }
 
+/** The badge Checkout copy writes, and the bytes "Save a copy…" must download. */
+const badgeSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="4"/></svg>\n';
+
 /** Checkout copy: writes the copy and a badge in its branch, then completes. */
 function checkoutCopy(req: ChatRequest): FakeReply {
   if (req.messages.at(-1)?.role === 'tool') {
@@ -28610,7 +28617,7 @@ function checkoutCopy(req: ChatRequest): FakeReply {
   }
   return tools(
     call('write_file', { path: 'copy.md', content: '# Checkout\n\nPay in one step.\n' }),
-    call('write_file', { path: 'badge.svg', content: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="4"/></svg>\n' }),
+    call('write_file', { path: 'badge.svg', content: badgeSvg }),
   );
 }
 
@@ -28800,6 +28807,9 @@ After the second case (its last line `  }, 180_000);`), inside `describe('the co
     expect(await viewer.locator('img, svg').count()).toBe(0);
     const [download] = await Promise.all([page.waitForEvent('download'), viewer.getByRole('button', { name: 'Save a copy…' }).click()]);
     expect(download.suggestedFilename()).toBe('badge.svg');
+    // From the page's own Blob, byte for byte the source.
+    expect(download.url()).toMatch(/^blob:/);
+    expect(readFileSync(await download.path(), 'utf8')).toBe(badgeSvg);
     // Markdown renders.
     await page.getByRole('button', { name: /copy\.md/ }).click();
     await viewer.getByRole('heading', { name: 'Checkout' }).waitFor();
