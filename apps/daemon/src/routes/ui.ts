@@ -47,7 +47,8 @@ function versionParam(c: Context): number {
   return v;
 }
 
-const octet = { 'content-type': 'application/octet-stream' };
+/** A fresh headers object per response: @hono/node-server writes each body's Content-Length into the one it is given. */
+const octet = () => ({ 'content-type': 'application/octet-stream' });
 
 /** Read endpoints for the desktop app (design spec §4.1–4.2). */
 export function uiRoutes({ runtime, store }: AppDeps): Hono {
@@ -77,7 +78,7 @@ export function uiRoutes({ runtime, store }: AppDeps): Hono {
   r.get('/threads/:id/files/raw/*', async (c) => {
     const t = requireThread(db, c.req.param('id'));
     const file = await confined(() => resolveWorkspaceFile(t, tail(c, '/files/raw/')));
-    return c.body(new Uint8Array(await readFile(file)), 200, octet);
+    return c.body(new Uint8Array(await readFile(file)), 200, octet());
   });
 
   const skillVersions = (prefix: string, project: boolean) => {
@@ -86,7 +87,7 @@ export function uiRoutes({ runtime, store }: AppDeps): Hono {
     r.get(`${prefix}/:name/versions/:v/files/*`, async (c) => {
       const skill = runtime.getSkillVersion(c.req.param('name'), versionParam(c), opts(c));
       const file = runtime.skills.filePath(skill, tail(c, `/versions/${c.req.param('v')}/files/`));
-      return c.body(new Uint8Array(await readFile(file)), 200, octet);
+      return c.body(new Uint8Array(await readFile(file)), 200, octet());
     });
   };
   skillVersions('/skills', false);

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createHarness, newRuntime, type Harness } from '@desk/core/testing';
 import { getDeskAgent } from '@desk/core';
 import { createApp } from './app';
+import { startServer } from './server';
 
 let h: Harness;
 afterEach(async () => h?.cleanup());
@@ -24,7 +25,7 @@ async function setup() {
     return { status: res.status, body: (json ? await res.json() : await res.text()) as any };
   };
   const projectId = runtime.createProject({ name: 'Onboarding revamp', goal: 'g' });
-  return { runtime, api, projectId, desk: getDeskAgent(h.store.db, projectId)! };
+  return { app, runtime, api, projectId, desk: getDeskAgent(h.store.db, projectId)! };
 }
 
 describe('attention routes', () => {
@@ -99,6 +100,34 @@ describe('thread inspection', () => {
     const { runtime, api, projectId } = await setup();
     const t = runtime.createThread(projectId, { title: 'Plain', brief: 'b', workspacePath: join(h.dir, 'plain') });
     expect((await api('GET', `/threads/${t}/diff`)).status).toBe(409);
+  });
+});
+
+describe('raw files over HTTP', () => {
+  it('serves one file after another, each with its own length (node-server writes Content-Length into the headers it is given)', async () => {
+    const { app, api, runtime, projectId } = await setup();
+    const ws = join(h.dir, 'plain');
+    await mkdir(ws, { recursive: true });
+    const t = runtime.createThread(projectId, { title: 'Plain', brief: 'b', workspacePath: ws });
+    await writeFile(join(ws, 'a.txt'), 'one');
+    await writeFile(join(ws, 'b.md'), '# two, and longer');
+    const b64 = (s: string) => Buffer.from(s).toString('base64');
+    await api('PUT', '/skills/notes', { description: 'Notes', instructions: 'steps', files: [{ path: 'x.md', content_base64: b64('x') }, { path: 'y.md', content_base64: b64('yy, and longer') }] });
+    const server = await startServer({ app, store: h.store, token: TOKEN, port: 0 });
+    try {
+      const get = async (path: string) => {
+        const res = await fetch(`http://127.0.0.1:${server.port}/v1${path}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        const body = await res.text();
+        // Each response carries its own type and its own length, not the previous file's.
+        return [res.status, body, res.headers.get('content-type'), res.headers.get('content-length')];
+      };
+      expect(await get(`/threads/${t}/files/raw/a.txt`)).toEqual([200, 'one', 'application/octet-stream', '3']);
+      expect(await get(`/threads/${t}/files/raw/b.md`)).toEqual([200, '# two, and longer', 'application/octet-stream', '17']);
+      expect(await get('/skills/notes/versions/1/files/x.md')).toEqual([200, 'x', 'application/octet-stream', '1']);
+      expect(await get('/skills/notes/versions/1/files/y.md')).toEqual([200, 'yy, and longer', 'application/octet-stream', '14']);
+    } finally {
+      await server.close();
+    }
   });
 });
 
