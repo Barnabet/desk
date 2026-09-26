@@ -87,6 +87,7 @@ Every task in W0c–W3b follows these rules. Each section's header repeats the o
 - **Text.** Templates keep exact text tight (`<li>+ New project</li>`): several ported assertions compare `textContent` exactly, and Angular collapses whitespace around interpolations.
 - **Specs.**
   - Specs are `*.spec.ts` next to the code, written with `@testing-library/angular`: `render(Component, { inputs, providers })`, or `render('<tag deskX …>', { imports, componentProperties })` when the host element matters.
+  - `render(Component, …)` hosts the component on a `<div>`. A spec that renders a component whose selector names another element (`form`, `section`, `header`, `button`…) and relies on that element's native behaviour, tag or role (a form's submit, a landmark's role, `tagName`) passes `configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true })` or renders from a template host.
   - Use `new FakeDeskBridge(handlers)` with `providers: bridge.providers`, and `provideGlobal(state)` for the React `globalStore.set`.
   - A ported React test keeps its cases, visible text and roles.
   - `fireEvent.change` on a text box becomes `fireEvent.input`.
@@ -11148,12 +11149,14 @@ git commit -m "feat(web-ui): Button, Field, EmptyState, StatusChip and CodeBlock
 **Interfaces:**
 - Consumes: `Button` (W0c.7).
 - Produces:
-  - `Sheet` — `div[deskSheet]`, the React `.sheet-backdrop`; inputs `title` (required), `width` (px, default 520); output `close` (Escape, or a mousedown on the backdrop itself). The body is the projected content; a projected element with class `sheet-footer` becomes the footer (the React `footer` prop).
+  - `Sheet` — `div[deskSheet]`, the React `.sheet-backdrop`; inputs `title` (required), `width` (px, default 520); output `close` (Escape while it is the topmost sheet, or a mousedown on the backdrop itself). The body is the projected content; a projected element with class `sheet-footer` becomes the footer (the React `footer` prop).
   - `ConfirmDialog` — `div[deskConfirmDialog]`; inputs `title` (required), `confirmLabel` (required), `danger`; outputs `confirm`, `cancel`; the body is projected. Its host is `display: contents`.
 
 The React `Sheet` renders through a portal into `document.body`. Angular has none without the CDK, so `Sheet` moves its own host element to `document.body` after its first render (after the view that contains it has been inserted, so Angular does not put it back) and removes it when destroyed, which also covers a `Sheet` nested in another component whose host Angular removes. Focus moves to the first input, textarea, select or button inside, and returns to the previously focused element on close, as in React.
 
 **Deviation (review fix):** `confirm-dialog.spec.ts` gains a close case. `sheet.spec.ts` wraps the `Sheet` itself in `@if`, so its host is a root node of the view Angular removes and Angular takes it out of `document.body` on its own; the `Sheet` inside a `ConfirmDialog` is not, and only `Sheet`'s own `onDestroy` (`this.host.remove()`) takes its backdrop out. Nothing covered that path, which every closed `ExternalLink` confirmation (W0c.10) takes. The case renders the dialog inside `@if`, closes it, and expects no `.sheet-backdrop` left and the focus back on the element that had it; it fails without `this.host.remove()` (5 tests).
+
+**Deviation (review fix, from W0d's review):** Escape closes only the topmost sheet. Every open `Sheet` listened for Escape on `window` and emitted `close`. So once W0d.7 shows the folder browser (a `Sheet` of its own) over the map's new-project sheet, Escape in the folder browser also closed the project form under it and lost what was typed. On the desktop the native folder dialog takes that key. `onKey` now emits `close` only when the host is the last `.sheet-backdrop` among `document.body`'s children; each sheet appends itself there when it opens. One result differs from the desktop: a `ConfirmDialog` opened from inside a sheet (an `ExternalLink` in `PairSheet`) now closes alone on Escape, while the desktop's `Sheet` closes both. `sheet.spec.ts` gains the case "closes only the topmost sheet on Escape" (2 files, 6 tests). W0d.6's and W0d.7's specs cover the same behaviour through the map and the folder browser.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -11208,6 +11211,30 @@ describe('Sheet', () => {
     fireEvent.mouseDown(dialog.parentElement!);
     expect(onClose).toHaveBeenCalledTimes(2);
     before.remove();
+  });
+
+  it('closes only the topmost sheet on Escape', async () => {
+    const outer = vi.fn();
+    const inner = vi.fn();
+    const view = await render(
+      `<div deskSheet title="New project" (close)="outer()"><input aria-label="Name" /></div>
+      @if (picking) {
+        <div deskSheet title="Choose a folder" (close)="inner()"><input aria-label="Folder" /></div>
+      }`,
+      { imports: [Sheet], componentProperties: { picking: false, outer, inner } },
+    );
+    await view.fixture.whenStable();
+    // Opened over the first, as the folder browser opens over the new-project form.
+    await view.rerender({ componentProperties: { picking: true }, partialUpdate: true });
+    await view.fixture.whenStable();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
+    await view.rerender({ componentProperties: { picking: false }, partialUpdate: true });
+    await view.fixture.whenStable();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(outer).toHaveBeenCalledTimes(1);
+    expect(inner).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the body and gives the focus back when it closes', async () => {
@@ -11286,7 +11313,8 @@ let nextTitle = 0;
 
 /**
  * A modal dialog: focus moves in, Escape or a backdrop click closes, focus returns on close. Like the React portal, the
- * backdrop (this host) lives in document.body. A projected `.sheet-footer` element is the footer.
+ * backdrop (this host) lives in document.body. A projected `.sheet-footer` element is the footer. Escape closes only
+ * the topmost sheet (the folder browser, not the project form under it).
  */
 @Component({
   selector: 'div[deskSheet]',
@@ -11332,7 +11360,13 @@ export class Sheet {
   }
 
   protected onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') this.close.emit();
+    if (e.key === 'Escape' && this.isTopmost()) this.close.emit();
+  }
+
+  /** Each sheet appends its backdrop to the body when it opens, so the one on top is the body's last backdrop. */
+  private isTopmost(): boolean {
+    const backdrops = [...document.body.children].filter((el) => el.classList.contains('sheet-backdrop'));
+    return backdrops.at(-1) === this.host;
   }
 }
 ```
@@ -11373,7 +11407,7 @@ export class ConfirmDialog {
 - [ ] **Step 4: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/sheet.spec.ts --include src/app/components/confirm-dialog.spec.ts)`
-Expected: PASS (2 files, 5 tests).
+Expected: PASS (2 files, 6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -14585,7 +14619,7 @@ Expected: the sixteen commits of W0c.1 to W0c.16, newest first (with any fix com
 - `components/button.ts` (W0c.7): `Button`, selector `button[deskButton]`, inputs `variant` (`'primary' | 'secondary' | 'ghost' | 'danger'`, default `'secondary'`), `size` (`'sm' | 'md'`), `pending`, `disabled`, `type` (default `'button'`).
 - `components/field.ts` (W0c.7): `Field`, selector `div[deskField]`, inputs `id` (the control's id; the host drops its own `id` attribute), `label`, `hint`, `error`; the control is projected between the label and the hint or error.
 - `components/empty-state.ts` (W0c.7): `EmptyState`, selector `div[deskEmptyState]`, inputs `title` (required; the host drops the `title` attribute) and `body` (the React children text, shown as `p.subtitle`); the action is projected after it.
-- `components/sheet.ts` (W0c.8): `Sheet`, selector `div[deskSheet]` (the `.sheet-backdrop`, moved into `document.body` after its first render), inputs `title` (required) and `width` (default 520), output `close` (Escape or a mousedown on the backdrop); the content is projected into `.sheet-body`, a projected `.sheet-footer` becomes the footer; focus moves to the first control and comes back when it closes.
+- `components/sheet.ts` (W0c.8): `Sheet`, selector `div[deskSheet]` (the `.sheet-backdrop`, moved into `document.body` after its first render), inputs `title` (required) and `width` (default 520), output `close` (Escape while it is the topmost sheet, or a mousedown on the backdrop); the content is projected into `.sheet-body`, a projected `.sheet-footer` becomes the footer; focus moves to the first control and comes back when it closes.
 - `components/toast.ts` (W0c.9): `describeError(err: unknown): { message: string; revealLogs: boolean }`; `ToastService` (`error(err)` is the desktop's `toastError(err)`).
 - `testing/fake-bridge.ts` (W0c.3, W0c.4): `new FakeDeskBridge(handlers?)` with a handler per operation (`webChannels` ones included), provided with `providers: bridge.providers` (or `{ provide: DeskBridge, useValue: bridge }`); `calls: Array<{ channel: string; input: unknown }>`; `emit(channel, payload)`; a handler that throws (or rejects with) an `IpcError`-shaped object makes `call` reject with a `DeskCallError`; an operation without a handler rejects with `unknown_channel`, except `app.pickFolder`, which then opens `folderRequest` like the real bridge; `FakeHandlers`; `provideGlobal(state)`.
 - `app.ts` (W0c.14, W0c.15): `App` (`desk-root`) renders `screenFor(route)` with `NgComponentOutlet` (the onboarding route without the shell, every other route inside `.app > main.screen`), next to `<div deskToaster>`; its field `bridge` is the `DeskBridge`. `app.spec.ts` (W0c.14) expects `NotYet` text for onboarding and the map, which W0d.7 replaces.
@@ -14601,7 +14635,7 @@ Expected: the sixteen commits of W0c.1 to W0c.16, newest first (with any fix com
 - `apps/web-ui/src/app/screens/onboarding.ts`: `Onboarding` (`div[deskOnboarding]`, host class `onboarding`).
 - `apps/web-ui/src/app/components/folder-browser.ts`: `FolderBrowser` (`div[deskFolderBrowser]`, a `display: contents` host around its `Sheet`; input `purpose: FolderPurpose`, output `picked: string | null`), `isAbsolutePath(p)`. Visible names: the dialog "Choose a folder" ("Choose a skill folder" for `skill-import`), the text box "Folder", "Go", "Up", "Show hidden folders", one button per folder, "No folders here.", "Choose this folder", "Cancel".
 - `apps/web-ui/src/app/map/map-screen.ts`: `MapScreen` (`div[deskMapScreen]`, input `newProject` (default false)). W1 fills in the orbit map, the list view, the legend and the inspector in the same file and spec.
-- `screenFor`: `{ name: 'onboarding' }` → `{ component: Onboarding, inputs: {} }`; `{ name: 'map', newProject }` → `{ component: MapScreen, inputs: { newProject: newProject ?? false } }`. `App` renders `<div deskFolderBrowser>` while `DeskBridge.folderRequest()` is set, outside `.app`, so it covers onboarding and every screen.
+- `screenFor`: `{ name: 'onboarding' }` → `{ component: Onboarding, inputs: {} }`; `{ name: 'map', newProject }` → `{ component: MapScreen, inputs: { newProject: newProject ?? false } }`. `App` renders `<div deskFolderBrowser>` while `DeskBridge.folderRequest()` is set (a fresh one for each request), outside `.app`, so it covers onboarding and every screen.
 - The web e2e: `apps/web-ui/e2e/harness.ts` (`startWebE2E(o?: { script?: Script }): Promise<WebE2E>`, `WebE2E`, `SignedIn`), `vitest.web-e2e.config.ts` (Vitest globals; includes `apps/web-ui/e2e/**/*.e2e.test.ts` and `apps/web-server/src/**/*.e2e.test.ts`), the root script `test:web-e2e`, `apps/web-ui/e2e/tsconfig.json` (checked by the root `typecheck`). W1–W3 add their scenarios as `apps/web-ui/e2e/*.e2e.test.ts` on this harness.
 - `apps/web-server/src/built-ui.e2e.test.ts`: the built `index.html` check (runs in `pnpm test:web-e2e`, after the build).
 
@@ -14648,11 +14682,14 @@ CLAUDE.md                                                 modify
 - Consumes: `DeskBridge` (W0c); `ModelInfo`, `ProjectSettings`, `ReasoningEffort` from `@desk/protocol`.
 - Produces: `injectModels(): Signal<ModelInfo[] | null>`; `SettingsFields` (`div[deskSettingsFields]`: `value = input.required<WorkingStyle>()`, `models = input.required<ModelInfo[] | null>()`, `idPrefix = input('settings')`, `changed = output<Partial<WorkingStyle>>()`); `ModelSelect` (`div[deskModelSelect]`: `selectId`, `label`, `value`, `models`, `allowNone`, output `picked`); `EffortSelect` (`div[deskEffortSelect]`: `selectId`, `label`, `value`, `model`, output `picked`); `WorkingStyle`, `DEFAULT_STYLE`, `workingStyleOf(s: ProjectSettings): WorkingStyle`.
 
+**Deviation (review fix):** the Review rounds and Threads at once boxes first bound `[value]` and emitted the clamped patch from `(input)`. Angular writes `[value]` only when the bound value changes, while React's controlled input resets the box after every change. Typing 11 in Review rounds at 10 (or 320 in Threads at once at 32) therefore kept the typed number on screen while the value, and what Save writes, stayed at the bound, and clearing a box already at its minimum left it empty. Both boxes now call `setNumber(event, key, min, max)`. It emits the clamped number and writes it back to the box unless the text already reads as it; that is React's rule for number inputs, so '05' stays. `val` and the template's `clamp` are gone. The new case renders through a host that merges each patch into `value` and types an out-of-range number twice (5 tests). W2b.4's Settings screen reuses `SettingsFields` unchanged and gets the fix with it.
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `apps/web-ui/src/app/settings/settings-fields.spec.ts`:
 
 ```ts
+import { signal } from '@angular/core';
 import { fireEvent, render, screen } from '@testing-library/angular';
 import userEvent from '@testing-library/user-event';
 import type { ModelInfo } from '@desk/protocol';
@@ -14718,6 +14755,31 @@ describe('SettingsFields', () => {
     await user.click(screen.getByRole('button', { name: '3 threads at once' }));
     fireEvent.input(screen.getByLabelText('Threads at once'), { target: { value: '40' } });
     expect(patches).toEqual([{ max_concurrent_threads: 3 }, { max_concurrent_threads: 32 }]);
+  });
+
+  it('shows the clamped number in its box even when the value stays the same, as a controlled input does', async () => {
+    // A host that merges each patch back into value, as ProjectForm and the Settings screen do.
+    const value = signal<WorkingStyle>(DEFAULT_STYLE);
+    await render(`<div deskSettingsFields idPrefix="p" [value]="value()" [models]="null" (changed)="patch($event)"></div>`, {
+      imports: [SettingsFields],
+      componentProperties: { value, patch: (p: Partial<WorkingStyle>) => value.update((v) => ({ ...v, ...p })) },
+    });
+    const rounds = screen.getByLabelText('Review rounds') as HTMLInputElement;
+    fireEvent.input(rounds, { target: { value: '11' } });
+    fireEvent.input(rounds, { target: { value: '11' } });
+    expect(rounds.value).toBe('10');
+    fireEvent.input(rounds, { target: { value: '-3' } });
+    fireEvent.input(rounds, { target: { value: '' } });
+    expect(rounds.value).toBe('0');
+    const threads = screen.getByLabelText('Threads at once') as HTMLInputElement;
+    fireEvent.input(threads, { target: { value: '320' } });
+    fireEvent.input(threads, { target: { value: '320' } });
+    expect(threads.value).toBe('32');
+    expect(screen.getByText('Threads at once · 32')).toBeTruthy();
+    fireEvent.input(threads, { target: { value: '0' } });
+    fireEvent.input(threads, { target: { value: '' } });
+    expect(threads.value).toBe('1');
+    expect(value()).toMatchObject({ review_rounds: 0, max_concurrent_threads: 1 });
   });
 
   it('waits for the registry before offering models or levels', async () => {
@@ -14812,7 +14874,6 @@ const SLOTS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 /** A number field's value, clamped; anything that is not a number counts as `min` (as SettingsFields.tsx does). */
 const clamp = (raw: string, min: number, max: number): number => Math.max(min, Math.min(max, Number(raw) || min));
-const val = (e: Event): string => (e.target as HTMLInputElement).value;
 
 /** A model change that also drops a reasoning level the new model does not take. */
 function withModel(
@@ -14931,7 +14992,7 @@ export class EffortSelect {
     </fieldset>
     <div class="field">
       <label [attr.for]="idPrefix() + '-rounds'">Review rounds</label>
-      <input [id]="idPrefix() + '-rounds'" class="input narrow" type="number" min="0" max="10" [value]="value().review_rounds" (input)="changed.emit({ review_rounds: clamp(val($event), 0, 10) })" />
+      <input [id]="idPrefix() + '-rounds'" class="input narrow" type="number" min="0" max="10" [value]="value().review_rounds" (input)="setNumber($event, 'review_rounds', 0, 10)" />
       <p class="field-hint">How many times Desk may send a thread's work back before accepting or escalating it.</p>
     </div>
     <div class="settings-models">
@@ -14954,7 +15015,7 @@ export class EffortSelect {
             (click)="changed.emit({ max_concurrent_threads: n })"
           ></button>
         }
-        <input class="input narrow" type="number" min="1" max="32" aria-label="Threads at once" [value]="value().max_concurrent_threads" (input)="changed.emit({ max_concurrent_threads: clamp(val($event), 1, 32) })" />
+        <input class="input narrow" type="number" min="1" max="32" aria-label="Threads at once" [value]="value().max_concurrent_threads" (input)="setNumber($event, 'max_concurrent_threads', 1, 32)" />
       </div>
     </div>
   `,
@@ -14967,8 +15028,18 @@ export class SettingsFields {
   protected readonly checkIn = CHECK_IN;
   protected readonly autonomy = AUTONOMY;
   protected readonly slots = SLOTS;
-  protected readonly clamp = clamp;
-  protected readonly val = val;
+
+  /**
+   * A number box's patch, clamped. The box then shows the clamped number even when the value does not change (11 typed
+   * in Review rounds at 10), which `[value]` alone would not write back; React's controlled input does.
+   */
+  protected setNumber(e: Event, key: 'review_rounds' | 'max_concurrent_threads', min: number, max: number): void {
+    const box = e.target as HTMLInputElement;
+    const n = clamp(box.value, min, max);
+    this.changed.emit(key === 'review_rounds' ? { review_rounds: n } : { max_concurrent_threads: n });
+    // React's rule for a number input: rewrite it unless its text already reads as that number ('05' stays).
+    if (box.value === '' || Number(box.value) !== n) box.value = String(n);
+  }
 
   protected modelOf(id: string): ModelInfo | undefined {
     return this.models()?.find((m) => m.id === id);
@@ -14991,7 +15062,7 @@ Options carry `[selected]` rather than a `[value]` on the `<select>`: Angular se
 - [ ] **Step 4: Run the spec**
 
 Run: `cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/settings/settings-fields.spec.ts`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -15013,6 +15084,8 @@ git commit -m "feat(web-ui): SettingsFields and injectModels, how Desk works on 
 - Consumes: `Button`, `Field`, `ToastService` (`error`), `DeskBridge`, `DeskCallError`, `FakeDeskBridge` (W0c); `injectModels`, `SettingsFields`, `DEFAULT_STYLE`, `WorkingStyle` (W0d.1).
 - Produces: `ProjectForm`, selector `form[deskProjectForm]` (the form is the root, class `sheet-body`, `novalidate`), `submitLabel = input('Create project')`, `cancelable = input(false)`, `created = output<string>()` (the new project's id), `cancelled = output<void>()`. "Add folder…" calls `app.pickFolder` with `{ purpose: 'source' }`, which the web `DeskBridge` answers through `folderRequest` and the folder browser (W0c.3, W0d.5).
 
+**Deviation (review fix):** `setup()` renders with `configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true })`. `render(ProjectForm, …)` otherwise hosts the component on TestBed's default `<div>`, so "Create project" sits outside any form and the three submit cases fail. With the option, TestBed builds the host from the selector's tag, a real `<form>`. The Specs bullet of the port conventions now says when a spec needs this.
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `apps/web-ui/src/app/screens/project-form.spec.ts`:
@@ -15033,6 +15106,8 @@ async function setup(handlers: ConstructorParameters<typeof FakeDeskBridge>[0], 
     inputs,
     providers: [{ provide: DeskBridge, useValue: bridge }],
     on: { created: (id: string) => created.push(id), cancelled: () => (cancelled += 1) },
+    // The host must be the <form> its selector names (TestBed uses a <div> otherwise), or "Create project" submits nothing.
+    configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true }),
   });
   return { bridge, created, cancelled: () => cancelled, user: userEvent.setup() };
 }
@@ -15283,6 +15358,8 @@ git commit -m "feat(web-ui): ProjectForm, with sources from app.pickFolder and M
 - Consumes: `Button`, `Field`, `describeError`, `DeskBridge`, `DeskCallError`, `FakeDeskBridge` (W0c); `ModelEndpointStatus`, `ModelEndpointTestResult` from `@desk/protocol`.
 - Produces: `EndpointState = ModelEndpointStatus | 'unsupported' | null`; `EndpointPanel`, selector `div[deskEndpointPanel]` (class `endpoint`), `statusChanged = output<EndpointState>()` (React's `onStatus`, emitted on load and after a save).
 
+**Deviation (review fix):** `EndpointPanel` keeps a `live` flag that its `DestroyRef` clears, and `setStatus` returns early once it is false, as W0d.1's `injectModels` does. Pressing "Skip for now" before `config.endpoint` answered destroyed the panel, and the late `statusChanged.emit` then logged NG0953 ("Unexpected emit for destroyed `OutputRef`"), which Angular logs in production too. React ignores the late `onStatus`. The case "reports nothing once it is gone…" destroys the panel before the load resolves and expects no emit and no NG0953 warning (6 tests).
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `apps/web-ui/src/app/components/endpoint-panel.spec.ts`:
@@ -15290,7 +15367,7 @@ Create `apps/web-ui/src/app/components/endpoint-panel.spec.ts`:
 ```ts
 import { render, screen, waitFor } from '@testing-library/angular';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DeskBridge } from '../core/desk-bridge';
 import { FakeDeskBridge } from '../testing/fake-bridge';
 import { EndpointPanel, type EndpointState } from './endpoint-panel';
@@ -15301,8 +15378,8 @@ const keychain = { configured: true, source: 'keychain', base_url: 'http://127.0
 async function setup(handlers: ConstructorParameters<typeof FakeDeskBridge>[0]) {
   const bridge = new FakeDeskBridge(handlers);
   const statuses: EndpointState[] = [];
-  await render(EndpointPanel, { providers: [{ provide: DeskBridge, useValue: bridge }], on: { statusChanged: (s: EndpointState) => statuses.push(s) } });
-  return { bridge, statuses, user: userEvent.setup() };
+  const view = await render(EndpointPanel, { providers: [{ provide: DeskBridge, useValue: bridge }], on: { statusChanged: (s: EndpointState) => statuses.push(s) } });
+  return { bridge, statuses, view, user: userEvent.setup() };
 }
 
 describe('EndpointPanel', () => {
@@ -15345,6 +15422,21 @@ describe('EndpointPanel', () => {
     expect(screen.queryByLabelText('API key')).toBeNull();
   });
 
+  it('reports nothing once it is gone, when the endpoint loads after it (Skip for now during the load)', async () => {
+    let loaded!: (s: typeof env) => void;
+    const warn = vi.spyOn(console, 'warn');
+    try {
+      const { statuses, view } = await setup({ 'config.endpoint': () => new Promise<typeof env>((resolve) => (loaded = resolve)) });
+      view.fixture.destroy();
+      loaded(env);
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(statuses).toEqual([]);
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('NG0953');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('shows any other failure to load', async () => {
     const { statuses } = await setup({ 'config.endpoint': () => Promise.reject({ code: 'daemon_not_running', message: 'Desk is not running.', status: 503 }) });
     expect((await screen.findByRole('alert')).textContent).toContain('Desk is not running.');
@@ -15363,7 +15455,7 @@ Expected: FAIL: the build cannot resolve `./endpoint-panel`.
 Create `apps/web-ui/src/app/components/endpoint-panel.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, output, signal, type OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, inject, output, signal, type OnInit } from '@angular/core';
 import type { ModelEndpointStatus, ModelEndpointTestResult } from '@desk/protocol';
 import { DeskBridge, DeskCallError } from '../core/desk-bridge';
 import { Button } from './button';
@@ -15453,6 +15545,12 @@ export class EndpointPanel implements OnInit {
   protected readonly result = signal<ModelEndpointTestResult | null>(null);
   protected readonly pending = signal<'test' | 'save' | null>(null);
   protected readonly error = signal<string | null>(null);
+  /** False once destroyed (Skip before the endpoint loaded): a late load or save then reports nothing, as React ignores it. */
+  private live = true;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.live = false));
+  }
 
   ngOnInit(): void {
     this.bridge
@@ -15511,6 +15609,7 @@ export class EndpointPanel implements OnInit {
   }
 
   private setStatus(s: EndpointState): void {
+    if (!this.live) return;
     this.status.set(s);
     this.statusChanged.emit(s);
   }
@@ -15520,7 +15619,7 @@ export class EndpointPanel implements OnInit {
 - [ ] **Step 4: Run the spec**
 
 Run: `cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/endpoint-panel.spec.ts`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -15543,6 +15642,8 @@ git commit -m "feat(web-ui): EndpointPanel, the model endpoint's source, test an
 - Produces: `Onboarding`, selector `div[deskOnboarding]` (class `onboarding`). The redirect to `#/onboarding` until the flag is set is W0c.14's `App` effect; this component only sets the flag when onboarding ends.
 
 The three steps (`DaemonStep`, `EndpointStep`, `ProjectStep` in React) are `@case` blocks of one template: each one's state lives on the component, and the steps only go forward, so nothing needs resetting. The endpoint step's `EndpointPanel` is created when that step shows, so `config.endpoint` is called then, as in React.
+
+**Deviation (review fix):** the first case asserts exactly `['daemon.start']`, as `Onboarding.test.tsx` does. It first filtered out `broker.snapshot`, but nothing in this spec calls that: only `App` starts `GlobalStore` (W0c.14), and this spec renders `Onboarding` alone.
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -15582,8 +15683,7 @@ describe('Onboarding', () => {
     expect(screen.getByText('deskd is not running yet.')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Start Desk' }));
     expect(await screen.findByText('deskd 1.0.0 is running.')).toBeTruthy();
-    // GlobalStore may seed itself from broker.snapshot; the step itself calls daemon.start and nothing else.
-    expect(bridge.calls.map((c) => c.channel).filter((c) => c !== 'broker.snapshot')).toEqual(['daemon.start']);
+    expect(bridge.calls.map((c) => c.channel)).toEqual(['daemon.start']);
   });
 
   it('saves and tests a new endpoint without keeping the key, then creates the first project', async () => {
@@ -15802,6 +15902,8 @@ Spec §3 and §4.12: on the web, `app.pickFolder` never reaches desk web. W0c.3'
 - Consumes: `DeskBridge` (`call('fs.listDirs', { path?, hidden? })`), `DeskCallError`, `FolderPurpose` (W0c.3); `Button`, `Field` (`id`, `label`, `hint`), `Sheet` (`title`, `width`, output `close`), `describeError`, `FakeDeskBridge` (W0c); `DirListing` from `@desk/web-server/contract`; `fs.listDirs` refusals from W0b.7 (`invalid_path`, `not_found`, `not_a_folder`, `not_allowed`, `unreadable`).
 - Produces: `FolderBrowser`, selector `div[deskFolderBrowser]` (host `display: contents`), `purpose = input.required<FolderPurpose>()`, `picked = output<string | null>()` (the chosen folder, or `null` on Cancel or Escape); `isAbsolutePath(p: string): boolean`.
 
+**Deviation (review fix):** "Choose this folder" is pending (`[pending]="loading() || checking()"`) while a listing or the typed path's check is in flight, and `choose()` returns early then; `checking` is set around `choose()`'s `fs.listDirs` call. Before, clicking a folder and then Choose before its listing landed picked the folder still on screen (the parent), and a double click on a typed path answered twice. Two cases were added. In the first, Choose stays pending through a slow listing and a slow check, nothing is picked meanwhile, and there is one answer. In the second, `fs.listDirs` refuses a typed `~/ext` as `not_allowed` (a link to a folder outside home): nothing is picked and the alert shows, which is what the `isAbsolutePath` guard ensures (9 tests).
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `apps/web-ui/src/app/components/folder-browser.spec.ts`:
@@ -15826,10 +15928,13 @@ const HOME: DirListing = {
 const HOME_HIDDEN: DirListing = { ...HOME, dirs: [{ name: '.claude', path: '/Users/me/.claude' }, ...HOME.dirs] };
 const CODE: DirListing = { path: '/Users/me/code', parent: '/Users/me', dirs: [{ name: 'app', path: '/Users/me/code/app' }] };
 
-/** fs.listDirs as desk web answers it (W0b.7): home, ~ expanded, folders outside home refused. */
-function listDirs(input: { path?: string; hidden?: boolean }): DirListing {
+type ListInput = { path?: string; hidden?: boolean };
+
+/** fs.listDirs as desk web answers it (W0b.7): home, ~ expanded, folders outside home refused (~/ext links to one). */
+function listDirs(input: ListInput): DirListing {
   const path = input.path === undefined || input.path === '~' ? '/Users/me' : input.path.startsWith('~/') ? `/Users/me/${input.path.slice(2)}` : input.path;
   if (!path.startsWith('/')) throw { code: 'invalid_path', message: 'Type a full path, such as ~/code.', status: 400 };
+  if (path === '/Users/me/ext') throw { code: 'not_allowed', message: "Desk can browse your home folder and your projects' sources only.", status: 403 };
   if (path === '/Users/me') return input.hidden ? HOME_HIDDEN : HOME;
   if (path === '/Users/me/code') return CODE;
   if (path === '/Users/me/code/app') return { path, parent: '/Users/me/code', dirs: [] };
@@ -15837,8 +15942,8 @@ function listDirs(input: { path?: string; hidden?: boolean }): DirListing {
   throw { code: 'not_allowed', message: "Desk can browse your home folder and your projects' sources only.", status: 403 };
 }
 
-async function setup(purpose: FolderPurpose = 'source') {
-  const bridge = new FakeDeskBridge({ 'fs.listDirs': listDirs });
+async function setup(purpose: FolderPurpose = 'source', list: (input: ListInput) => DirListing | Promise<DirListing> = listDirs) {
+  const bridge = new FakeDeskBridge({ 'fs.listDirs': list });
   const picked: Array<string | null> = [];
   await render(FolderBrowser, { inputs: { purpose }, providers: [{ provide: DeskBridge, useValue: bridge }], on: { picked: (p: string | null) => picked.push(p) } });
   const lists = () => bridge.calls.filter((c) => c.channel === 'fs.listDirs').map((c) => c.input);
@@ -15905,6 +16010,50 @@ describe('FolderBrowser', () => {
     await user.click(screen.getByRole('button', { name: 'Choose this folder' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('That folder does not exist.'));
     expect(picked).toEqual(['/Users/me/code', '/Volumes/work/repo']);
+  });
+
+  it('never hands deskd a ~ path, even one the browser may not list (~/ext, a link to a folder outside home)', async () => {
+    const { picked, user, input } = await setup();
+    await screen.findByRole('button', { name: 'code' });
+    await user.clear(input());
+    await user.type(input(), '~/ext');
+    await user.click(screen.getByRole('button', { name: 'Choose this folder' }));
+    expect((await screen.findByRole('alert')).textContent).toContain("Desk can browse your home folder and your projects' sources only.");
+    expect(picked).toEqual([]);
+  });
+
+  it('keeps Choose this folder pending while a listing lands or a typed folder is checked: no stale folder, no second answer', async () => {
+    const waiting: Array<() => void> = [];
+    const answerLater = (i: ListInput) =>
+      new Promise<DirListing>((resolve, reject) =>
+        waiting.push(() => {
+          try {
+            resolve(listDirs(i));
+          } catch (err) {
+            reject(err);
+          }
+        }),
+      );
+    const { picked, lists, user, input } = await setup('source', answerLater);
+    const choose = (await screen.findByRole('button', { name: 'Choose this folder' })) as HTMLButtonElement;
+    expect(choose.disabled).toBe(true);
+    waiting.shift()!();
+    await user.click(await screen.findByRole('button', { name: 'code' }));
+    await waitFor(() => expect(choose.getAttribute('aria-busy')).toBe('true'));
+    await user.click(choose);
+    expect(picked).toEqual([]);
+    waiting.shift()!();
+    await screen.findByRole('button', { name: 'app' });
+    await waitFor(() => expect(choose.disabled).toBe(false));
+    await user.clear(input());
+    await user.type(input(), '/Volumes/work/repo');
+    await user.click(choose);
+    await waitFor(() => expect(choose.getAttribute('aria-busy')).toBe('true'));
+    await user.click(choose);
+    expect(waiting).toHaveLength(1);
+    waiting.shift()!();
+    await waitFor(() => expect(picked).toEqual(['/Volumes/work/repo']));
+    expect(lists()).toHaveLength(3);
   });
 
   it('shows hidden folders when asked, and from the start for a skill import', async () => {
@@ -16019,7 +16168,7 @@ export const isAbsolutePath = (p: string): boolean => /^(?:\/|[A-Za-z]:[\\/]|\\\
         <p class="field-error" role="alert">{{ error() }}</p>
       }
       <div class="actions">
-        <button deskButton variant="primary" (click)="choose()">Choose this folder</button>
+        <button deskButton variant="primary" [pending]="loading() || checking()" (click)="choose()">Choose this folder</button>
         <button deskButton (click)="picked.emit(null)">Cancel</button>
       </div>
     </div>
@@ -16036,6 +16185,8 @@ export class FolderBrowser implements OnInit {
   protected readonly typed = signal('');
   protected readonly hidden = signal(false);
   protected readonly loading = signal(false);
+  /** Choose is checking a typed folder with deskd. */
+  protected readonly checking = signal(false);
   protected readonly error = signal<string | null>(null);
   /** Only the latest listing lands, whatever order the answers come back in. */
   private seq = 0;
@@ -16082,6 +16233,8 @@ export class FolderBrowser implements OnInit {
   }
 
   protected async choose(): Promise<void> {
+    // Pending while a listing lands (the folder on screen is about to change) or a typed folder is checked (one answer).
+    if (this.loading() || this.checking()) return;
     const typed = this.typed().trim();
     const shown = this.listing();
     if (shown && (!typed || typed === shown.path)) {
@@ -16090,6 +16243,7 @@ export class FolderBrowser implements OnInit {
     }
     if (!typed) return;
     this.error.set(null);
+    this.checking.set(true);
     try {
       const l = await this.bridge.call('fs.listDirs', { path: typed, hidden: this.hidden() });
       this.picked.emit(l.path);
@@ -16097,6 +16251,8 @@ export class FolderBrowser implements OnInit {
       // Outside home and the sources the browser may not list it, but deskd checks every folder it is given (spec §4.7).
       if (err instanceof DeskCallError && err.code === 'not_allowed' && isAbsolutePath(typed)) this.picked.emit(typed);
       else this.error.set(describeError(err).message);
+    } finally {
+      this.checking.set(false);
     }
   }
 }
@@ -16105,7 +16261,7 @@ export class FolderBrowser implements OnInit {
 - [ ] **Step 4: Run the spec**
 
 Run: `cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/folder-browser.spec.ts --include src/app/core/desk-bridge.spec.ts`
-Expected: PASS (7 folder-browser tests, and W0c.3's `desk-bridge.spec.ts` unchanged, whose "asks the folder browser for a folder, one request at a time" case is the other half of this contract).
+Expected: PASS (9 folder-browser tests, and W0c.3's `desk-bridge.spec.ts` unchanged, whose "asks the folder browser for a folder, one request at a time" case is the other half of this contract).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -16129,6 +16285,8 @@ Spec §7 W0 asks for "an empty map": `MapScreen` with its heading and counts, th
 - Consumes: `Button`, `EmptyState`, `Sheet`, `GlobalStore`, `RouteService`, `FakeDeskBridge` (W0c); `ProjectForm` (W0d.2); `plural` from `@desk/ui-core`; `initialGlobalState` from `@desk/bff/contract`; `AttentionItem`, `ProjectSummary` from `@desk/protocol`.
 - Produces: `MapScreen`, selector `div[deskMapScreen]` (class `map-screen`, so `.map-screen > .page` in `map.css` applies), `newProject = input(false)` (`#/map?new=1`: the sheet is open on arrival, and closing it goes back to `#/map`; read once, like React's `useState(newProject)`).
 
+**Deviation (review fix):** "opens the new project sheet" also presses Escape. The dialog goes, the hash stays `#/map`, and `RouteService.navigate` is not called; this covers the `Sheet`'s `(close)` binding and `close()` with `newProject` false. W0c.8's `Sheet` now closes on Escape only when it is the topmost sheet (see its note), so Escape in the folder browser leaves this sheet and its form alone. W0d.7's `app.onboarding.spec.ts` checks that.
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `apps/web-ui/src/app/map/map-screen.spec.ts`:
@@ -16139,9 +16297,10 @@ import { render, screen, waitFor } from '@testing-library/angular';
 import userEvent from '@testing-library/user-event';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { AttentionItem, ProjectSummary } from '@desk/protocol';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeskBridge } from '../core/desk-bridge';
 import { GlobalStore } from '../core/global.store';
+import { RouteService } from '../core/route.service';
 import { FakeDeskBridge } from '../testing/fake-bridge';
 import { MapScreen } from './map-screen';
 
@@ -16184,6 +16343,11 @@ describe('MapScreen', () => {
     const { user } = await setup({ seeded: true });
     await user.click(screen.getByRole('button', { name: /New project/ }));
     expect(await screen.findByRole('dialog', { name: 'New project' })).toBeTruthy();
+    const navigate = vi.spyOn(TestBed.inject(RouteService), 'navigate');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New project' })).toBeNull());
+    expect(window.location.hash).toBe('#/map');
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('counts running threads, busy projects and what waits on you', async () => {
@@ -16324,7 +16488,9 @@ W0c.14's `App` already does what `App.tsx`'s `Shell` does around the screens: it
 
 **Interfaces:**
 - Consumes: `screenFor` with the lines `      return notYet('Onboarding');` and `      return notYet('The map');` (W0c.11); `App` with its `bridge` field (W0c.14); `DeskBridge.folderRequest`, `DeskBridge.answerFolder`, `FakeDeskBridge` (W0c.3); `provideErrorBoundaries` (W0c.11); `Onboarding` (W0d.4); `FolderBrowser` (W0d.5); `MapScreen` (W0d.6).
-- Produces: `screenFor({ name: 'onboarding' })` → `{ component: Onboarding, inputs: {} }`; `screenFor({ name: 'map', newProject })` → `{ component: MapScreen, inputs: { newProject: newProject ?? false } }`; `App` renders `div[deskFolderBrowser]` while `DeskBridge.folderRequest()` is set and answers the request with its `picked` output.
+- Produces: `screenFor({ name: 'onboarding' })` → `{ component: Onboarding, inputs: {} }`; `screenFor({ name: 'map', newProject })` → `{ component: MapScreen, inputs: { newProject: newProject ?? false } }`; `App` renders `div[deskFolderBrowser]` while `DeskBridge.folderRequest()` is set (a fresh one for each request) and answers the request with its `picked` output.
+
+**Deviation (review fix):** `App` renders the folder browser in a one-item `@for` tracked by the request (`folderRequests`) instead of `@if (…; as request)`. `DeskBridge.pickFolder` settles an open request with null and sets the next one in the same tick, and `@if` then keeps the same view. A second request therefore inherited the first one's listing, typed path, error and hidden-folders choice; only the heading followed. Two cases were added. A `skill-import` request that replaces a `source` one gets a fresh browser: hidden folders on, the home listing, the old dialog gone. Escape in the folder browser opened from the map's new-project sheet closes only the folder browser and keeps the typed name (W0c.8's topmost-sheet fix). The spec has 7 cases.
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -16349,6 +16515,11 @@ async function setup(hash: string, handlers: FakeHandlers = {}) {
 }
 
 const HOME = { path: '/Users/me', parent: null, dirs: [{ name: 'code', path: '/Users/me/code' }] };
+/** Home (with .claude when hidden folders show) and ~/code. */
+const listDirs = (input: { path?: string; hidden?: boolean }) =>
+  input.path === '/Users/me/code'
+    ? { path: '/Users/me/code', parent: '/Users/me', dirs: [{ name: 'app', path: '/Users/me/code/app' }] }
+    : { ...HOME, dirs: input.hidden ? [{ name: '.claude', path: '/Users/me/.claude' }, ...HOME.dirs] : HOME.dirs };
 
 describe('App: onboarding, the map and the folder browser', () => {
   it('sends a browser that has not been through onboarding there, without the shell', async () => {
@@ -16386,6 +16557,42 @@ describe('App: onboarding, the map and the folder browser', () => {
     expect(screen.getByText('Welcome to Desk')).toBeTruthy();
   });
 
+  it('closes only the folder browser on Escape, not the new-project sheet under it', async () => {
+    localStorage.setItem('desk.onboarded', '1');
+    const { bridge, user } = await setup('#/map?new=1', { 'fs.listDirs': () => HOME });
+    await screen.findByRole('dialog', { name: 'New project' });
+    await user.type(screen.getByLabelText('Name'), 'Launch');
+    await user.click(screen.getByRole('button', { name: 'Add folder…' }));
+    const browser = await screen.findByRole('dialog', { name: 'Choose a folder' });
+    await within(browser).findByRole('button', { name: 'code' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Choose a folder' })).toBeNull());
+    expect(bridge.folderRequest()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'New project' })).toBeTruthy();
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Launch');
+    expect(window.location.hash).toBe('#/map?new=1');
+  });
+
+  it('opens a fresh folder browser for a second request, at its own purpose and listing', async () => {
+    localStorage.setItem('desk.onboarded', '1');
+    const { bridge, user } = await setup('#/map', { 'fs.listDirs': listDirs });
+    await screen.findByRole('heading', { name: 'Projects', level: 1 });
+    const first = bridge.call('app.pickFolder', { purpose: 'source' });
+    const dialog = await screen.findByRole('dialog', { name: 'Choose a folder' });
+    await user.click(await within(dialog).findByRole('button', { name: 'code' }));
+    await within(dialog).findByRole('button', { name: 'app' });
+    const second = bridge.call('app.pickFolder', { purpose: 'skill-import' });
+    await expect(first).resolves.toBeNull();
+    const again = await screen.findByRole('dialog', { name: 'Choose a skill folder' });
+    await within(again).findByRole('button', { name: '.claude' });
+    expect(dialog.isConnected).toBe(false);
+    expect((within(again).getByRole('checkbox', { name: 'Show hidden folders' }) as HTMLInputElement).checked).toBe(true);
+    expect((within(again).getByLabelText('Folder') as HTMLInputElement).value).toBe('/Users/me');
+    expect(bridge.calls.filter((c) => c.channel === 'fs.listDirs').map((c) => c.input)).toEqual([{ hidden: false }, { path: '/Users/me/code', hidden: false }, { hidden: true }]);
+    await user.click(within(again).getByRole('button', { name: 'Choose this folder' }));
+    await expect(second).resolves.toBe('/Users/me');
+  });
+
   it('shows the folder browser over the shell, outside .app, and Cancel answers null', async () => {
     localStorage.setItem('desk.onboarded', '1');
     const { bridge, view, user } = await setup('#/map', { 'fs.listDirs': () => HOME });
@@ -16405,7 +16612,7 @@ describe('App: onboarding, the map and the folder browser', () => {
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.onboarding.spec.ts`
-Expected: FAIL, all five: `#/onboarding` and `#/map` still show `NotYet` ("Onboarding is not in the web UI yet", "The map is not in the web UI yet"), so there is no "Welcome to Desk", no `Projects` heading and no `New project` dialog, and nothing renders the folder browser, so the two `Choose a folder` cases time out.
+Expected: FAIL, all seven: `#/onboarding` and `#/map` still show `NotYet` ("Onboarding is not in the web UI yet", "The map is not in the web UI yet"), so there is no "Welcome to Desk", no `Projects` heading and no `New project` dialog, and nothing renders the folder browser, so the cases that open it fail too.
 
 - [ ] **Step 3: Give both routes their screens**
 
@@ -16494,7 +16701,7 @@ after:
 
 - [ ] **Step 4: Show the folder browser from `App`**
 
-All three edits are in `apps/web-ui/src/app/app.ts` (W0c.14, with W0c.15's notifications).
+All four edits are in `apps/web-ui/src/app/app.ts` (W0c.14, with W0c.15's notifications).
 
 The import, before:
 
@@ -16540,7 +16747,7 @@ after:
           }
         </ng-template>
       </div>
-      @if (bridge.folderRequest(); as request) {
+      @for (request of folderRequests(); track request) {
         <div deskFolderBrowser [purpose]="request.purpose" (picked)="bridge.answerFolder($event)"></div>
       }
     }
@@ -16548,12 +16755,38 @@ after:
 })
 ```
 
+The class body, before:
+
+```ts
+  protected readonly screen = computed(() => {
+    const view = screenFor(this.route());
+    return view ? [{ ...view, key: this.key() }] : [];
+  });
+```
+
+after:
+
+```ts
+  protected readonly screen = computed(() => {
+    const view = screenFor(this.route());
+    return view ? [{ ...view, key: this.key() }] : [];
+  });
+
+  /** The open folder request as a one-item list tracked by the request, so a new request gets a fresh folder browser. */
+  protected readonly folderRequests = computed(() => {
+    const request = this.bridge.folderRequest();
+    return request ? [request] : [];
+  });
+```
+
+A second `app.pickFolder` while one is open settles the first with null and sets a new request object in the same tick; tracking the request gives that request its own `FolderBrowser`, which lists from its own purpose (`ngOnInit`), as the screen `@for` does for a new screen key.
+
 The folder browser's host is `display: contents` and its `.sheet-backdrop` moves itself into `document.body` (`position: fixed`), so it covers the page without adding a box beside `.app` or `.onboarding`, and W0c.14's check of `.app`'s children still holds.
 
 - [ ] **Step 5: Run the specs**
 
 Run: `cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.onboarding.spec.ts --include src/app/app.spec.ts --include src/app/screen-for.spec.ts`
-Expected: PASS (5 cases here, W0c's 9 `app.spec.ts` cases with the two replaced expectations, and `screen-for.spec.ts`).
+Expected: PASS (7 cases here, W0c's 9 `app.spec.ts` cases with the two replaced expectations, and `screen-for.spec.ts`).
 
 Run: `git grep -n "Onboarding is not in the web UI yet\|The map is not in the web UI yet" -- apps/web-ui`
 Expected: no output (exit 1).
@@ -16701,6 +16934,8 @@ The harness gives desk web and deskd a temporary home folder (`home/code/app`, `
 - Consumes: `startWebServer`, `WebServer` (`@desk/web-server`, W0b.12: `{ dataDir, port: 0, open: false, home, log }`; `loginLink()`, `url`, `close()`); `startDaemon`, `RunningDaemon` (`@desk/daemon`); `startFakeModel`, `text`, `Script`, `FakeModelServer` (`@desk/fake-model`); `clientFromDataDir` (`@desk/client/node`); `chromium` (`playwright`); the login page's `desk.session` key and the "Open Desk from your terminal" signed-out state (W0b, W0c); every screen of W0d.1–W0d.7.
 - Produces: `startWebE2E(o?: { script?: Script }): Promise<WebE2E>`; `WebE2E = { home; dataDir; fake; daemon; web; warnings: string[]; client(): DeskClient; signIn(link?: string): Promise<SignedIn>; shot(page, name): Promise<void>; close(): Promise<void> }`; `SignedIn = { context: BrowserContext; page: Page; problems: string[] }` (`problems` collects Content-Security-Policy violations and uncaught page errors). Screenshots go to `$DESK_E2E_SHOTS/web-<name>.png` when that variable is set, as in the Electron suite. W1–W3 add their scenarios next to `smoke.e2e.test.ts` on this harness.
 
+**Deviation (review fix):** two changes. (1) The smoke test waits for "No projects yet" to detach before the map screenshot. The heading appears while the W0 map still shows its empty state; the empty state going away proves that the pushed global state reaches the map (the project itself is checked behind the UI's back). (2) The harness's `close()` runs every closer even when one throws, keeps the first error and rethrows it after the loop. Before, a failing `browser.close()` or `web.close()` left deskd, the fake model and the temp root behind, and Vitest waiting on open servers.
+
 - [ ] **Step 1: Write the failing smoke test**
 
 Create `apps/web-ui/e2e/smoke.e2e.test.ts` (Vitest globals: see `vitest.web-e2e.config.ts`):
@@ -16753,6 +16988,8 @@ describe('desk web', () => {
 
     await page.waitForURL(/#\/map$/);
     await page.getByRole('heading', { name: 'Projects', exact: true }).waitFor();
+    // The empty state goes once the pushed global state brings the new project to the map.
+    await page.getByText('No projects yet').waitFor({ state: 'detached' });
     await e2e.shot(page, 'map');
     const [project] = await e2e.client().projects.list();
     expect(project).toMatchObject({ name: 'Launch', goal: 'Relaunch onboarding next month' });
@@ -16883,8 +17120,17 @@ export async function startWebE2E(o: { script?: Script } = {}): Promise<WebE2E> 
   const dataDir = join(root, 'data');
   for (const dir of [join(home, 'code', 'app'), join(home, 'Documents'), join(home, '.config')]) mkdirSync(dir, { recursive: true });
   const closers: Array<() => Promise<void> | void> = [() => rmSync(root, { recursive: true, force: true })];
+  // Every closer runs even when one throws (deskd, the fake model and the temp root still go); the first error is rethrown.
   const close = async () => {
-    for (const c of closers.splice(0).reverse()) await c();
+    const errors: unknown[] = [];
+    for (const c of closers.splice(0).reverse()) {
+      try {
+        await c();
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+    if (errors.length) throw errors[0];
   };
   try {
     const fake = await startFakeModel(o.script ?? (() => text('Noted.')));
@@ -17000,7 +17246,7 @@ Expected: every file passes (`packages/*`, `apps/*/src`, `test/*`; `@desk/bff`, 
 - [ ] **Step 3: The web UI's suite**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: every spec passes, W0d's among them: `settings-fields` (4), `project-form` (6), `endpoint-panel` (5), `onboarding` (4), `folder-browser` (7), `map-screen` (4), `app.onboarding` (5), and W0c's `app.spec.ts` (9) and `screen-for.spec.ts` with W0d.7's changes.
+Expected: every spec passes (39 files, 157 tests), W0d's among them: `settings-fields` (5), `project-form` (6), `endpoint-panel` (6), `onboarding` (4), `folder-browser` (9), `map-screen` (4), `app.onboarding` (7), and W0c's `sheet.spec.ts` (4, with the topmost-sheet case from W0d's review), `app.spec.ts` (9) and `screen-for.spec.ts` with W0d.7's changes.
 
 - [ ] **Step 4: The Electron e2e suite (the desktop app is unchanged)**
 
@@ -17010,7 +17256,7 @@ Expected: every `apps/desktop/e2e/*.e2e.test.ts` passes (the packaged case skips
 - [ ] **Step 5: The web e2e suite**
 
 Run: `pnpm test:web-e2e`
-Expected: the production build succeeds; then PASS: `apps/web-server/src/built-ui.e2e.test.ts` (3) and `apps/web-ui/e2e/smoke.e2e.test.ts` (2). With `DESK_E2E_SHOTS=$(mktemp -d)` set, that folder holds `web-onboarding-daemon.png`, `web-folder-browser.png` and `web-map.png`; look at them.
+Expected: the production build succeeds; then PASS (2 files, 5 tests): `apps/web-server/src/built-ui.e2e.test.ts` (3) and `apps/web-ui/e2e/smoke.e2e.test.ts` (2). With `DESK_E2E_SHOTS=$(mktemp -d)` set, that folder holds `web-onboarding-daemon.png`, `web-folder-browser.png` and `web-map.png`; look at them.
 
 - [ ] **Step 6: Nothing left behind**
 
@@ -17913,6 +18159,8 @@ async function setup(o: { p?: ProjectSummary; items?: AttentionItem[]; plan?: Fa
   const view = await render(TerritoryInspector, {
     inputs: { p: o.p ?? onboarding, items: o.items ?? [approval, stalled], now: NOW },
     providers: [{ provide: DeskBridge, useValue: bridge }],
+    // The host must be the <article> its selector names (TestBed uses a <div> otherwise): the first case checks its tag.
+    configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true }),
   });
   const planCalls = () => bridge.calls.filter((c) => c.channel === 'projects.plan').map((c) => c.input);
   return { bridge, view, planCalls };
@@ -18254,10 +18502,10 @@ After:
 import { render, screen, waitFor, within } from '@testing-library/angular';
 ```
 
-2. Before:
+2. Before (`vi` since W0d.6's review fix):
 
 ```ts
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 ```
 
 After:
@@ -18632,7 +18880,7 @@ Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 
 Expected: PASS (10 tests).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 'src/app/map/*.spec.ts' --include src/app/app.onboarding.spec.ts)`
-Expected: PASS (map-canvas 5, orbit-map 7, project-list 2, territory-inspector 9, map-screen 10, and W0d.7's 5 `app.onboarding.spec.ts` cases, which render `MapScreen` for `#/map` and `#/map?new=1`).
+Expected: PASS (map-canvas 5, orbit-map 7, project-list 2, territory-inspector 9, map-screen 10, and W0d.7's 7 `app.onboarding.spec.ts` cases, which render `MapScreen` for `#/map` and `#/map?new=1`).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -29783,7 +30031,7 @@ If Tasks W2b.1 and W2b.2 are in, that was the last `notYet(…)` line under `cas
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/settings/settings-screen.spec.ts --include src/app/settings/policy-editor.spec.ts --include src/app/settings/settings-fields.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 6 settings cases, the 3 policy editor cases, W0d.1's 4 `SettingsFields` cases unchanged, and `screen-for.spec.ts`.
+Expected: PASS: the 6 settings cases, the 3 policy editor cases, W0d.1's 5 `SettingsFields` cases unchanged, and `screen-for.spec.ts`.
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -32206,6 +32454,8 @@ async function setup(o: { skill?: SkillRef; node?: SkillNode; catalog?: { item: 
     },
     on: outputs,
     providers: [...bridge.providers, provideGlobal(initialGlobalState())],
+    // The host must be the <article> its selector names (TestBed uses a <div> otherwise), or getByRole('article') finds nothing.
+    configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true }),
   });
   return { bridge, view, outputs, panel: screen.getByRole('article') };
 }
@@ -36233,7 +36483,7 @@ Expected: no output (exit 1).
 - [ ] **Step 5: Run the table and the shell**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/screen-for.spec.ts --include src/app/app.spec.ts --include src/app/app.onboarding.spec.ts)`
-Expected: PASS: 3 `screen-for` cases, every `app.spec.ts` case, and W0d.7's 5 `app.onboarding.spec.ts` cases.
+Expected: PASS: 3 `screen-for` cases, every `app.spec.ts` case, and W0d.7's 7 `app.onboarding.spec.ts` cases.
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0 (nothing imports `screens/not-yet` any more).
