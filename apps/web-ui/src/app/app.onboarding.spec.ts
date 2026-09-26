@@ -53,6 +53,22 @@ describe('App: onboarding, the map and the folder browser', () => {
     expect(screen.getByText('Welcome to Desk')).toBeTruthy();
   });
 
+  it('closes only the folder browser on Escape, not the new-project sheet under it', async () => {
+    localStorage.setItem('desk.onboarded', '1');
+    const { bridge, user } = await setup('#/map?new=1', { 'fs.listDirs': () => HOME });
+    await screen.findByRole('dialog', { name: 'New project' });
+    await user.type(screen.getByLabelText('Name'), 'Launch');
+    await user.click(screen.getByRole('button', { name: 'Add folder…' }));
+    const browser = await screen.findByRole('dialog', { name: 'Choose a folder' });
+    await within(browser).findByRole('button', { name: 'code' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Choose a folder' })).toBeNull());
+    expect(bridge.folderRequest()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'New project' })).toBeTruthy();
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Launch');
+    expect(window.location.hash).toBe('#/map?new=1');
+  });
+
   it('shows the folder browser over the shell, outside .app, and Cancel answers null', async () => {
     localStorage.setItem('desk.onboarded', '1');
     const { bridge, view, user } = await setup('#/map', { 'fs.listDirs': () => HOME });

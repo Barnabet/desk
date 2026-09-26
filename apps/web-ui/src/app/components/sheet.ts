@@ -4,7 +4,8 @@ let nextTitle = 0;
 
 /**
  * A modal dialog: focus moves in, Escape or a backdrop click closes, focus returns on close. Like the React portal, the
- * backdrop (this host) lives in document.body. A projected `.sheet-footer` element is the footer.
+ * backdrop (this host) lives in document.body. A projected `.sheet-footer` element is the footer. Escape closes only
+ * the topmost sheet (the folder browser, not the project form under it).
  */
 @Component({
   selector: 'div[deskSheet]',
@@ -50,6 +51,12 @@ export class Sheet {
   }
 
   protected onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') this.close.emit();
+    if (e.key === 'Escape' && this.isTopmost()) this.close.emit();
+  }
+
+  /** Each sheet appends its backdrop to the body when it opens, so the one on top is the body's last backdrop. */
+  private isTopmost(): boolean {
+    const backdrops = [...document.body.children].filter((el) => el.classList.contains('sheet-backdrop'));
+    return backdrops.at(-1) === this.host;
   }
 }

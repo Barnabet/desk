@@ -3,9 +3,10 @@ import { render, screen, waitFor } from '@testing-library/angular';
 import userEvent from '@testing-library/user-event';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { AttentionItem, ProjectSummary } from '@desk/protocol';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeskBridge } from '../core/desk-bridge';
 import { GlobalStore } from '../core/global.store';
+import { RouteService } from '../core/route.service';
 import { FakeDeskBridge } from '../testing/fake-bridge';
 import { MapScreen } from './map-screen';
 
@@ -48,6 +49,11 @@ describe('MapScreen', () => {
     const { user } = await setup({ seeded: true });
     await user.click(screen.getByRole('button', { name: /New project/ }));
     expect(await screen.findByRole('dialog', { name: 'New project' })).toBeTruthy();
+    const navigate = vi.spyOn(TestBed.inject(RouteService), 'navigate');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New project' })).toBeNull());
+    expect(window.location.hash).toBe('#/map');
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('counts running threads, busy projects and what waits on you', async () => {

@@ -48,6 +48,30 @@ describe('Sheet', () => {
     before.remove();
   });
 
+  it('closes only the topmost sheet on Escape', async () => {
+    const outer = vi.fn();
+    const inner = vi.fn();
+    const view = await render(
+      `<div deskSheet title="New project" (close)="outer()"><input aria-label="Name" /></div>
+      @if (picking) {
+        <div deskSheet title="Choose a folder" (close)="inner()"><input aria-label="Folder" /></div>
+      }`,
+      { imports: [Sheet], componentProperties: { picking: false, outer, inner } },
+    );
+    await view.fixture.whenStable();
+    // Opened over the first, as the folder browser opens over the new-project form.
+    await view.rerender({ componentProperties: { picking: true }, partialUpdate: true });
+    await view.fixture.whenStable();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
+    await view.rerender({ componentProperties: { picking: false }, partialUpdate: true });
+    await view.fixture.whenStable();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(outer).toHaveBeenCalledTimes(1);
+    expect(inner).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves the body and gives the focus back when it closes', async () => {
     const { view, before } = await renderSheet();
     await view.rerender({ componentProperties: { open: false } });
