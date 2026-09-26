@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/angular';
+import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeDeskBridge } from '../testing/fake-bridge';
 import { FileViewer, rasterMime } from './file-viewer';
+import { ToastService } from './toast';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -67,6 +69,17 @@ describe('FileViewer', () => {
     await waitFor(() => expect(created.map((b) => b.type)).toEqual(['image/png', 'image/jpeg']));
     expect(revoked).toEqual(['blob:test/1']);
     expect((await screen.findByRole('img', { name: 'page-2.jpg' })).getAttribute('src')).toBe('blob:test/2');
+    view.fixture.destroy();
+    expect(revoked).toEqual(['blob:test/1', 'blob:test/2']);
+  });
+
+  it('never makes an image of a file whose extension names an Object.prototype member', async () => {
+    expect(['a.__proto__', 'a.constructor', 'a.CONSTRUCTOR', 'a.toString', 'a.hasOwnProperty', 'a.valueOf'].map(rasterMime)).toEqual([null, null, null, null, null, null]);
+    const bridge = new FakeDeskBridge();
+    await render(FileViewer, { inputs: { path: 'out/x.constructor', data: new Uint8Array([0x89, 0x50, 0, 1]) }, providers: bridge.providers });
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByText("This file isn't text, so it can't be shown here. Save a copy to open it.")).toBeTruthy();
+    expect(created).toEqual([]);
   });
 
   it('says a binary file cannot be shown, and saves a copy of it through the browser', async () => {
@@ -79,6 +92,25 @@ describe('FileViewer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
     await waitFor(() => expect(bridge.calls).toEqual([{ channel: 'app.saveFile', input: { name: 'archive.bin', data } }]));
     expect(created).toEqual([]);
+  });
+
+  it('shows the error in a toast when saving a copy fails', async () => {
+    const bridge = new FakeDeskBridge({
+      'app.saveFile': () => {
+        throw { code: 'internal', message: 'The download could not start' };
+      },
+    });
+    await render(FileViewer, { inputs: { path: 'out/archive.bin', data: new Uint8Array([0, 1]) }, providers: bridge.providers });
+    fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
+    await waitFor(() => expect(TestBed.inject(ToastService).list().map((t) => [t.tone, t.message])).toEqual([['error', 'The download could not start']]));
+  });
+
+  it("saves a copy named 'file' when the path has no name", async () => {
+    const bridge = new FakeDeskBridge({ 'app.saveFile': () => true });
+    const data = new Uint8Array([0, 1]);
+    await render(FileViewer, { inputs: { path: 'out/', data }, providers: bridge.providers });
+    fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
+    await waitFor(() => expect(bridge.calls).toEqual([{ channel: 'app.saveFile', input: { name: 'file', data } }]));
   });
 
   it("puts its host's actions in the bar, before Save a copy…", async () => {

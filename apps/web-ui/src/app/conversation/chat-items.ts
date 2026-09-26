@@ -278,7 +278,8 @@ export class ChatItemView {
   /** ToolGroup's titleOf: one function per view, so the group re-renders only when the titles change. */
   protected readonly titleOf = computed(() => {
     const titles = this.view()?.titles;
-    return (id: string): string | undefined => titles?.[id];
+    // Own keys only: the id is the agent's thread_id argument, and 'constructor' must not find Object.prototype's.
+    return (id: string): string | undefined => (titles && Object.hasOwn(titles, id) ? titles[id] : undefined);
   });
   protected readonly long = computed(() => {
     const it = this.item();

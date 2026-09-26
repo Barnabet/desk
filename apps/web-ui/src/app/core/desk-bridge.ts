@@ -208,7 +208,8 @@ export class DeskBridge {
       a.click();
     } finally {
       a.remove();
-      URL.revokeObjectURL(url);
+      // In a later task: some Firefox versions cancel a download whose URL is revoked in the click's own task.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     }
     return true;
   }

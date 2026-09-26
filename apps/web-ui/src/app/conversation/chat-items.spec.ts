@@ -159,11 +159,22 @@ describe('ChatItemView', () => {
     expect(r.host.textContent).toBe('');
     expect(r.host.childElementCount).toBe(0);
     await r.rerender({
-      item: { kind: 'tools', id: 'tools:5', ts: TS, calls: [ok, { ...ok, id: 'c2', status: 'error' }, { id: 'c3', name: 'read_thread', arguments: '{"thread_id":"a"}', status: 'running', content: null }] },
+      item: {
+        kind: 'tools',
+        id: 'tools:5',
+        ts: TS,
+        calls: [
+          ok,
+          { ...ok, id: 'c2', status: 'error' },
+          { id: 'c3', name: 'read_thread', arguments: '{"thread_id":"a"}', status: 'running', content: null },
+          // An id named after an Object.prototype member reads as itself, never as that member.
+          { id: 'c4', name: 'read_thread', arguments: '{"thread_id":"constructor"}', status: 'error', content: null },
+        ],
+      },
       view: { titles: { a: 'Auth API' } },
     });
-    expect(r.host.querySelector('.toolgroup-title')!.textContent).toBe('Desk is using 2 tools');
-    expect([...r.host.querySelectorAll('.toolgroup li .mono')].map((l) => l.textContent)).toEqual(['message_thread Auth API', 'read_thread Auth API']);
+    expect(r.host.querySelector('.toolgroup-title')!.textContent).toBe('Desk is using 3 tools');
+    expect([...r.host.querySelectorAll('.toolgroup li .mono')].map((l) => l.textContent)).toEqual(['message_thread Auth API', 'read_thread Auth API', 'read_thread constructor']);
   });
 
   it("lists a digest's pairs on demand, each opening the pair's sheet", async () => {

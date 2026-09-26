@@ -9,11 +9,18 @@ import { ToastService } from './toast';
 /**
  * The image types shown as images (spec §4.11). A browser lets the user open an image in a tab of its own, where a
  * `blob:` document runs with desk web's origin, so SVG (a document that can run script) is shown as its source instead.
+ * A Map, not an object literal: a file named `x.constructor` or `x.__proto__` must not find Object.prototype's members.
  */
-const RASTER: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+const RASTER = new Map([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
+]);
 
 /** The raster image type of `path`, by its extension; null for anything else, SVG included. */
-export const rasterMime = (path: string): string | null => RASTER[extOf(path)] ?? null;
+export const rasterMime = (path: string): string | null => RASTER.get(extOf(path)) ?? null;
 
 /**
  * Shows one file's bytes: raster images through a blob URL of their own type (never a remote one), Markdown rendered
@@ -59,6 +66,8 @@ export class FileViewer {
   protected readonly md = computed(() => this.text() !== null && isMarkdown(this.path()));
   protected readonly ext = computed(() => extOf(this.path()));
   protected readonly name = computed(() => this.path().split('/').pop() ?? '');
+  /** The download's name: 'file' for a path that ends in '/'. */
+  private readonly saveName = computed(() => this.name() || 'file');
   protected readonly size = computed(() => bytes(this.data().length));
   /** The Markdown source instead of its rendering; each new file starts rendered. */
   protected readonly raw = linkedSignal({ source: this.path, computation: () => false });
@@ -79,10 +88,10 @@ export class FileViewer {
     });
   }
 
-  /** DeskBridge downloads it as application/octet-stream and revokes the URL right after the click (spec §4.11). */
+  /** DeskBridge downloads it as application/octet-stream and revokes the URL once the click's task is over (spec §4.11). */
   protected async save(): Promise<void> {
     try {
-      await this.bridge.call('app.saveFile', { name: this.path().split('/').pop() ?? 'file', data: new Uint8Array(this.data()) });
+      await this.bridge.call('app.saveFile', { name: this.saveName(), data: new Uint8Array(this.data()) });
     } catch (err) {
       this.toasts.error(err);
     }

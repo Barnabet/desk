@@ -174,7 +174,7 @@ describe('DeskBridge host operations', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('saves a file through an octet-stream blob, revoked right after the click', async () => {
+  it('saves a file through an octet-stream blob, revoked in a task after the click', async () => {
     const blobs: Blob[] = [];
     const revoke = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: (b: Blob) => (blobs.push(b), 'blob:desk/1') });
@@ -187,6 +187,9 @@ describe('DeskBridge host operations', () => {
       await expect(TestBed.inject(DeskBridge).call('app.saveFile', { name: 'report.pdf', data: new Uint8Array([1, 2, 3]) })).resolves.toBe(true);
       expect(blobs.map((b) => [b.type, b.size])).toEqual([['application/octet-stream', 3]]);
       expect(clicks).toEqual([{ href: 'blob:desk/1', download: 'report.pdf', connected: true }]);
+      // Some Firefox versions cancel a download whose URL is revoked in the same task as the click.
+      expect(revoke).not.toHaveBeenCalled();
+      await new Promise((r) => setTimeout(r, 0));
       expect(revoke).toHaveBeenCalledWith('blob:desk/1');
       expect(document.querySelector('a[download]')).toBeNull();
       expect(fetchMock).not.toHaveBeenCalled();
