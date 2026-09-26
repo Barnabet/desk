@@ -63,7 +63,8 @@ export const openPrTool = defineTool({
   name: 'open_pr',
   description: 'Open a pull request for your pushed branch with the GitHub CLI. Push first.',
   input: z.object({ title: z.string().min(1), body: z.string(), base: z.string().optional() }),
-  gate: { subject: () => ({}), unmatched: 'ask' },
+  // The thread's branch, as for git_push: grants and rules on match.branch then name the branch a PR comes from.
+  gate: { subject: (_i, g) => (g.gitBranch ? { branch: g.gitBranch } : {}), unmatched: 'ask' },
   async execute({ title, body, base }, ctx) {
     const g = requireGit(ctx);
     const r = await runProcess({
