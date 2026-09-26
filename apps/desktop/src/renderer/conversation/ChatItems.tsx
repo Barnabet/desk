@@ -186,7 +186,7 @@ export function ChatItemView(o: {
         <ToolGroup
           calls={calls}
           title={`Desk ${calls.some((c) => c.status === 'running') ? 'is using' : 'used'} ${calls.length} tool${calls.length === 1 ? '' : 's'}`}
-          titleOf={(id) => view?.titles?.[id]}
+          titleOf={(id) => (view?.titles && Object.hasOwn(view.titles, id) ? view.titles[id] : undefined)}
         />
       );
     }

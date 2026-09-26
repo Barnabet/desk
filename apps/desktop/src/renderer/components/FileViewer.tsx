@@ -22,9 +22,10 @@ export function FileViewer({ path, data, actions }: { path: string; data: Uint8A
     return () => URL.revokeObjectURL(u);
   }, [data, mime]);
   useEffect(() => setRaw(false), [path]);
+  const name = path.split('/').pop() ?? '';
   const save = async () => {
     try {
-      await call('app.saveFile', { name: path.split('/').pop() ?? 'file', data: new Uint8Array(data) });
+      await call('app.saveFile', { name: name || 'file', data: new Uint8Array(data) });
     } catch (err) {
       toastError(err);
     }
@@ -46,7 +47,7 @@ export function FileViewer({ path, data, actions }: { path: string; data: Uint8A
         </Button>
       </div>
       {mime ? (
-        url ? <img className="file-image" src={url} alt={path.split('/').pop() ?? ''} /> : null
+        url ? <img className="file-image" src={url} alt={name} /> : null
       ) : text === null ? (
         <p className="muted">This file isn't text, so it can't be shown here. Save a copy to open it.</p>
       ) : md && !raw ? (

@@ -341,8 +341,13 @@ describe('messages in the conversation', () => {
       ...team(),
       ev(5, 'tool.call', { run_id: 'r', tool_call_id: 'c1', name: 'read_thread', arguments: '{"thread_id":"a"}' }, d),
       ev(6, 'tool.result', { run_id: 'r', tool_call_id: 'c1', name: 'read_thread', status: 'ok', content: 'Auth API: running' }, d),
+      // An id named after an Object.prototype member reads as itself, never as that member.
+      ev(7, 'tool.call', { run_id: 'r', tool_call_id: 'c2', name: 'read_thread', arguments: '{"thread_id":"constructor"}' }, d),
+      ev(8, 'tool.result', { run_id: 'r', tool_call_id: 'c2', name: 'read_thread', status: 'error', content: 'No such thread' }, d),
     ]);
     await waitFor(() => expect(row('tools:5')?.textContent).toContain('read_thread Auth API'));
+    expect(row('tools:5')!.textContent).toContain('read_thread constructor');
+    expect(row('tools:5')!.textContent).not.toContain('function');
   });
 
   it("opens the pair sheet from the counterpart's name on Desk's message rows, and keeps a notice's link", async () => {
