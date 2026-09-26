@@ -18,7 +18,9 @@ export class HttpError extends Error {
 
 export function errorResponse(c: Context, err: unknown) {
   if (err instanceof HttpError) return c.json({ error: { code: err.code, message: err.message } }, err.status);
-  if (err instanceof DeskError) return c.json({ error: { code: err.code, message: err.message } }, STATUS[err.code]);
+  if (err instanceof DeskError) {
+    return c.json({ error: { code: err.code, message: err.message, ...(err.details !== undefined ? { details: err.details } : {}) } }, STATUS[err.code]);
+  }
   if (err instanceof ZodError) return c.json({ error: { code: 'invalid', message: 'Invalid request', details: err.issues } }, 400);
   console.error('[deskd] internal error:', err);
   return c.json({ error: { code: 'internal', message: err instanceof Error ? err.message : 'Internal error' } }, 500);

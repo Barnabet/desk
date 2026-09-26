@@ -37,7 +37,8 @@ export {
 } from './state/queries';
 export { listAttention } from './state/attention';
 export { listOverview } from './state/overview';
-export { listWorkspace, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
+export { listFolder, listWorkspace, resolveFolderFile, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
+export { readAgentFile } from './tools/agent-files';
 export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, modelCredentialsFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
 export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';

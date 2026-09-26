@@ -408,6 +408,11 @@ export class Runtime {
     return join(this.o.dataDir, 'projects', projectId);
   }
 
+  /** deskd's data folder (run folders, logs). */
+  get dataDir(): string {
+    return this.o.dataDir;
+  }
+
   libraryDir(projectId: string): string {
     return join(this.projectDir(projectId), 'library');
   }

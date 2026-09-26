@@ -43,11 +43,10 @@ export async function threadDiff(t: AgentRow): Promise<ThreadDiff> {
   return { base: t.git_base, branch: t.git_branch, files, patch };
 }
 
-/** Lists one directory of the workspace (directories first, `.git` hidden). Symlinks show as entries but cannot be followed out. */
-export async function listWorkspace(t: AgentRow, rel = ''): Promise<WorkspaceEntry[]> {
-  const ws = requireWorkspace(t);
-  const root = await resolveInside('.', [ws], ws);
-  const dir = await resolveInside(rel || '.', [ws], ws);
+/** Lists one directory under `root` (directories first, `.git` hidden). Symlinks show as entries but cannot be followed out. */
+export async function listFolder(root: string, rel = ''): Promise<WorkspaceEntry[]> {
+  const top = await resolveInside('.', [root], root);
+  const dir = await resolveInside(rel || '.', [root], root);
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => {
     throw new NotFoundError(`No such directory: ${rel}`);
   });
@@ -57,16 +56,25 @@ export async function listWorkspace(t: AgentRow, rel = ''): Promise<WorkspaceEnt
     const full = join(dir, e.name);
     const s = await stat(full).catch(() => null);
     const isDir = s ? s.isDirectory() : e.isDirectory();
-    out.push({ name: e.name, path: relative(root, full).split('\\').join('/'), type: isDir ? 'dir' : 'file', size: isDir || !s ? 0 : s.size });
+    out.push({ name: e.name, path: relative(top, full).split('\\').join('/'), type: isDir ? 'dir' : 'file', size: isDir || !s ? 0 : s.size });
   }
   return out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
 }
 
+/** Resolves a file under `root` for reading; refuses anything that leads outside it. */
+export async function resolveFolderFile(root: string, rel: string): Promise<string> {
+  const file = await resolveInside(rel, [root], root);
+  const s = await stat(file).catch(() => null);
+  if (!s?.isFile()) throw new NotFoundError(`No such file: ${rel}`);
+  return file;
+}
+
+/** Lists one directory of the workspace (directories first, `.git` hidden). Symlinks show as entries but cannot be followed out. */
+export async function listWorkspace(t: AgentRow, rel = ''): Promise<WorkspaceEntry[]> {
+  return listFolder(requireWorkspace(t), rel);
+}
+
 /** Resolves a workspace file for reading; refuses anything that leads outside the workspace. */
 export async function resolveWorkspaceFile(t: AgentRow, rel: string): Promise<string> {
-  const ws = requireWorkspace(t);
-  const file = await resolveInside(rel, [ws], ws);
-  const s = await stat(file).catch(() => null);
-  if (!s?.isFile()) throw new NotFoundError(`No such file in the workspace: ${rel}`);
-  return file;
+  return resolveFolderFile(requireWorkspace(t), rel);
 }

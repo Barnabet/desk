@@ -11,6 +11,7 @@ import type { CatalogService, EventStore, ModelRegistry, Runtime, SkillRuntimes 
 import { bearerAuth, errorResponse } from './http';
 import { agentRoutes } from './routes/agents';
 import { attachmentRoutes } from './routes/attachments';
+import { automationRoutes } from './routes/automations';
 import { catalogRoutes } from './routes/catalog';
 import { serviceRoutes } from './routes/services';
 import { configRoutes } from './routes/config';
@@ -67,6 +68,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/v1', catalogRoutes(deps));
   app.route('/v1', serviceRoutes(deps));
   app.route('/v1', systemRoutes(deps));
+  app.route('/v1', automationRoutes(deps));
   app.route('/v1', configRoutes(deps));
   return app;
 }

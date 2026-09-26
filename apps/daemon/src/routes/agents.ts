@@ -60,7 +60,7 @@ export function agentRoutes({ runtime, store }: AppDeps): Hono {
 
   r.post('/approvals/:id/resolve', async (c) => {
     const req = await body(c, ResolveApprovalRequest);
-    await runtime.resolveApproval(c.req.param('id'), req.decision, { by: 'user', ...(req.note ? { note: req.note } : {}) });
+    await runtime.resolveApproval(c.req.param('id'), req.decision, { by: 'user', ...(req.note ? { note: req.note } : {}), ...(req.remember ? { remember: true } : {}) });
     return c.json({ ok: true });
   });
 
