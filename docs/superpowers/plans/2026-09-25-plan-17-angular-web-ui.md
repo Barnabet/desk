@@ -57,7 +57,7 @@ browser (Angular app)  ── http://127.0.0.1:7434 ──►  desk web (Node, H
 - Agent text reaches the page only through `SafeMarkdownComponent` (`div[deskSafeMarkdown]`) or plain interpolation.
 - `desk web` binds loopback only. The Host check (421) runs on every request and WebSocket upgrade, and the Origin check (403) runs on `/rpc` and every upgrade.
 - The code is cross-platform: no macOS-only tools, except in the launchd code paths, which are guarded by platform. Paths go through `node:path`, and the folder opener is chosen per platform.
-- The Electron app's behaviour does not change, and neither do its unit and e2e tests. A moved test changes only in its import lines and the contract's two renames. Five review fixes reach the desktop on purpose, so both apps agree (each with its own cases in the desktop's tests): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); and the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`).
+- The Electron app's behaviour does not change, and neither do its unit and e2e tests, except for the cases the review fixes below add. A moved test changes only in its import lines and the contract's two renames. Five review fixes reach the desktop on purpose, so both apps agree, each with its own cases (in the desktop's tests; the map fix's are in `packages/ui-styles/src/map.test.ts`): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); and the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`).
 - TypeScript is strict with `noUncheckedIndexedAccess`, including the Angular app (`ngc` with strict templates).
 - The machine is shared: at most 2 agents at once, and one Electron or Chromium run at a time.
 
@@ -364,7 +364,7 @@ All paths are relative to the repo root.
 | `.gitignore` | modify: `.angular/`, `apps/web-ui/dist` | W0c.2 |
 | `pnpm-lock.yaml` | modify | W0a.1–4, W0b.1, W0b.13, W0c.2, W0d.9 |
 | `CLAUDE.md` | modify | W0a.6, W0b.14, W0c.16, W0d.9, W3b.7 |
-| `docs/desktop.md` | modify | W0a.6, W0b.6, W3b.7 |
+| `docs/desktop.md` | modify | W0a.6, W0b.6, W1c.3, W3b.7 |
 | `docs/web.md` | new | W3b.7 |
 | `scripts/ng.mjs`, `scripts/ng.test.ts` | new | W0c.1 |
 | `scripts/web-dev.mjs`, `scripts/web-dev.test.ts` | new | W0c.16 |
@@ -434,7 +434,7 @@ Five review fixes change what the desktop does, so that both apps agree. Escape 
 | `apps/desktop/src/renderer/styles.test.ts` | new | W0a.4 |
 | `apps/desktop/src/renderer/theme/tokens.{css,test.ts}`, the eight `renderer/<area>/<area>.css` | moved away | W0a.4 |
 | `apps/desktop/src/renderer/components/Sheet.tsx`; `components/Sheet.test.tsx` | modify (Escape closes only the topmost sheet); new | W0c.8 (review fix, from W0d's review) |
-| `apps/desktop/src/renderer/attention/AttentionScreen.{tsx,test.tsx}` | modify (⌘⌫ leaves the note alone, held keys decide once, a late failure keeps the next item pending) | W1c.3 (review fix) |
+| `apps/desktop/src/renderer/attention/AttentionScreen.{tsx,test.tsx}`, `docs/desktop.md` | modify (⌘⌫ leaves the note alone, held keys decide once, a late failure keeps the next item pending; the Attention row in `docs/desktop.md` says so) | W1c.3 (review fix) |
 | `apps/desktop/src/renderer/components/FileViewer.tsx`, `conversation/ChatItems.tsx`, `conversation/ConversationScreen.test.tsx`; `components/FileViewer.test.tsx` | modify (a nameless path saves as `file`; `titleOf` reads own keys); new | W2a.1 (review fix) |
 | `apps/desktop/src/renderer/knowledge/LibraryScreen.{tsx,test.tsx}` | modify (the drag hint lets go when the drag leaves the window, "Uploaded N files." counts the uploaded ones, a late single upload no longer navigates back) | W2b.1 (review fix) |
 
@@ -23947,7 +23947,7 @@ The seven React cases are ported one for one. One case is added for ⌘⌫, for 
 
 **Deviation (review fix):** three fixes, in both apps (`apps/desktop`'s `AttentionScreen.tsx` too, for parity). (1) ⌘⌫ / Ctrl+⌫ first denied the approval even with focus in the note, where it deletes to the line start on macOS and a word on Windows and Linux, so editing the note lost the approval. It now denies only when focus is not in a text box (the `typing(e.target)` guard J and K use) and otherwise leaves the key to the note, without `preventDefault`; ⌘⏎ still approves from the note. (2) A held ⌘⏎ or ⌘⌫ auto-repeats, and once the selection moved a repeat decided the next approval unseen; both ignore `e.repeat`. (3) `resolve`, `answer` and `dismiss` cleared `busy` after their await even if the selection had moved on, clearing the next item's pending state; `settle(id)` clears it only while the request's item is still selected (React keeps the selected id in a ref). The approve case now presses ⌘⏎ in the note, the last case is renamed "denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box" (Ctrl+⌫ and ⌘⌫ in the note are not prevented and deny nothing; ⌘⌫ on `document.body` denies), and four cases are added before it: the "someone else" 409 fallback when `approvals.list` fails; K's direction and top stop, the `lastIndex` fallback when the selected item leaves `GlobalStore` (a3 takes a2's place) and E on an approval (`#/p/p/threads/t3`); held keys; and a late failure (its error toast, the next approval still `aria-busy`, a second ⌘⏎ sending nothing). `AttentionScreen.test.tsx` gets the approve change and the held-key, late-failure and ⌘⌫ cases (10 tests).
 
-**Deviation (review fix, with W2b.2's):** `note` and `busy` were `linkedSignal({ source: () => this.selected()?.id, … })`. A linkedSignal reads its source inside its own node, so the inline source made it depend on `selected` itself, and every `desk:global` push (fresh JSON, so a new `selected` object with the same id) cleared the note being typed and the pending decision, which let the Approve button be pressed again while the first request was still out. Both now take `source: this.selectedId`, a `computed` of the id, which changes only when the selection does (React's `[selected?.id]` dependency). A new case types a note, pushes the same items plus one more as new objects, and expects the note kept; then approves, pushes again, and expects the button still `aria-busy` and one `approvals.resolve` call (it failed before the fix; 14 tests). The desktop needs no change: its effect is keyed on the id. The code block below is updated.
+**Deviation (review fix, with W2b.2's):** `note` and `busy` were `linkedSignal({ source: () => this.selected()?.id, … })`. A linkedSignal reads its source inside its own node, so the inline source made it depend on `selected` itself, and every `desk:global` push (fresh JSON, so a new `selected` object with the same id) cleared the note being typed and the pending decision, which let the Approve button be pressed again while the first request was still out. Both now take `source: this.selectedId`, a `computed` of the id, which changes only when the selection does (React's `[selected?.id]` dependency). A new case types a note, pushes the same items plus one more as new objects, and expects the note kept; then approves, pushes again, and expects the button still `aria-busy` and one `approvals.resolve` call (it failed before the fix; 14 tests). The desktop needs no change: its effect is keyed on the id. The code blocks below are updated. A later review adds one more case: type a note, press J, and the next approval's note is empty (it fails if `note` stops following `selectedId`; 15 tests).
 
 **Files:**
 - Create: `apps/web-ui/src/app/attention/attention-screen.ts`
@@ -24221,6 +24221,38 @@ describe('AttentionScreen', () => {
       { id: 'a1', decision: 'approved' },
       { id: 'a2', decision: 'approved' },
     ]);
+  });
+
+  it('keeps the note and the pending decision when a global push rebuilds the selected item', async () => {
+    const bridge = await setup({ 'approvals.resolve': () => new Promise(() => {}) });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    const note = within(insp).getByLabelText('Note to the thread (optional)') as HTMLInputElement;
+    fireEvent.input(note, { target: { value: 'Use npm test' } });
+    // Every desk:global push is fresh JSON: the selected item comes back as a new object with the same id.
+    const push = (extra: AttentionItem[]) => TestBed.inject(GlobalStore).set((s) => ({ ...s, attention: structuredClone([...items, ...extra]) }));
+    push([approval(2, 2)]);
+    await screen.findByText(/^4 items across 1 project/);
+    expect(note.value).toBe('Use npm test');
+    fireEvent.click(within(insp).getByRole('button', { name: /^Approve once/ }));
+    const approve = within(insp).getByRole('button', { name: /^Approve once/ });
+    await waitFor(() => expect(approve.getAttribute('aria-busy')).toBe('true'));
+    push([approval(2, 2), approval(3, 1)]);
+    await screen.findByText(/^5 items across 1 project/);
+    expect(approve.getAttribute('aria-busy')).toBe('true');
+    expect(bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input)).toEqual([{ id: 'a1', decision: 'approved', note: 'Use npm test' }]);
+  });
+
+  it('clears the note when the selection moves to another item', async () => {
+    await setup({}, [...items, approval(2, 2)]);
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    const note = within(insp).getByLabelText('Note to the thread (optional)') as HTMLInputElement;
+    fireEvent.input(note, { target: { value: 'Use npm test' } });
+    fireEvent.keyDown(window, { key: 'j' });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa2'));
+    // The inspector now shows a2: its note starts empty rather than carrying a1's.
+    await waitFor(() => expect((screen.getByLabelText('Note to the thread (optional)') as HTMLInputElement).value).toBe(''));
   });
 
   it('denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box', async () => {
