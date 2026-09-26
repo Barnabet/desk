@@ -3,7 +3,9 @@
  *
  *   pnpm catalog:pin [ids…] [--ref <ref>]   resolve refs to commits and (re)compute digests in catalog.json
  *   pnpm catalog:check [ids…]               install each entry for real, build its runtime, run its smoke command in the sandbox
+ *   pnpm catalog:check --builtins [names…]  the same for Desk's built-in skills: verify each tree, build its environment, smoke it
  *   pnpm catalog:sync                       copy catalog/shared/*.py over the copies inside first-party skills' scripts/
+ *   pnpm builtins:pin [names…]              re-pin builtins.json from catalog/skills (digests, counts, packages.txt)
  *
  * pin works on the raw JSON so new entries can start with `"sha": "HEAD"` and `"digest": "pending"`. Entries whose
  * repository archive is too large switch to files mode (the skill's files listed and fetched one by one). A Node
@@ -24,6 +26,7 @@ import {
   EventStore,
   extractSubtree,
   httpFetch,
+  loadBuiltinsManifest,
   isScript,
   ModelRegistry,
   openDb,
@@ -31,12 +34,14 @@ import {
   readTree,
   runProcess,
   Runtime,
+  runtimeKey,
   scrubbedEnv,
   shellInvocation,
   SkillRuntimes,
   treeDigest,
   withSkillEnv,
   type ExtractedFile,
+  type SkillEnv,
 } from '../src/index';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -212,9 +217,26 @@ function resolveRef(repo: string, name: string): string {
 
 // ── check ───────────────────────────────────────────────────────────────
 
+/** Runs a skill's smoke command from its folder, sandboxed and writable only to a fresh workspace; returns its first line. */
+async function smokeIn(o: { dir: string; name: string; smoke: string[]; env: SkillEnv; dataDir: string; sandbox: boolean }): Promise<string> {
+  const ws = mkdtempSync(join(o.dataDir, 'ws-'));
+  const cmd = o.smoke.map(shq).join(' ');
+  const r = await runProcess({
+    ...shellInvocation(`cd ${shq(o.dir)} && ${cmd}`, { enabled: o.sandbox, writable: [ws] }),
+    cwd: ws,
+    env: { ...withSkillEnv(scrubbedEnv(ws), o.env), SKILL_DIR: o.dir, SKILL_NAME: o.name },
+    timeoutMs: 180_000,
+  });
+  if (r.exitCode !== 0) throw new Error(`smoke exited ${r.exitCode}: ${r.output.trim().split('\n').slice(-8).join('\n')}`);
+  return `smoke ok (${r.output.trim().split('\n')[0]?.slice(0, 80) ?? ''})`;
+}
+
 async function check(): Promise<boolean> {
+  const builtins = rest.includes('--builtins');
   const catalog = CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8')));
-  const entries = catalog.entries.filter((e) => !ids.length || ids.includes(e.id));
+  const entries = builtins ? [] : catalog.entries.filter((e) => !ids.length || ids.includes(e.id));
+  const manifest = loadBuiltinsManifest(JSON.parse(readFileSync(BUILTINS, 'utf8')));
+  const skills = builtins ? manifest.skills.filter((s) => !ids.length || ids.includes(s.name)) : [];
   const sandbox = await detectSandbox();
   if (!sandbox) console.warn('sandbox-exec is unavailable: smoke commands run unsandboxed');
   const dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'desk-catalog-check-')));
@@ -222,7 +244,7 @@ async function check(): Promise<boolean> {
   const store = new EventStore(db);
   const models = new ModelRegistry();
   let runtime: Runtime | null = null;
-  const runtimes = new SkillRuntimes({ dataDir, store, uv: process.env.DESK_UV ?? which('uv'), nodeExec: process.execPath, exists: (r) => !!runtime?.skills.get(r.scope, r.name, r.projectId) });
+  const runtimes = new SkillRuntimes({ dataDir, store, uv: process.env.DESK_UV ?? which('uv'), nodeExec: process.execPath, exists: (r) => r.scope === 'builtin' || !!runtime?.skills.get(r.scope, r.name, r.projectId) });
   runtime = new Runtime({ store, models, dataDir, adapter: createModelAdapter({ baseURL: 'http://127.0.0.1:9/v1', apiKey: 'unused' }, models), skillEnv: runtimes, sandboxAvailable: sandbox });
   const service = new CatalogService({ runtime, store, dataDir, catalog, builtinRoot: BUILTIN, runtimes });
   let ok = true;
@@ -239,24 +261,31 @@ async function check(): Promise<boolean> {
       await runtimes.settled(ref);
       const rt = runtimes.state(ref);
       if (rt.state === 'failed') throw new Error(`runtime failed: ${rt.reason}`);
-      let smoke = 'no smoke command';
-      if (e.smoke?.length) {
-        const skill = runtime.skills.get('global', e.id)!;
-        const ws = mkdtempSync(join(dataDir, 'ws-'));
-        const cmd = e.smoke.map(shq).join(' ');
-        const r = await runProcess({
-          ...shellInvocation(`cd ${shq(skill.dir)} && ${cmd}`, { enabled: sandbox, writable: [ws] }),
-          cwd: ws,
-          env: { ...withSkillEnv(scrubbedEnv(ws), runtimes.env(ref)), SKILL_DIR: skill.dir, SKILL_NAME: e.id },
-          timeoutMs: 180_000,
-        });
-        if (r.exitCode !== 0) throw new Error(`smoke exited ${r.exitCode}: ${r.output.trim().split('\n').slice(-8).join('\n')}`);
-        smoke = `smoke ok (${r.output.trim().split('\n')[0]?.slice(0, 80) ?? ''})`;
-      }
+      const smoke = e.smoke?.length
+        ? await smokeIn({ dir: runtime.skills.get('global', e.id)!.dir, name: e.id, smoke: e.smoke, env: runtimes.env(ref), dataDir, sandbox })
+        : 'no smoke command';
       console.log(`PASS ${e.id} · runtime ${rt.state} · ${smoke} · ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     } catch (err) {
       ok = false;
       console.log(`FAIL ${e.id}: ${(err as Error).message}`);
+    }
+  }
+  for (const s of skills) {
+    const ref = { scope: 'builtin' as const, name: s.name };
+    const spec = { digest: runtimeKey(s.runtime), runtime: s.runtime };
+    const dir = join(BUILTIN, s.name);
+    const t0 = Date.now();
+    try {
+      if (treeDigest(readTree(dir)) !== s.digest) throw new Error(`${s.name} does not match builtins.json: run pnpm builtins:pin ${s.name}`);
+      runtimes.setup(ref, spec, manifest.updated);
+      await runtimes.settled(ref);
+      const rt = runtimes.state(ref, spec.digest);
+      if (rt.state !== 'ready') throw new Error(`runtime ${rt.state}: ${rt.reason}`);
+      const smoke = s.smoke?.length ? await smokeIn({ dir, name: s.name, smoke: s.smoke, env: runtimes.env(ref, spec.digest), dataDir, sandbox }) : 'no smoke command';
+      console.log(`PASS ${s.name} · runtime ready · ${smoke} · ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    } catch (err) {
+      ok = false;
+      console.log(`FAIL ${s.name}: ${(err as Error).message}`);
     }
   }
   await runtime.shutdown();

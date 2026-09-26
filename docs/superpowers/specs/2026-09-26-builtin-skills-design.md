@@ -1,7 +1,7 @@
 # Desk — Built-in Skills Design
 
 - **Date:** 2026-09-26
-- **Status:** design approved by the user in chat, 2026-09-26. This written spec awaits review.
+- **Status:** implemented (Plan 18, branch `builtin-skills`), 2026-09-26.
 - **Goal:** Desk's 12 first-party skills are part of the app. Agents can use them without the user installing anything:
   - the file-type skills: `file-inspector`, `word-documents`, `pdf-toolkit`, `spreadsheets`, `presentations`, `images`, `audio-video`, `data-files`, `archives`, `markup-ebooks`, `email-calendar`
   - `web-research`

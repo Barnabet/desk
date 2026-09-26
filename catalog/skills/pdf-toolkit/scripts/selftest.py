@@ -22,6 +22,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PY = sys.executable
+# Scripts run from the selftest's temp dir unless a check names another, so default outputs never land in the
+# skill's own folder (read-only when the skill is built into Desk).
+WORK: Path | None = None
 
 SECRET_EMAIL = "jane.doe@example.com"
 SECRET_SSN = "123-45-6789"
@@ -382,7 +385,7 @@ def run(args: list[str], env: dict[str, str] | None = None, expect: int = 0, std
     cmd = [PY, str(HERE / args[0]), *[str(a) for a in args[1:]]]
     e = dict(os.environ)
     e.update(env or {})
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=e, input=stdin, cwd=cwd, timeout=180)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=e, input=stdin, cwd=cwd or WORK, timeout=180)
     if r.returncode != expect:
         raise AssertionError(f"{' '.join(str(x) for x in args[:3])} … exited {r.returncode} (expected {expect}):\n{r.stderr[-1500:]}\n{r.stdout[-500:]}")
     return r
@@ -447,7 +450,9 @@ def main() -> int:
         print("\n".join(str(p) for p in fx.values()))
         return 0
     t0 = time.time()
+    global WORK
     tmp = Path(tempfile.mkdtemp(prefix="pdf-toolkit-selftest-"))
+    WORK = tmp
     os.environ["DESK_FILE_CACHE"] = str(tmp / "cache")  # a private, initially empty cache for the cache checks
     os.environ.pop("DESK_NO_CACHE", None)
     c = Checks()
@@ -789,8 +794,8 @@ def test_form(c: Checks, fx: dict[str, Path], w: Path) -> None:
 def test_create(c: Checks, fx: dict[str, Path], w: Path) -> None:
     md = w / "doc.md"
     md.write_text("---\ntitle: Field Report\nauthor: Ada\n---\n\n# Findings\n\nWe measured *three* things.[^1]\n\n| Item | Value |\n|---|---|\n| alpha | 1 |\n| beta | 2 |\n\n## Details\n\nSee @sec-x and `code`.\n\n```python\nprint('hi')\n```\n\n[^1]: A footnote.\n", encoding="utf-8")
-    d = jrun(["pdf_create.py", md, "--toc", "--render", w / "png"])
-    out = Path(d["output"])
+    d = jrun(["pdf_create.py", md, "--toc", "--render", w / "png"], cwd=w)  # no --out: the PDF lands in the working directory
+    out = w / d["output"]
     t = "\n".join(text_of(out))
     c.ok(out.exists() and d["template"] == "report" and "Field Report" in t and "Findings" in t and "A footnote." in t, "create: Markdown → report PDF")
     c.ok("alpha" in t and "Contents" in t, "create: table and table of contents")

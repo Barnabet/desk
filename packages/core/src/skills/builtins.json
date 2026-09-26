@@ -107,9 +107,9 @@
         "No OCR: scanned pages are rendered as images for the agent to look at.",
         "Office inputs to pdf_create need LibreOffice."
       ],
-      "digest": "sha256:d6b1a80e7234ed3ad52ab4d28df27b1036bfe2ab8364929a8de6a6dcb9ab34b6",
+      "digest": "sha256:23a144e628f48eab91b68fdc08e5354b4dda154346baabc4d03d4645f48fbe71",
       "files": 30,
-      "bytes": 674724,
+      "bytes": 675023,
       "scripts": 20,
       "runtime": {
         "python": {
