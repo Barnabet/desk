@@ -22,6 +22,31 @@ const project = (id: string, name: string, threads: ProjectSummary['threads'], a
 });
 const approval: AttentionItem = { id: 'approval:a1', kind: 'approval', project_id: 'p1', project_name: 'Onboarding revamp', agent_id: 't2', title: 'Signup checklist wants to run bash', detail: 'rule 1', created_at: '2026-09-24T11:21:00.000Z', ref: { approval_id: 'a1', thread_id: 't2' } };
 
+/** Anchors as map.css reads them: a label's is its bottom, ~38px under its top; the sun's lines' is their top, ~34px above their bottom. */
+const LABEL_H = 38;
+const SUN_LABEL_H = 34;
+/** A moon's dot and halo reach 11px round its anchor; the callout's pin 11px left of its anchor, and the card's bottom edge is at it. */
+const MOON_HALF = 11;
+const PIN_HALF = 11;
+const at = (e: Element) => [parseFloat((e as HTMLElement).style.left), parseFloat((e as HTMLElement).style.top)] as const;
+
+/** The approval's callout leaves Onboarding's moons in sight, and Tax paperwork's label, under the sun, stays off the sun's lines. */
+function expectMapClear() {
+  const [cx, cy] = at(document.querySelector('.orbit-callout')!);
+  const moons = document.querySelectorAll('a.orbit-thread[href^="#/p/p1/"]');
+  expect(moons).toHaveLength(2);
+  for (const m of moons) {
+    const [mx, my] = at(m);
+    const below = my - MOON_HALF >= cy;
+    const leftOfPin = m.classList.contains('left') && mx + MOON_HALF <= cx - PIN_HALF;
+    expect(below || leftOfPin, `${m.textContent} at ${mx},${my} under the callout at ${cx},${cy}`).toBe(true);
+  }
+  const [, sunTop] = at(document.querySelector('.orbit-sun-label')!);
+  const tax = Array.from(document.querySelectorAll('.orbit-label')).find((l) => l.textContent?.includes('Tax paperwork'))!;
+  const [, taxBottom] = at(tax);
+  expect(taxBottom - LABEL_H).toBeGreaterThanOrEqual(sunTop + SUN_LABEL_H);
+}
+
 function seed() {
   globalStore.set({
     ...initialGlobalState(),
@@ -72,6 +97,13 @@ describe('MapScreen', () => {
     const legend = document.querySelector<HTMLElement>('.map-legend')!;
     expect(legend.textContent).not.toContain('Waiting on you');
     expect(within(legend).getAllByText('Waiting')).toHaveLength(2);
+  });
+
+  it("keeps the approval's callout off its territory's moons and the lower label off the sun's lines", () => {
+    seed();
+    installBridge({ 'projects.plan': () => null });
+    render(<MapScreen newProject={false} />);
+    expectMapClear();
   });
 });
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { activityOf, layoutMap, plural } from '@desk/ui-core';
+import { activityOf, layoutMap, plural, type MapProject } from '@desk/ui-core';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { Sheet } from '../components/Sheet';
@@ -8,7 +8,7 @@ import { ProjectForm } from '../screens/ProjectForm';
 import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { MapCanvas } from './MapCanvas';
-import { OrbitMap } from './OrbitMap';
+import { OrbitMap, projectSummaryLine } from './OrbitMap';
 import { ProjectList } from './ProjectList';
 import { TerritoryInspector } from './TerritoryInspector';
 
@@ -50,7 +50,16 @@ export function MapScreen({ newProject }: { newProject: boolean }) {
   const busy = overview.filter((p) => p.threads.some((t) => t.status === 'running')).length;
   const selected = overview.find((p) => p.project.id === picked) ?? overview.find((p) => p.attention_count > 0) ?? overview[0];
   const selectedItems = useMemo(() => attention.filter((i) => i.project_id === selected?.project.id), [attention, selected?.project.id]);
-  const mapProjects = useMemo(() => overview.map((p) => ({ id: p.project.id, activity: activityOf(p), threads: p.threads })), [overview]);
+  /** Each project as the layout sees it: with its label's lines and whether a callout is pinned over its Desk. */
+  const mapProjects = useMemo(
+    () =>
+      overview.map((p): MapProject => {
+        const items = attention.filter((i) => i.project_id === p.project.id);
+        return { id: p.project.id, activity: activityOf(p), threads: p.threads, label: [p.project.name, projectSummaryLine(p, items)], callout: items.length > 0 };
+      }),
+    [overview, attention],
+  );
+  const sunLabel: [string, string] = [`${health?.version ?? ''} · ${status === 'live' ? 'running' : status}`, `proxy ${proxy} · ${plural(running, 'thread')} running`];
 
   const choose = (v: 'map' | 'list') => {
     setView(v);
@@ -93,7 +102,7 @@ export function MapScreen({ newProject }: { newProject: boolean }) {
           <MapCanvas label="Projects map">
             {(size) => {
               const width = size.width > 900 ? size.width - 380 : size.width;
-              const layout = layoutMap(mapProjects, width, size.height);
+              const layout = layoutMap(mapProjects, width, size.height, sunLabel);
               return (
                 <OrbitMap
                   layout={layout}
@@ -104,7 +113,7 @@ export function MapScreen({ newProject }: { newProject: boolean }) {
                   width={width}
                   height={size.height}
                   now={now}
-                  sunLabel={[`${health?.version ?? ''} · ${status === 'live' ? 'running' : status}`, `proxy ${proxy} · ${plural(running, 'thread')} running`]}
+                  sunLabel={sunLabel}
                   sunAria={`deskd, ${status === 'live' ? 'running' : status}, model proxy ${proxy}`}
                 />
               );
