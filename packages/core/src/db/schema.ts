@@ -178,3 +178,10 @@ export const attentionDismissals = sqliteTable('attention_dismissals', {
   project_id: text('project_id').notNull(),
   dismissed_at: text('dismissed_at').notNull(),
 });
+
+/** The user's switch for each of Desk's built-in skills; no row means on. Projected from `skill.builtin_toggled`. */
+export const builtinSkillSettings = sqliteTable('builtin_skill_settings', {
+  name: text('name').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+  updated_at: text('updated_at').notNull(),
+});
