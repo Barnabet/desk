@@ -6,20 +6,6 @@ import { ToastService } from '../components/toast';
 import { FakeDeskBridge, type FakeHandlers } from '../testing/fake-bridge';
 import { Composer } from './composer';
 
-/** Gives a File the `arrayBuffer()` that `fileToBase64` reads (through FileReader): web-ui's jsdom (27) has none. */
-function readable(file: File): File {
-  Object.defineProperty(file, 'arrayBuffer', {
-    value: () =>
-      new Promise<ArrayBuffer>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsArrayBuffer(file);
-      }),
-  });
-  return file;
-}
-
 async function setup(handlers: FakeHandlers = {}, draft = '') {
   const bridge = new FakeDeskBridge({ 'projects.send': () => ({ ok: true }), ...handlers });
   const sent = vi.fn();
@@ -53,7 +39,7 @@ describe('Composer', () => {
     expect(box.value).toBe('See notes');
     const big = new File(['x'], 'big.bin');
     Object.defineProperty(big, 'size', { value: MAX_UPLOAD + 1 });
-    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [big, readable(new File(['hi'], 'notes.md'))] } });
+    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [big, new File(['hi'], 'notes.md')] } });
     await waitFor(() => expect(box.value).toBe('See notes\nAttached: uploads/notes.md\n'));
     expect(bridge.calls).toEqual([{ channel: 'library.upload', input: { projectId: 'p', file: { name: 'notes.md', content_base64: 'aGk=' } } }]);
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['big.bin is larger than 25 MB.']);

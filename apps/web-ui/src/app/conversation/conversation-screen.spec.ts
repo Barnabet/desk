@@ -14,20 +14,6 @@ import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fak
 import { chatDomId } from './chat-items';
 import { CHAT_PAGE, ConversationScreen } from './conversation-screen';
 
-/** Gives a File the `arrayBuffer()` that `fileToBase64` reads (through FileReader): web-ui's jsdom (27) has none. */
-function readable(file: File): File {
-  Object.defineProperty(file, 'arrayBuffer', {
-    value: () =>
-      new Promise<ArrayBuffer>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsArrayBuffer(file);
-      }),
-  });
-  return file;
-}
-
 beforeEach(() => {
   clearAttachmentCache();
   localStorage.clear();
@@ -105,7 +91,7 @@ describe('ConversationScreen', () => {
   it('sends with Enter and attaches files through the Library', async () => {
     const bridge = await setup({ 'library.upload': ({ file }: { file: { name: string } }) => ({ id: 'a1', path: `uploads/${file.name}` }) });
     const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
-    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [readable(new File(['hi'], 'notes.md'))] } });
+    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [new File(['hi'], 'notes.md')] } });
     await waitFor(() => expect(box.value).toContain('Attached: uploads/notes.md'));
     expect(bridge.calls.find((c) => c.channel === 'library.upload')?.input).toEqual({ projectId: 'p', file: { name: 'notes.md', content_base64: 'aGk=' } });
     fireEvent.input(box, { target: { value: 'Use these notes' } });

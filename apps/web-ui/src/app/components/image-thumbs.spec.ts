@@ -32,16 +32,6 @@ function fakeObserver() {
   };
 }
 
-/** A Blob's text through FileReader: web-ui's jsdom (27) has no `Blob.text()`. */
-function blobText(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(blob);
-  });
-}
-
 beforeEach(() => clearAttachmentCache());
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -66,7 +56,7 @@ describe('ImageThumbs', () => {
     const resized: Array<[string, ImageBitmapOptions | undefined]> = [];
     const close = vi.fn();
     vi.stubGlobal('createImageBitmap', async (blob: Blob, opts?: ImageBitmapOptions) => {
-      resized.push([`${blob.type}:${await blobText(blob)}`, opts]);
+      resized.push([`${blob.type}:${await blob.text()}`, opts]);
       return { width: opts?.resizeWidth, height: opts?.resizeHeight, close } as unknown as ImageBitmap;
     });
     const drawn: unknown[] = [];
