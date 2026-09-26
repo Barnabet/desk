@@ -29,6 +29,14 @@ export function LibraryScreen({ projectId, file }: { projectId: string; file?: s
   const [uploading, setUploading] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** False once the screen is gone: a late upload must not pull the viewer back here. */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const shown = useMemo(() => filterLibrary(items, kind, query), [items, kind, query]);
   const selected = file ? items.find((i) => i.path === file) : undefined;
   const version = selected?.eventId;
@@ -54,6 +62,7 @@ export function LibraryScreen({ projectId, file }: { projectId: string; file?: s
 
   const upload = async (files: FileList | File[] | null) => {
     const list = Array.from(files ?? []);
+    let uploaded = 0;
     for (const f of list) {
       if (f.size > MAX_UPLOAD) {
         toastError(new Error(`${f.name} is larger than 25 MB.`));
@@ -62,14 +71,16 @@ export function LibraryScreen({ projectId, file }: { projectId: string; file?: s
       setUploading((n) => n + 1);
       try {
         const a = await call('library.upload', { projectId, file: { name: f.name, content_base64: await fileToBase64(f) } });
-        if (list.length === 1) select(a.path);
+        uploaded++;
+        if (list.length === 1 && mounted.current) select(a.path);
       } catch (err) {
         toastError(err);
       } finally {
         setUploading((n) => n - 1);
       }
     }
-    if (list.length > 1) toast({ tone: 'info', message: `Uploaded ${plural(list.length, 'file')}.` });
+    // Refused and failed files have had their own toasts.
+    if (list.length > 1 && uploaded > 0) toast({ tone: 'info', message: `Uploaded ${plural(uploaded, 'file')}.` });
     if (inputRef.current) inputRef.current.value = '';
   };
   const onDrop = (e: DragEvent) => {
@@ -93,7 +104,11 @@ export function LibraryScreen({ projectId, file }: { projectId: string; file?: s
         e.preventDefault();
         setDragging(true);
       }}
-      onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
+      onDragLeave={(e) => {
+        // Leaving for a child is still over the screen; leaving for outside it, or off the window (no related target), is not.
+        const to = e.relatedTarget;
+        if (!(to instanceof Node) || !e.currentTarget.contains(to)) setDragging(false);
+      }}
       onDrop={onDrop}
     >
       <div className="library-main">
