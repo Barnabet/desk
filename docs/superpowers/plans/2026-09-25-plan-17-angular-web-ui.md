@@ -30884,6 +30884,8 @@ Spec §7 W2 asks for "library upload and preview, add a source" end to end ("thr
 - Consumes: `startWebE2E`, `WebE2E`, `SignedIn` (W0d.9: `e2e.home` with `code/app`, `Documents` and a hidden `.config`; `e2e.client()`, `e2e.signIn()`, `e2e.shot()`, `e2e.close()`); `DeskClient` (`projects.create`, `projects.get`, `projects.list`, `library.list`, `memory.add`, `memory.list`); the visible names of W2b.1–W2b.4, W2a.1's `FileViewer` (`img.file-image`, `.codeblock code`), W0d.5's folder browser (dialog "Choose a folder", "Folder", "Choose this folder"), W0c.12's Project nav (navigation "Project", links "Library", "Memory", "Settings") and W0c.9's toaster.
 - Produces: `apps/web-ui/e2e/knowledge.e2e.test.ts` with `go(page, hash)`, `openAt(hash)` and `PNG` (a 1×1 PNG).
 
+**Deviation (e2e):** after "Close preview", the first draft counted the Preview region right after the hash moved and expected 0. The hash changes at once, while the preview goes only when the `hashchange` has reached `RouteService` and the screen has rendered, so the count raced the render (it saw 1 on the first run). The case now waits for the region to detach, a real condition; the code below has it. Nothing else changed: 3 tests, stable over four runs.
+
 - [ ] **Step 1: Write the e2e**
 
 The unit specs of W2b.1–W2b.4 already drove the behaviour; this file is written after them, so the shared machine builds the UI and runs Chromium only once for it.
@@ -30967,7 +30969,8 @@ describe('knowledge and settings in the browser', () => {
     // Close the preview; the kind switch and the filter narrow the grid.
     await preview.getByRole('button', { name: 'Close preview' }).click();
     await expect.poll(() => hashOf(page)).toBe(`#/p/${project.id}/library`);
-    expect(await page.getByRole('complementary', { name: 'Preview' }).count()).toBe(0);
+    // The hash moves at once; the preview goes when the route change has rendered.
+    await page.getByRole('complementary', { name: 'Preview' }).waitFor({ state: 'detached' });
     expect((await client.library.list(project.id)).map((a) => a.path).sort()).toEqual(['checklist.md', 'dot.png', 'totals.csv']);
     const kinds = page.getByRole('group', { name: 'Kind' });
     await kinds.getByRole('button', { name: 'Report' }).click();
