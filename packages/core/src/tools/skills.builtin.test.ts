@@ -17,6 +17,9 @@ function skills() {
   return new SkillStore(mkdtempSync(join(tmpdir(), 'desk-tools-')), undefined, b);
 }
 
+/** What a built runtime sets (catalog/runtimes.ts): without it Python writes __pycache__ into the tree, which then fails verify(). */
+const skillEnv = () => ({ bins: [], vars: { PYTHONDONTWRITEBYTECODE: '1' }, blocked: null, note: null });
+
 describe('skill tools and built-in skills', () => {
   it('skill_list shows built-ins', async () => {
     const store = new EventStore(openDb(':memory:').db);
@@ -28,14 +31,14 @@ describe('skill tools and built-in skills', () => {
 
   it('skill_run says when it set up the environment first', async () => {
     const ctx = testToolContext(mkdtempSync(join(tmpdir(), 'desk-ws-')), {
-      services: testServices({ skills: skills(), prepareSkillRuntime: async () => ({ waitedMs: 42_000 }) }),
+      services: testServices({ skills: skills(), skillEnv, prepareSkillRuntime: async () => ({ waitedMs: 42_000 }) }),
     });
     const out = await skillRunTool.execute({ name: 'file-inspector', script: 'file_identify.py', args: ['--help'], timeout_s: 60 }, ctx);
     expect(out).toMatch(/^\(Set up file-inspector's Python environment first: first use only, 42 s\.\)\n\[/);
   });
 
   it('skill_run adds nothing when no setup was needed', async () => {
-    const ctx = testToolContext(mkdtempSync(join(tmpdir(), 'desk-ws-')), { services: testServices({ skills: skills() }) });
+    const ctx = testToolContext(mkdtempSync(join(tmpdir(), 'desk-ws-')), { services: testServices({ skills: skills(), skillEnv }) });
     const out = await skillRunTool.execute({ name: 'file-inspector', script: 'file_identify.py', args: ['--help'], timeout_s: 60 }, ctx);
     expect(out).toMatch(/^\[/);
   });
