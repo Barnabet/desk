@@ -230,7 +230,7 @@ The plan has 108 tasks in 11 sections, one commit per task. The sections follow 
 | W0c | the `apps/web-ui` workspace and `scripts/ng.mjs`; `DeskBridge`, the state services, the shell components, `SafeMarkdown`, `ErrorBoundary`, `screenFor`, `App`, browser notifications, `pnpm web` | 17 | W0a, W0b |
 | W0d | `SettingsFields`, `ProjectForm`, `EndpointPanel`, `Onboarding`, `FolderBrowser`, the map's W0 shell; the built `index.html` check; the Playwright harness and smoke test (W0d.10 is the W0 exit) | 10 | W0c |
 | W1a | the map: `MapCanvas`, `OrbitMap`, `ProjectList`, `TerritoryInspector`, the full `MapScreen` | 6 | W0 |
-| W1b | the conversation: badges, images, tool groups, pair sheet, what's up, plan, services, composer, chat rows, line diagram, `ConversationScreen` | 12 | W0 |
+| W1b | the conversation: badges, images, tool groups, pair sheet, what's up, plan, services, composer, chat rows, line diagram, `ConversationScreen`; master's later conversation and threads changes (W1b.13) | 13 | W0; W1b.13 after W2a and the merge of master |
 | W1c | Attention: flight strips, the rack, the inspector, `AttentionScreen`; the W1 e2e | 5 | W0; W1c.4 after W1b; W1c.5 (the W1 exit) after W1a too |
 | W2a | Threads: `SkillBadge`, `FileViewer`, the thread tabs, route view, transcript, roster, detail, `ThreadsScreen`; the W2 threads e2e | 8 | W0, W1b; W2a.7 after W1c.4 |
 | W2b | Library, Memory, `PolicyEditor`, `SettingsScreen`; the W2 knowledge e2e | 6 | W0, W2a.1; W2b.6 (the W2 exit) after W2a.7 |
@@ -331,7 +331,7 @@ The plan has 108 tasks in 11 sections, one commit per task. The sections follow 
     - The catalog: 18 third-party entries in five bays, a `files` category with no bay, and `WritableSkillScope` for installs. W3a.2 has it (0cdc815); W3a.4 and W3a.10 port the rest.
     - Dark mode: every color is a token in `@desk/ui-styles`' `tokens.css`, with a dark value under `prefers-color-scheme: dark`. `tokens.test.ts` scans the web UI too (c16b4df), so a port writes `var(--run)` and its siblings, never a hex color. The desktop's Appearance setting has no web counterpart: a browser follows the system (W3b.2).
     - `UsageTab`'s `tokens` scales to M and B (0745c68); since the review follow-ups it is `@desk/ui-core`'s, re-exported by both UIs.
-    - Not ported yet, for a follow-up after W3 (the landed W1b and W2a screens are the pre-merge React's): the conversation keeps Desk's line and Threads unfolds every lane (`ProjectFrame.tsx`, master 6221a36); messages between agents are links on the line diagram (60c8a7b; `@desk/ui-core`'s `lineGeometry` already returns the links); paste or drop files into the chat (68a8fb6); and the conversation's `at` route (in `@desk/ui-core`'s router since the merge).
+    - Ported by W1b.13, added for them (the landed W1b and W2a screens were the pre-merge React's): the conversation keeps Desk's line and Threads unfolds every lane (`ProjectFrame.tsx`, master 6221a36); messages between agents are links on the line diagram (60c8a7b; `@desk/ui-core`'s `lineGeometry` already returns the links); paste or drop files into the chat (68a8fb6); and the conversation's `at` route (in `@desk/ui-core`'s router since the merge).
     - A later merge of master re-checks the tasks still to run (W3a.2b onward, and W3b) against the React sources, as this one did.
   - If the W0a extraction conflicts, redo it mechanically: the `git mv` tables and the scripted import rewrites.
 - **Phases:**
@@ -516,6 +516,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/conversation/chat-items.ts` + spec | W1b.9 |
 | `src/app/conversation/line-diagram.ts` + spec | W1b.10 |
 | `src/app/conversation/conversation-screen.ts` + spec | W1b.11 |
+| `src/app/conversation/project-frame.ts`; `composer.ts`, `line-diagram.ts`, `conversation-screen.ts`, `app.ts`, `screen-for.ts` and their specs changed | W1b.13 |
 | `src/app/attention/{flight-strip,strip-rack}.ts`, `attention/strip-rack.spec.ts` | W1c.1 |
 | `src/app/attention/inspector.ts` + spec | W1c.2 |
 | `src/app/attention/attention-screen.ts` + spec | W1c.3 (spec modified W1c.4) |
@@ -19055,6 +19056,7 @@ With deskd running and at least two projects (one with a running thread and an a
 | W1b.10 | `LineDiagram` | `line-diagram.spec.ts` (new) |
 | W1b.11 | `ConversationScreen`, `CHAT_PAGE`; `#/p/<id>/conversation` shows it | `conversation-screen.spec.ts` (`ConversationScreen.test.tsx` ported case for case, plus the route) |
 | W1b.12 | verify | `pnpm typecheck`, root Vitest, every web-ui spec, the production build |
+| W1b.13 | master's later conversation and threads changes: paste and drop into the chat, message links on the line diagram, `ProjectFrame` (the folded conversation line, the unfolded Threads timeline), the conversation's `at` | `conversation-screen.spec.ts` (the React cases master added, ported), `line-diagram.spec.ts`, `app.spec.ts`, `screen-for.spec.ts` |
 
 **Consumes (exact names; the contract's are used as they are):**
 
@@ -22950,6 +22952,255 @@ Expected: `Application bundle generation complete`; `grep -c 'onload' apps/web-u
 - [ ] **Step 5: Look at it once**
 
 With deskd running and a project that has a thread or two (a running one, and ideally a tracked question between threads), run `pnpm web` and open the login link it prints (Chromium or Safari). On `#/p/<id>/conversation`: the line diagram draws the trunk, the lanes and the trains, follows "now" as the clock moves, and stays put after you scroll it back; a station click scrolls the chat to it and flashes the row; a question mark lights its recipient's label on hover and opens the pair sheet on click; the chat shows the report, the question card (an option sends it and shows "You · sending…" until the event arrives), the digest with its pair lines, and older messages when you scroll up; the composer sends with ⏎, keeps ⇧⏎ for a new line, and keeps its draft across a reload; the services card opens a loopback URL in a new tab and shows a live log sheet; below 1280 px the Plan toggle opens the plan overlay with the services in it. Stop `pnpm web` with Ctrl-C. No commit.
+
+---
+
+### Task W1b.13: master's conversation and threads changes
+
+Added after the merge of master (8883229). W1b and W2a ported the React conversation and threads as of 7961adb; master changed them afterwards, and "UI features ship in both UIs" (CLAUDE.md). `git diff 7961adb 8883229^2 -- apps/desktop/src/renderer packages/ui-core packages/client` shows these changes to the conversation and threads, each ported by a step below:
+
+1. **Paste and drop files into the chat** (68a8fb6, `Composer.tsx`, `ConversationScreen.tsx`): a paste with files attaches them (a pasted screenshot, always "image.png", gets a name of its own from `pastedName`); files dropped anywhere on the chat attach too, with a "Drop to attach to the Library" hint (`.conv-chat.dropping`, `.chat-drop`) while they are dragged over it; `useAttachments` is shared by the composer and the drop zone; the picker resets its input after the upload. Step 1.
+2. **Messages between agents are links on the line diagram** (60c8a7b, `LineDiagram.tsx`; `lineGeometry`'s `links` came with the merge in `@desk/ui-core`): a vertical link from the sender's line to the recipient's at the send time, drawn over a halo and landing on a dot (a note light, a question or an answer full strength, an answer dashed); a burst between one pair is one link with a count past two, and a fresh one carries a travelling pulse; each link is a button named for who wrote what to whom, which lights both agents' labels (the lit label is now a list) and opens their pair sheet; the legend says "message". Step 2.
+3. **The folded conversation line** (6221a36, `ProjectFrame.tsx`, `App.tsx`, `LineDiagram.tsx`, `ConversationScreen.tsx`): the line diagram leaves the conversation for `ProjectFrame`, which the Conversation and Threads tabs share and which stays mounted between them. The conversation shows Desk's line alone (`desk` mode: `.line-diagram.collapsed`, the lanes folded up into Desk's line, their marks and labels `inert`, a "N threads · M running ›" link to Threads); Threads unfolds every lane (`full` mode) and dims every lane but the open thread's (`focus`, `.line-dim`). Switching tabs animates the fold (the CSS came with the merge in `@desk/ui-styles`). A Desk stop opens the chat at that point: in place on the conversation, as a new page from Threads. The pair sheet the diagram opens is the frame's; the conversation keeps its own for the chat rows. Step 3.
+4. **The conversation's `at` route** (6221a36, `router.ts`, in `@desk/ui-core`'s router since the merge): `#/p/<id>/conversation?at=<event id>` scrolls the chat to that Desk stop once and drops `at` from the route (so the same stop can be clicked again). Step 3.
+
+The rest of the diff is ported elsewhere or needs nothing: the SVG colours as tokens (`FlightStrip`, `OrbitMap`, `RouteView`, `LineDiagram`, `Composer`) landed with c16b4df; `UsageTab`'s `tokens` with 0745c68 (in `@desk/ui-core` since the review follow-ups); the built-in skills, `CommandPalette`'s built-in group and `SystemScreen`'s Appearance are W3a and W3b's; `TrayPopover` and `miniLine` are the desktop's tray.
+
+**Files:**
+- Modify: `packages/ui-core/src/files.ts` (`pastedName`), `packages/ui-core/src/line-geometry.ts` (`linkText`), and their tests; `apps/desktop/src/renderer/conversation/Composer.tsx` and `LineDiagram.tsx` (import those two from `@desk/ui-core`; behaviour unchanged)
+- Create: `apps/web-ui/src/app/conversation/project-frame.ts`
+- Modify: `apps/web-ui/src/app/conversation/composer.ts`, `line-diagram.ts`, `conversation-screen.ts`; `apps/web-ui/src/app/app.ts`, `screen-for.ts`
+- Test: `apps/web-ui/src/app/conversation/conversation-screen.spec.ts` (the React cases master added, ported), `line-diagram.spec.ts`, `app.spec.ts`, `screen-for.spec.ts`
+
+**Interfaces:**
+- Consumes: `pastedName(file: { name; type }, at: Date, index: number): string`, `linkText(m: MessagesState, k: MessageLink): { name: string; title: string }`, `MessageLink`, `lineGeometry({ …, messages })` (`@desk/ui-core`); `RouteService.navigate`/`replace` (W0c.4); `injectSession`, `injectWidth`, `NowService`, `GlobalStore` (W0c); `PairSheet` (W1b.4).
+- Produces: `Composer.attach(files: Iterable<File> | ArrayLike<File> | null): Promise<void>` (public, for the chat's drop zone); `LineDiagram` inputs `mode: 'desk' | 'full'` (default `'full'`) and `focus: string | null` (default `null`); `ProjectFrame` — `div[deskProjectFrame]` (host class `project-frame`), inputs `projectId` (required), `mode: 'desk' | 'full'` (required), `focus: string | null` (default `null`), its content projected into `div.project-frame-body`; `ConversationScreen` input `at?: number`; `screenFor` passes `at` to the conversation.
+
+**Porting notes:**
+- The lanes' fold is CSS (`@desk/ui-styles`' `conversation.css`): the template sets `transition-delay` per lane group (`[style.transition-delay]`), `--trunk-y` on the host (`'[style.--trunk-y]'`) and `inert` on the two `.line-fold-html` layers (`[attr.inert]`, so a spec reads it as an attribute).
+- A link's `--dy` (how far its pulse travels) is a custom property on the pulse (`[style.--dy]`).
+- `App` renders the frame around the screen's error boundary for the conversation and threads routes, keyed by project id (`@for … track f.id`), so switching between the two tabs keeps the frame and its diagram (the animation needs the same element). The screen template is one `ng-template` that both branches render.
+- React wraps the diagram in an `ErrorBoundary` of its own inside the frame. The web's boundaries are not told where an error came from: `ErrorBoundaries.report` hands it to the last registered boundary that is not failing (W0c.11), which would be the diagram's, so a screen's error would show in the diagram's slot. The frame has no boundary of its own; a diagram error lands in the screen's boundary, which is the web's rule for errors outside the screen (W0c.11).
+
+- [ ] **Step 1: Paste and drop files into the chat (master 68a8fb6)**
+
+`@desk/ui-core` gains `pastedName` (`files.ts`; the React `Composer.tsx` imports it from there and re-exports it), with a case in `files.test.ts`:
+
+```ts
+  it("names a pasted screenshot after the moment it was pasted, and keeps a copied file's own name", () => {
+    const at = new Date(2026, 8, 26, 1, 12, 7);
+    expect(pastedName({ name: 'image.png', type: 'image/png' }, at, 0)).toBe('pasted-2026-09-26-011207.png');
+    expect(pastedName({ name: 'image.jpeg', type: 'image/jpeg' }, at, 1)).toBe('pasted-2026-09-26-011207-2.jpeg');
+    expect(pastedName({ name: '', type: 'image/webp' }, at, 0)).toBe('pasted-2026-09-26-011207.webp');
+    expect(pastedName({ name: 'spec.pdf', type: 'application/pdf' }, at, 3)).toBe('spec.pdf');
+  });
+```
+
+Port the two React cases into `conversation-screen.spec.ts`'s `ConversationScreen` block (with `createEvent` from `@testing-library/angular`), plus one of the web's own: the dragover is taken only for files, and the hint goes only once the drag has left every child it entered.
+
+```ts
+  it('attaches a pasted image under a unique name, and leaves a text paste to the textarea', async () => {
+    const bridge = await setup({ 'library.upload': ({ file }: { file: { name: string } }) => ({ id: 'a1', path: `uploads/${file.name}` }) });
+    const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
+    const text = createEvent.paste(box, { clipboardData: { files: [], getData: () => 'plain words' } });
+    fireEvent(box, text);
+    expect(text.defaultPrevented).toBe(false);
+    const shot = createEvent.paste(box, { clipboardData: { files: [new File(['px'], 'image.png', { type: 'image/png' })], getData: () => '' } });
+    fireEvent(box, shot);
+    expect(shot.defaultPrevented).toBe(true);
+    await waitFor(() => expect(box.value).toMatch(/^Attached: uploads\/pasted-\d{4}-\d{2}-\d{2}-\d{6}\.png\n$/));
+    expect(bridge.calls.filter((c) => c.channel === 'library.upload')).toHaveLength(1);
+  });
+
+  it('attaches files dropped anywhere on the chat, and shows where to drop them while dragging', async () => {
+    await setup({ 'library.upload': ({ file }: { file: { name: string } }) => ({ id: 'a1', path: `uploads/${file.name}` }) });
+    const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
+    const chat = screen.getByRole('region', { name: 'Conversation with Desk' });
+    fireEvent.dragEnter(chat.querySelector('.chat-list')!, { dataTransfer: { types: ['Files'], files: [] } });
+    expect(chat.classList.contains('dropping')).toBe(true);
+    expect(screen.getByText('Drop to attach to the Library')).toBeTruthy();
+    // Files dragged over the chat are taken (a dragover nobody takes would make the browser refuse the drop).
+    const over = createEvent.dragOver(chat, { dataTransfer: { types: ['Files'], files: [] } });
+    fireEvent(chat, over);
+    expect(over.defaultPrevented).toBe(true);
+    fireEvent.drop(chat, { dataTransfer: { types: ['Files'], files: [new File(['a'], 'mock.png', { type: 'image/png' }), new File(['b'], 'spec.pdf')] } });
+    expect(chat.classList.contains('dropping')).toBe(false);
+    await waitFor(() => expect(box.value).toBe('Attached: uploads/mock.png\nAttached: uploads/spec.pdf\n'));
+  });
+
+  it('lets a drag of text cross the chat without a drop hint, and forgets a drag of files that leaves it', async () => {
+    await setup();
+    const chat = await screen.findByRole('region', { name: 'Conversation with Desk' });
+    const list = chat.querySelector('.chat-list')!;
+    fireEvent.dragEnter(list, { dataTransfer: { types: ['text/plain'], files: [] } });
+    expect(chat.classList.contains('dropping')).toBe(false);
+    const over = createEvent.dragOver(chat, { dataTransfer: { types: ['text/plain'], files: [] } });
+    fireEvent(chat, over);
+    expect(over.defaultPrevented).toBe(false);
+    // Entering a child counts once more; the hint goes only when the drag has left every one of them.
+    fireEvent.dragEnter(chat, { dataTransfer: { types: ['Files'], files: [] } });
+    fireEvent.dragEnter(list, { dataTransfer: { types: ['Files'], files: [] } });
+    fireEvent.dragLeave(chat, { dataTransfer: { types: ['Files'], files: [] } });
+    expect(chat.classList.contains('dropping')).toBe(true);
+    fireEvent.dragLeave(list, { dataTransfer: { types: ['Files'], files: [] } });
+    expect(chat.classList.contains('dropping')).toBe(false);
+    expect(screen.queryByText('Drop to attach to the Library')).toBeNull();
+  });
+```
+
+And in `app.spec.ts` (after the Library case), that the app's file-drop guard leaves the chat's drop alone:
+
+```ts
+  it("still hands files dropped on the conversation's chat to its composer", async () => {
+    go('#/p/p/conversation');
+    const overview = { project: { id: 'p', name: 'P', goal: '', instructions: '', settings: {}, created_at: 't', updated_at: 't', archived_at: null }, desk: null, sources: [], plan: null, threads: [], approvals: [], last_seq: 0 };
+    const bridge = new FakeDeskBridge({
+      'broker.snapshot': () => ({ ...initialGlobalState(), connection: { status: 'live' } }),
+      'projects.get': () => overview,
+      'broker.watch': () => ({ ok: true }),
+      'broker.unwatch': () => ({ ok: true }),
+      'library.upload': ({ file }: { file: { name: string } }) => ({ path: `uploads/${file.name}` }),
+    });
+    await renderApp(bridge);
+    const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
+    const chat = screen.getByRole('region', { name: 'Conversation with Desk' });
+    const over = drag('dragover', ['Files']);
+    chat.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect((over as Event & { dataTransfer: DataTransfer }).dataTransfer.dropEffect).toBe('copy');
+    const drop = drag('drop', ['Files'], [new File(['hi'], 'notes.txt')]);
+    chat.dispatchEvent(drop);
+    expect(drop.defaultPrevented).toBe(true);
+    await waitFor(() => expect(box.value).toBe('Attached: uploads/notes.txt\n'));
+    expect(bridge.calls.filter((c) => c.channel === 'library.upload')).toHaveLength(1);
+  });
+```
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/conversation/conversation-screen.spec.ts --include src/app/app.spec.ts)` and watch the new cases fail (no `dropping` class, no paste handler).
+
+`Composer`: React's `useAttachments` is shared by the composer and the chat's drop zone; the web keeps the upload count in the composer and makes its `attach` public, so the screen hands dropped files to it (`viewChild(Composer)`, as for `focus()`). The picker resets its input once the upload is done, as React now does; a paste with files attaches them under `pastedName`, and a paste of text is the textarea's.
+
+```html
+      (keydown)="onKey($event)"
+      (paste)="onPaste($event)"
+      …
+      <input #attachInput type="file" multiple hidden data-testid="attach-input" (change)="picked(attachInput)" />
+```
+
+```ts
+  /**
+   * Uploads files to the Library and adds an "Attached: <path>" line per file to the draft, in order (React's
+   * `useAttachments`, which the chat's drop zone shares with the composer; here the screen hands dropped files to this).
+   */
+  async attach(files: Iterable<File> | ArrayLike<File> | null): Promise<void> {
+    for (const f of Array.from(files ?? [])) {
+      if (f.size > MAX_UPLOAD) {
+        this.toasts.error(new Error(`${f.name} is larger than 25 MB.`));
+        continue;
+      }
+      this.uploading.update((n) => n + 1);
+      try {
+        const a = await this.bridge.call('library.upload', { projectId: this.projectId(), file: { name: f.name, content_base64: await fileToBase64(f) } });
+        this.draft.update((d) => `${d}${d && !d.endsWith('\n') ? '\n' : ''}Attached: ${a.path}\n`);
+      } catch (err) {
+        this.toasts.error(err);
+      } finally {
+        this.uploading.update((n) => n - 1);
+      }
+    }
+  }
+
+  protected async picked(input: HTMLInputElement): Promise<void> {
+    await this.attach(Array.from(input.files ?? []));
+    input.value = '';
+  }
+
+  /** Pasted files (a screenshot, files copied in Finder) are attached; a paste of text is the textarea's. */
+  protected onPaste(e: ClipboardEvent): void {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (!files.length) return;
+    e.preventDefault();
+    const at = new Date();
+    void this.attach(files.map((f, i) => new File([f], pastedName(f, at, i), { type: f.type })));
+  }
+```
+
+`ConversationScreen`: the chat section is the drop zone (React's `useFileDrop`: a counter of dragenters, since each child crossed fires its own). `dragenter`, `dragleave` and `drop` are template listeners; `dragover`, which fires many times a second, is added with `addEventListener` once the section exists (an `effect` on the `#chat` view query, removed in `onCleanup`), as W2b.1's Library does. Taking the dragover is what lets the browser drop there. The app's guard (W0c.14's `guardFileDrops`) runs after it on the document, sees it taken and leaves the drop effect alone, so the guard needs no change beyond its comment.
+
+```html
+        <section
+          #chat
+          class="conv-chat"
+          [class.dropping]="dropping()"
+          aria-label="Conversation with Desk"
+          (dragenter)="onDragEnter($event)"
+          (dragleave)="onDragLeave($event)"
+          (drop)="onDrop($event)"
+        >
+          @if (dropping()) {
+            <div class="chat-drop" aria-hidden="true">Drop to attach to the Library</div>
+          }
+```
+
+```ts
+const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
+  private readonly chat = viewChild<ElementRef<HTMLElement>>('chat');
+  /** Files are being dragged over the chat, which takes them all (React's `useFileDrop`). */
+  protected readonly dropping = signal(false);
+  /** dragenter and dragleave fire for every child crossed: files are over the chat while this is above zero. */
+  private drags = 0;
+
+    // Not a template (dragover) listener: dragover fires many times a second, and each would schedule change detection.
+    // Taking it is what lets the chat take the drop; the app's file-drop guard leaves a dragover taken here alone.
+    effect((onCleanup) => {
+      const el = this.chat()?.nativeElement;
+      if (!el) return;
+      const onDragOver = (e: DragEvent) => {
+        if (hasFiles(e)) e.preventDefault();
+      };
+      el.addEventListener('dragover', onDragOver);
+      onCleanup(() => el.removeEventListener('dragover', onDragOver));
+    });
+
+  protected onDragEnter(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    this.drags++;
+    this.dropping.set(true);
+  }
+
+  protected onDragLeave(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    this.drags = Math.max(0, this.drags - 1);
+    if (!this.drags) this.dropping.set(false);
+  }
+
+  /** Files dropped anywhere on the chat go to the composer's attachments. */
+  protected onDrop(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    this.drags = 0;
+    this.dropping.set(false);
+    void this.composer()?.attach(e.dataTransfer?.files ?? null);
+  }
+```
+
+Run the two specs again: PASS. Commit (`feat(web-ui): paste and drop files into the chat`) with `packages/ui-core/src/files.ts`, `files.test.ts`, `apps/desktop/src/renderer/conversation/Composer.tsx`, `composer.ts`, `conversation-screen.ts`, its spec, `app.ts` (the guard's comment), `app.spec.ts` and this plan.
+
+- [ ] **Step 2: Message links on the line diagram (master 60c8a7b)**
+
+Port the React case "draws messages between agents as links that name both sides, light up both labels and open the pair sheet" into `conversation-screen.spec.ts`, then draw `g.links` in `LineDiagram` as React does (the SVG under a `.line-fold` group, a `button.line-link` per link with `linkText`'s name and title), light a list of labels, and add the legend's "message". Commit (`feat(web-ui): messages between agents as links on the line diagram`).
+
+- [ ] **Step 3: `ProjectFrame`, the folded conversation line, and the `at` target (master 6221a36)**
+
+Port the React "timeline frame" cases into `conversation-screen.spec.ts` (rendering the screen inside `ProjectFrame`), write `ProjectFrame`, move the diagram out of `ConversationScreen`, give `LineDiagram` its `mode` and `focus`, give the conversation its `at`, and wire the frame in `App`. Commit (`feat(web-ui): the conversation and threads share a timeline frame that folds and unfolds`).
+
+- [ ] **Step 4: Verify**
+
+Run: `pnpm typecheck`, `pnpm exec vitest run --maxWorkers=2`, `pnpm --filter @desk/web-ui test`: all pass.
+
+Run: `pnpm test:web-e2e` once (headless), since the conversation screen changed; and, since `@desk/ui-core` changed under the desktop (`pastedName`, `linkText`), `pnpm test:e2e` once, never both at the same time.
 
 ---
 

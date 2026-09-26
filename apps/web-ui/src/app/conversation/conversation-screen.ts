@@ -34,6 +34,8 @@ import { PlanPanel } from './plan-panel';
 import { ServicesCard } from './services-card';
 import { WhatsUp } from './whats-up';
 
+const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
 /** Chat items rendered at first; scrolling up renders this many more (long conversations stay fast). */
 export const CHAT_PAGE = 60;
 
@@ -78,7 +80,18 @@ function readDraft(projectId: string): string {
             <section deskServicesCard [project]="project"></section>
           }
         </div>
-        <section class="conv-chat" aria-label="Conversation with Desk">
+        <section
+          #chat
+          class="conv-chat"
+          [class.dropping]="dropping()"
+          aria-label="Conversation with Desk"
+          (dragenter)="onDragEnter($event)"
+          (dragleave)="onDragLeave($event)"
+          (drop)="onDrop($event)"
+        >
+          @if (dropping()) {
+            <div class="chat-drop" aria-hidden="true">Drop to attach to the Library</div>
+          }
           <div class="chat-list" #list (scroll)="onScroll(list)">
             @if (start() > 0) {
               <button type="button" class="btn btn-ghost btn-sm chat-earlier" (click)="showEarlier()">Show earlier messages ({{ start() }})</button>
@@ -149,6 +162,11 @@ export class ConversationScreen {
   protected readonly pairOf = signal<readonly [string, string] | null>(null);
   protected readonly ticks = ticks;
   private readonly list = viewChild<ElementRef<HTMLDivElement>>('list');
+  private readonly chat = viewChild<ElementRef<HTMLElement>>('chat');
+  /** Files are being dragged over the chat, which takes them all (React's `useFileDrop`). */
+  protected readonly dropping = signal(false);
+  /** dragenter and dragleave fire for every child crossed: files are over the chat while this is above zero. */
+  private drags = 0;
   private readonly composer = viewChild(Composer);
   /** Whether the chat follows its newest item (the user hasn't scrolled up). */
   private pinned = true;
@@ -206,6 +224,17 @@ export class ConversationScreen {
       const left = pending.filter((t) => !sent.has(t));
       if (left.length !== pending.length) this.pending.set(left);
     });
+    // Not a template (dragover) listener: dragover fires many times a second, and each would schedule change detection.
+    // Taking it is what lets the chat take the drop; the app's file-drop guard leaves a dragover taken here alone.
+    effect((onCleanup) => {
+      const el = this.chat()?.nativeElement;
+      if (!el) return;
+      const onDragOver = (e: DragEvent) => {
+        if (hasFiles(e)) e.preventDefault();
+      };
+      el.addEventListener('dragover', onDragOver);
+      onCleanup(() => el.removeEventListener('dragover', onDragOver));
+    });
     afterRenderEffect(() => {
       this.items();
       this.pending();
@@ -241,6 +270,28 @@ export class ConversationScreen {
 
   protected addPending(text: string): void {
     this.pending.update((p) => [...p, text]);
+  }
+
+  protected onDragEnter(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    this.drags++;
+    this.dropping.set(true);
+  }
+
+  protected onDragLeave(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    this.drags = Math.max(0, this.drags - 1);
+    if (!this.drags) this.dropping.set(false);
+  }
+
+  /** Files dropped anywhere on the chat go to the composer's attachments. */
+  protected onDrop(e: DragEvent): void {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    this.drags = 0;
+    this.dropping.set(false);
+    void this.composer()?.attach(e.dataTransfer?.files ?? null);
   }
 
   protected focusComposer(): void {

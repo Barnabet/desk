@@ -1,10 +1,13 @@
 import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, computed, inject, input, model, output, signal, viewChild } from '@angular/core';
-import { fileToBase64, MAX_UPLOAD } from '@desk/ui-core';
+import { fileToBase64, MAX_UPLOAD, pastedName } from '@desk/ui-core';
 import { Button } from '../components/button';
 import { ToastService } from '../components/toast';
 import { DeskBridge } from '../core/desk-bridge';
 
-/** Message Desk: ⏎ sends, ⇧⏎ adds a line; attachments go to the Library and are referenced in the message. */
+/**
+ * Message Desk: ⏎ sends, ⇧⏎ adds a line; attachments (picked, pasted, or dropped on the chat, which hands them to `attach`)
+ * go to the Library and are referenced in the message.
+ */
 @Component({
   selector: 'div[deskComposer]',
   imports: [Button],
@@ -20,6 +23,7 @@ import { DeskBridge } from '../core/desk-bridge';
       [value]="draft()"
       (input)="draft.set(box.value)"
       (keydown)="onKey($event)"
+      (paste)="onPaste($event)"
       placeholder="Brief a new piece of work, answer a question, or change direction"
     ></textarea>
     <div class="composer-bar">
@@ -28,7 +32,7 @@ import { DeskBridge } from '../core/desk-bridge';
           <path d="M11.5 6.5L7 11a3 3 0 0 1-4.2-4.2l4.6-4.6a2 2 0 0 1 2.8 2.8L5.6 9.6a1 1 0 0 1-1.4-1.4L8.4 4" fill="none" stroke="var(--text)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
-      <input #attachInput type="file" multiple hidden data-testid="attach-input" (change)="attach(attachInput)" />
+      <input #attachInput type="file" multiple hidden data-testid="attach-input" (change)="picked(attachInput)" />
       <button type="button" class="link small" (click)="turnIntoSkill()">Turn this into a skill</button>
       <span class="grow"></span>
       <span class="muted small">{{ uploading() ? 'Uploading…' : '⏎ send · ⇧⏎ new line' }}</span>
@@ -76,8 +80,12 @@ export class Composer {
     }
   }
 
-  protected async attach(input: HTMLInputElement): Promise<void> {
-    for (const f of Array.from(input.files ?? [])) {
+  /**
+   * Uploads files to the Library and adds an "Attached: <path>" line per file to the draft, in order (React's
+   * `useAttachments`, which the chat's drop zone shares with the composer; here the screen hands dropped files to this).
+   */
+  async attach(files: Iterable<File> | ArrayLike<File> | null): Promise<void> {
+    for (const f of Array.from(files ?? [])) {
       if (f.size > MAX_UPLOAD) {
         this.toasts.error(new Error(`${f.name} is larger than 25 MB.`));
         continue;
@@ -92,7 +100,20 @@ export class Composer {
         this.uploading.update((n) => n - 1);
       }
     }
+  }
+
+  protected async picked(input: HTMLInputElement): Promise<void> {
+    await this.attach(Array.from(input.files ?? []));
     input.value = '';
+  }
+
+  /** Pasted files (a screenshot, files copied in Finder) are attached; a paste of text is the textarea's. */
+  protected onPaste(e: ClipboardEvent): void {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (!files.length) return;
+    e.preventDefault();
+    const at = new Date();
+    void this.attach(files.map((f, i) => new File([f], pastedName(f, at, i), { type: f.type })));
   }
 
   protected turnIntoSkill(): void {

@@ -35,3 +35,16 @@ export const extOf = (path: string) => (/\.([^./]+)$/.exec(path)?.[1] ?? '').toL
 export const imageMime = (path: string): string | null => IMAGE.get(extOf(path)) ?? null;
 export const isMarkdown = (path: string) => /^(md|markdown)$/.test(extOf(path));
 export const MAX_UPLOAD = 25 * 1024 * 1024;
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * A pasted screenshot arrives as "image.png" every time: it gets a name of its own, "pasted-2026-09-26-011207.png"
+ * ("-2" and on for more in the same paste). Files copied in Finder keep theirs.
+ */
+export function pastedName(file: { name: string; type: string }, at: Date, index: number): string {
+  if (!/^image\.\w+$/.test(file.name) && file.name) return file.name;
+  const ext = /\.(\w+)$/.exec(file.name)?.[1] ?? file.type.split('/')[1] ?? 'png';
+  const stamp = `${at.getFullYear()}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())}-${pad2(at.getHours())}${pad2(at.getMinutes())}${pad2(at.getSeconds())}`;
+  return `pasted-${stamp}${index ? `-${index + 1}` : ''}.${ext}`;
+}

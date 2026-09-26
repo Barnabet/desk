@@ -17,8 +17,9 @@ import { screenFor, screenKey } from './screen-for';
 
 /**
  * A browser opens a file dropped where no drop zone takes it, replacing the page and whatever was unsaved (Electron
- * refuses the navigation instead). Cancels file drags on the whole document, after drop zones (the Library) have had
- * them: a drag nothing took shows "no drop". Returns the function that removes the listeners.
+ * refuses the navigation instead). Cancels file drags on the whole document, after drop zones (the Library, the
+ * conversation's chat) have had them: a drag nothing took shows "no drop", and one a zone took keeps its drop effect.
+ * Returns the function that removes the listeners.
  */
 function guardFileDrops(doc: Document): () => void {
   const guard = (e: DragEvent) => {

@@ -1,21 +1,11 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type RefObject } from 'react';
-import { fileToBase64, MAX_UPLOAD } from '@desk/ui-core';
+import { fileToBase64, MAX_UPLOAD, pastedName } from '@desk/ui-core';
 import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { toastError } from '../components/Toast';
 
-const pad = (n: number) => String(n).padStart(2, '0');
-
-/**
- * A pasted screenshot arrives as "image.png" every time: it gets a name of its own, "pasted-2026-09-26-011207.png"
- * ("-2" and on for more in the same paste). Files copied in Finder keep theirs.
- */
-export function pastedName(file: File, at: Date, index: number): string {
-  if (!/^image\.\w+$/.test(file.name) && file.name) return file.name;
-  const ext = /\.(\w+)$/.exec(file.name)?.[1] ?? file.type.split('/')[1] ?? 'png';
-  const stamp = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}-${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
-  return `pasted-${stamp}${index ? `-${index + 1}` : ''}.${ext}`;
-}
+/** `pastedName` moved to `@desk/ui-core` (both UIs name pasted files); re-exported for this module's users. */
+export { pastedName };
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 

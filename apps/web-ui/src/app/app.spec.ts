@@ -171,6 +171,30 @@ describe('App', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/p/p/library?file=notes.txt'));
   });
 
+  it("still hands files dropped on the conversation's chat to its composer", async () => {
+    go('#/p/p/conversation');
+    const overview = { project: { id: 'p', name: 'P', goal: '', instructions: '', settings: {}, created_at: 't', updated_at: 't', archived_at: null }, desk: null, sources: [], plan: null, threads: [], approvals: [], last_seq: 0 };
+    const bridge = new FakeDeskBridge({
+      'broker.snapshot': () => ({ ...initialGlobalState(), connection: { status: 'live' } }),
+      'projects.get': () => overview,
+      'broker.watch': () => ({ ok: true }),
+      'broker.unwatch': () => ({ ok: true }),
+      'library.upload': ({ file }: { file: { name: string } }) => ({ path: `uploads/${file.name}` }),
+    });
+    await renderApp(bridge);
+    const box = (await screen.findByLabelText('Message Desk')) as HTMLTextAreaElement;
+    const chat = screen.getByRole('region', { name: 'Conversation with Desk' });
+    const over = drag('dragover', ['Files']);
+    chat.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect((over as Event & { dataTransfer: DataTransfer }).dataTransfer.dropEffect).toBe('copy');
+    const drop = drag('drop', ['Files'], [new File(['hi'], 'notes.txt')]);
+    chat.dispatchEvent(drop);
+    expect(drop.defaultPrevented).toBe(true);
+    await waitFor(() => expect(box.value).toBe('Attached: uploads/notes.txt\n'));
+    expect(bridge.calls.filter((c) => c.channel === 'library.upload')).toHaveLength(1);
+  });
+
   it('shows desk:notify items as browser notifications while the page is in the background', async () => {
     const titles: string[] = [];
     class BrowserNotification {
