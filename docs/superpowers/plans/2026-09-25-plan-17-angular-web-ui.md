@@ -31694,8 +31694,17 @@ describe('the catalog helpers', () => {
 
 describe('injectCatalog', () => {
   it('loads the catalog, and lists again when a runtime changes state or the window gets focus', async () => {
-    const { fixture, catalog, lists } = await setup({ 'catalog.list': () => catalogItems() });
+    // Held until the loading state is checked: render's whenStable would otherwise see a one-call refresh answered.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { fixture, catalog, lists } = await setup({
+      'catalog.list': async () => {
+        await gate;
+        return catalogItems();
+      },
+    });
     expect(catalog.status()).toBe('loading');
+    release();
     await vi.waitFor(() => expect(catalog.status()).toBe('ready'));
     expect(catalog.items().map((i) => i.id)).toEqual(['paper-lookup', 'word-documents', 'pre-mortem']);
     expect(lists()).toBe(1);
@@ -31874,6 +31883,10 @@ Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0 (`testing/catalog.ts` type-checks with the app, as `testing/fake-bridge.ts` does).
+
+**Deviation (spec):** the first `injectCatalog` case first expected `loading` right after `render`, with a handler that answered at once. `render` waits for `whenStable`, and a refresh that makes one bridge call settles within it, so the case saw `ready` (W3a.1's case passes only because its refresh awaits a `Promise.all` of several calls). The first answer is now held behind a gate the case opens after checking `loading`; later lists pass straight through. The code above has it; `data.ts` is the plan's. 6 tests, stable over three runs.
+
+**Master (checked 2026-09-26, origin/master 79b8f54):** the other session's catalog work has landed there and is not on `web-ui`. For this task's files it changes `BAYS`' `documents` blurb to "Conversion to Markdown, data analysis, Excel automation, HTML slides." and adds a `files` category to `CatalogCategory` (no bay for it; the Electron e2e expects no "Files & media" region and 18 cards), and `CatalogInstall.scope` becomes `WritableSkillScope`. Port those after the rebase; W3a.4 and W3a.10 port the `CatalogView.tsx` comment and the e2e's offline catalog (an `excel-automation` stand-in).
 
 - [ ] **Step 5: Commit**
 
