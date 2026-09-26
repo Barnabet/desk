@@ -81,13 +81,13 @@ function commandFor(file: string): string {
 
 export const skillListTool = defineTool({
   name: 'skill_list',
-  description: 'List the skills available in this project (project skills shadow global ones), optionally filtered by words matched against names and descriptions.',
+  description: "List the skills available in this project (project skills shadow global ones, which shadow Desk's built-in skills), optionally filtered by words matched against names and descriptions.",
   input: z.object({ query: z.string().optional() }),
   async execute({ query }, ctx) {
     const active = new Set(getAgent(ctx.services.store.db, ctx.agentId)?.active_skills ?? []);
     const words = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     const skills = ctx.services.skills
-      .list(ctx.projectId)
+      .list(ctx.projectId, { builtins: true })
       .filter((s) => words.every((w) => `${s.name} ${s.description}`.toLowerCase().includes(w)));
     if (!skills.length) return query ? `No skills match "${query}".` : 'No skills yet.';
     return skills.map((s) => formatSkillLine(s, active)).join('\n');
@@ -135,6 +135,7 @@ export const skillRunTool = defineTool({
   async execute({ name, script, args, stdin, timeout_s }, ctx) {
     const skill = resolveSkill(ctx, name);
     const file = locateScript(skill, script, ctx.services.skills);
+    const { waitedMs } = await ctx.services.prepareSkillRuntime(ctx.agentId, { scope: skill.scope, name: skill.name }, ctx.signal);
     const skillEnv = ctx.services.skillEnv(ctx.agentId, { scope: skill.scope, name: skill.name });
     if (skillEnv.blocked) throw new Error(skillEnv.blocked);
     const command = [commandFor(file), ...args.map(shellQuote)].join(' ');
@@ -147,7 +148,8 @@ export const skillRunTool = defineTool({
       ...(stdin !== undefined ? { stdin } : {}),
     });
     const status = r.aborted ? 'aborted' : r.timedOut ? `timed out after ${timeout_s}s` : `exit code ${r.exitCode}`;
-    return `[${status}]\n${r.output}`;
+    const setup = waitedMs >= 1000 ? `(Set up ${skill.name}'s Python environment first: first use only, ${Math.round(waitedMs / 1000)} s.)\n` : '';
+    return `${setup}[${status}]\n${r.output}`;
   },
 });
 
