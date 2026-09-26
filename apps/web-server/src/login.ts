@@ -2,11 +2,19 @@ import { SESSION_STORAGE_KEY } from './frames';
 
 export const escapeHtml = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-const STYLE = '<style>body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:36rem;padding:0 1rem;color:#2b2a27;background:#efeae0}</style>';
+/**
+ * The login pages' look, light and dark, in `@desk/ui-styles`' token values (they load no stylesheet): `--ground` and
+ * `--ink` for the page, `--run-text` for links. `tokens.test.ts` checks every colour here against tokens.css.
+ */
+const STYLE =
+  '<meta name="color-scheme" content="light dark"><style>' +
+  'body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:36rem;padding:0 1rem;color:#1c1b18;background:#efeae0}a{color:#1f45a8}' +
+  '@media (prefers-color-scheme: dark){body{color:#f1ece2;background:#171613}a{color:#a3bbf7}}' +
+  '</style>';
 
 /** The /login answer: the new session secret in a <meta> tag, stored by the external /login.js (the CSP forbids inline scripts). */
 export function loginPage(secret: string): string {
-  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="desk-session" content="${escapeHtml(secret)}"><title>Desk</title><script src="/login.js"></script></head><body></body></html>\n`;
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="desk-session" content="${escapeHtml(secret)}"><title>Desk</title>${STYLE}<script src="/login.js"></script></head><body></body></html>\n`;
 }
 
 export function loginFailedPage(): string {
@@ -26,5 +34,5 @@ export const LOGIN_JS = `(() => {
 /** The page desk web opens instead of the link, so the one-time code never appears on a command line. */
 export function loginRedirectHtml(link: string): string {
   const href = escapeHtml(link);
-  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${href}"><title>Desk</title></head><body><a href="${href}">Open Desk</a></body></html>\n`;
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${href}"><title>Desk</title>${STYLE}</head><body><a href="${href}">Open Desk</a></body></html>\n`;
 }

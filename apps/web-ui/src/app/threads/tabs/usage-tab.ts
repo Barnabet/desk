@@ -20,23 +20,8 @@ export function usageByModel(events: StoredEvent[], agentId: string): ModelUsage
   return [...by.values()];
 }
 
-/** A token count in a few characters: "950", "1.5k", "12k". */
-/** A token count in at most ~3 significant digits: 236, 7.7k, 402M, 3.2B (renderer/threads/tabs/UsageTab.tsx). */
-export function tokens(n: number): string {
-  if (n < 1000) return String(n);
-  const units: Array<[number, string]> = [
-    [1e3, 'k'],
-    [1e6, 'M'],
-    [1e9, 'B'],
-  ];
-  for (const [i, [size, unit]] of units.entries()) {
-    const v = n / size;
-    const text = v < 9.95 ? v.toFixed(1) : String(Math.round(v));
-    // 999_700 rounds to "1000k"; the next unit says it better.
-    if (Number(text) < 1000 || i === units.length - 1) return `${text}${unit}`;
-  }
-  return String(n);
-}
+/** A token count: `@desk/ui-core`'s `tokens`, re-exported where the thread's tabs and System import it from. */
+export { tokens } from '@desk/ui-core';
 
 /** Calls and tokens per model, with totals. */
 @Component({

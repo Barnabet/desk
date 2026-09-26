@@ -103,7 +103,7 @@ describe('injectCatalog', () => {
     await vi.waitFor(() => expect(lists()).toBe(3));
   });
 
-  it('keeps the newest catalog when an older refresh answers last', async () => {
+  it('never overlaps a slow list: asks meanwhile list once more when it ends, and that newer catalog lands', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let calls = 0;
@@ -114,14 +114,16 @@ describe('injectCatalog', () => {
         return catalogItems();
       },
     });
+    // A slow first list: focus and a runtime change ask again while it runs, and nothing new starts.
     window.dispatchEvent(new Event('focus'));
-    await vi.waitFor(() => expect(catalog.status()).toBe('ready'));
-    expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1);
+    window.dispatchEvent(new Event('focus'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lists()).toBe(1);
+    expect(catalog.status()).toBe('loading');
     release();
-    await gate;
+    await vi.waitFor(() => expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(lists()).toBe(2);
-    expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1);
   });
 
   it('polls every 3 s while a runtime is being set up, and stops once it is ready', async () => {

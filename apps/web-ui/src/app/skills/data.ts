@@ -1,28 +1,16 @@
-import { computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
+import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
 import { buildSkillGraph, type SkillNode, type SkillSummary } from '@desk/client';
 import type { SkillRef } from '@desk/ui-core';
 import { describeError } from '../components/toast';
 import { DeskBridge } from '../core/desk-bridge';
+import { singleFlight } from '../core/refresh';
 import { GlobalStore } from '../core/global.store';
 
 /** The IPC scope argument: project skills name their project; global ones don't. */
 export const scopeArg = (r: SkillRef): { projectId?: string } => (r.scope === 'project' && r.projectId ? { projectId: r.projectId } : {});
 
-/**
- * `user` → you, `agent:<id>` → the agent's title when known, `builtin:<name>` → Desk itself (a copy of a built-in skill),
- * `catalog:<id>@<commit>` → the catalog with its commit.
- */
-export function whoLabel(origin: string | null, titles: Map<string, string>): string {
-  if (!origin) return 'Unknown';
-  if (origin === 'user') return 'You';
-  if (origin.startsWith('agent:')) return titles.get(origin.slice(6)) ?? 'Desk';
-  if (origin.startsWith('builtin:')) return 'Built into Desk';
-  if (origin.startsWith('catalog:')) {
-    const marker = origin.slice(origin.lastIndexOf('@') + 1);
-    return /^[0-9a-f]{40}$/.test(marker) ? `Catalog · ${marker.slice(0, 7)}` : 'Catalog';
-  }
-  return origin;
-}
+/** Who made a skill version: `@desk/ui-core`'s `whoLabel`, re-exported where the skills screen imports it from. */
+export { whoLabel } from '@desk/ui-core';
 
 /** The global list, and each project's own keyed by project id (a Map, so no id reads a prototype member). */
 type Lists = { global: SkillSummary[]; projects: Map<string, SkillSummary[]> };
@@ -46,12 +34,9 @@ export function injectSkills(): SkillsState {
   const projectIds = computed(() => overview().map((p) => p.project.id).join(','));
   const lists = signal<Lists | null>(null);
   const error = signal<string | null>(null);
-  // Refreshes overlap (focus, the timer, a new project); only the latest one's answer lands, so a slow earlier answer
-  // never overwrites a newer list.
-  let latest = 0;
-
-  const refresh = async (): Promise<void> => {
-    const run = ++latest;
+  // One list at a time (focus, the timer, a new project): an ask while one runs lists once more when it ends, so a
+  // list slower than the timer neither piles up calls nor lets an older answer land last.
+  const flight = singleFlight(async () => {
     const joined = untracked(projectIds);
     const ids = joined ? joined.split(',') : [];
     try {
@@ -59,13 +44,14 @@ export function injectSkills(): SkillsState {
         bridge.call('skills.list', {}),
         ...ids.map((id) => bridge.call('skills.list', { projectId: id }).catch((): SkillSummary[] => [])),
       ]);
-      if (run !== latest) return;
       lists.set({ global: all ?? [], projects: new Map(ids.map((id, i) => [id, perProject[i] ?? []])) });
       error.set(null);
     } catch (err) {
-      if (run === latest) error.set(describeError(err).message);
+      error.set(describeError(err).message);
     }
-  };
+  });
+  const refresh = flight.run;
+  inject(DestroyRef).onDestroy(flight.stop);
 
   // React's [refresh] dependency is the joined project ids: a new project, or one gone, lists again.
   effect((onCleanup) => {

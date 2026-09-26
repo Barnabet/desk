@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, bytes, clock, duration, plural } from './format';
+import { ago, bytes, clock, duration, plural, tokens } from './format';
 
 describe('format', () => {
   it('formats durations, ages, sizes and counts', () => {
@@ -23,5 +23,18 @@ describe('format', () => {
     const d = new Date(2026, 8, 24, 9, 5);
     expect(clock(d)).toBe('09:05');
     expect(clock(d.toISOString())).toBe('09:05');
+  });
+
+  it('keeps small token counts exact and scales large ones to k, M and B', () => {
+    expect(tokens(236)).toBe('236');
+    expect(tokens(7_700)).toBe('7.7k');
+    expect(tokens(5_811_000)).toBe('5.8M');
+    expect(tokens(402_266_000)).toBe('402M');
+    expect(tokens(3_200_000_000)).toBe('3.2B');
+  });
+
+  it('moves a token count to the next unit instead of printing 1000k', () => {
+    expect(tokens(999_700)).toBe('1.0M');
+    expect(tokens(9_960)).toBe('10k');
   });
 });

@@ -25,4 +25,11 @@ describe('login pages', () => {
     expect(loginRedirectHtml('http://127.0.0.1:7434/login?code=a&b')).toContain('content="0;url=http://127.0.0.1:7434/login?code=a&amp;b"');
     expect(escapeHtml('<a href="x">&</a>')).toBe('&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
   });
+
+  it('follow the browser into dark mode, so a dark system never gets a white page', () => {
+    for (const html of [loginPage('s'), loginFailedPage(), loginRedirectHtml('http://127.0.0.1:7434/login?code=a')]) {
+      expect(html).toContain('<meta name="color-scheme" content="light dark">');
+      expect(html).toContain('@media (prefers-color-scheme: dark){body{color:#f1ece2;background:#171613}');
+    }
+  });
 });

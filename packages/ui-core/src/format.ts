@@ -37,3 +37,20 @@ export function bytes(n: number): string {
 }
 
 export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+/** A token count in at most ~3 significant digits: 236, 7.7k, 402M, 3.2B (the thread's Usage tab, System's totals). */
+export function tokens(n: number): string {
+  if (n < 1000) return String(n);
+  const units: Array<[number, string]> = [
+    [1e3, 'k'],
+    [1e6, 'M'],
+    [1e9, 'B'],
+  ];
+  for (const [i, [size, unit]] of units.entries()) {
+    const v = n / size;
+    const text = v < 9.95 ? v.toFixed(1) : String(Math.round(v));
+    // 999_700 rounds to "1000k"; the next unit says it better.
+    if (Number(text) < 1000 || i === units.length - 1) return `${text}${unit}`;
+  }
+  return String(n);
+}

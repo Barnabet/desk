@@ -221,7 +221,7 @@ Steps for a port, in order:
 
 ## Sections
 
-The plan has 105 tasks in 11 sections, one commit per task. The sections follow this header in order.
+The plan has 108 tasks in 11 sections, one commit per task. The sections follow this header in order.
 
 | Section | Delivers | Tasks | Runs after |
 |---|---|---|---|
@@ -330,7 +330,7 @@ The plan has 105 tasks in 11 sections, one commit per task. The sections follow 
     - Built-in skills (master's Plan 18: a `builtin` skill scope, `/v1/builtin-skills`, six `builtins.*` operations). The contract and the bff carry them since the merge; the web screens port them in W3a.2b, W3a.7, W3a.8b, W3a.9, W3a.10 and W3b.3.
     - The catalog: 18 third-party entries in five bays, a `files` category with no bay, and `WritableSkillScope` for installs. W3a.2 has it (0cdc815); W3a.4 and W3a.10 port the rest.
     - Dark mode: every color is a token in `@desk/ui-styles`' `tokens.css`, with a dark value under `prefers-color-scheme: dark`. `tokens.test.ts` scans the web UI too (c16b4df), so a port writes `var(--run)` and its siblings, never a hex color. The desktop's Appearance setting has no web counterpart: a browser follows the system (W3b.2).
-    - `UsageTab`'s `tokens` scales to M and B (0745c68).
+    - `UsageTab`'s `tokens` scales to M and B (0745c68); since the review follow-ups it is `@desk/ui-core`'s, re-exported by both UIs.
     - Not ported yet, for a follow-up after W3 (the landed W1b and W2a screens are the pre-merge React's): the conversation keeps Desk's line and Threads unfolds every lane (`ProjectFrame.tsx`, master 6221a36); messages between agents are links on the line diagram (60c8a7b; `@desk/ui-core`'s `lineGeometry` already returns the links); paste or drop files into the chat (68a8fb6); and the conversation's `at` route (in `@desk/ui-core`'s router since the merge).
     - A later merge of master re-checks the tasks still to run (W3a.2b onward, and W3b) against the React sources, as this one did.
   - If the W0a extraction conflicts, redo it mechanically: the `git mv` tables and the scripted import rewrites.
@@ -397,6 +397,8 @@ All paths are relative to the repo root.
 | `packages/ui-core/src/{strips,library,memory}.ts` | moved from `renderer/attention/strips.ts`, `renderer/knowledge/{library,memory}.ts` | W0a.3 |
 | `packages/ui-core/src/{policy-reason,line-geometry,map-layout,skills-map,skills-diff,thread-route,row-views}.ts` | moved from `renderer/policyReason.ts`, `conversation/lineGeometry.ts`, `map/layout.ts`, `skills/skillsMap.ts`, `skills/diff.ts`, `threads/route.ts`, `conversation/rowViews.ts` | W0a.3 |
 | `packages/ui-core/src/{router,format,palette,pairs,waits,policy-reason,line-geometry,map-layout,skills-map,skills-diff,thread-route,row-views}.test.ts` | moved with their modules | W0a.3 |
+| `packages/ui-core/src/{catalog,skill-origin}.ts`, `src/catalog.test.ts`; `tokens` in `src/format.ts` | new: the catalog helpers, `whoLabel` and `tokens`, moved out of both UIs (both re-export them) | the review follow-ups (after W3a.2) |
+| `packages/ui-core/src/builtins.ts` + test | new: `builtinKey`, `parseBuiltinKey`, `runtimeLabel` (the desktop's `builtins/data.ts` re-exports them) | W3a.2b |
 | `packages/ui-styles/package.json`, `src/index.css`, `src/index.test.ts` | new | W0a.4 |
 | `packages/ui-styles/src/tokens.css`, `tokens.test.ts` | moved from `apps/desktop/src/renderer/theme/` | W0a.4 |
 | `packages/ui-styles/src/{attention,conversation,knowledge,map,settings,skills,system,threads}.css` | moved from `apps/desktop/src/renderer/<area>/<area>.css` | W0a.4 |
@@ -532,6 +534,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/skills/data.ts` + spec | W3a.1 |
 | `src/app/skills/catalog/data.ts` + spec, `src/app/testing/catalog.ts` | W3a.2 |
 | `src/app/skills/builtins/data.ts` + spec, `src/app/testing/builtins.ts` | W3a.2b |
+| `src/app/core/refresh.ts` + spec (`singleFlight`) | the review follow-ups (after W3a.2) |
 | `src/app/skills/catalog/runtime-line.ts` + spec | W3a.3 |
 | `src/app/skills/catalog/catalog-view.ts` + spec | W3a.4 |
 | `src/app/skills/catalog/review-sheet.ts` + spec | W3a.5 |
@@ -24960,7 +24963,7 @@ Expected: no line for a file under `apps/web-ui/src/app/attention/`, `apps/web-u
 
 - `apps/web-ui/src/app/components/skill-badge.ts`: `SkillBadge` — `span[deskSkillBadge]` (host class `skill-badge`, `title` "<scope> skill" when `scope` is set), inputs `name` (required), `scope?: 'global' | 'project'`. W3's skills screens use it as it is.
 - `apps/web-ui/src/app/components/file-viewer.ts`: `rasterMime(path): string | null` (png, jpg/jpeg, gif, webp, looked up in a `Map`; never SVG, never an `Object.prototype` member); `FileViewer` — `div[deskFileViewer]` (host class `file-viewer`), inputs `path: string`, `data: Uint8Array` (both required); projected content lands in the bar between the Raw toggle and "Save a copy…" (the React `actions` prop; LibraryScreen projects its "Close preview" button there).
-- `apps/web-ui/src/app/threads/tabs/`: `ResultTab` — `div[deskResultTab]` (`projectId`, `thread`); `DiffTab` — `div[deskDiffTab]` (`threadId`, `version`); `FilesTab` — `div[deskFilesTab]` (`threadId`, `version`, `dir = model.required<string>()`: bind `[(dir)]`, the React `dir`/`onDir` pair); `SkillDraftsTab` — `div[deskSkillDraftsTab]` (`projectId`, `threadTitle`, `drafts`; output `browse: string`, React's `onBrowse`); `UsageTab` — `div[deskUsageTab]` (`usage: ModelUsage[]`); `usage-tab.ts` also exports `ModelUsage`, `usageByModel(events, agentId)` and `tokens(n)` (W3's `SystemScreen` imports `tokens` from here, as the React one does from `UsageTab.tsx`). Every tab host is `display: contents`: the React tabs switch roots (an empty state, a `ul`, a `div.tab-body`).
+- `apps/web-ui/src/app/threads/tabs/`: `ResultTab` — `div[deskResultTab]` (`projectId`, `thread`); `DiffTab` — `div[deskDiffTab]` (`threadId`, `version`); `FilesTab` — `div[deskFilesTab]` (`threadId`, `version`, `dir = model.required<string>()`: bind `[(dir)]`, the React `dir`/`onDir` pair); `SkillDraftsTab` — `div[deskSkillDraftsTab]` (`projectId`, `threadTitle`, `drafts`; output `browse: string`, React's `onBrowse`); `UsageTab` — `div[deskUsageTab]` (`usage: ModelUsage[]`); `usage-tab.ts` also exports `ModelUsage`, `usageByModel(events, agentId)` and `tokens(n)` (since the review follow-ups a re-export of `@desk/ui-core`'s `tokens`, as the React `UsageTab.tsx` re-exports it; W3's `SystemScreen` imports `tokens` from here, as the React one does from `UsageTab.tsx`). Every tab host is `display: contents`: the React tabs switch roots (an empty state, a `ul`, a `div.tab-body`).
 - `apps/web-ui/src/app/threads/route-view.ts`: `RouteView` — `div[deskRouteView]` (host class `route`), inputs `stops`, `running`, `activity`, `reviewRounds`, `messages`, `selected`; output `selectStop: number` (React's `onSelect`).
 - `apps/web-ui/src/app/threads/transcript.ts`: `Depth`, `ComposerMode`, `stopDomId(n)`; `ToolCallFull` — `div[deskToolCallFull]` (host class `tr-call`, input `c`); `MessageCard` — `div[deskMessageCard]` (host class `tr-card tr-card-<dir>[ muted]`, input `c: CardView`, output `pair: string`); `Transcript` — `aside[deskTranscript]` (host class `card transcript`, `aria-label="Transcript"`), inputs `projectId`, `threadId`, `rows`, `entries`, `reviewRounds`, `messages`, `sent`, `selected`, `composer`, `depth = model.required<Depth>()` (React's `depth`/`onDepth`); outputs `pair: string`, `selectStop: number`; projected content is the head's actions (React's `actions`).
 - `apps/web-ui/src/app/threads/thread-roster.ts`: `ThreadRoster` — `div[deskThreadRoster]` (host class `page roster`), inputs `project: ProjectState`, `messages: MessagesState`, `now: number`.
@@ -26006,8 +26009,8 @@ export function usageByModel(events: StoredEvent[], agentId: string): ModelUsage
   return [...by.values()];
 }
 
-/** A token count in a few characters: "950", "1.5k", "12k". */
-export const tokens = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+/** A token count: `@desk/ui-core`'s `tokens`, re-exported where the thread's tabs and System import it from. */
+export { tokens } from '@desk/ui-core';
 
 /** Calls and tokens per model, with totals. */
 @Component({
@@ -31193,7 +31196,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 |---|---|---|
 | W3a.1 | `skills/data.ts`: `scopeArg`, `whoLabel`, `injectSkills` (React `useSkills`) | `skills/data.spec.ts` (new: the React module has no test) |
 | W3a.2 | `skills/catalog/data.ts`: `BAYS`, `installRef`, `fromCatalog`, `catalogIndex`, `runtimeWords`, `runtimePackages`, `sourceLabel`, `actionFor`, `injectCatalog` (React `useCatalog`); `testing/catalog.ts` fixtures | `skills/catalog/data.spec.ts` (`catalog/data.test.ts` ported, plus the helpers and the hook) |
-| W3a.2b | `skills/builtins/data.ts`: `builtinKey`, `parseBuiltinKey`, `runtimeLabel`, `injectBuiltins` (React `useBuiltins`); `testing/builtins.ts` | `skills/builtins/data.spec.ts` (`builtins/data.test.ts` ported, plus the hook) |
+| W3a.2b | `packages/ui-core/src/builtins.ts`: `builtinKey`, `parseBuiltinKey`, `runtimeLabel`; `skills/builtins/data.ts`: their re-export and `injectBuiltins` (React `useBuiltins`); `testing/builtins.ts` | `packages/ui-core/src/builtins.test.ts` (`builtins/data.test.ts` ported), `skills/builtins/data.spec.ts` (the hook) |
 | W3a.3 | `RuntimeLine` | `runtime-line.spec.ts` (new) |
 | W3a.4 | `CatalogView`, `LayoutSwitch`, `injectCatalogLayout` | `catalog-view.spec.ts` (new) |
 | W3a.5 | `ReviewSheet` | `review-sheet.spec.ts` (new) |
@@ -31219,10 +31222,10 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 
 **Produces (shared names beyond the contract):**
 
-- `apps/web-ui/src/app/skills/data.ts`: `scopeArg(r: SkillRef): { projectId?: string }`, `whoLabel(origin: string | null, titles: Map<string, string>): string`, `SkillsState` (`{ status: Signal<'loading' | 'ready' | 'error'>; error: Signal<string | null>; nodes: Signal<SkillNode[]>; refresh(): Promise<void> }`), `injectSkills(): SkillsState` (field initializer only).
-- `apps/web-ui/src/app/skills/catalog/data.ts`: `BAYS`, `installRef(id, install)`, `fromCatalog(install)`, `catalogIndex(items): Map<string, { item: CatalogItem; install: CatalogInstall }>`, `runtimeWords(e)`, `runtimePackages(e)`, `sourceLabel(e)`, `actionFor(install)`, `CatalogState` (`{ status; error; items: Signal<CatalogItem[]>; refresh(): Promise<void> }`), `injectCatalog(): CatalogState` (field initializer only).
+- `apps/web-ui/src/app/skills/data.ts`: `scopeArg(r: SkillRef): { projectId?: string }`, `whoLabel(origin: string | null, titles: Map<string, string>): string` (re-exported from `@desk/ui-core`), `SkillsState` (`{ status: Signal<'loading' | 'ready' | 'error'>; error: Signal<string | null>; nodes: Signal<SkillNode[]>; refresh(): Promise<void> }`), `injectSkills(): SkillsState` (field initializer only).
+- `apps/web-ui/src/app/skills/catalog/data.ts`: re-exported from `@desk/ui-core`'s `catalog.ts`: `BAYS` (`CATALOG_BAYS`), `installRef(id, install)`, `fromCatalog(install)`, `catalogIndex(items): Map<string, { item: CatalogItem; install: CatalogInstall }>`, `runtimeWords(e)`, `runtimePackages(e)`, `sourceLabel(e)`, `actionFor(install)`, `CatalogState` (`{ status; error; items: Signal<CatalogItem[]>; refresh(): Promise<void> }`), `injectCatalog(): CatalogState` (field initializer only).
 - `apps/web-ui/src/app/testing/catalog.ts`: `catalogItems(installs?)`, `install(o?)`, `reviewOf(item, o?)` (the renderer's `test/catalog.ts`, for specs).
-- `apps/web-ui/src/app/skills/builtins/data.ts`: `builtinKey(name)`, `parseBuiltinKey(key): string | null`, `runtimeLabel(b, progress?)`, `BuiltinsState` (`{ status; error; items: Signal<BuiltinSkillInfo[]>; refresh(): Promise<void> }`), `injectBuiltins(): BuiltinsState` (field initializer only). `apps/web-ui/src/app/testing/builtins.ts`: `builtin(name, over?)` (the renderer's `test/builtins.ts`, for specs).
+- `apps/web-ui/src/app/skills/builtins/data.ts`: `builtinKey(name)`, `parseBuiltinKey(key): string | null`, `runtimeLabel(b, progress?)` (re-exported from `@desk/ui-core`'s `builtins.ts`), `BuiltinsState` (`{ status; error; items: Signal<BuiltinSkillInfo[]>; refresh(): Promise<void> }`), `injectBuiltins(): BuiltinsState` (field initializer only). `apps/web-ui/src/app/testing/builtins.ts`: `builtin(name, over?)` (the renderer's `test/builtins.ts`, for specs).
 - `apps/web-ui/src/app/skills/catalog/runtime-line.ts`: `RuntimeLine` — `div[deskRuntimeLine]` (`display: contents`), inputs `entry: Pick<CatalogEntry, 'id' | 'runtime'>`, `install: CatalogInstall` (both required), output `retried` (React's `onRetried`).
 - `apps/web-ui/src/app/skills/catalog/catalog-view.ts`: `Layout` (`'cards' | 'list'`), `injectCatalogLayout(): { layout: Signal<Layout>; set(next: Layout): void }` (localStorage `desk.catalogLayout`), `LayoutSwitch` — `div[deskLayoutSwitch]` (host `class="segmented" role="group" aria-label="Layout"`), input `layout`, output `changed: Layout`; `CatalogView` — `div[deskCatalogView]` (host class `catalog`), inputs `items`, `layout`, `projectNames: Map<string, string>`, output `review: string` (React's `onReview`).
 - `apps/web-ui/src/app/skills/catalog/review-sheet.ts`: `ReviewSheet` — `div[deskReviewSheet]` (`display: contents`), inputs `id` (required), `item?: CatalogItem`, `projects: Array<{ id; name }>` (required), outputs `changed`, `close`.
@@ -31284,7 +31287,7 @@ apps/web-ui/e2e/catalog.e2e.test.ts                         new
 - **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** Each attribute selector sits on the React component's root element: `SkillsScreen` on `div.skills`, `SkillList` on `div.skill-list`, `SkillPanel` on `article.card.skill-panel`, `CatalogView` on `div.catalog`, `LayoutSwitch` on its `div.segmented`, `Compare` on `div.skill-compare`. Components whose React root is a `Sheet` (a portal) or that switch roots are `display: contents` hosts: `SkillEditor`, `AskDesk`, `ImportSheet`, `ReviewSheet` (their `Sheet` moves into `document.body`, leaving an empty host that makes no grid or flex item in `.skills` or `.skill-panel`), `RuntimeLine` (nothing, a `p.runtime-line` or a `div.runtime-line`) and `SkillsMapView` (its React root is `MapCanvas`, whose `.map-canvas` is `position: absolute; inset: 0` against `.skills-body.map`). `skills.css` has two child selectors, `.skills-legend > span` and `.review-files > *`, and both see the same children as on the desktop. `CatalogView`'s React `Card`, `Row` and `Action` are inlined in its template (the action once, as an `ng-template` both layouts use), over one view model per entry computed in TS.
 - **Callbacks** become outputs: `onSelect` → `selectSkill` (a plain `select` output would also catch the native `select` event), `onReview` → `review`, `onEdit` → `edit`, `onAskDesk` → `askDesk`, `onChanged` → `changed`, `onClose` → `close`, `onSaved` → `saved`, `onDone` → `done`, `onRetried` → `retried`, `LayoutSwitch`'s `onChange` → `changed`.
-- **Hooks.** `useSkills`, `useCatalog` and `useCatalogLayout` become `injectSkills()`, `injectCatalog()` and `injectCatalogLayout()`, called in field initializers; their React effects are `effect`s with `onCleanup` (the focus listener, the 30 s and 3 s timers). `useCatalog`'s refetch keyed on `runtimes.seq` reads the sequence through its own `computed`, so a `desk:global` push that leaves it unchanged lists nothing. `useBuiltins` becomes `injectBuiltins()` the same way (focus, 30 s, and 2 s while one is being set up). Refreshes overlap, so each of the three hooks numbers its calls and only the latest answer lands (the review of W3a.1 and W3a.2; React keeps the race). `SkillsScreen`'s `useView` is a private signal over localStorage `desk.skillsView`.
+- **Hooks.** `useSkills`, `useCatalog` and `useCatalogLayout` become `injectSkills()`, `injectCatalog()` and `injectCatalogLayout()`, called in field initializers; their React effects are `effect`s with `onCleanup` (the focus listener, the 30 s and 3 s timers). `useCatalog`'s refetch keyed on `runtimes.seq` reads the sequence through its own `computed`, so a `desk:global` push that leaves it unchanged lists nothing. `useBuiltins` becomes `injectBuiltins()` the same way (focus, 30 s, and 2 s while one is being set up). Each of the three hooks lists one call at a time through `singleFlight` (`core/refresh.ts`): an ask while a list runs starts nothing and lists once more when it ends, so a list slower than its poll neither piles up calls nor starves, and an older answer never lands after a newer one (the follow-up to the review of W3a.1 and W3a.2, which had numbered the calls; React keeps the race). `SkillsScreen`'s `useView` is a private signal over localStorage `desk.skillsView`.
 - **State.** `useState` is `signal`. State React seeds from props once (`useState(props.x)`) is seeded in `ngOnInit` (`SkillEditor`, `AskDesk`), so a new `projects` array from an overview push never resets what the user picked. `SkillPanel` resets its tab and open file when the skill changes (React's second effect) through `linkedSignal`s keyed on `skillKey(skill)`; its fetch `effect` reads that key, `version` and a reload counter (React's dependencies) and drops a late answer through `onCleanup`. `Compare` keeps its first `from`/`to` versions as React's `useState` does (`linkedSignal`s that return their previous value).
 - **Selects and text.** Options that come from `@for` carry `[selected]` (W0d.1's rule); text boxes bind `[value]` and `(input)`. Compared lines stay on one template line, a JSX `{' '}` is `&ngsp;`, and a literal `@` is `&#64;`. The diff `<pre>` is written on a single line: Angular keeps whitespace inside `<pre>`.
 - **Specs.** Ported cases keep their queries and visible text. `fireEvent.change` on a text box becomes `fireEvent.input`; selects and the file input keep `fireEvent.change`. Dialogs are found with `findByRole` (W0c's `Sheet` moves itself into `document.body` after its first render), so the React `getAllByRole('button', { name: 'Restore' }).at(-1)` becomes the "Restore" button inside the "Restore v1?" dialog (the same for Delete). The React `globalStore.set(...)` is `provideGlobal(state)` at render and `TestBed.inject(GlobalStore).set(...)` afterwards. Where React asserted a hash change right after an awaited bridge call, the port waits for it (`waitFor`), since the number of microtasks between the call and the navigation differs. The React tests' `Routed` wrapper becomes a small host component that reads `RouteService.route` and binds `skill`, `catalog` and `review` as `screenFor` would. `app.pickFolder` is scripted with a `FakeDeskBridge` handler, as React's `installBridge` does; the real folder browser is driven in the e2e. No source or spec contains the words W0c's `security.spec.ts` forbids.
@@ -31430,7 +31433,7 @@ describe('injectSkills', () => {
     expect(lists()).toEqual([{}, { projectId: 'p1' }]);
   });
 
-  it('keeps the newest lists when an older refresh answers last', async () => {
+  it('never overlaps a slow list: asks meanwhile list once more when it ends, and those newer lists land', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let calls = 0;
@@ -31444,13 +31447,35 @@ describe('injectSkills', () => {
       },
       [],
     );
+    // Focus twice while the first list is still out: nothing new starts, and the ask waits for the list after it.
     window.dispatchEvent(new Event('focus'));
-    await vi.waitFor(() => expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']));
-    release();
-    await gate;
+    let done = false;
+    void skills.refresh().then(() => (done = true));
     await settle();
+    expect(lists()).toEqual([{}]);
+    release();
+    await vi.waitFor(() => expect(done).toBe(true));
     expect(lists()).toEqual([{}, {}]);
     expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']);
+  });
+
+  it('lists nothing more once its component is gone, not even a list asked for while one ran', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { lists, fixture } = await setup(
+      {
+        'skills.list': async () => {
+          await gate;
+          return [];
+        },
+      },
+      [],
+    );
+    window.dispatchEvent(new Event('focus'));
+    fixture.destroy();
+    release();
+    await settle();
+    expect(lists()).toEqual([{}]);
   });
 
   it('lists nothing more once its component is gone: no focus listener, no 30 s timer', async () => {
@@ -31505,31 +31530,19 @@ Expected: FAIL. The test build stops with `Could not resolve "./data"`.
 Create `apps/web-ui/src/app/skills/data.ts`:
 
 ```ts
-import { computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
+import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
 import { buildSkillGraph, type SkillNode, type SkillSummary } from '@desk/client';
 import type { SkillRef } from '@desk/ui-core';
 import { describeError } from '../components/toast';
 import { DeskBridge } from '../core/desk-bridge';
+import { singleFlight } from '../core/refresh';
 import { GlobalStore } from '../core/global.store';
 
 /** The IPC scope argument: project skills name their project; global ones don't. */
 export const scopeArg = (r: SkillRef): { projectId?: string } => (r.scope === 'project' && r.projectId ? { projectId: r.projectId } : {});
 
-/**
- * `user` → you, `agent:<id>` → the agent's title when known, `builtin:<name>` → Desk itself (a copy of a built-in skill),
- * `catalog:<id>@<commit>` → the catalog with its commit.
- */
-export function whoLabel(origin: string | null, titles: Map<string, string>): string {
-  if (!origin) return 'Unknown';
-  if (origin === 'user') return 'You';
-  if (origin.startsWith('agent:')) return titles.get(origin.slice(6)) ?? 'Desk';
-  if (origin.startsWith('builtin:')) return 'Built into Desk';
-  if (origin.startsWith('catalog:')) {
-    const marker = origin.slice(origin.lastIndexOf('@') + 1);
-    return /^[0-9a-f]{40}$/.test(marker) ? `Catalog · ${marker.slice(0, 7)}` : 'Catalog';
-  }
-  return origin;
-}
+/** Who made a skill version: `@desk/ui-core`'s `whoLabel`, re-exported where the skills screen imports it from. */
+export { whoLabel } from '@desk/ui-core';
 
 /** The global list, and each project's own keyed by project id (a Map, so no id reads a prototype member). */
 type Lists = { global: SkillSummary[]; projects: Map<string, SkillSummary[]> };
@@ -31553,12 +31566,9 @@ export function injectSkills(): SkillsState {
   const projectIds = computed(() => overview().map((p) => p.project.id).join(','));
   const lists = signal<Lists | null>(null);
   const error = signal<string | null>(null);
-  // Refreshes overlap (focus, the timer, a new project); only the latest one's answer lands, so a slow earlier answer
-  // never overwrites a newer list.
-  let latest = 0;
-
-  const refresh = async (): Promise<void> => {
-    const run = ++latest;
+  // One list at a time (focus, the timer, a new project): an ask while one runs lists once more when it ends, so a
+  // list slower than the timer neither piles up calls nor lets an older answer land last.
+  const flight = singleFlight(async () => {
     const joined = untracked(projectIds);
     const ids = joined ? joined.split(',') : [];
     try {
@@ -31566,13 +31576,14 @@ export function injectSkills(): SkillsState {
         bridge.call('skills.list', {}),
         ...ids.map((id) => bridge.call('skills.list', { projectId: id }).catch((): SkillSummary[] => [])),
       ]);
-      if (run !== latest) return;
       lists.set({ global: all ?? [], projects: new Map(ids.map((id, i) => [id, perProject[i] ?? []])) });
       error.set(null);
     } catch (err) {
-      if (run === latest) error.set(describeError(err).message);
+      error.set(describeError(err).message);
     }
-  };
+  });
+  const refresh = flight.run;
+  inject(DestroyRef).onDestroy(flight.stop);
 
   // React's [refresh] dependency is the joined project ids: a new project, or one gone, lists again.
   effect((onCleanup) => {
@@ -31605,7 +31616,7 @@ export function injectSkills(): SkillsState {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/data.spec.ts)`
-Expected: PASS (9 tests).
+Expected: PASS (10 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -31614,8 +31625,9 @@ Expected: exit 0.
 
 **After the review and the merge of master (commits 0cdc815, 48d6ec0, 61baa04):** the code above is the file as it stands.
 - `whoLabel` names a `builtin:<name>` origin (a copy of one of Desk's built-in skills, from master's Plan 18) "Built into Desk", as the React `whoLabel` now does; the whoLabel case checks it.
-- Refreshes overlap (focus, the 30 s timer, a new project), so each takes a number from a counter bumped per call and only the latest one sets the lists or the error: a slow earlier answer never puts back an older list. React's `useSkills` has the same race; the port fixes it rather than copying it.
-- The spec gained four cases: the first case holds the global list behind a gate until it has checked `loading` (as W3a.2's does, instead of relying on a `Promise.all` outlasting render's `whenStable`); an overview push that leaves the project ids unchanged sends no list while `usedBy` follows the threads; the newest list wins when an older refresh answers last; and once the component is destroyed neither focus nor the 30 s timer lists. 9 tests.
+- Refreshes overlap (focus, the 30 s timer, a new project). The review's fix numbered the calls and let only the latest answer land, but a list slower than the timer then never landed at all. The follow-up (Plan 17's review follow-ups, `core/refresh.ts`) runs one list at a time: `singleFlight` marks an ask that comes in while a list runs, lists once more when that list ends, and hands the asker the promise that includes the rerun; `stop()` on destroy drops a pending rerun. React's `useSkills` has the same race; the port fixes it rather than copying it.
+- The same follow-up moved `whoLabel` into `@desk/ui-core` (`skill-origin.ts`, with its case in `catalog.test.ts`); both UIs' `skills/data.ts` re-export it.
+- The spec gained four cases: the first case holds the global list behind a gate until it has checked `loading` (as W3a.2's does, instead of relying on a `Promise.all` outlasting render's `whenStable`); an overview push that leaves the project ids unchanged sends no list while `usedBy` follows the threads; the newest list wins when an older refresh answers last (since the follow-up: asks during a slow list start nothing and get one more list after it); and once the component is destroyed neither focus nor the 30 s timer lists (since the follow-up, nor a list asked for while one ran). 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -31828,7 +31840,7 @@ describe('injectCatalog', () => {
     await vi.waitFor(() => expect(lists()).toBe(3));
   });
 
-  it('keeps the newest catalog when an older refresh answers last', async () => {
+  it('never overlaps a slow list: asks meanwhile list once more when it ends, and that newer catalog lands', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let calls = 0;
@@ -31839,14 +31851,16 @@ describe('injectCatalog', () => {
         return catalogItems();
       },
     });
+    // A slow first list: focus and a runtime change ask again while it runs, and nothing new starts.
     window.dispatchEvent(new Event('focus'));
-    await vi.waitFor(() => expect(catalog.status()).toBe('ready'));
-    expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1);
+    window.dispatchEvent(new Event('focus'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lists()).toBe(1);
+    expect(catalog.status()).toBe('loading');
     release();
-    await gate;
+    await vi.waitFor(() => expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(lists()).toBe(2);
-    expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1);
   });
 
   it('polls every 3 s while a runtime is being set up, and stops once it is ready', async () => {
@@ -31893,70 +31907,14 @@ Create `apps/web-ui/src/app/skills/catalog/data.ts`:
 
 ```ts
 import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
-import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem, WritableSkillScope } from '@desk/protocol';
-import { skillKey, type SkillRef } from '@desk/ui-core';
+import type { CatalogItem } from '@desk/protocol';
 import { describeError } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
+import { singleFlight } from '../../core/refresh';
 import { GlobalStore } from '../../core/global.store';
 
-/** The catalog's bays, in order. `files` has none: Desk's file-type skills are built in now, not catalog entries. */
-export const BAYS: Array<{ category: CatalogCategory; title: string; blurb: string }> = [
-  { category: 'research', title: 'Research', blurb: 'Find sources, check facts, read the web.' },
-  { category: 'documents', title: 'Documents & data', blurb: 'Conversion to Markdown, data analysis, Excel automation, HTML slides.' },
-  { category: 'writing', title: 'Writing & diagrams', blurb: 'Clearer prose, rendered diagrams.' },
-  { category: 'planning', title: 'Planning', blurb: 'Meetings, risks and decisions.' },
-  { category: 'code', title: 'Code', blurb: 'Debugging, review and testing.' },
-];
-
-/** The skill a catalog install became (installs are global or in a project, never built in). */
-export const installRef = (id: string, i: { scope: WritableSkillScope; project_id: string | null }): SkillRef =>
-  i.scope === 'global' ? { scope: 'global', name: id } : { scope: 'project', projectId: i.project_id!, name: id };
-
-/** Installs that really came from the catalog (not another skill that happens to share the name). */
-export const fromCatalog = (i: CatalogInstall) => i.state !== 'name_taken';
-
-/** Installed catalog skills by skill key, for the chips on the map, the list and the detail panel. */
-export function catalogIndex(items: CatalogItem[]): Map<string, { item: CatalogItem; install: CatalogInstall }> {
-  const out = new Map<string, { item: CatalogItem; install: CatalogInstall }>();
-  for (const item of items) for (const install of item.installs) if (fromCatalog(install)) out.set(skillKey(installRef(item.id, install)), { item, install });
-  return out;
-}
-
-/** What Desk sets up for an entry, in plain words. */
-export function runtimeWords(e: Pick<CatalogEntry, 'runtime'>): string {
-  const parts: string[] = [];
-  if (e.runtime.python) parts.push(`Python ${e.runtime.python.version}`);
-  if (e.runtime.node) parts.push('Node');
-  if (e.runtime.extras?.includes('playwright-chromium')) parts.push('Chromium');
-  if (e.runtime.extras?.includes('browser')) parts.push('browser');
-  return parts.length ? `${parts.join(' + ')} · set up by Desk` : 'Nothing to set up';
-}
-
-/** The packages Desk installs for an entry: pinned Python packages and the top-level Node packages. */
-export function runtimePackages(e: Pick<CatalogEntry, 'runtime'>): string[] {
-  const out = [...(e.runtime.python?.packages ?? [])];
-  for (const l of e.runtime.node?.lock ?? []) if (l.path === `node_modules/${l.name}`) out.push(`${l.name}@${l.version}`);
-  return out;
-}
-
-export const sourceLabel = (e: Pick<CatalogEntry, 'source'>) => (e.source.type === 'github' ? e.source.repo : 'Desk');
-
-/** The action a card offers for one scope. */
-export function actionFor(install: CatalogInstall | undefined): { label: string; kind: 'install' | 'update' | 'installed' | 'modified' | 'taken' } {
-  if (!install) return { label: 'Install', kind: 'install' };
-  switch (install.state) {
-    case 'installed':
-      return { label: 'Installed', kind: 'installed' };
-    case 'update_available':
-      return { label: 'Update', kind: 'update' };
-    case 'modified':
-      return { label: 'Modified', kind: 'modified' };
-    case 'name_taken':
-      return { label: 'Name taken', kind: 'taken' };
-    default:
-      return { label: 'Install', kind: 'install' };
-  }
-}
+/** The catalog's pure helpers live in `@desk/ui-core`, shared by both UIs; its bays keep their name here. */
+export { CATALOG_BAYS as BAYS, actionFor, catalogIndex, fromCatalog, installRef, runtimePackages, runtimeWords, sourceLabel } from '@desk/ui-core';
 
 /** What `injectCatalog` gives a screen (the React `useCatalog` result). */
 export type CatalogState = {
@@ -31976,21 +31934,17 @@ export function injectCatalog(): CatalogState {
   const global = inject(GlobalStore);
   const items = signal<CatalogItem[] | null>(null);
   const error = signal<string | null>(null);
-  // Refreshes overlap (a runtime change, focus, the 3 s poll); only the latest one's answer lands, so a slow earlier
-  // answer never puts back an older catalog.
-  let latest = 0;
-
-  const refresh = async (): Promise<void> => {
-    const run = ++latest;
+  // One list at a time (a runtime change, focus, the 3 s poll): an ask while one runs lists once more when it ends, so
+  // a list slower than the poll neither piles up calls nor lets an older catalog land last.
+  const flight = singleFlight(async () => {
     try {
-      const next = await bridge.call('catalog.list', {});
-      if (run !== latest) return;
-      items.set(next);
+      items.set(await bridge.call('catalog.list', {}));
       error.set(null);
     } catch (err) {
-      if (run === latest) error.set(describeError(err).message);
+      error.set(describeError(err).message);
     }
-  };
+  });
+  const refresh = flight.run;
 
   // Its own computed, so a desk:global push that leaves the sequence alone lists nothing.
   const seq = computed(() => global.state().runtimes.seq);
@@ -32001,7 +31955,10 @@ export function injectCatalog(): CatalogState {
 
   const onFocus = () => void refresh();
   window.addEventListener('focus', onFocus);
-  inject(DestroyRef).onDestroy(() => window.removeEventListener('focus', onFocus));
+  inject(DestroyRef).onDestroy(() => {
+    window.removeEventListener('focus', onFocus);
+    flight.stop();
+  });
 
   const preparing = computed(() => (items() ?? []).some((i) => i.installs.some((x) => x.runtime === 'preparing')));
   effect((onCleanup) => {
@@ -32029,6 +31986,8 @@ Expected: exit 0 (`testing/catalog.ts` type-checks with the app, as `testing/fak
 
 **After the review (48d6ec0):** `injectCatalog` drops the answer of a refresh that is no longer the latest (a counter bumped per call), as W3a.1 does; the spec's "keeps the newest catalog" case holds the first answer until a newer one has landed. 7 tests.
 
+**Review follow-up:** the counter could starve a catalog slower than the 3 s poll, so `injectCatalog` lists through `singleFlight` (`core/refresh.ts`, W3a.1's note): asks while a list runs start nothing and list once more when it ends, and `stop()` on destroy drops a pending rerun; the race case now checks that. The pure helpers (`BAYS` as `CATALOG_BAYS`, `installRef`, `fromCatalog`, `catalogIndex`, `runtimeWords`, `runtimePackages`, `sourceLabel`, `actionFor`) moved into `@desk/ui-core`'s `catalog.ts` (Attention already has a `BAYS`), with cases in `catalog.test.ts`; both UIs' `catalog/data.ts` re-export them under their old names, so the code above and every later task keep importing them from `./data`. 7 tests.
+
 - [ ] **Step 5: Commit**
 
 ```sh
@@ -32038,17 +31997,91 @@ git commit -m "feat(web-ui): catalog data: bays, install refs, runtime words, ac
 
 ### Task W3a.2b: `skills/builtins/data.ts`, Desk's built-in skills, and their fixture
 
-Added after the merge of master (8883229), which brought Plan 18's built-in skills: Desk's first-party file-type skills and web research ship with the app, read-only, each with a switch and an environment set up on first use. A port of `renderer/skills/builtins/data.ts`: the selection key a built-in gets on the skills screen (`builtin:<name>`, next to `global:` and `project:` keys), the words for its environment, and `injectBuiltins()` (React's `useBuiltins`: lists on start, on window focus, every 30 s, and every 2 s while one is being set up). Like `injectSkills` and `injectCatalog` after their review, only the latest refresh's answer lands. `builtins/data.test.ts` is ported; the hook's cases are new. The code below was written and run (6 tests, three times) on the merged tree before it went into the plan; the task commits it.
+Added after the merge of master (8883229), which brought Plan 18's built-in skills: Desk's first-party file-type skills and web research ship with the app, read-only, each with a switch and an environment set up on first use. A port of `renderer/skills/builtins/data.ts`: the selection key a built-in gets on the skills screen (`builtin:<name>`, next to `global:` and `project:` keys), the words for its environment, and `injectBuiltins()` (React's `useBuiltins`: lists on start, on window focus, every 30 s, and every 2 s while one is being set up). The pure helpers (`builtinKey`, `parseBuiltinKey`, `runtimeLabel`) go into `@desk/ui-core` (`builtins.ts`, CLAUDE.md "Two UIs"), where `builtins/data.test.ts` is ported; the desktop's `builtins/data.ts` and the web's re-export them. Like `injectSkills` and `injectCatalog` after the review follow-ups, `injectBuiltins` lists through `singleFlight` (`core/refresh.ts`): one list at a time, and an ask while one runs lists once more when it ends. The hook's cases are new. The code below was written and run (the web spec's 4 tests and the ui-core test's 2, on the tree of the review follow-ups) before it went into the plan; the task commits it.
 
 **Files:**
-- Create: `apps/web-ui/src/app/skills/builtins/data.ts`, `apps/web-ui/src/app/testing/builtins.ts`
-- Test: `apps/web-ui/src/app/skills/builtins/data.spec.ts` (ported from `apps/desktop/src/renderer/skills/builtins/data.test.ts`, plus the hook)
+- Create: `packages/ui-core/src/builtins.ts`, `apps/web-ui/src/app/skills/builtins/data.ts`, `apps/web-ui/src/app/testing/builtins.ts`
+- Modify: `packages/ui-core/src/index.ts` (`export * from './builtins';`), `apps/desktop/src/renderer/skills/builtins/data.ts` (the three helpers become a re-export)
+- Test: `packages/ui-core/src/builtins.test.ts` (ported from `apps/desktop/src/renderer/skills/builtins/data.test.ts`, which stays and passes through the re-export), `apps/web-ui/src/app/skills/builtins/data.spec.ts` (the hook)
 
 **Interfaces:**
-- Consumes: `BuiltinSkillInfo` (`@desk/protocol`); `DeskBridge` (`call('builtins.list', {})`), `describeError`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal` (W0c); `initialGlobalState` (`@desk/bff/contract`, spec).
-- Produces: `builtinKey(name: string): string`, `parseBuiltinKey(key: string): string | null`, `runtimeLabel(b: BuiltinSkillInfo, progress?: { step: string } | null): string`, `BuiltinsState`, `injectBuiltins(): BuiltinsState`; `builtin(name, over?)` (`testing/builtins.ts`).
+- Consumes: `BuiltinSkillInfo` (`@desk/protocol`); `DeskBridge` (`call('builtins.list', {})`), `describeError`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal` (W0c); `singleFlight` (`core/refresh.ts`); `initialGlobalState` (`@desk/bff/contract`, spec).
+- Produces: `@desk/ui-core`: `builtinKey(name: string): string`, `parseBuiltinKey(key: string): string | null`, `runtimeLabel(b: BuiltinSkillInfo, progress?: { step: string } | null): string` (re-exported by both UIs' `skills/builtins/data.ts`); `BuiltinsState`, `injectBuiltins(): BuiltinsState`; `builtin(name, over?)` (`testing/builtins.ts`).
 
-- [ ] **Step 1: Write the fixture and the failing spec**
+- [ ] **Step 1: Move the helpers into `@desk/ui-core`**
+
+Create `packages/ui-core/src/builtins.test.ts` (the renderer's `builtins/data.test.ts`, importing from `./builtins`):
+
+```ts
+import { describe, expect, it } from 'vitest';
+import type { BuiltinSkillInfo } from '@desk/protocol';
+import { builtinKey, parseBuiltinKey, runtimeLabel } from './builtins';
+
+const b = (state: BuiltinSkillInfo['runtime']['state'], reason: string | null = null): BuiltinSkillInfo => ({
+  name: 'pdf-toolkit',
+  title: 'PDF toolkit',
+  summary: '',
+  caveats: [],
+  description: '',
+  scripts: 1,
+  enabled: true,
+  broken: null,
+  shadowed_by: null,
+  runtime: { state, reason },
+});
+
+describe('built-in skill helpers', () => {
+  it('round-trips keys', () => {
+    expect(parseBuiltinKey(builtinKey('pdf-toolkit'))).toBe('pdf-toolkit');
+    expect(parseBuiltinKey('global:pdf-toolkit')).toBeNull();
+    expect(parseBuiltinKey('builtin:')).toBeNull();
+  });
+
+  it('words the environment state', () => {
+    expect(runtimeLabel(b('none'))).toBe('Set up on first use');
+    expect(runtimeLabel(b('preparing'), { step: 'Installing 6 Python packages' })).toBe('Setting up… Installing 6 Python packages');
+    expect(runtimeLabel(b('preparing'))).toBe('Setting up…');
+    expect(runtimeLabel(b('ready'))).toBe('Ready');
+    expect(runtimeLabel(b('failed', 'no network'))).toBe('Setup failed: no network');
+  });
+});
+```
+
+Create `packages/ui-core/src/builtins.ts` (the three helpers of the renderer's `builtins/data.ts`, unchanged):
+
+```ts
+import type { BuiltinSkillInfo } from '@desk/protocol';
+
+/** The skills screen's selection key for a built-in skill (user skills use `global:` and `project:` keys). */
+export const builtinKey = (name: string) => `builtin:${name}`;
+export const parseBuiltinKey = (key: string): string | null => (key.startsWith('builtin:') && key.length > 8 ? key.slice(8) : null);
+
+/** The environment line of a built-in skill card. */
+export function runtimeLabel(b: BuiltinSkillInfo, progress?: { step: string } | null): string {
+  switch (b.runtime.state) {
+    case 'none':
+      return 'Set up on first use';
+    case 'preparing':
+      return `Setting up…${progress ? ` ${progress.step}` : ''}`;
+    case 'ready':
+      return 'Ready';
+    default:
+      return `Setup failed${b.runtime.reason ? `: ${b.runtime.reason}` : ''}`;
+  }
+}
+```
+
+Add `export * from './builtins';` to `packages/ui-core/src/index.ts` (after `./catalog`), and in `apps/desktop/src/renderer/skills/builtins/data.ts` replace the three helpers with a re-export, so its components and its test keep importing them from `./data`:
+
+```ts
+/** The built-in skills' pure helpers live in `@desk/ui-core` (`builtins.ts`), shared by both UIs. */
+export { builtinKey, parseBuiltinKey, runtimeLabel } from '@desk/ui-core';
+```
+
+Run: `pnpm vitest run packages/ui-core/src/builtins.test.ts apps/desktop/src/renderer/skills/builtins --maxWorkers=2`
+Expected: PASS (both files, 2 tests each).
+
+- [ ] **Step 2: Write the fixture and the failing spec**
 
 Create `apps/web-ui/src/app/testing/builtins.ts` (the renderer's `test/builtins.ts`, unchanged but for its comment):
 
@@ -32084,7 +32117,7 @@ import { initialGlobalState } from '@desk/bff/contract';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { builtin } from '../../testing/builtins';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../../testing/fake-bridge';
-import { builtinKey, injectBuiltins, parseBuiltinKey, runtimeLabel } from './data';
+import { injectBuiltins } from './data';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -32107,22 +32140,6 @@ async function setup(handlers: FakeHandlers) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const b = (state: BuiltinSkillInfo['runtime']['state'], reason: string | null = null) => builtin('pdf-toolkit', { title: 'PDF toolkit', runtime: { state, reason } });
-
-describe('built-in skill helpers (builtins/data.test.ts)', () => {
-  it('round-trips keys', () => {
-    expect(parseBuiltinKey(builtinKey('pdf-toolkit'))).toBe('pdf-toolkit');
-    expect(parseBuiltinKey('global:pdf-toolkit')).toBeNull();
-    expect(parseBuiltinKey('builtin:')).toBeNull();
-  });
-
-  it('words the environment state', () => {
-    expect(runtimeLabel(b('none'))).toBe('Set up on first use');
-    expect(runtimeLabel(b('preparing'), { step: 'Installing 6 Python packages' })).toBe('Setting up… Installing 6 Python packages');
-    expect(runtimeLabel(b('preparing'))).toBe('Setting up…');
-    expect(runtimeLabel(b('ready'))).toBe('Ready');
-    expect(runtimeLabel(b('failed', 'no network'))).toBe('Setup failed: no network');
-  });
-});
 
 describe('injectBuiltins', () => {
   it('loads the built-ins, lists again on focus, and keeps them when a list fails', async () => {
@@ -32171,11 +32188,11 @@ describe('injectBuiltins', () => {
     expect(lists()).toBe(settled + 1);
   });
 
-  it('keeps the newest list when an older refresh answers last', async () => {
+  it('never overlaps a slow list: asks meanwhile list once more when it ends, and that newer list lands', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let calls = 0;
-    const { builtins } = await setup({
+    const { builtins, lists } = await setup({
       'builtins.list': async () => {
         if (++calls > 1) return [builtin('pdf-toolkit', { enabled: false })];
         await gate;
@@ -32183,11 +32200,13 @@ describe('injectBuiltins', () => {
       },
     });
     window.dispatchEvent(new Event('focus'));
-    await vi.waitFor(() => expect(builtins.items()[0]?.enabled).toBe(false));
-    release();
-    await gate;
+    window.dispatchEvent(new Event('focus'));
     await settle();
-    expect(builtins.items()[0]?.enabled).toBe(false);
+    expect(lists()).toBe(1);
+    release();
+    await vi.waitFor(() => expect(builtins.items()[0]?.enabled).toBe(false));
+    await settle();
+    expect(lists()).toBe(2);
   });
 
   it("is an error until a list arrives", async () => {
@@ -32198,38 +32217,24 @@ describe('injectBuiltins', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 3: Run it and watch it fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins/data.spec.ts)`
 Expected: FAIL. The test build stops with `Could not resolve "./data"`.
 
-- [ ] **Step 3: Write `skills/builtins/data.ts`**
+- [ ] **Step 4: Write `skills/builtins/data.ts`**
 
 Create `apps/web-ui/src/app/skills/builtins/data.ts`:
 
 ```ts
-import { computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
+import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { describeError } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
+import { singleFlight } from '../../core/refresh';
 
-/** The skills screen's selection key for a built-in skill (user skills use `global:` and `project:` keys). */
-export const builtinKey = (name: string) => `builtin:${name}`;
-export const parseBuiltinKey = (key: string): string | null => (key.startsWith('builtin:') && key.length > 8 ? key.slice(8) : null);
-
-/** The environment line of a built-in skill card. */
-export function runtimeLabel(b: BuiltinSkillInfo, progress?: { step: string } | null): string {
-  switch (b.runtime.state) {
-    case 'none':
-      return 'Set up on first use';
-    case 'preparing':
-      return `Setting up…${progress ? ` ${progress.step}` : ''}`;
-    case 'ready':
-      return 'Ready';
-    default:
-      return `Setup failed${b.runtime.reason ? `: ${b.runtime.reason}` : ''}`;
-  }
-}
+/** The built-in skills' pure helpers live in `@desk/ui-core` (`builtins.ts`), shared by both UIs. */
+export { builtinKey, parseBuiltinKey, runtimeLabel } from '@desk/ui-core';
 
 /** What `injectBuiltins` gives a screen (the React `useBuiltins` result). */
 export type BuiltinsState = {
@@ -32247,20 +32252,18 @@ export function injectBuiltins(): BuiltinsState {
   const bridge = inject(DeskBridge);
   const items = signal<BuiltinSkillInfo[] | null>(null);
   const error = signal<string | null>(null);
-  // Refreshes overlap (focus, the timers); only the latest one's answer lands, as in injectSkills and injectCatalog.
-  let latest = 0;
-
-  const refresh = async (): Promise<void> => {
-    const run = ++latest;
+  // One list at a time (focus, the timers), as in injectSkills and injectCatalog: an ask while one runs lists once more
+  // when it ends, so a list slower than the 2 s poll neither piles up calls nor lets an older answer land last.
+  const flight = singleFlight(async () => {
     try {
-      const next = await bridge.call('builtins.list', {});
-      if (run !== latest) return;
-      items.set(next);
+      items.set(await bridge.call('builtins.list', {}));
       error.set(null);
     } catch (err) {
-      if (run === latest) error.set(describeError(err).message);
+      error.set(describeError(err).message);
     }
-  };
+  });
+  const refresh = flight.run;
+  inject(DestroyRef).onDestroy(flight.stop);
 
   const preparing = computed(() => (items() ?? []).some((b) => b.runtime.state === 'preparing'));
   // React's effect on [refresh, preparing]: it lists at start and again whenever the poll changes speed.
@@ -32281,19 +32284,19 @@ export function injectBuiltins(): BuiltinsState {
 }
 ```
 
-- [ ] **Step 4: Run it**
+- [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins/data.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (4 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```sh
-git add apps/web-ui/src/app/skills/builtins/data.ts apps/web-ui/src/app/skills/builtins/data.spec.ts apps/web-ui/src/app/testing/builtins.ts
-git commit -m "feat(web-ui): built-in skills data: keys, environment words, and the list polled while one is set up" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add packages/ui-core/src/builtins.ts packages/ui-core/src/builtins.test.ts packages/ui-core/src/index.ts apps/desktop/src/renderer/skills/builtins/data.ts apps/web-ui/src/app/skills/builtins/data.ts apps/web-ui/src/app/skills/builtins/data.spec.ts apps/web-ui/src/app/testing/builtins.ts
+git commit -m "feat(web-ui,ui-core): built-in skills data: keys and environment words in ui-core, and the list polled while one is set up" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task W3a.3: `RuntimeLine`, an installed catalog skill's environment
@@ -35435,7 +35438,7 @@ export class BuiltinPanel {
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins)`
-Expected: PASS (10 tests: these 4 and W3a.2b's 6).
+Expected: PASS (8 tests: these 4 and W3a.2b's 4).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.

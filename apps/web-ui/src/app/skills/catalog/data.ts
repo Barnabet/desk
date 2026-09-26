@@ -1,68 +1,12 @@
 import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
-import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem, WritableSkillScope } from '@desk/protocol';
-import { skillKey, type SkillRef } from '@desk/ui-core';
+import type { CatalogItem } from '@desk/protocol';
 import { describeError } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
+import { singleFlight } from '../../core/refresh';
 import { GlobalStore } from '../../core/global.store';
 
-/** The catalog's bays, in order. `files` has none: Desk's file-type skills are built in now, not catalog entries. */
-export const BAYS: Array<{ category: CatalogCategory; title: string; blurb: string }> = [
-  { category: 'research', title: 'Research', blurb: 'Find sources, check facts, read the web.' },
-  { category: 'documents', title: 'Documents & data', blurb: 'Conversion to Markdown, data analysis, Excel automation, HTML slides.' },
-  { category: 'writing', title: 'Writing & diagrams', blurb: 'Clearer prose, rendered diagrams.' },
-  { category: 'planning', title: 'Planning', blurb: 'Meetings, risks and decisions.' },
-  { category: 'code', title: 'Code', blurb: 'Debugging, review and testing.' },
-];
-
-/** The skill a catalog install became (installs are global or in a project, never built in). */
-export const installRef = (id: string, i: { scope: WritableSkillScope; project_id: string | null }): SkillRef =>
-  i.scope === 'global' ? { scope: 'global', name: id } : { scope: 'project', projectId: i.project_id!, name: id };
-
-/** Installs that really came from the catalog (not another skill that happens to share the name). */
-export const fromCatalog = (i: CatalogInstall) => i.state !== 'name_taken';
-
-/** Installed catalog skills by skill key, for the chips on the map, the list and the detail panel. */
-export function catalogIndex(items: CatalogItem[]): Map<string, { item: CatalogItem; install: CatalogInstall }> {
-  const out = new Map<string, { item: CatalogItem; install: CatalogInstall }>();
-  for (const item of items) for (const install of item.installs) if (fromCatalog(install)) out.set(skillKey(installRef(item.id, install)), { item, install });
-  return out;
-}
-
-/** What Desk sets up for an entry, in plain words. */
-export function runtimeWords(e: Pick<CatalogEntry, 'runtime'>): string {
-  const parts: string[] = [];
-  if (e.runtime.python) parts.push(`Python ${e.runtime.python.version}`);
-  if (e.runtime.node) parts.push('Node');
-  if (e.runtime.extras?.includes('playwright-chromium')) parts.push('Chromium');
-  if (e.runtime.extras?.includes('browser')) parts.push('browser');
-  return parts.length ? `${parts.join(' + ')} · set up by Desk` : 'Nothing to set up';
-}
-
-/** The packages Desk installs for an entry: pinned Python packages and the top-level Node packages. */
-export function runtimePackages(e: Pick<CatalogEntry, 'runtime'>): string[] {
-  const out = [...(e.runtime.python?.packages ?? [])];
-  for (const l of e.runtime.node?.lock ?? []) if (l.path === `node_modules/${l.name}`) out.push(`${l.name}@${l.version}`);
-  return out;
-}
-
-export const sourceLabel = (e: Pick<CatalogEntry, 'source'>) => (e.source.type === 'github' ? e.source.repo : 'Desk');
-
-/** The action a card offers for one scope. */
-export function actionFor(install: CatalogInstall | undefined): { label: string; kind: 'install' | 'update' | 'installed' | 'modified' | 'taken' } {
-  if (!install) return { label: 'Install', kind: 'install' };
-  switch (install.state) {
-    case 'installed':
-      return { label: 'Installed', kind: 'installed' };
-    case 'update_available':
-      return { label: 'Update', kind: 'update' };
-    case 'modified':
-      return { label: 'Modified', kind: 'modified' };
-    case 'name_taken':
-      return { label: 'Name taken', kind: 'taken' };
-    default:
-      return { label: 'Install', kind: 'install' };
-  }
-}
+/** The catalog's pure helpers live in `@desk/ui-core`, shared by both UIs; its bays keep their name here. */
+export { CATALOG_BAYS as BAYS, actionFor, catalogIndex, fromCatalog, installRef, runtimePackages, runtimeWords, sourceLabel } from '@desk/ui-core';
 
 /** What `injectCatalog` gives a screen (the React `useCatalog` result). */
 export type CatalogState = {
@@ -82,21 +26,17 @@ export function injectCatalog(): CatalogState {
   const global = inject(GlobalStore);
   const items = signal<CatalogItem[] | null>(null);
   const error = signal<string | null>(null);
-  // Refreshes overlap (a runtime change, focus, the 3 s poll); only the latest one's answer lands, so a slow earlier
-  // answer never puts back an older catalog.
-  let latest = 0;
-
-  const refresh = async (): Promise<void> => {
-    const run = ++latest;
+  // One list at a time (a runtime change, focus, the 3 s poll): an ask while one runs lists once more when it ends, so
+  // a list slower than the poll neither piles up calls nor lets an older catalog land last.
+  const flight = singleFlight(async () => {
     try {
-      const next = await bridge.call('catalog.list', {});
-      if (run !== latest) return;
-      items.set(next);
+      items.set(await bridge.call('catalog.list', {}));
       error.set(null);
     } catch (err) {
-      if (run === latest) error.set(describeError(err).message);
+      error.set(describeError(err).message);
     }
-  };
+  });
+  const refresh = flight.run;
 
   // Its own computed, so a desk:global push that leaves the sequence alone lists nothing.
   const seq = computed(() => global.state().runtimes.seq);
@@ -107,7 +47,10 @@ export function injectCatalog(): CatalogState {
 
   const onFocus = () => void refresh();
   window.addEventListener('focus', onFocus);
-  inject(DestroyRef).onDestroy(() => window.removeEventListener('focus', onFocus));
+  inject(DestroyRef).onDestroy(() => {
+    window.removeEventListener('focus', onFocus);
+    flight.stop();
+  });
 
   const preparing = computed(() => (items() ?? []).some((i) => i.installs.some((x) => x.runtime === 'preparing')));
   effect((onCleanup) => {

@@ -119,7 +119,7 @@ describe('injectSkills', () => {
     expect(lists()).toEqual([{}, { projectId: 'p1' }]);
   });
 
-  it('keeps the newest lists when an older refresh answers last', async () => {
+  it('never overlaps a slow list: asks meanwhile list once more when it ends, and those newer lists land', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let calls = 0;
@@ -133,13 +133,35 @@ describe('injectSkills', () => {
       },
       [],
     );
+    // Focus twice while the first list is still out: nothing new starts, and the ask waits for the list after it.
     window.dispatchEvent(new Event('focus'));
-    await vi.waitFor(() => expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']));
-    release();
-    await gate;
+    let done = false;
+    void skills.refresh().then(() => (done = true));
     await settle();
+    expect(lists()).toEqual([{}]);
+    release();
+    await vi.waitFor(() => expect(done).toBe(true));
     expect(lists()).toEqual([{}, {}]);
     expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']);
+  });
+
+  it('lists nothing more once its component is gone, not even a list asked for while one ran', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { lists, fixture } = await setup(
+      {
+        'skills.list': async () => {
+          await gate;
+          return [];
+        },
+      },
+      [],
+    );
+    window.dispatchEvent(new Event('focus'));
+    fixture.destroy();
+    release();
+    await settle();
+    expect(lists()).toEqual([{}]);
   });
 
   it('lists nothing more once its component is gone: no focus listener, no 30 s timer', async () => {
