@@ -25361,6 +25361,18 @@ describe('DiffTab', () => {
     expect(bridge.calls).toEqual([{ channel: 'threads.diff', input: { id: 't' } }]);
   });
 
+  it("shows a status it has no letter for as it is, even one named after an Object.prototype member", async () => {
+    // Not a status the protocol names (a newer deskd's, say): the cell shows it as it is.
+    const file = { path: 'x.md', status: 'constructor', additions: 1, deletions: 0 } as unknown as ThreadDiff['files'][number];
+    const odd: ThreadDiff = { ...diff, files: [file] };
+    const bridge = new FakeDeskBridge({ 'threads.diff': () => odd });
+    await render(DiffTab, { inputs: { threadId: 't', version: '5' }, providers: bridge.providers });
+    await screen.findByText(/1 file changed\./);
+    const cell = document.querySelector('.diff-files td.diff-status')!;
+    expect(cell.textContent).toBe('constructor');
+    expect(cell.getAttribute('title')).toBe('constructor');
+  });
+
   it('explains a scratch thread, and asks again when the thread moves on', async () => {
     const bridge = new FakeDeskBridge({
       'threads.diff': () => {
@@ -26010,12 +26022,12 @@ export class UsageTab {
 - [ ] **Step 4: Run them**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 'src/app/threads/tabs/*.spec.ts')`
-Expected: PASS (5 files, 14 tests).
+Expected: PASS (5 files, 15 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
-**Deviation (W2a.1's review fix):** `DiffTab`'s `FILE_STATUS` is a `Map` (`FILE_STATUS.get(status) ?? status`), not the React file's object literal, following the prototype-lookup sweep of W2a.1's review. deskd's `DiffFileStatus` is an enum today, but the fallback shows any other status as it is, and with an object literal a `constructor` status would show `Object`'s source text. The React `DiffTab.tsx` stays as it is (nothing in `apps/desktop` changes in this task).
+**Deviation (W2a.1's review fix):** `DiffTab`'s `FILE_STATUS` is a `Map` (`FILE_STATUS.get(status) ?? status`), not the React file's object literal, following the prototype-lookup sweep of W2a.1's review. deskd's `DiffFileStatus` is an enum today, but the fallback shows any other status as it is, and with an object literal a `constructor` status would show `Object`'s source text; the spec's `constructor` case (added in a later `test(web-ui,bff): …` commit, and mirrored in the block above) fails on an object literal. The React `DiffTab.tsx` stays as it is (nothing in `apps/desktop` changes in this task).
 
 - [ ] **Step 5: Commit**
 
@@ -28653,12 +28665,12 @@ Expected: exit 0: the root `tsc`, the desktop's, the web e2e's (`flows.e2e.test.
 - [ ] **Step 2: The root suite**
 
 Run: `pnpm exec vitest run --maxWorkers=2`
-Expected: PASS. This section's tasks change nothing the root suite runs (bff, ui-core, the servers, the desktop's `ThreadsScreen.test.tsx` and `thread-route.test.ts`), except W2a.1's review fix, whose tests the root suite runs: ui-core's `files.test.ts` and `row-views.test.ts`, the desktop's `FileViewer.test.tsx` and `ConversationScreen.test.tsx`, and bff's `daemon.test.ts`; the run proves them.
+Expected: PASS. This section's tasks change nothing the root suite runs (bff, ui-core, the servers, the desktop's `ThreadsScreen.test.tsx` and `thread-route.test.ts`), except W2a.1's review fix, whose tests the root suite runs: ui-core's `files.test.ts` and `row-views.test.ts`, the desktop's `FileViewer.test.tsx` and `ConversationScreen.test.tsx`, and bff's `daemon.test.ts` (the `unescapeXml` case); the run proves them.
 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (3), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (3), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (3), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the e2e**
 

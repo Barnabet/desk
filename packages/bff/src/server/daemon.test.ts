@@ -231,6 +231,23 @@ describe('DaemonManager in web mode', () => {
     expect((await manager({ mode: 'web', dataDir: join(dir, 'A & B') }).m.status()).agent).toBe('unsupported');
   });
 
+  it("leaves an entity named after an Object.prototype member as it is, and undoes a character reference, in a hand-written plist", async () => {
+    const file = plistPath(join(dir, 'home'));
+    mkdirSync(join(dir, 'home', 'Library', 'LaunchAgents'), { recursive: true });
+    writeFileSync(
+      file,
+      `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>dev.desk.deskd</string>
+  <key>ProgramArguments</key>
+  <array><string>/Applications/Desk.app/Contents/MacOS/Desk</string><string>deskd.mjs</string><string>--data-dir</string><string>${dir}/&constructor;&#65;</string></array>
+</dict></plist>
+`,
+    );
+    expect((await manager({ mode: 'web', dataDir: join(dir, '&constructor;A') }).m.status()).agent).toBe('installed');
+    expect((await manager({ mode: 'web', dataDir: join(dir, '&constructor;&#65;') }).m.status()).agent).toBe('unsupported');
+  });
+
   it('stops by pid, then starts the job, when `desk up` started deskd while the LaunchAgent was not loaded', async () => {
     const file = installDesktopAgent();
     const daemonJson = join(dir, 'data', 'daemon.json');

@@ -32,6 +32,18 @@ describe('DiffTab', () => {
     expect(bridge.calls).toEqual([{ channel: 'threads.diff', input: { id: 't' } }]);
   });
 
+  it("shows a status it has no letter for as it is, even one named after an Object.prototype member", async () => {
+    // Not a status the protocol names (a newer deskd's, say): the cell shows it as it is.
+    const file = { path: 'x.md', status: 'constructor', additions: 1, deletions: 0 } as unknown as ThreadDiff['files'][number];
+    const odd: ThreadDiff = { ...diff, files: [file] };
+    const bridge = new FakeDeskBridge({ 'threads.diff': () => odd });
+    await render(DiffTab, { inputs: { threadId: 't', version: '5' }, providers: bridge.providers });
+    await screen.findByText(/1 file changed\./);
+    const cell = document.querySelector('.diff-files td.diff-status')!;
+    expect(cell.textContent).toBe('constructor');
+    expect(cell.getAttribute('title')).toBe('constructor');
+  });
+
   it('explains a scratch thread, and asks again when the thread moves on', async () => {
     const bridge = new FakeDeskBridge({
       'threads.diff': () => {
