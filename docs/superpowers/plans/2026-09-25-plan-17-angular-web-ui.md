@@ -27096,12 +27096,14 @@ git commit -m "feat(web-ui): the thread transcript: numbered stops, every step, 
 
 `ThreadRoster.tsx` lists the project's threads as cards, busiest first (waiting, running, queued, idle, failed, done, stopped; newest first within a status), with "Show N archived" when some are archived. A card links to the thread and shows its title and status chip, "answering X" while an answer run is in progress (the chip does not change), the status reason (never for running or waiting threads: a wait comes from the message fold), the current activity, the facts (elapsed, model with effort, workspace, revision round), its skills, and "Archived". A waiting thread's card gets its wait as a line of its own in a slot under the link: a button that opens the pair sheet with what it waits on (plain text when it waits on you), followed by the one-hop link to what needs you. The React `ThreadCard` switches its root (`a.card` alone, or inside `div.thread-card-slot`), so it is an `ng-template` in the roster. The roster's React cases live in `ThreadsScreen.test.tsx` (ported in W2a.6); this spec adds what they leave out: the order, the archived toggle, the facts and the empty state.
 
+**Deviation (port conventions; W2a.1's review fix):** two changes from the first draft of this block, which the code below already has. (1) The card's `ng-template` types its context with `TemplateOf` (`[deskTemplateOf]="cardType"`, `cardType = templateOf<RosterCard>()`, W1b.4), as the header's port conventions require, so strict templates check `c`'s fields (a misspelt `c.t.git_brnch` is now a type error; with a bare `let-c` it was `any`). (2) `ORDER` is a `Map` (`ORDER.get(status) ?? 9`), not the React file's object literal, following the prototype-lookup sweep of W2a.1's review and W2a.2's `FILE_STATUS`: deskd's status is an enum today, but with an object literal a `constructor` status read `Object`, the comparison was `NaN`, and the card sorted by date among the known statuses instead of last. A fifth spec case (an unknown `constructor` status sorts after a known one) fails on the object literal (5 tests). The React `ThreadRoster.tsx` stays as it is.
+
 **Files:**
 - Create: `apps/web-ui/src/app/threads/thread-roster.ts`
 - Test: `apps/web-ui/src/app/threads/thread-roster.spec.ts`
 
 **Interfaces:**
-- Consumes: `waitingOn`, `emptyMessages`, `MessagesState`, `ProjectState`, `ThreadView` from `@desk/client`; `ago`, `answeringLabel`, `href`, `waitHop`, `waitLabel`, `waitsOnYou`, `WaitHop` from `@desk/ui-core`; `GlobalStore` (`state().system.proxy`, `state().attention`), `EmptyState`, `StatusChip`, `FakeDeskBridge`, `provideGlobal` (W0c); `AnsweringBadge`, `HopLink`, `PairSheet` (W1b); `SkillBadge` (W2a.1).
+- Consumes: `waitingOn`, `emptyMessages`, `MessagesState`, `ProjectState`, `ThreadView` from `@desk/client`; `ago`, `answeringLabel`, `href`, `waitHop`, `waitLabel`, `waitsOnYou`, `WaitHop` from `@desk/ui-core`; `GlobalStore` (`state().system.proxy`, `state().attention`), `EmptyState`, `StatusChip`, `FakeDeskBridge`, `provideGlobal` (W0c); `AnsweringBadge`, `HopLink`, `PairSheet`, `TemplateOf` and `templateOf` (W1b); `SkillBadge` (W2a.1).
 - Produces: `ThreadRoster` — `div[deskThreadRoster]` (host class `page roster`), inputs `project: ProjectState`, `messages: MessagesState`, `now: number` (all required).
 
 - [ ] **Step 1: Write the failing spec**
@@ -27181,6 +27183,14 @@ describe('ThreadRoster', () => {
     expect(within(archived).getByText('Archived')).toBeTruthy();
   });
 
+  it('puts a status it does not know after every known one, even one named like a prototype member', async () => {
+    await mount([
+      thread('a', { title: 'Known idle', status: 'idle', created_at: at(0) }),
+      thread('b', { title: 'Odd one', status: 'constructor' as ThreadView['status'], created_at: at(9) }),
+    ]);
+    expect(titles()).toEqual(['Known idle', 'Odd one']);
+  });
+
   it("shows a card's status, reason, activity, facts and skills, and no reason while a thread runs", async () => {
     await mount([
       thread('t', {
@@ -27251,9 +27261,11 @@ import { HopLink } from '../components/hop-link';
 import { PairSheet } from '../components/pair-sheet';
 import { SkillBadge } from '../components/skill-badge';
 import { StatusChip } from '../components/status-chip';
+import { TemplateOf, templateOf } from '../components/template-of';
 import { GlobalStore } from '../core/global.store';
 
-const ORDER: Record<string, number> = { waiting: 0, running: 1, queued: 2, idle: 3, failed: 4, done: 5, cancelled: 6 };
+/** Busiest first. A Map, so a status it does not know (even `constructor`) sorts last instead of reading `Object.prototype`. */
+const ORDER = new Map<string, number>([['waiting', 0], ['running', 1], ['queued', 2], ['idle', 3], ['failed', 4], ['done', 5], ['cancelled', 6]]);
 
 /** One card: the React ThreadCard's props. */
 type RosterCard = {
@@ -27272,13 +27284,13 @@ type RosterCard = {
 /** Every thread in the project as cards, busiest first. */
 @Component({
   selector: 'div[deskThreadRoster]',
-  imports: [NgTemplateOutlet, AnsweringBadge, EmptyState, HopLink, PairSheet, SkillBadge, StatusChip],
+  imports: [NgTemplateOutlet, TemplateOf, AnsweringBadge, EmptyState, HopLink, PairSheet, SkillBadge, StatusChip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'page roster' },
   template: `
     <!-- ThreadCard: the card's link. A waiting thread's wait sits in a slot under it: a button cannot live inside a link. -->
-    <ng-template #card let-c>
+    <ng-template #card let-c [deskTemplateOf]="cardType">
       <a class="card thread-card" [class.archived]="!!c.t.archived_at" [class.has-wait]="!!c.wait" [href]="c.href">
         <div class="thread-card-head">
           <h2>{{ c.t.title ?? 'Untitled thread' }}</h2>
@@ -27370,6 +27382,7 @@ export class ThreadRoster {
   protected readonly archived = computed(() => this.project().threads.filter((t) => t.archived_at).length);
   protected readonly conversationHref = computed(() => href({ name: 'project', id: this.project().project.id, tab: 'conversation' }));
   protected readonly ago = ago;
+  protected readonly cardType = templateOf<RosterCard>();
 
   protected readonly cards = computed<RosterCard[]>(() => {
     const projectId = this.project().project.id;
@@ -27379,7 +27392,7 @@ export class ThreadRoster {
     const show = this.showArchived();
     return this.project()
       .threads.filter((t) => show || !t.archived_at)
-      .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || b.created_at.localeCompare(a.created_at))
+      .sort((a, b) => (ORDER.get(a.status) ?? 9) - (ORDER.get(b.status) ?? 9) || b.created_at.localeCompare(a.created_at))
       .map((t) => {
         const wait = t.status === 'waiting' ? waitLabel(messages, t.id, attention, now) : null;
         // Its first wait target, for the pair sheet; a thread with an item of its own that waits on the user waits on you,
@@ -27405,7 +27418,7 @@ export class ThreadRoster {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/threads/thread-roster.spec.ts)`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
