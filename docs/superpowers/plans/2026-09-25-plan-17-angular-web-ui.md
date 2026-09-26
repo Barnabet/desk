@@ -24564,6 +24564,8 @@ The unit cases above already drove the behaviour. The e2e is written after the w
 
 Create `apps/web-ui/e2e/flows.e2e.test.ts` (Vitest globals: see `vitest.web-e2e.config.ts`; files under `apps/web-ui` never import `vitest`):
 
+**Deviation (review fix):** two lookups in the first scenario were loose. The pill's `'1 need you'` link lookup matched by substring, so `11 need you` would pass too; it now passes `exact: true`, and a comment notes that the attention counts are global across projects, so a later scenario must not leave items in Attention before this one runs (or must run after it). The one-shot `expect(await diagram.getByText(/^sent back/).count()).toBeGreaterThan(0)` could read the diagram before the lane's label rendered; it is now `await diagram.getByText(/^sent back/).first().waitFor()`.
+
 ```ts
 import type { Page } from 'playwright';
 import { call, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
@@ -24723,13 +24725,14 @@ describe('the core loop in the browser', () => {
     // The thread reports, Desk sends it back, it reports again, and Desk reports to you.
     await go(page, `#/p/${project.id}/conversation`);
     await page.getByRole('heading', { name: 'The signup checklist is in' }).waitFor({ timeout: 30_000 });
-    expect(await diagram.getByText(/^sent back/).count()).toBeGreaterThan(0);
+    await diagram.getByText(/^sent back/).first().waitFor();
     const needsYou = page.getByRole('link', { name: 'Review the checklist copy' });
     await needsYou.waitFor();
     await e2e.shot(page, 'flows-3-conversation-report');
 
     // What the report needs from you is the one thing left: the pill counts it, and its link racks it in HANDOFFS.
-    await page.getByRole('link', { name: '1 need you' }).waitFor({ timeout: 10_000 });
+    // Attention counts are global across projects: a later scenario must not leave items in Attention before this one runs.
+    await page.getByRole('link', { name: '1 need you', exact: true }).waitFor({ timeout: 10_000 });
     await needsYou.click();
     const handoff = page.getByRole('article', { name: 'Selected: from a report' });
     await handoff.getByText('The signup checklist is in').waitFor();

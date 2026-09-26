@@ -156,13 +156,14 @@ describe('the core loop in the browser', () => {
     // The thread reports, Desk sends it back, it reports again, and Desk reports to you.
     await go(page, `#/p/${project.id}/conversation`);
     await page.getByRole('heading', { name: 'The signup checklist is in' }).waitFor({ timeout: 30_000 });
-    expect(await diagram.getByText(/^sent back/).count()).toBeGreaterThan(0);
+    await diagram.getByText(/^sent back/).first().waitFor();
     const needsYou = page.getByRole('link', { name: 'Review the checklist copy' });
     await needsYou.waitFor();
     await e2e.shot(page, 'flows-3-conversation-report');
 
     // What the report needs from you is the one thing left: the pill counts it, and its link racks it in HANDOFFS.
-    await page.getByRole('link', { name: '1 need you' }).waitFor({ timeout: 10_000 });
+    // Attention counts are global across projects: a later scenario must not leave items in Attention before this one runs.
+    await page.getByRole('link', { name: '1 need you', exact: true }).waitFor({ timeout: 10_000 });
     await needsYou.click();
     const handoff = page.getByRole('article', { name: 'Selected: from a report' });
     await handoff.getByText('The signup checklist is in').waitFor();
