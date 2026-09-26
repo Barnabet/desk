@@ -1,11 +1,7 @@
 import { Injectable, inject, signal, type Signal } from '@angular/core';
 import type { NotifyPermission, WebNotice } from '@desk/web-server/contract';
-import { DeskBridge } from './desk-bridge';
+import { DeskBridge, notificationPermission } from './desk-bridge';
 import { RouteService } from './route.service';
-
-function browserPermission(): NotifyPermission {
-  return typeof Notification === 'undefined' ? 'denied' : Notification.permission;
-}
 
 /**
  * Browser notifications for new attention (spec §5). desk web pushes `desk:notify` to every signed-in tab; a tab shows the
@@ -16,7 +12,7 @@ function browserPermission(): NotifyPermission {
 export class WebNotifications {
   private readonly bridge = inject(DeskBridge);
   private readonly routes = inject(RouteService);
-  private readonly value = signal<NotifyPermission>(browserPermission());
+  private readonly value = signal<NotifyPermission>(notificationPermission());
   /** What this browser allows the page: `default` until the user answers the prompt. */
   readonly permission: Signal<NotifyPermission> = this.value.asReadonly();
 
@@ -26,7 +22,7 @@ export class WebNotifications {
    */
   start(): () => void {
     const off = this.bridge.onPush<WebNotice[]>('desk:notify', (notices) => this.show(notices));
-    const recheck = () => this.report(browserPermission());
+    const recheck = () => this.report(notificationPermission());
     window.addEventListener('focus', recheck);
     return () => {
       off();
@@ -49,7 +45,7 @@ export class WebNotifications {
   }
 
   private show(notices: WebNotice[]): void {
-    if (browserPermission() !== 'granted' || document.hasFocus()) return;
+    if (notificationPermission() !== 'granted' || document.hasFocus()) return;
     for (const notice of notices) {
       const shown = new Notification(notice.title, { body: notice.body, tag: notice.tag });
       shown.onclick = () => {

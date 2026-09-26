@@ -55,7 +55,8 @@ function storedSecret(): string | null {
   }
 }
 
-function notificationPermission(): NotifyPermission {
+/** What this browser lets the page do with notifications (`denied` where it has none); WebNotifications reads it too. */
+export function notificationPermission(): NotifyPermission {
   return typeof Notification === 'undefined' ? 'denied' : Notification.permission;
 }
 

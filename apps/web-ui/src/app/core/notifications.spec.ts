@@ -46,6 +46,8 @@ beforeEach(() => {
   FakeNotification.requestPermission.mockClear();
   vi.stubGlobal('Notification', FakeNotification);
   vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
+  // jsdom has no window.focus(); a click on a notification brings the tab forward with it.
+  vi.spyOn(window, 'focus').mockImplementation(() => {});
 });
 afterEach(() => {
   stop();
@@ -64,6 +66,7 @@ describe('WebNotifications', () => {
       ['Launch: approve a command', 'npm publish', 'approval:2'],
     ]);
     FakeNotification.shown[0]!.onclick?.();
+    expect(window.focus).toHaveBeenCalledTimes(1);
     expect(window.location.hash).toBe('#/attention?item=question%3A1');
     expect(FakeNotification.shown[0]!.closed).toBe(true);
   });
