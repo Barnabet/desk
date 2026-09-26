@@ -55,7 +55,7 @@ const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot:
 /** Undoes XML escaping: the named entities `launchdPlist` and the CLI's `plistFor` write, and character references. */
 function unescapeXml(s: string): string {
   return s.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (m, e: string) => {
-    if (!e.startsWith('#')) return XML_ENTITIES[e] ?? m;
+    if (!e.startsWith('#')) return Object.hasOwn(XML_ENTITIES, e) ? XML_ENTITIES[e]! : m; // never `&constructor;` → Object
     return String.fromCodePoint(e.startsWith('#x') ? Number.parseInt(e.slice(2), 16) : Number.parseInt(e.slice(1), 10));
   });
 }
