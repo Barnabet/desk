@@ -20,7 +20,7 @@ function row(over: Partial<AgentRow>): AgentRow {
   return {
     id: 't1', project_id: 'p', role: 'thread', status: 'running', model: 'm', reasoning_effort: null, title: 'T', brief: 'b', workspace_path: null, parent_id: null,
     inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null,
-    git_base: null, git_common_dir: null, archived_at: null, created_at: '', updated_at: '', ...over,
+    git_base: null, git_common_dir: null, automation_run_id: null, automation_step_id: null, archived_at: null, created_at: '', updated_at: '', ...over,
   };
 }
 

@@ -101,6 +101,8 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
         git_branch: e.payload.git?.branch ?? null,
         git_base: e.payload.git?.base ?? null,
         git_common_dir: e.payload.git?.common_dir ?? null,
+        automation_run_id: e.payload.automation?.run_id ?? null,
+        automation_step_id: e.payload.automation?.step_id ?? null,
         archived_at: null,
         created_at: e.ts,
         updated_at: e.ts,

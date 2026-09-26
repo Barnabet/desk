@@ -1,6 +1,6 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 // Type-only import: erased at runtime, so drizzle-kit can still load this file standalone.
-import type { PlanItem, ProjectSettings, ReasoningEffort } from '@desk/protocol';
+import type { AutomationDefinition, AutomationLayout, Grant, InputValue, Outputs, PlanItem, ProjectSettings, ReasoningEffort, StepGate, StepQuestion } from '@desk/protocol';
 
 export const events = sqliteTable(
   'events',
@@ -36,7 +36,7 @@ export const agents = sqliteTable(
   {
     id: text('id').primaryKey(),
     project_id: text('project_id').notNull(),
-    role: text('role', { enum: ['desk', 'thread', 'step'] }).notNull(), // Task 14 audits step agents here.
+    role: text('role', { enum: ['desk', 'thread', 'step'] }).notNull(),
     status: text('status', { enum: ['idle', 'queued', 'running', 'waiting', 'done', 'failed', 'cancelled'] }).notNull(),
     model: text('model').notNull(),
     /** A reasoning level chosen for this agent (threads, at spawn); null follows the project setting. */
@@ -54,6 +54,9 @@ export const agents = sqliteTable(
     git_branch: text('git_branch'),
     git_base: text('git_base'),
     git_common_dir: text('git_common_dir'),
+    /** A step agent's automation run and step (role `step`). */
+    automation_run_id: text('automation_run_id'),
+    automation_step_id: text('automation_step_id'),
     archived_at: text('archived_at'),
     created_at: text('created_at').notNull(),
     updated_at: text('updated_at').notNull(),
@@ -185,3 +188,100 @@ export const builtinSkillSettings = sqliteTable('builtin_skill_settings', {
   enabled: integer('enabled', { mode: 'boolean' }).notNull(),
   updated_at: text('updated_at').notNull(),
 });
+
+/** Automations (spec 2026-09-26-automations-design §2): the current definition, the user's switch and grants. */
+export const automations = sqliteTable(
+  'automations',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    name: text('name').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    version: integer('version').notNull(),
+    definition: text('definition', { mode: 'json' }).$type<AutomationDefinition>().notNull(),
+    layout: text('layout', { mode: 'json' }).$type<AutomationLayout>().notNull().default({}),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+    grants: text('grants', { mode: 'json' }).$type<Grant[]>().notNull().default([]),
+    grants_suspended: integer('grants_suspended', { mode: 'boolean' }).notNull().default(false),
+    /** The version current when grants were last set. */
+    grants_set_version: integer('grants_set_version'),
+    enable_request: text('enable_request', { mode: 'json' }).$type<{ note: string; proposed_grants: Grant[]; at: string } | null>(),
+    /** Per schedule (trigger index): the due time it last fired or skipped, or when it was turned on. */
+    last_due: text('last_due', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+    deleted_at: text('deleted_at'),
+    created_at: text('created_at').notNull(),
+    updated_at: text('updated_at').notNull(),
+  },
+  (t) => [index('automations_project_idx').on(t.project_id, t.name)],
+);
+
+export const automationVersions = sqliteTable(
+  'automation_versions',
+  {
+    automation_id: text('automation_id').notNull(),
+    version: integer('version').notNull(),
+    definition: text('definition', { mode: 'json' }).$type<AutomationDefinition>().notNull(),
+    origin: text('origin').notNull(),
+    change_note: text('change_note').notNull(),
+    via: text('via').notNull(),
+    created_at: text('created_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.automation_id, t.version] })],
+);
+
+export const automationRuns = sqliteTable(
+  'automation_runs',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    automation_id: text('automation_id').notNull(),
+    version: integer('version').notNull(),
+    trigger: text('trigger', { enum: ['schedule', 'manual', 'desk', 'parent', 'test'] }).notNull(),
+    test: integer('test', { mode: 'boolean' }).notNull(),
+    inputs: text('inputs', { mode: 'json' }).$type<Record<string, InputValue>>().notNull(),
+    by: text('by').notNull(),
+    parent_run_id: text('parent_run_id'),
+    parent_step_id: text('parent_step_id'),
+    trigger_index: integer('trigger_index'),
+    due_at: text('due_at'),
+    caught_up: integer('caught_up').notNull().default(0),
+    /** Stored statuses; `waiting` is derived on read (automations/views.ts). */
+    status: text('status', { enum: ['running', 'succeeded', 'failed', 'cancelled'] }).notNull(),
+    summary: text('summary'),
+    reason: text('reason'),
+    started_at: text('started_at').notNull(),
+    finished_at: text('finished_at'),
+    deadline_at: text('deadline_at').notNull(),
+  },
+  (t) => [
+    index('automation_runs_automation_idx').on(t.automation_id, t.started_at),
+    index('automation_runs_status_idx').on(t.status),
+    index('automation_runs_parent_idx').on(t.parent_run_id),
+  ],
+);
+
+export const automationStepRuns = sqliteTable(
+  'automation_step_runs',
+  {
+    run_id: text('run_id').notNull(),
+    step_id: text('step_id').notNull(),
+    attempt: integer('attempt').notNull(),
+    status: text('status', { enum: ['pending', 'running', 'waiting', 'succeeded', 'failed', 'rejected', 'skipped', 'cancelled'] }).notNull(),
+    route: text('route'),
+    outputs: text('outputs', { mode: 'json' }).$type<Outputs>().notNull().default({}),
+    summary: text('summary'),
+    error: text('error'),
+    agent_id: text('agent_id'),
+    child_run_id: text('child_run_id'),
+    resume_at: text('resume_at'),
+    gate: text('gate', { mode: 'json' }).$type<StepGate | null>(),
+    question: text('question', { mode: 'json' }).$type<StepQuestion | null>(),
+    note: text('note'),
+    answered_by: text('answered_by'),
+    started_at: text('started_at'),
+    finished_at: text('finished_at'),
+    updated_at: text('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.run_id, t.step_id] }), index('automation_step_runs_status_idx').on(t.status)],
+);

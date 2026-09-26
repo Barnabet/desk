@@ -43,6 +43,13 @@
       "when": 1790421602242,
       "tag": "0005_builtin_skill_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790463108315,
+      "tag": "0006_automations",
+      "breakpoints": true
     }
   ]
 }
