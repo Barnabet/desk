@@ -6,6 +6,7 @@ import { initialGlobalState } from '../../shared/state';
 import { useRoute } from '../router';
 import { globalStore } from '../state/global';
 import { installBridge } from '../test/bridge';
+import { builtin } from '../test/builtins';
 import { SkillsScreen } from './SkillsScreen';
 
 afterEach(cleanup);
@@ -138,5 +139,36 @@ describe('SkillsScreen', () => {
     fireEvent.click(within(imp).getByRole('button', { name: 'Import' }));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'skills.import')?.input).toEqual({ path: '/Users/me/.claude/skills/pdf' }));
     await waitFor(() => expect(window.location.hash).toBe('#/skills/global%3Apdf'));
+  });
+
+  it("shows Desk's built-in skills above your own, and duplicates one into your skills", async () => {
+    let copied = false;
+    const bridge = setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit', shadowed_by: copied ? 'global' : null }), builtin('images')],
+      'builtins.get': () => ({ ...detail(1, '# PDF'), name: 'pdf-toolkit', scope: 'builtin' }),
+      'builtins.duplicate': () => ((copied = true), { dir: '/s/pdf-toolkit', created: true, version: 1 }),
+      'skills.history': () => [{ version: 1, description: 'd', current: true, change_note: 'Duplicated from the built-in skill', origin: 'builtin:pdf-toolkit@0123456789ab', ts: new Date().toISOString() }],
+    });
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    expect(screen.getByRole('group', { name: 'Skill map' })).toBeTruthy();
+    fireEvent.click(within(group).getByRole('button', { name: 'Open PDF toolkit' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/builtin%3Apdf-toolkit'));
+    const panel = await screen.findByRole('article', { name: 'Built-in skill pdf-toolkit' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Duplicate to my skills' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Duplicate pdf-toolkit' })).getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/global%3Apdf-toolkit'));
+    expect(bridge.calls.find((c) => c.channel === 'builtins.duplicate')?.input).toEqual({ name: 'pdf-toolkit' });
+    const copy = await screen.findByRole('article', { name: 'Skill pdf-toolkit' });
+    expect(await within(copy).findByText(/Customised from the built-in skill/)).toBeTruthy();
+    expect(within(copy).getByRole('link', { name: 'pdf-toolkit' }).getAttribute('href')).toBe('#/skills/builtin%3Apdf-toolkit');
+    expect(copy.textContent).toContain('Built into Desk · v1');
+    await waitFor(() => expect(within(group).getByText('Shadowed by your global skill')).toBeTruthy());
+  });
+
+  it('shows the built-ins even with no skills of your own', async () => {
+    installBridge({ 'skills.list': () => [], 'builtins.list': () => [builtin('images')] });
+    render(<Routed />);
+    expect(await screen.findByRole('region', { name: 'Built into Desk' })).toBeTruthy();
+    expect(screen.getByText('No skills of your own yet')).toBeTruthy();
   });
 });

@@ -63,11 +63,12 @@ export function useSkills(): { status: 'loading' | 'ready' | 'error'; error: str
   return { status: lists ? 'ready' : error ? 'error' : 'loading', error, nodes, refresh };
 }
 
-/** `user` → you, `agent:<id>` → the agent's title when known. */
+/** `user` → you, `agent:<id>` → the agent's title when known, `catalog:` and `builtin:` origins → where the skill came from. */
 export function whoLabel(origin: string | null, titles: Map<string, string>): string {
   if (!origin) return 'Unknown';
   if (origin === 'user') return 'You';
   if (origin.startsWith('agent:')) return titles.get(origin.slice(6)) ?? 'Desk';
+  if (origin.startsWith('builtin:')) return 'Built into Desk';
   if (origin.startsWith('catalog:')) {
     const marker = origin.slice(origin.lastIndexOf('@') + 1);
     return /^[0-9a-f]{40}$/.test(marker) ? `Catalog · ${marker.slice(0, 7)}` : 'Catalog';

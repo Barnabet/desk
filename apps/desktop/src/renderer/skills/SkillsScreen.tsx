@@ -10,6 +10,9 @@ import { projectTone } from '../map/OrbitMap';
 import { navigate, replaceRoute } from '../router';
 import { useGlobal } from '../state/global';
 import { AskDesk } from './AskDesk';
+import { BuiltinGroup } from './builtins/BuiltinGroup';
+import { BuiltinPanel } from './builtins/BuiltinPanel';
+import { parseBuiltinKey, useBuiltins } from './builtins/data';
 import { CatalogView, LayoutSwitch, useCatalogLayout } from './catalog/CatalogView';
 import { catalogIndex, useCatalog } from './catalog/data';
 import { ReviewSheet } from './catalog/ReviewSheet';
@@ -100,12 +103,13 @@ function ImportSheet(o: { path: string; projects: Array<{ id: string; name: stri
 }
 
 /**
- * Every skill Desk and its threads can use: a map (or list) with global, project and shadowed skills, and what's in
- * use now; and the catalog of pinned skills to install, each reviewed first.
+ * Every skill Desk and its threads can use: Desk's built-in skills, a map (or list) with global, project and shadowed
+ * skills, and what's in use now; and the catalog of pinned skills to install, each reviewed first.
  */
 export function SkillsScreen({ skill, catalog = false, review }: { skill?: string; catalog?: boolean; review?: string }) {
   const overview = useGlobal((g) => g.overview);
   const data = useSkills();
+  const builtins = useBuiltins();
   const cat = useCatalog();
   const [layout, setLayout] = useCatalogLayout();
   const fromCatalog = useMemo(() => catalogIndex(cat.items), [cat.items]);
@@ -137,13 +141,20 @@ export function SkillsScreen({ skill, catalog = false, review }: { skill?: strin
   };
   const shown = useMemo(() => data.nodes.filter((n) => filter === 'all' || (filter === 'used' ? n.usedBy.length > 0 : n.shadows || n.shadowedIn.length > 0)), [data.nodes, filter]);
   const ref = !catalog && skill ? parseSkillKey(skill) : null;
+  const builtinName = !catalog && skill ? parseBuiltinKey(skill) : null;
+  const builtin = builtinName ? builtins.items.find((b) => b.name === builtinName) : undefined;
   const node = skill ? data.nodes.find((n) => n.key === skill) : undefined;
   const select = (key: string | null) => replaceRoute({ name: 'skills', ...(key ? { skill: key } : {}) });
   const changed = () => {
     setVersion((v) => v + 1);
     void data.refresh();
     void cat.refresh();
+    void builtins.refresh();
   };
+  const builtinGroup = (collapsible: boolean) =>
+    builtins.items.length ? (
+      <BuiltinGroup items={builtins.items} selected={skill ?? null} collapsible={collapsible} onSelect={(k) => select(k === skill ? null : k)} onChanged={() => void builtins.refresh()} />
+    ) : null;
   const startImport = async () => {
     try {
       const path = await call('app.pickFolder', { purpose: 'skill-import' });
@@ -154,7 +165,7 @@ export function SkillsScreen({ skill, catalog = false, review }: { skill?: strin
   };
 
   return (
-    <div className={`skills${ref ? ' with-panel' : ''}`}>
+    <div className={`skills${ref || builtin ? ' with-panel' : ''}`}>
       <div className="skills-main">
         <div className="skills-head">
           <h1 className="title">{catalog ? 'Skill catalog' : 'Skill map'}</h1>
@@ -212,14 +223,19 @@ export function SkillsScreen({ skill, catalog = false, review }: { skill?: strin
           <EmptyState title="Couldn't load skills">{data.error}</EmptyState>
         ) : !data.nodes.length ? (
           <div className="skills-body">
-            <EmptyState title="No skills yet">Skills are instructions and scripts Desk and its threads reuse. Import one, write one, or ask Desk to build one.</EmptyState>
+            {builtinGroup(false)}
+            <EmptyState title="No skills of your own yet">Skills are instructions and scripts Desk and its threads reuse. Import one, write one, or ask Desk to build one.</EmptyState>
           </div>
         ) : view === 'map' ? (
-          <div className="skills-body map">
-            <SkillsMapView nodes={shown} projects={projects} catalogKeys={catalogKeys} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
-          </div>
+          <>
+            <div className="builtin-strip">{builtinGroup(true)}</div>
+            <div className="skills-body map">
+              <SkillsMapView nodes={shown} projects={projects} catalogKeys={catalogKeys} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
+            </div>
+          </>
         ) : (
           <div className="skills-body">
+            {builtinGroup(false)}
             <SkillList nodes={shown} projectNames={projectNames} catalogKeys={catalogKeys} selected={skill ?? null} onSelect={(k) => select(k === skill ? null : k)} />
           </div>
         )}
@@ -275,6 +291,18 @@ export function SkillsScreen({ skill, catalog = false, review }: { skill?: strin
             })
           }
           onChanged={changed}
+          onClose={() => select(null)}
+        />
+      ) : null}
+      {builtin ? (
+        <BuiltinPanel
+          item={builtin}
+          projects={projects}
+          onDuplicated={(r) => {
+            changed();
+            select(skillKey(r));
+          }}
+          onChanged={() => void builtins.refresh()}
           onClose={() => select(null)}
         />
       ) : null}

@@ -630,6 +630,169 @@
   }
 }
 
+/* Built into Desk */
+.builtin-strip {
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow: auto;
+  padding: 0 32px 10px;
+}
+.builtin-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.builtin-strip .builtin-group {
+  margin-bottom: 0;
+}
+.builtin-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.builtin-head h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 19px;
+  white-space: nowrap;
+}
+.builtin-fold {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.builtin-cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.builtin-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  box-shadow: none;
+  min-width: 0;
+}
+.builtin-card:hover {
+  box-shadow: var(--card-shadow);
+}
+.builtin-card.selected {
+  outline: 2px solid var(--ink);
+  outline-offset: -1px;
+}
+.builtin-card.off .builtin-open {
+  opacity: 0.55;
+}
+.builtin-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.builtin-title {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.builtin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.builtin-meta .chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.builtin-open .runtime-line {
+  font-size: 12px;
+}
+.builtin-open .runtime-line.failed {
+  padding: 4px 8px;
+}
+.runtime-line.none .runtime-dot {
+  background: var(--rule-strong);
+}
+.builtin-runtime {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.builtin-caveats {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.skill-scope.builtin {
+  border: 1.5px solid var(--rule-strong);
+  color: var(--ink);
+}
+
+/* On/off switch */
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--rule-strong);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch[aria-checked='true'] {
+  background: var(--ok);
+}
+.switch:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.switch:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.3);
+  transition: transform 0.15s;
+}
+.switch[aria-checked='true'] .switch-knob {
+  transform: translateX(14px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch-knob {
+    transition: none;
+  }
+}
+
 /* Skill panel: installed from the catalog */
 .skill-catalog {
   display: flex;
