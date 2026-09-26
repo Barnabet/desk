@@ -11156,7 +11156,7 @@ The React `Sheet` renders through a portal into `document.body`. Angular has non
 
 **Deviation (review fix):** `confirm-dialog.spec.ts` gains a close case. `sheet.spec.ts` wraps the `Sheet` itself in `@if`, so its host is a root node of the view Angular removes and Angular takes it out of `document.body` on its own; the `Sheet` inside a `ConfirmDialog` is not, and only `Sheet`'s own `onDestroy` (`this.host.remove()`) takes its backdrop out. Nothing covered that path, which every closed `ExternalLink` confirmation (W0c.10) takes. The case renders the dialog inside `@if`, closes it, and expects no `.sheet-backdrop` left and the focus back on the element that had it; it fails without `this.host.remove()` (5 tests).
 
-**Deviation (review fix, from W0d's review):** Escape closes only the topmost sheet. Every open `Sheet` listened for Escape on `window` and emitted `close`. So once W0d.7 shows the folder browser (a `Sheet` of its own) over the map's new-project sheet, Escape in the folder browser also closed the project form under it and lost what was typed. On the desktop the native folder dialog takes that key. `onKey` now emits `close` only when the host is the last `.sheet-backdrop` among `document.body`'s children; each sheet appends itself there when it opens. One result differs from the desktop: a `ConfirmDialog` opened from inside a sheet (an `ExternalLink` in `PairSheet`) now closes alone on Escape, while the desktop's `Sheet` closes both. `sheet.spec.ts` gains the case "closes only the topmost sheet on Escape" (2 files, 6 tests). W0d.6's and W0d.7's specs cover the same behaviour through the map and the folder browser.
+**Deviation (review fix, from W0d's review):** Escape closes only the topmost sheet. Every open `Sheet` listened for Escape on `window` and emitted `close`. So once W0d.7 shows the folder browser (a `Sheet` of its own) over the map's new-project sheet, Escape in the folder browser also closed the project form under it and lost what was typed. On the desktop the native folder dialog takes that key. `onKey` now emits `close` only when the host is the last `.sheet-backdrop` among `document.body`'s children; each sheet appends itself there when it opens. The desktop's `Sheet` had the same fault: Escape in a `ConfirmDialog` opened from inside a sheet (an `ExternalLink` in `PairSheet`) closed both. It got the same rule in its own `fix(desktop)` commit, with a `Sheet.test.tsx` case, so the two apps agree: Escape closes only the confirmation. `sheet.spec.ts` gains the case "closes only the topmost sheet on Escape" (2 files, 6 tests). W0d.6's and W0d.7's specs cover the same behaviour through the map and the folder browser.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -14536,7 +14536,7 @@ Expected: PASS. It includes `scripts/ng.test.ts` and `scripts/web-dev.test.ts`, 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false)`
-Expected: PASS: 32 spec files, 115 tests. `pnpm test` runs Step 2 and this step in that order; running them separately keeps `--maxWorkers=2` on the root suite.
+Expected: PASS: 32 spec files, 116 tests (with W0c.8's topmost-sheet case from W0d's review). `pnpm test` runs Step 2 and this step in that order; running them separately keeps `--maxWorkers=2` on the root suite.
 
 The files, as a checklist (all under `apps/web-ui/src`): `build-config.spec.ts`; `app/app.spec.ts` (9); `app/app.config.spec.ts`; `app/security.spec.ts`; `app/screen-for.spec.ts`; `app/testing/fake-bridge.spec.ts`; `app/core/`: `desk-bridge`, `route.service`, `store-signal`, `global.store`, `now.service`, `last-project`, `unread`, `onboarded`, `media`, `width`, `session.service`, `notifications`; `app/components/`: `button`, `field`, `empty-state`, `status-chip`, `code-block`, `sheet`, `confirm-dialog`, `toast`, `markdown`, `safe-markdown`, `error-boundary`, `title-bar`, `project-nav`, `connection-overlay`.
 
@@ -17248,7 +17248,9 @@ Expected: every file passes (`packages/*`, `apps/*/src`, `test/*`; `@desk/bff`, 
 Run: `pnpm --filter @desk/web-ui test`
 Expected: every spec passes (39 files, 157 tests), W0d's among them: `settings-fields` (5), `project-form` (6), `endpoint-panel` (6), `onboarding` (4), `folder-browser` (9), `map-screen` (4), `app.onboarding` (7), and W0c's `sheet.spec.ts` (4, with the topmost-sheet case from W0d's review), `app.spec.ts` (9) and `screen-for.spec.ts` with W0d.7's changes.
 
-- [ ] **Step 4: The Electron e2e suite (the desktop app is unchanged)**
+- [ ] **Step 4: The Electron e2e suite (the desktop app is unchanged but for `Sheet.tsx`)**
+
+After W0a's and W0b's extractions, the only desktop change is the review fix in W0c.8's note: the React `Sheet` closes on Escape only when it is the topmost sheet.
 
 Run: `pnpm test:e2e`
 Expected: every `apps/desktop/e2e/*.e2e.test.ts` passes (the packaged case skips without a packaged app). It opens Electron windows; nothing else runs meanwhile.
@@ -30314,7 +30316,7 @@ Expected: PASS. This section changes nothing the root suite runs (bff, ui-core w
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (5), `knowledge/memory-screen.spec.ts` (5), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (6); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (4) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (5), `knowledge/memory-screen.spec.ts` (5), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (6); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
