@@ -150,8 +150,13 @@ export class AttentionScreen {
         const by = all?.find((x) => x.id === approvalId)?.resolved_by;
         this.toasts.toast({ tone: 'info', message: `Already decided by ${by ? (WHO[by] ?? by) : 'someone else'}.` });
       } else this.toasts.error(err);
-      this.busy.set(null);
+      this.settle(selected.id);
     }
+  }
+
+  /** Clears the pending state once `id`'s request is over, unless the selection has moved on (the next item's may be pending). */
+  private settle(id: string): void {
+    if (this.selected()?.id === id) this.busy.set(null);
   }
 
   protected async answer(text: string): Promise<void> {
@@ -164,7 +169,7 @@ export class AttentionScreen {
     } catch (err) {
       this.toasts.error(err);
     } finally {
-      this.busy.set(null);
+      this.settle(selected.id);
     }
   }
 
@@ -176,7 +181,7 @@ export class AttentionScreen {
       await this.bridge.call('attention.dismiss', { id: selected.id });
     } catch (err) {
       this.toasts.error(err);
-      this.busy.set(null);
+      this.settle(selected.id);
     }
   }
 
@@ -191,12 +196,15 @@ export class AttentionScreen {
     const flat = this.rack().flat;
     if (!flat.length) return;
     const mod = e.metaKey || e.ctrlKey;
+    // A held key repeats: once the selection moves, a repeat would decide the next approval unseen.
     if (mod && e.key === 'Enter') {
       e.preventDefault();
-      void this.resolve('approved');
+      if (!e.repeat) void this.resolve('approved');
     } else if (mod && e.key === 'Backspace') {
+      // In the note, ⌘⌫ and Ctrl+⌫ delete text (to the line start, or a word); they deny only outside a text box.
+      if (typing(e.target)) return;
       e.preventDefault();
-      void this.resolve('denied');
+      if (!e.repeat) void this.resolve('denied');
     } else if (!mod && !e.altKey && !typing(e.target)) {
       const k = e.key.toLowerCase();
       if (k === 'j' || k === 'k') {
