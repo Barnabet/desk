@@ -57,7 +57,7 @@ browser (Angular app)  ── http://127.0.0.1:7434 ──►  desk web (Node, H
 - Agent text reaches the page only through `SafeMarkdownComponent` (`div[deskSafeMarkdown]`) or plain interpolation.
 - `desk web` binds loopback only. The Host check (421) runs on every request and WebSocket upgrade, and the Origin check (403) runs on `/rpc` and every upgrade.
 - The code is cross-platform: no macOS-only tools, except in the launchd code paths, which are guarded by platform. Paths go through `node:path`, and the folder opener is chosen per platform.
-- The Electron app's behaviour does not change, and neither do its unit and e2e tests. A moved test changes only in its import lines and the contract's two renames. Two review fixes reach the desktop on purpose, so both apps agree: Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`), and dragging a map's background selects no text (W1a.1's note, the shared `map.css`).
+- The Electron app's behaviour does not change, and neither do its unit and e2e tests. A moved test changes only in its import lines and the contract's two renames. Five review fixes reach the desktop on purpose, so both apps agree (each with its own cases in the desktop's tests): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); and the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`).
 - TypeScript is strict with `noUncheckedIndexedAccess`, including the Angular app (`ngc` with strict templates).
 - The machine is shared: at most 2 agents at once, and one Electron or Chromium run at a time.
 
@@ -80,6 +80,8 @@ Every task in W0c–W3b follows these rules. Each section's header repeats the o
   - Class names are the React names (`StripRack`, `FolderBrowser`), and file names are the React names in kebab case under the same area folder.
   - Inputs keep the React prop names. An input named like a native attribute (`title`, `id`) makes the host drop that attribute (`'[attr.title]': 'null'`).
   - Outputs are never named after bubbling DOM events (`select`, `click`, `change`, `input`, `submit`). React's `onSelect` becomes `pick`, `selectSkill` or `selectStop`.
+- **Signals.**
+  - A `linkedSignal` of user-editable state (a draft, a toggle, a selection, a pending flag) derives from a `computed` primitive or an id, not a whole object that folds or pushes rebuild: it reads its source inside its own node, so `linkedSignal(() => this.m().content)` or `{ source: () => this.selected()?.id }` resets whenever `m` or `selected` is a new object with the same content. Write `private readonly content = computed(() => this.m().content)` and `linkedSignal(() => this.content())`, or `{ source: this.selectedId }` (W1c.3's and W2b.2's review fixes).
 - **Shared services.**
   - `ToastService.error(err)` replaces the desktop's `toastError(err)`.
   - `DeskBridge.call('<op>', …)` always names its operation literally, which is what the parity guard reads.
@@ -406,9 +408,9 @@ All paths are relative to the repo root.
 | `apps/cli/package.json`, `apps/cli/src/commands.ts` | modify (`desk web`) | W0b.13 |
 | `apps/cli/src/web.test.ts` | new | W0b.13 |
 
-### `apps/desktop` (behaviour unchanged except the topmost-sheet Escape rule)
+### `apps/desktop` (behaviour unchanged except five review fixes)
 
-Two review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it.
+Five review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit, cba3b17). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it. Attention's ⌘⌫ leaves the note alone, held keys decide once, and a late failure keeps the next item pending (W1c.3's note, 55af589). A nameless path saves as `file`, and tool rows never title a `thread_id` with a prototype member (W2a.1's note, d1c14db). The Library lets go of a drag that leaves the window, counts only uploaded files, and stays put after a late upload (W2b.1's note, 24d56ad).
 
 | Path | Change | Tasks |
 |---|---|---|
@@ -432,6 +434,9 @@ Two review fixes change what the desktop does, so that both apps agree. Escape c
 | `apps/desktop/src/renderer/styles.test.ts` | new | W0a.4 |
 | `apps/desktop/src/renderer/theme/tokens.{css,test.ts}`, the eight `renderer/<area>/<area>.css` | moved away | W0a.4 |
 | `apps/desktop/src/renderer/components/Sheet.tsx`; `components/Sheet.test.tsx` | modify (Escape closes only the topmost sheet); new | W0c.8 (review fix, from W0d's review) |
+| `apps/desktop/src/renderer/attention/AttentionScreen.{tsx,test.tsx}` | modify (⌘⌫ leaves the note alone, held keys decide once, a late failure keeps the next item pending) | W1c.3 (review fix) |
+| `apps/desktop/src/renderer/components/FileViewer.tsx`, `conversation/ChatItems.tsx`, `conversation/ConversationScreen.test.tsx`; `components/FileViewer.test.tsx` | modify (a nameless path saves as `file`; `titleOf` reads own keys); new | W2a.1 (review fix) |
+| `apps/desktop/src/renderer/knowledge/LibraryScreen.{tsx,test.tsx}` | modify (the drag hint lets go when the drag leaves the window, "Uploaded N files." counts the uploaded ones, a late single upload no longer navigates back) | W2b.1 (review fix) |
 
 ### `apps/web-server` (`@desk/web-server`, all new)
 
@@ -23067,7 +23072,7 @@ apps/web-ui/e2e/flows.e2e.test.ts                         new
   `AttentionScreen` binds `[note]="note()" (noteChange)="note.set($event)"`, spelled out rather than `[(note)]`.
 - **Remounting the Inspector.** `key={selected.id}` on the Inspector becomes a one-item `@for (s of shown(); track s.id)`, with an `@empty` block for "All clear" (W0c.14's `App` keys its screen the same way). A new item mounts a fresh `Inspector`, which resets its raw-arguments toggle and its free answer, as React's remount does.
 - **Selection state.**
-  - The React effect that clears `note` and `busy` whenever the selected id changes becomes two `linkedSignal`s whose source is the selected id.
+  - The React effect that clears `note` and `busy` whenever the selected id changes becomes two `linkedSignal`s whose source is a `computed` of the selected id (`selectedId`), not `() => this.selected()?.id`: a linkedSignal reads its source inside its own node, so an inline source re-runs, and resets, whenever `selected` is a new object, which every `desk:global` push makes (W1c.3's second review fix).
   - `lastIndex` (a React ref) is a plain field. `index` reads it only when the route names no current item. That happens only after the rack or `itemId` has changed, so the `computed` always re-runs when it matters.
   - The effect that writes the selection into the route stays an `effect`, with the write in `untracked`.
 - **Keyboard.** The window `keydown` listener is the host listener `(window:keydown)`. It returns early for an event without a string `key`. Chrome's autofill sends such `keydown` events, and in Angular a throw there would trip the screen's error boundary; React's listener has no such boundary.
@@ -23942,6 +23947,8 @@ The seven React cases are ported one for one. One case is added for ⌘⌫, for 
 
 **Deviation (review fix):** three fixes, in both apps (`apps/desktop`'s `AttentionScreen.tsx` too, for parity). (1) ⌘⌫ / Ctrl+⌫ first denied the approval even with focus in the note, where it deletes to the line start on macOS and a word on Windows and Linux, so editing the note lost the approval. It now denies only when focus is not in a text box (the `typing(e.target)` guard J and K use) and otherwise leaves the key to the note, without `preventDefault`; ⌘⏎ still approves from the note. (2) A held ⌘⏎ or ⌘⌫ auto-repeats, and once the selection moved a repeat decided the next approval unseen; both ignore `e.repeat`. (3) `resolve`, `answer` and `dismiss` cleared `busy` after their await even if the selection had moved on, clearing the next item's pending state; `settle(id)` clears it only while the request's item is still selected (React keeps the selected id in a ref). The approve case now presses ⌘⏎ in the note, the last case is renamed "denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box" (Ctrl+⌫ and ⌘⌫ in the note are not prevented and deny nothing; ⌘⌫ on `document.body` denies), and four cases are added before it: the "someone else" 409 fallback when `approvals.list` fails; K's direction and top stop, the `lastIndex` fallback when the selected item leaves `GlobalStore` (a3 takes a2's place) and E on an approval (`#/p/p/threads/t3`); held keys; and a late failure (its error toast, the next approval still `aria-busy`, a second ⌘⏎ sending nothing). `AttentionScreen.test.tsx` gets the approve change and the held-key, late-failure and ⌘⌫ cases (10 tests).
 
+**Deviation (review fix, with W2b.2's):** `note` and `busy` were `linkedSignal({ source: () => this.selected()?.id, … })`. A linkedSignal reads its source inside its own node, so the inline source made it depend on `selected` itself, and every `desk:global` push (fresh JSON, so a new `selected` object with the same id) cleared the note being typed and the pending decision, which let the Approve button be pressed again while the first request was still out. Both now take `source: this.selectedId`, a `computed` of the id, which changes only when the selection does (React's `[selected?.id]` dependency). A new case types a note, pushes the same items plus one more as new objects, and expects the note kept; then approves, pushes again, and expects the button still `aria-busy` and one `approvals.resolve` call (it failed before the fix; 14 tests). The desktop needs no change: its effect is keyed on the id. The code block below is updated.
+
 **Files:**
 - Create: `apps/web-ui/src/app/attention/attention-screen.ts`
 - Test: `apps/web-ui/src/app/attention/attention-screen.spec.ts` (ported from `apps/desktop/src/renderer/attention/AttentionScreen.test.tsx`)
@@ -24354,10 +24361,15 @@ export class AttentionScreen {
     const s = this.selected();
     return s ? [s] : [];
   });
+  /**
+   * The selected item's id. Every desk:global push is fresh JSON, so `selected` is a new object with the same id each time;
+   * a linkedSignal reads its source inside its own node, so it must follow this computed, not `selected()?.id` directly.
+   */
+  private readonly selectedId = computed(() => this.selected()?.id);
   /** The note to the thread; cleared when the selection changes. */
-  protected readonly note = linkedSignal({ source: () => this.selected()?.id, computation: (): string => '' });
+  protected readonly note = linkedSignal({ source: this.selectedId, computation: (): string => '' });
   /** The decision, option, text or 'dismiss' on its way; cleared when the selection changes. */
-  protected readonly busy = linkedSignal<string | undefined, string | null>({ source: () => this.selected()?.id, computation: () => null });
+  protected readonly busy = linkedSignal<string | undefined, string | null>({ source: this.selectedId, computation: () => null });
   protected readonly answered = signal<ReadonlySet<string>>(new Set());
   protected readonly summary = computed(() => {
     const flat = this.rack().flat;
@@ -28944,7 +28956,7 @@ apps/web-ui/e2e/knowledge.e2e.test.ts                    new
 - **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** All three React screens switch between three `div` roots (a loading line, a failed project, the screen itself), so each Angular host *is* that `div` and switches its `class` through a host binding: no `display: contents`, and the shared CSS (`.library` grid, `.memory`, `.settings`) applies to the same element as on the desktop. `Entry` keeps its `li` root (`li[deskMemoryEntry]`) inside the React `ul.memory-list`. `PolicyEditor`'s host is its `div.policy`; its rows keep the seven grid cells `.policy-rule` lays out (Angular's comment nodes take no cell). React's `Source` fragment (a link or "you") is inlined in `Entry`'s template, twice, as the React component is used twice.
 - **Callbacks** become outputs: `PolicyEditor`'s `onChange` is `changed` (as W0d.1's `SettingsFields`). The shared `label(id)` that `Entry` receives stays a function input; the screen hands it a `computed` function, so it changes only when the project does.
-- **State.** `useState` is `signal`; `useMemo` is `computed` (keyed on `s().events` through its own `computed`, as the React `[s.events]` dependency). Drafts that React resets in an effect when the project changes are `linkedSignal`s over a `computed` with a custom `equal`: `SettingsScreen`'s About draft follows only the name, goal and instructions, its working style and policy only the settings (compared as JSON, React's `settingsKey`), and `MemoryScreen`'s search box follows the route's `q`. `Entry`'s correction draft is a `linkedSignal` on the entry's content, so a fresh fold of the same entry keeps what the user typed. The React fetch effects (`library.file` on `[projectId, file, version]`; the debounced `memory.list` on `[projectId, query, active.length]`) are `effect`s that read the same keys (`active.length` through a numeric `computed`, so only a new count re-runs it) and ignore a late answer through `onCleanup`.
+- **State.** `useState` is `signal`; `useMemo` is `computed` (keyed on `s().events` through its own `computed`, as the React `[s.events]` dependency). Drafts that React resets in an effect when the project changes are `linkedSignal`s over a `computed` with a custom `equal`: `SettingsScreen`'s About draft follows only the name, goal and instructions, its working style and policy only the settings (compared as JSON, React's `settingsKey`), and `MemoryScreen`'s search box follows the route's `q`. `Entry`'s correction draft is a `linkedSignal` over a `computed` of the entry's content (not `() => this.m().content`, which re-runs, and resets the draft, whenever a fold hands `Entry` a new object: W2b.2's review fix), so a fresh fold of the same entry keeps what the user typed. The React fetch effects (`library.file` on `[projectId, file, version]`; the debounced `memory.list` on `[projectId, query, active.length]`) are `effect`s that read the same keys (`active.length` through a numeric `computed`, so only a new count re-runs it) and ignore a late answer through `onCleanup`.
 - **Controlled checkbox.** React's "Agents can write here" is controlled: after a click it shows deskd's value until the `source.updated` event lands. The port does the same: its handler reads the new value, puts the box back, and the `[checked]` binding moves when the event arrives.
 - **Selects.** A `<select>` whose options are static takes `[value]` (the options exist before the binding is applied); one whose options come from `@for` (`MemoryScreen`'s Kind) marks the chosen option with `[selected]`, as W0d.1 does.
 - **Text.** A JSX `{' '}` is `&ngsp;`; compared lines stay on one line in the template; static texts given to `EmptyState`'s `body` are bound (`[body]="'…'"`), so no stray `body` attribute lands in the DOM.
@@ -29407,6 +29419,8 @@ git commit -m "feat(web-ui): the Library screen: filters, upload by picker or dr
 
 A port of `MemoryScreen.tsx`. What Desk remembers is folded from the event log (`memoryFromEvents`: supersession and deletion; `activeEntries`, newest first) and grouped by kind (Decisions, Facts, Preferences, Contacts, Notes; an empty kind has no section). The form adds an entry of a chosen kind; each entry corrects in place ("The old version is kept in the history."), shows "Corrected N times" with its earlier versions, and deletes after a confirm. The search box asks deskd (`memory.list` with `q`, 250 ms after the last keystroke), keeps the route's `?q=` in step (replaced), and starts from it.
 
+**Deviation (review fix, after 91f235e):** `Entry`'s draft was `linkedSignal(() => this.m().content)`. A linkedSignal reads its source inside its own node and compares only its result with the value it holds, so when the source reads a whole object, any new object re-runs it: `memoryFromEvents` builds new entry objects on every project event, so an unrelated event reset the correction being typed back to the entry's text (React's `useState` never resets it). The draft now follows a `computed` of the content (`private readonly content = computed(() => this.m().content)`, `draft = linkedSignal(() => this.content())`), which changes only when the text does. A sixth case types a correction, lets a `memory.written` for another entry arrive, and expects the box to keep the typed text (it failed before the fix). The code blocks below are updated.
+
 **Files:**
 - Create: `apps/web-ui/src/app/knowledge/memory-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts`, `apps/web-ui/src/app/screen-for.spec.ts` (W0c.11)
@@ -29517,6 +29531,18 @@ describe('MemoryScreen', () => {
     expect(bridge.calls.find((c) => c.channel === 'memory.list')?.input).toEqual({ projectId: 'p', q: 'churn' });
   });
 
+  it('keeps a correction being typed when an unrelated event folds the entries again', async () => {
+    const bridge = await setup();
+    const fact = await screen.findByRole('listitem', { name: /Churn is 4%/ });
+    fireEvent.click(within(fact).getByRole('button', { name: 'Correct' }));
+    const box = within(fact).getByLabelText('Correct this entry') as HTMLTextAreaElement;
+    fireEvent.input(box, { target: { value: 'Churn is 3.5% monthly' } });
+    // A new entry elsewhere: memoryFromEvents rebuilds every entry object, this one included.
+    bridge.emit('desk:event', ev(7, 'memory.written', { memory_id: 'm5', kind: 'fact', content: 'Most users sign up on mobile', source: 'user' }));
+    await screen.findByRole('listitem', { name: /Most users sign up on mobile/ });
+    expect(box.value).toBe('Churn is 3.5% monthly');
+  });
+
   it("starts from the route's search, and keeps the route in step with the box", async () => {
     const bridge = await setup({ 'memory.list': () => [{ id: 'm2' }] }, 'launch');
     const box = (await screen.findByLabelText('Search memory')) as HTMLInputElement;
@@ -29618,8 +29644,10 @@ export class Entry {
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
   protected readonly editing = signal(false);
-  /** The correction being typed; a fresh fold of the same entry keeps it. */
-  protected readonly draft = linkedSignal(() => this.m().content);
+  /** The entry's text: a fold rebuilds `m` on every project event, and only a new text should reach `draft`. */
+  private readonly content = computed(() => this.m().content);
+  /** The correction being typed; a fresh fold of the same entry keeps it (the source is the text, not the object). */
+  protected readonly draft = linkedSignal(() => this.content());
   protected readonly busy = signal<'save' | 'delete' | null>(null);
   protected readonly showChain = signal(false);
   protected readonly confirming = signal(false);
@@ -29880,7 +29908,7 @@ after:
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/knowledge/memory-screen.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 5 memory cases, and `screen-for.spec.ts` with its updated memory line.
+Expected: PASS: the 6 memory cases (5 before W2b.2's review fix), and `screen-for.spec.ts` with its updated memory line.
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
