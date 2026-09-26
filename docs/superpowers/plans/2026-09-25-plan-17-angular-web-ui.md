@@ -36683,7 +36683,7 @@ Expected: PASS: `tokens.test.ts` finds no color literal in the new files.
 - **Late answers after another built-in opens.** `openFile` captures the name before its `await` and drops a file (and its error toast) that lands for another built-in, as `SkillPanel` does. Case 6: the Files tab of the next built-in showed the old file.
 - **Pending marks per built-in.** The panel's `retrying` and `pending`, and `BuiltinSwitch`'s `pending`, were one flag, and the panel's switch and Retry are the same components whichever built-in it shows, so a running call marked the next built-in's buttons and lost its own mark on the way back. The panel keeps a set of `<name>|<what>` marks (`retry`, `duplicate`) that `busyHere(what)` reads for the open built-in, and the switch keeps a set of names; each call adds its mark and deletes only that one. Retry's toast and `changed` still come when another built-in opened meanwhile, since it did happen. Case 7: pdf-toolkit's held Retry and switch, then archives (neither busy), then pdf-toolkit again (both busy until released).
 - **The Duplicate sheet ignores close while its call runs.** Cancel is `[disabled]` while the copy is made, and both it and the `Sheet`'s `(close)` (Escape, the backdrop) go through `dismiss()`, which does nothing meanwhile, so `duplicated` still reaches the screen (W3a.8's review fix). Case 8: the sheet stayed open through Cancel, Escape and the backdrop, then closed with `duplicated`; against the first code Cancel was never disabled.
-- **The Duplicate sheet resets per built-in.** `duplicating` is `linkedSignal<string, boolean>({ source: this.name, computation: () => false })`, like `SkillPanel`'s `confirming` since W3a.7's second review fix, so an open sheet never duplicates the next built-in. A copy that lands after another built-in opened still toasts, and emits `changed` (the screen lists the built-ins again) instead of `duplicated`, which would open the copy and leave the built-in the user opened, as `SkillPanel`'s late delete keeps its `changed` and drops its `close`. Case 9: the sheet stayed open over archives, and the late copy emitted `duplicated`.
+- **The Duplicate sheet resets per built-in.** `duplicating` is `linkedSignal<string, boolean>({ source: this.name, computation: () => false })`, like `SkillPanel`'s `confirming` since W3a.7's second review fix, so an open sheet never duplicates the next built-in. A copy that lands after another built-in opened still toasts, and emits `changed` (the screen lists the skills, the catalog and the built-ins again: W3a.9 binds the panel's `changed` to its whole `changed()`, so the copy shows at once) instead of `duplicated`, which would open the copy and leave the built-in the user opened, as `SkillPanel`'s late delete keeps its `changed` and drops its `close`. Case 9: the sheet stayed open over archives, and the late copy emitted `duplicated`.
 
 The spec failed first on `Could not resolve "./builtin-group"` and `"./builtin-panel"`. Nothing else departs from `BuiltinGroup.tsx` and `BuiltinPanel.tsx` (master bd87256, unchanged on `web-ui` since the merge but for their imports): the panel never offers Edit or anything that writes a built-in's files, and the switch only asks deskd (`builtins.setEnabled`). 9 tests.
 
@@ -36707,7 +36707,7 @@ A port of `SkillsScreen.tsx`: the heading and blurb for the map or the catalog; 
 - Consumes: `SkillDetail` (`@desk/client`); `parseSkillKey`, `skillKey`, `SkillRef` (`@desk/ui-core`); `initialGlobalState` (`@desk/bff/contract`, specs); `ProjectSummary`, `CatalogItem` (`@desk/protocol`, specs); `DeskBridge`, `RouteService`, `GlobalStore`, `ToastService`, `Button`, `EmptyState`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal`, `screenFor` (W0c); `projectTone` (W0c.12); `injectSkills` (W3a.1); `catalogIndex`, `injectCatalog`, `catalogItems`, `install`, `reviewOf` (W3a.2); `CatalogView`, `LayoutSwitch`, `injectCatalogLayout` (W3a.4); `ReviewSheet` (W3a.5); `SkillList`, `SkillsMapView` (W3a.6); `SkillPanel` (W3a.7); `SkillEditor`, `AskDesk`, `ImportSheet` (W3a.8); `injectBuiltins`, `parseBuiltinKey`, `builtin` (W3a.2b, the last in the spec); `BuiltinGroup`, `BuiltinPanel` (W3a.8b).
 - Produces: `SkillsScreen` — `div[deskSkillsScreen]`, `skill = input<string>()`, `catalog = input(false, { transform: booleanAttribute })`, `review = input<string>()`; `screenFor({ name: 'skills', skill })` → `{ component: SkillsScreen, inputs: { skill, catalog: false, review: undefined } }`, `screenFor({ name: 'catalog', review })` → `{ component: SkillsScreen, inputs: { skill: undefined, catalog: true, review } }`.
 
-**Master (merged in 8883229):** `SkillsScreen.tsx` gained the built-in group and panel (`useBuiltins`, `parseBuiltinKey`, `builtin-strip` over the map, "No skills of your own yet", the panel for a `builtin:` key, and `changed` listing the built-ins again), and `SkillsScreen.test.tsx` two cases, ported last in the spec above the route case. The React file builds the group with a helper called three times; the template repeats the `@if` three times instead (with `collapsible` only over the map). Where a case has no `builtins.list` handler, both fake bridges answer `unknown_channel`: `injectBuiltins` reports the error and the group stays hidden, as it does with no built-ins. `Catalog.test.tsx` did not change.
+**Master (merged in 8883229):** `SkillsScreen.tsx` gained the built-in group and panel (`useBuiltins`, `parseBuiltinKey`, `builtin-strip` over the map, "No skills of your own yet", the panel for a `builtin:` key, and `changed` listing the built-ins again beside the skills and the catalog; React's `BuiltinGroup` and `BuiltinPanel` `onChanged` list only the built-ins, and the web binds the panel's `changed` to the whole `changed()`, see the Deviation note below), and `SkillsScreen.test.tsx` two cases, ported last in the spec above the route case. The React file builds the group with a helper called three times; the template repeats the `@if` three times instead (with `collapsible` only over the map). Where a case has no `builtins.list` handler, both fake bridges answer `unknown_channel`: `injectBuiltins` reports the error and the group stays hidden, as it does with no built-ins. `Catalog.test.tsx` did not change.
 
 - [ ] **Step 1: Write the failing specs**
 
@@ -36899,6 +36899,29 @@ describe('SkillsScreen', () => {
     await setup({ 'skills.list': () => [], 'builtins.list': () => [builtin('images')] });
     expect(await screen.findByRole('region', { name: 'Built into Desk' })).toBeTruthy();
     expect(screen.getByText('No skills of your own yet')).toBeTruthy();
+  });
+
+  it('lists your skills again when a copy lands after another built-in opened', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' }), builtin('images', { title: 'Images' })],
+      'builtins.get': ({ name }: { name: string }) => ({ ...detail(1, '# Skill'), name, scope: 'builtin' }),
+      'builtins.duplicate': () => new Promise((resolve) => (release = () => resolve({ dir: '/s/pdf-toolkit', created: true, version: 1 }))),
+    });
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Open PDF toolkit' }));
+    const panel = await screen.findByRole('article', { name: 'Built-in skill pdf-toolkit' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Duplicate to my skills' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' })).getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'builtins.duplicate')).toBe(true));
+    fireEvent.click(within(group).getByRole('button', { name: 'Open Images' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/builtin%3Aimages'));
+    expect(await screen.findByRole('article', { name: 'Built-in skill images' })).toBeTruthy();
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/builtin%3Aimages');
   });
 
   it('is what #/skills and #/skills/catalog show, with the skill or the review the route names', () => {
@@ -37258,7 +37281,7 @@ function storedView(): View {
       ></article>
     }
     @if (builtin(); as b) {
-      <article deskBuiltinPanel [item]="b" [projects]="projects()" (duplicated)="onDuplicated($event)" (changed)="refreshBuiltins()" (close)="select(null)"></article>
+      <article deskBuiltinPanel [item]="b" [projects]="projects()" (duplicated)="onDuplicated($event)" (changed)="changed()" (close)="select(null)"></article>
     }
     @if (reviewId(); as id) {
       <div deskReviewSheet [id]="id" [item]="reviewItem()" [projects]="projects()" (changed)="changed()" (close)="closeReview()"></div>
@@ -37371,7 +37394,11 @@ export class SkillsScreen {
     this.routes.replace({ name: 'catalog' });
   }
 
-  /** Something changed: list skills, the catalog and the built-ins again, and have the panel fetch its skill again. */
+  /**
+   * Something changed: list skills, the catalog and the built-ins again, and have the panel fetch its skill again. The
+   * built-in panel's `changed` comes here too (React lists only the built-ins): a copy that lands after another built-in
+   * opened emits only `changed`, and the new user skill must show at once.
+   */
   protected changed(): void {
     this.version.update((v) => v + 1);
     void this.data.refresh();
@@ -37449,13 +37476,15 @@ After:
 - [ ] **Step 5: Run the specs**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skills-screen.spec.ts --include src/app/skills/catalog/catalog.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 7 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line.
+Expected: PASS: the 8 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line (13 tests).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
 Expected: PASS, unchanged: no `app.spec.ts` case renders `#/skills` or `#/skills/catalog` (W0c.14's cases open the map, onboarding, two projects' threads, System and the tray; W3b.3's shortcut case opens the map).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation (from the review of W3a.8b):** the blocks above are the committed files. `BuiltinPanel`'s `(changed)` is bound to the screen's whole `changed()` (the skills, the catalog and the built-ins listed again, and the panel's version bumped), not to `refreshBuiltins()` as React's `onChanged={() => void builtins.refresh()}` is. Since W3a.8b's review, a copy that lands after another built-in opened emits only `changed` (not `duplicated`, which would leave the built-in the user opened), so with the built-ins alone listed again the new user skill would not show until the next focus or 30 s poll. The panel's switch and Retry go through the same output, and list a little more than React does, which changes nothing they show. `BuiltinGroup`'s `(changed)` stays `refreshBuiltins()`, as in React: its switches change only the built-ins. A new case (8 in the skills-screen spec, above the route case) holds `builtins.duplicate`, opens Images, releases the copy and expects one more global `skills.list` call while `#/skills/builtin%3Aimages` stays open; it failed with the panel bound to `refreshBuiltins()` (1 call, not 2). `changed()`'s doc comment says why. The specs failed first on `TS2307: Cannot find module './skills-screen'` (and `'../skills-screen'`), the Angular compiler's form of the resolve error. Nothing else departs from `SkillsScreen.tsx`, `SkillsScreen.test.tsx` and `Catalog.test.tsx` as they are on `web-ui` since the merge of master (8883229), unchanged after it: `screen-for.ts` imports `SkillsScreen` just above `ThreadsScreen`, since its relative imports are not sorted. 8 + 4 cases, and `screen-for.spec.ts`'s one.
 
 - [ ] **Step 6: Commit**
 

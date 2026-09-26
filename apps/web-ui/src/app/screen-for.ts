@@ -7,6 +7,7 @@ import { NotYet } from './screens/not-yet';
 import { SettingsScreen } from './settings/settings-screen';
 import { MemoryScreen } from './knowledge/memory-screen';
 import { LibraryScreen } from './knowledge/library-screen';
+import { SkillsScreen } from './skills/skills-screen';
 import { ThreadsScreen } from './threads/threads-screen';
 import { Onboarding } from './screens/onboarding';
 
@@ -36,9 +37,9 @@ export function screenFor(route: Route): ScreenView | null {
     case 'attention':
       return { component: AttentionScreen, inputs: { itemId: route.item } };
     case 'skills':
-      return notYet('Skills');
+      return { component: SkillsScreen, inputs: { skill: route.skill, catalog: false, review: undefined } };
     case 'catalog':
-      return notYet('The skill catalog');
+      return { component: SkillsScreen, inputs: { skill: undefined, catalog: true, review: route.review } };
     case 'system':
       return notYet('System');
     case 'project':
