@@ -101,6 +101,10 @@ describe('knowledge and system screens, end to end', () => {
     await style.getByRole('button', { name: 'Save' }).click();
     await expect.poll(async () => (await client.projects.get(project.id)).project.settings.review_rounds).toBe(3);
     expect((await client.projects.get(project.id)).project.settings.thread_reasoning_effort).toBe('high');
+    // deskd has it; wait until the window does too. The policy draft resets when the settings change, so a push that
+    // lands after "Add rule" would drop the new rule. The section is clean (Save off, no Discard) only once it has landed.
+    await expect.poll(() => style.getByRole('button', { name: 'Discard changes' }).count()).toBe(0);
+    await expect.poll(() => style.getByRole('button', { name: 'Save' }).isDisabled()).toBe(true);
     await style.scrollIntoViewIfNeeded();
     await shot(page, 'k4-settings-style');
     const policy = page.getByRole('region', { name: 'Policy' });

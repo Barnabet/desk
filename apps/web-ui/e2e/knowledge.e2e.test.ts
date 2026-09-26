@@ -182,6 +182,10 @@ describe('knowledge and settings in the browser', () => {
     await style.getByRole('button', { name: 'Save' }).click();
     await expect.poll(async () => (await client.projects.get(project.id)).project.settings.review_rounds).toBe(3);
     expect((await client.projects.get(project.id)).project.settings.thread_reasoning_effort).toBe('high');
+    // deskd has it; wait until the page does too. The policy draft follows the live settings, so a push that lands
+    // after "Add rule" would reset it. The section is clean (Save off, no Discard) only once the push has landed.
+    await expect.poll(() => style.getByRole('button', { name: 'Discard changes' }).count()).toBe(0);
+    await expect.poll(() => style.getByRole('button', { name: 'Save' }).isDisabled()).toBe(true);
 
     // The policy: one more rule, at the end.
     const policy = page.getByRole('region', { name: 'Policy' });
