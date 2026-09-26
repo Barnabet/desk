@@ -57,7 +57,7 @@ browser (Angular app)  ── http://127.0.0.1:7434 ──►  desk web (Node, H
 - Agent text reaches the page only through `SafeMarkdownComponent` (`div[deskSafeMarkdown]`) or plain interpolation.
 - `desk web` binds loopback only. The Host check (421) runs on every request and WebSocket upgrade, and the Origin check (403) runs on `/rpc` and every upgrade.
 - The code is cross-platform: no macOS-only tools, except in the launchd code paths, which are guarded by platform. Paths go through `node:path`, and the folder opener is chosen per platform.
-- The Electron app's behaviour does not change, and neither do its unit and e2e tests, except for the cases the review fixes below add. A moved test changes only in its import lines and the contract's two renames. Five review fixes reach the desktop on purpose, so both apps agree, each with its own cases (in the desktop's tests; the map fix's are in `packages/ui-styles/src/map.test.ts`): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); and the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`).
+- The Electron app's behaviour does not change, and neither do its unit and e2e tests, except for the cases the review fixes below add. A moved test changes only in its import lines and the contract's two renames. Six review fixes reach the desktop on purpose, so both apps agree, each with its own cases (in the desktop's tests; the map fix's are in `packages/ui-styles/src/map.test.ts`): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); and the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`); and Settings shows "Couldn't load this project" when the first load fails, and keeps each control's pending state to its own write (W2b.4's note, `SettingsScreen.tsx`).
 - TypeScript is strict with `noUncheckedIndexedAccess`, including the Angular app (`ngc` with strict templates).
 - The machine is shared: at most 2 agents at once, and one Electron or Chromium run at a time.
 
@@ -408,9 +408,9 @@ All paths are relative to the repo root.
 | `apps/cli/package.json`, `apps/cli/src/commands.ts` | modify (`desk web`) | W0b.13 |
 | `apps/cli/src/web.test.ts` | new | W0b.13 |
 
-### `apps/desktop` (behaviour unchanged except five review fixes)
+### `apps/desktop` (behaviour unchanged except six review fixes)
 
-Five review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit, cba3b17). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it. Attention's ⌘⌫ leaves the note alone, held keys decide once, and a late failure keeps the next item pending (W1c.3's note, 55af589). A nameless path saves as `file`, and tool rows never title a `thread_id` with a prototype member (W2a.1's note, d1c14db). The Library lets go of a drag that leaves the window, counts only uploaded files, and stays put after a late upload (W2b.1's note, 24d56ad).
+Six review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit, cba3b17). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it. Attention's ⌘⌫ leaves the note alone, held keys decide once, and a late failure keeps the next item pending (W1c.3's note, 55af589). A nameless path saves as `file`, and tool rows never title a `thread_id` with a prototype member (W2a.1's note, d1c14db). The Library lets go of a drag that leaves the window, counts only uploaded files, and stays put after a late upload (W2b.1's note, 24d56ad). Settings says it couldn't load a project whose first load fails, and overlapping writes keep their own pending controls (W2b.4's note).
 
 | Path | Change | Tasks |
 |---|---|---|
@@ -437,6 +437,7 @@ Five review fixes change what the desktop does, so that both apps agree. Escape 
 | `apps/desktop/src/renderer/attention/AttentionScreen.{tsx,test.tsx}`, `docs/desktop.md` | modify (⌘⌫ leaves the note alone, held keys decide once, a late failure keeps the next item pending; the Attention row in `docs/desktop.md` says so) | W1c.3 (review fix) |
 | `apps/desktop/src/renderer/components/FileViewer.tsx`, `conversation/ChatItems.tsx`, `conversation/ConversationScreen.test.tsx`; `components/FileViewer.test.tsx` | modify (a nameless path saves as `file`; `titleOf` reads own keys); new | W2a.1 (review fix) |
 | `apps/desktop/src/renderer/knowledge/LibraryScreen.{tsx,test.tsx}` | modify (the drag hint lets go when the drag leaves the window, "Uploaded N files." counts the uploaded ones, a late single upload no longer navigates back) | W2b.1 (review fix) |
+| `apps/desktop/src/renderer/settings/SettingsScreen.{tsx,test.tsx}` | modify (the load failure comes before the drafts; `useSaver` keeps a set of busy keys) | W2b.4 (review fix) |
 
 ### `apps/web-server` (`@desk/web-server`, all new)
 
@@ -30237,6 +30238,8 @@ A port of `SettingsScreen.tsx` (with its `useSaver`). Five cards: About this pro
 
 **Deviation (spec):** two cases beyond the plan's six, so the port covers the web's own paths. (1) "adds a folder chosen in the folder browser, and lists it with its own write switch once deskd has it": the spec renders `SettingsScreen` beside W0d.5's `FolderBrowser` the way `App` does (`@if (bridge.folderRequest(); as request)`, `(picked)="bridge.answerFolder($event)"`), with no `app.pickFolder` handler, so `FakeDeskBridge` opens a real folder request. Cancel adds nothing; choosing `code` sends `projects.addSource` with `/Users/me/code`; after deskd's `source.added` the list has two items, the new one with its `git` chip (`chip chip-run`), its label and path separated by one space (the `&ngsp;`), "Remove code" and its own "Agents can write here" box, which stays as deskd has it after a click. (2) "keeps every draft when a push rebuilds the project with the same values": a `project.updated` with the same instructions rebuilds the project and its settings as new objects; the typed goal, a check-in choice and an added policy rule survive (it fails if `liveAbout` and `liveSettings` lose their value equality, the port's Signals rule). The component matches the plan's code, plus a comment on that rule. The PolicyEditor case already types the added rule's tool and pattern with `fireEvent.input` (the port convention; React used `fireEvent.change`). 8 tests.
 
+**Deviation (review fix, after 4ffd02c):** three changes, in both apps; the code blocks below are updated. (1) **A failed first load says so.** The view checked the drafts before the status, and a project that never loaded has no drafts, so "Couldn't load this project" was unreachable and the screen stayed on "Loading…". `view` now returns `loading` while the session loads, `error` when it is not ready (`error` or `missing`), and only then `loading` until the drafts exist; `SettingsScreen.tsx` reorders its early returns the same way. A case per status (`it.each`: `projects.get` throws a 500, and a 404, which the session calls `missing`; both show the same heading, as React) expects the heading and the message and no "Loading…". (2) **Each control keeps its own pending state.** `busy` was one value, so a second write re-enabled the first's control and the first write finishing cleared the second's. It is now a set of keys (`signal<ReadonlySet<string>>`; React's `useSaver` holds a `Set` in state), `run` adds its key and removes only that key when it settles, and each control reads `busy().has(key)`. A case starts `projects.addSource` (pending), then saves the policy (pending), lets the save settle and expects "Add folder…" still pending until its own call settles. (3) **"follows the live project after a save"** also pushes `project.updated` with `settings: { check_in: 'detailed' }` once the screen shows, and expects Detailed checked and How Desk works' Save disabled (clean): it fails if `sameSettings` ignored value changes (checked both by making it always true and by making it compare only nullness); the earlier events arrive before the first load settles, so they could not prove it. React's `SettingsScreen.test.tsx` gains the load and pending cases (the sixth review fix to reach the desktop). 11 tests.
+
 **Files:**
 - Create: `apps/web-ui/src/app/settings/settings-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts` (W0c.11)
@@ -30409,8 +30412,58 @@ describe('SettingsScreen', () => {
   });
 
   it('follows the live project after a save', async () => {
-    await setup({}, [ev(9, 'project.updated', { goal: 'File by April' })]);
+    const bridge = await setup({}, [ev(9, 'project.updated', { goal: 'File by April' })]);
     await waitFor(() => expect((screen.getByLabelText('Goal') as HTMLTextAreaElement).value).toBe('File by April'));
+    // A real settings change on the screen already showing reaches the drafts of how Desk works.
+    const style = screen.getByRole('region', { name: 'How Desk works' });
+    expect((within(style).getByLabelText(/Detailed/) as HTMLInputElement).checked).toBe(false);
+    bridge.emit('desk:event', ev(10, 'project.updated', { settings: { check_in: 'detailed' } }));
+    await waitFor(() => expect((within(style).getByLabelText(/Detailed/) as HTMLInputElement).checked).toBe(true));
+    expect((within(style).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    ['fails', { code: 'internal', message: 'deskd is not answering', status: 500 }],
+    ['is missing', { code: 'not_found', message: 'No project p', status: 404 }],
+  ])("says it couldn't load a project that %s", async (_, error) => {
+    await setup({
+      'projects.get': () => {
+        throw error;
+      },
+    });
+    expect(await screen.findByRole('heading', { name: "Couldn't load this project" })).toBeTruthy();
+    expect(screen.getByText(error.message)).toBeTruthy();
+    expect(screen.queryByText('Loading…')).toBeNull();
+  });
+
+  it('keeps each write pending on its own control until that write settles', async () => {
+    let addDone!: () => void;
+    let saveDone!: () => void;
+    const bridge = await setup({
+      'app.pickFolder': () => '/Users/me/repo',
+      'projects.addSource': () => new Promise<object>((resolve) => (addDone = () => resolve({}))),
+      'projects.update': () => new Promise<object>((resolve) => (saveDone = () => resolve({}))),
+    });
+    const sources = await screen.findByRole('region', { name: 'Sources' });
+    const add = within(sources).getByRole('button', { name: 'Add folder…' }) as HTMLButtonElement;
+    const policy = screen.getByRole('region', { name: 'Policy' });
+    const save = within(policy).getByRole('button', { name: 'Save policy' }) as HTMLButtonElement;
+    const pending = (b: HTMLButtonElement) => b.getAttribute('aria-busy') === 'true' && b.disabled;
+
+    fireEvent.click(add);
+    await waitFor(() => expect(pending(add)).toBe(true));
+    fireEvent.click(within(policy).getByRole('button', { name: 'Move rule 2 up' }));
+    fireEvent.click(save);
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'projects.update')).toBe(true));
+    await waitFor(() => expect(pending(save)).toBe(true));
+    expect(pending(add)).toBe(true);
+
+    // The policy saves first: its button lets go, "Add folder…" stays pending until its own call settles.
+    saveDone();
+    await waitFor(() => expect(pending(save)).toBe(false));
+    expect(pending(add)).toBe(true);
+    addDone();
+    await waitFor(() => expect(pending(add)).toBe(false));
   });
 
   it("shows a source's write access as deskd has it until the change lands, and says why deskd refuses a folder", async () => {
@@ -30558,7 +30611,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
               <textarea id="set-instructions" class="textarea" rows="4" [value]="f.about.instructions" (input)="patchAbout({ instructions: val($event) })"></textarea>
             </div>
             <div class="actions">
-              <button deskButton variant="primary" [pending]="busy() === 'about'" [disabled]="!aboutDirty() || !f.about.name.trim()" (click)="saveAbout()">Save</button>
+              <button deskButton variant="primary" [pending]="busy().has('about')" [disabled]="!aboutDirty() || !f.about.name.trim()" (click)="saveAbout()">Save</button>
             </div>
           </section>
 
@@ -30571,8 +30624,8 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
                   <li>
                     <span class="chip" [class]="src.kind === 'git' ? 'chip-run' : 'chip-idle'">{{ src.kind }}</span>
                     <span class="grow"><strong>{{ src.label }}</strong>&ngsp;<span class="mono small muted">{{ src.path }}</span></span>
-                    <label class="source-write"><input type="checkbox" [checked]="src.agent_write" [disabled]="busy() === 'w-' + src.id" (change)="setWrite(src.id, $event)" />Agents can write here</label>
-                    <button deskButton size="sm" variant="ghost" [attr.aria-label]="'Remove ' + src.label" [pending]="busy() === 'rm-' + src.id" (click)="removeSource(src.id)">Remove</button>
+                    <label class="source-write"><input type="checkbox" [checked]="src.agent_write" [disabled]="busy().has('w-' + src.id)" (change)="setWrite(src.id, $event)" />Agents can write here</label>
+                    <button deskButton size="sm" variant="ghost" [attr.aria-label]="'Remove ' + src.label" [pending]="busy().has('rm-' + src.id)" (click)="removeSource(src.id)">Remove</button>
                   </li>
                 }
               </ul>
@@ -30580,7 +30633,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
               <p class="muted">No sources yet.</p>
             }
             <div>
-              <button deskButton size="sm" [pending]="busy() === 'source'" (click)="addSource()">Add folder…</button>
+              <button deskButton size="sm" [pending]="busy().has('source')" (click)="addSource()">Add folder…</button>
             </div>
           </section>
 
@@ -30588,7 +30641,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
             <h2 id="set-style">How Desk works</h2>
             <div deskSettingsFields [value]="f.style" [models]="models()" (changed)="patchStyle($event)"></div>
             <div class="actions">
-              <button deskButton variant="primary" [pending]="busy() === 'style'" [disabled]="!styleDirty()" (click)="saveStyle()">Save</button>
+              <button deskButton variant="primary" [pending]="busy().has('style')" [disabled]="!styleDirty()" (click)="saveStyle()">Save</button>
               @if (styleDirty()) {
                 <button deskButton variant="ghost" (click)="discardStyle()">Discard changes</button>
               }
@@ -30599,7 +30652,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
             <h2 id="set-policy">Policy</h2>
             <div deskPolicyEditor [rules]="f.policy" (changed)="policy.set($event)"></div>
             <div class="actions">
-              <button deskButton variant="primary" [pending]="busy() === 'policy'" [disabled]="!policyDirty() || policyIncomplete()" (click)="savePolicy()">Save policy</button>
+              <button deskButton variant="primary" [pending]="busy().has('policy')" [disabled]="!policyDirty() || policyIncomplete()" (click)="savePolicy()">Save policy</button>
               @if (policyDirty()) {
                 <button deskButton variant="ghost" (click)="discardPolicy()">Discard changes</button>
               }
@@ -30610,7 +30663,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
             <h2 id="set-archive">Archive</h2>
             <p class="small">Archiving stops the project's threads and hides it from the map. Its library, memory and branches are kept.</p>
             <div>
-              <button deskButton variant="danger" [pending]="busy() === 'archive'" (click)="confirmArchive.set(true)">Archive project…</button>
+              <button deskButton variant="danger" [pending]="busy().has('archive')" (click)="confirmArchive.set(true)">Archive project…</button>
             </div>
           </section>
           @if (confirmArchive()) {
@@ -30631,8 +30684,9 @@ export class SettingsScreen {
   protected readonly models = injectModels();
   private readonly project = computed(() => this.s().project?.project ?? null);
 
-  /** What is being written now (React's `useSaver`): a section, `source`, `w-<id>`, `rm-<id>` or `archive`. */
-  protected readonly busy = signal<string | null>(null);
+  /** What is being written now (React's `useSaver`): sections, `source`, `w-<id>`, `rm-<id>`, `archive`. One key per
+   *  control, so overlapping writes never clear or re-enable each other's. */
+  protected readonly busy = signal<ReadonlySet<string>>(new Set());
   protected readonly confirmArchive = signal(false);
 
   // Drafts start from the live project and reset when it changes underneath (after a save, or another client). Each
@@ -30653,11 +30707,13 @@ export class SettingsScreen {
   });
   protected readonly policy = linkedSignal<PolicyRule[] | null>(() => this.liveSettings()?.policy ?? null);
 
-  /** React's early returns: "Loading…" until the drafts exist, then the failure, then the screen. */
+  /** React's early returns: "Loading…" while it loads, the failure (a project that never loaded has no drafts), then
+   *  "Loading…" until the drafts exist, then the screen. */
   protected readonly view = computed<'loading' | 'error' | 'ready'>(() => {
     const s = this.s();
-    if (s.status === 'loading' || !this.about() || !this.style() || !this.policy()) return 'loading';
-    return s.status === 'ready' && s.project ? 'ready' : 'error';
+    if (s.status === 'loading') return 'loading';
+    if (s.status !== 'ready' || !s.project) return 'error';
+    return this.about() && this.style() && this.policy() ? 'ready' : 'loading';
   });
   /** The class beside the fixed `page`. */
   protected readonly hostClass = computed(() => ({ loading: 'muted', error: '', ready: 'settings' })[this.view()]);
@@ -30753,7 +30809,7 @@ export class SettingsScreen {
   }
 
   private async run(what: string, fn: () => Promise<unknown>, done?: string): Promise<boolean> {
-    this.busy.set(what);
+    this.busy.update((b) => new Set(b).add(what));
     try {
       await fn();
       if (done) this.toasts.toast({ tone: 'info', message: done });
@@ -30762,13 +30818,17 @@ export class SettingsScreen {
       this.toasts.error(err);
       return false;
     } finally {
-      this.busy.set(null);
+      this.busy.update((b) => {
+        const next = new Set(b);
+        next.delete(what);
+        return next;
+      });
     }
   }
 }
 ```
 
-(A project that fails to load has no drafts, so, as on the desktop, it keeps the "Loading…" line: React checks the drafts before the status.)
+(The failure comes before the drafts, as on the desktop since the review fix: a project that never loaded has none.)
 
 - [ ] **Step 4: Show it for `#/p/<id>/settings`**
 
@@ -30797,7 +30857,7 @@ If Tasks W2b.1 and W2b.2 are in, that was the last `notYet(…)` line under `cas
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/settings/settings-screen.spec.ts --include src/app/settings/policy-editor.spec.ts --include src/app/settings/settings-fields.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 8 settings cases, the 3 policy editor cases, W0d.1's 5 `SettingsFields` cases unchanged, and `screen-for.spec.ts`.
+Expected: PASS: the 11 settings cases, the 3 policy editor cases, W0d.1's 5 `SettingsFields` cases unchanged, and `screen-for.spec.ts`.
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.

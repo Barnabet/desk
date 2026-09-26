@@ -49,7 +49,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
               <textarea id="set-instructions" class="textarea" rows="4" [value]="f.about.instructions" (input)="patchAbout({ instructions: val($event) })"></textarea>
             </div>
             <div class="actions">
-              <button deskButton variant="primary" [pending]="busy() === 'about'" [disabled]="!aboutDirty() || !f.about.name.trim()" (click)="saveAbout()">Save</button>
+              <button deskButton variant="primary" [pending]="busy().has('about')" [disabled]="!aboutDirty() || !f.about.name.trim()" (click)="saveAbout()">Save</button>
             </div>
           </section>
 
@@ -62,8 +62,8 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
                   <li>
                     <span class="chip" [class]="src.kind === 'git' ? 'chip-run' : 'chip-idle'">{{ src.kind }}</span>
                     <span class="grow"><strong>{{ src.label }}</strong>&ngsp;<span class="mono small muted">{{ src.path }}</span></span>
-                    <label class="source-write"><input type="checkbox" [checked]="src.agent_write" [disabled]="busy() === 'w-' + src.id" (change)="setWrite(src.id, $event)" />Agents can write here</label>
-                    <button deskButton size="sm" variant="ghost" [attr.aria-label]="'Remove ' + src.label" [pending]="busy() === 'rm-' + src.id" (click)="removeSource(src.id)">Remove</button>
+                    <label class="source-write"><input type="checkbox" [checked]="src.agent_write" [disabled]="busy().has('w-' + src.id)" (change)="setWrite(src.id, $event)" />Agents can write here</label>
+                    <button deskButton size="sm" variant="ghost" [attr.aria-label]="'Remove ' + src.label" [pending]="busy().has('rm-' + src.id)" (click)="removeSource(src.id)">Remove</button>
                   </li>
                 }
               </ul>
@@ -71,7 +71,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
               <p class="muted">No sources yet.</p>
             }
             <div>
-              <button deskButton size="sm" [pending]="busy() === 'source'" (click)="addSource()">Add folder…</button>
+              <button deskButton size="sm" [pending]="busy().has('source')" (click)="addSource()">Add folder…</button>
             </div>
           </section>
 
@@ -79,7 +79,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
             <h2 id="set-style">How Desk works</h2>
             <div deskSettingsFields [value]="f.style" [models]="models()" (changed)="patchStyle($event)"></div>
             <div class="actions">
-              <button deskButton variant="primary" [pending]="busy() === 'style'" [disabled]="!styleDirty()" (click)="saveStyle()">Save</button>
+              <button deskButton variant="primary" [pending]="busy().has('style')" [disabled]="!styleDirty()" (click)="saveStyle()">Save</button>
               @if (styleDirty()) {
                 <button deskButton variant="ghost" (click)="discardStyle()">Discard changes</button>
               }
@@ -90,7 +90,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
             <h2 id="set-policy">Policy</h2>
             <div deskPolicyEditor [rules]="f.policy" (changed)="policy.set($event)"></div>
             <div class="actions">
-              <button deskButton variant="primary" [pending]="busy() === 'policy'" [disabled]="!policyDirty() || policyIncomplete()" (click)="savePolicy()">Save policy</button>
+              <button deskButton variant="primary" [pending]="busy().has('policy')" [disabled]="!policyDirty() || policyIncomplete()" (click)="savePolicy()">Save policy</button>
               @if (policyDirty()) {
                 <button deskButton variant="ghost" (click)="discardPolicy()">Discard changes</button>
               }
@@ -101,7 +101,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
             <h2 id="set-archive">Archive</h2>
             <p class="small">Archiving stops the project's threads and hides it from the map. Its library, memory and branches are kept.</p>
             <div>
-              <button deskButton variant="danger" [pending]="busy() === 'archive'" (click)="confirmArchive.set(true)">Archive project…</button>
+              <button deskButton variant="danger" [pending]="busy().has('archive')" (click)="confirmArchive.set(true)">Archive project…</button>
             </div>
           </section>
           @if (confirmArchive()) {
@@ -122,8 +122,9 @@ export class SettingsScreen {
   protected readonly models = injectModels();
   private readonly project = computed(() => this.s().project?.project ?? null);
 
-  /** What is being written now (React's `useSaver`): a section, `source`, `w-<id>`, `rm-<id>` or `archive`. */
-  protected readonly busy = signal<string | null>(null);
+  /** What is being written now (React's `useSaver`): sections, `source`, `w-<id>`, `rm-<id>`, `archive`. One key per
+   *  control, so overlapping writes never clear or re-enable each other's. */
+  protected readonly busy = signal<ReadonlySet<string>>(new Set());
   protected readonly confirmArchive = signal(false);
 
   // Drafts start from the live project and reset when it changes underneath (after a save, or another client). Each
@@ -144,11 +145,13 @@ export class SettingsScreen {
   });
   protected readonly policy = linkedSignal<PolicyRule[] | null>(() => this.liveSettings()?.policy ?? null);
 
-  /** React's early returns: "Loading…" until the drafts exist, then the failure, then the screen. */
+  /** React's early returns: "Loading…" while it loads, the failure (a project that never loaded has no drafts), then
+   *  "Loading…" until the drafts exist, then the screen. */
   protected readonly view = computed<'loading' | 'error' | 'ready'>(() => {
     const s = this.s();
-    if (s.status === 'loading' || !this.about() || !this.style() || !this.policy()) return 'loading';
-    return s.status === 'ready' && s.project ? 'ready' : 'error';
+    if (s.status === 'loading') return 'loading';
+    if (s.status !== 'ready' || !s.project) return 'error';
+    return this.about() && this.style() && this.policy() ? 'ready' : 'loading';
   });
   /** The class beside the fixed `page`. */
   protected readonly hostClass = computed(() => ({ loading: 'muted', error: '', ready: 'settings' })[this.view()]);
@@ -244,7 +247,7 @@ export class SettingsScreen {
   }
 
   private async run(what: string, fn: () => Promise<unknown>, done?: string): Promise<boolean> {
-    this.busy.set(what);
+    this.busy.update((b) => new Set(b).add(what));
     try {
       await fn();
       if (done) this.toasts.toast({ tone: 'info', message: done });
@@ -253,7 +256,11 @@ export class SettingsScreen {
       this.toasts.error(err);
       return false;
     } finally {
-      this.busy.set(null);
+      this.busy.update((b) => {
+        const next = new Set(b);
+        next.delete(what);
+        return next;
+      });
     }
   }
 }

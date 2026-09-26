@@ -156,8 +156,58 @@ describe('SettingsScreen', () => {
   });
 
   it('follows the live project after a save', async () => {
-    await setup({}, [ev(9, 'project.updated', { goal: 'File by April' })]);
+    const bridge = await setup({}, [ev(9, 'project.updated', { goal: 'File by April' })]);
     await waitFor(() => expect((screen.getByLabelText('Goal') as HTMLTextAreaElement).value).toBe('File by April'));
+    // A real settings change on the screen already showing reaches the drafts of how Desk works.
+    const style = screen.getByRole('region', { name: 'How Desk works' });
+    expect((within(style).getByLabelText(/Detailed/) as HTMLInputElement).checked).toBe(false);
+    bridge.emit('desk:event', ev(10, 'project.updated', { settings: { check_in: 'detailed' } }));
+    await waitFor(() => expect((within(style).getByLabelText(/Detailed/) as HTMLInputElement).checked).toBe(true));
+    expect((within(style).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    ['fails', { code: 'internal', message: 'deskd is not answering', status: 500 }],
+    ['is missing', { code: 'not_found', message: 'No project p', status: 404 }],
+  ])("says it couldn't load a project that %s", async (_, error) => {
+    await setup({
+      'projects.get': () => {
+        throw error;
+      },
+    });
+    expect(await screen.findByRole('heading', { name: "Couldn't load this project" })).toBeTruthy();
+    expect(screen.getByText(error.message)).toBeTruthy();
+    expect(screen.queryByText('Loading…')).toBeNull();
+  });
+
+  it('keeps each write pending on its own control until that write settles', async () => {
+    let addDone!: () => void;
+    let saveDone!: () => void;
+    const bridge = await setup({
+      'app.pickFolder': () => '/Users/me/repo',
+      'projects.addSource': () => new Promise<object>((resolve) => (addDone = () => resolve({}))),
+      'projects.update': () => new Promise<object>((resolve) => (saveDone = () => resolve({}))),
+    });
+    const sources = await screen.findByRole('region', { name: 'Sources' });
+    const add = within(sources).getByRole('button', { name: 'Add folder…' }) as HTMLButtonElement;
+    const policy = screen.getByRole('region', { name: 'Policy' });
+    const save = within(policy).getByRole('button', { name: 'Save policy' }) as HTMLButtonElement;
+    const pending = (b: HTMLButtonElement) => b.getAttribute('aria-busy') === 'true' && b.disabled;
+
+    fireEvent.click(add);
+    await waitFor(() => expect(pending(add)).toBe(true));
+    fireEvent.click(within(policy).getByRole('button', { name: 'Move rule 2 up' }));
+    fireEvent.click(save);
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'projects.update')).toBe(true));
+    await waitFor(() => expect(pending(save)).toBe(true));
+    expect(pending(add)).toBe(true);
+
+    // The policy saves first: its button lets go, "Add folder…" stays pending until its own call settles.
+    saveDone();
+    await waitFor(() => expect(pending(save)).toBe(false));
+    expect(pending(add)).toBe(true);
+    addDone();
+    await waitFor(() => expect(pending(add)).toBe(false));
   });
 
   it("shows a source's write access as deskd has it until the change lands, and says why deskd refuses a folder", async () => {
