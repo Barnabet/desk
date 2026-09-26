@@ -16,6 +16,10 @@ describe('injectMediaQuery', () => {
     expect(view.container.textContent).toBe('false');
   });
 
+  it('needs an injection context, also where matchMedia is missing', () => {
+    expect(() => injectMediaQuery('(max-width: 1279px)')).toThrow(/NG0203/);
+  });
+
   it('follows the query until the component goes away', async () => {
     let onChange: (() => void) | undefined;
     const mql = { matches: true, addEventListener: (_: string, l: () => void) => (onChange = l), removeEventListener: vi.fn() };
