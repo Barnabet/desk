@@ -37945,6 +37945,8 @@ Expected: PASS (3 tests). With `DESK_E2E_SHOTS=$(mktemp -d)`, `web-catalog.png`,
 Run: `pnpm vitest run --config vitest.web-e2e.config.ts apps/web-ui/e2e/smoke.e2e.test.ts`
 Expected: PASS (2 tests): without `daemon`, deskd starts as before.
 
+**As run:** the blocks above are the committed files, unchanged: Step 2 failed with the TS2353 above, every "before" anchor in `harness.ts` matched W0d.9's text, and the file passed its 3 tests on its first Chromium run (about 7 s), downloading nothing. Checked before it ran, on `web-ui` after the merge of master (8883229): the shipped `catalog.json` has 18 entries in the five bays' categories (research 5, documents 4, writing 3, planning 2, code 4) and none in `files`, so no "Files & media" region; `excel-automation` and `summarize-meeting` are in it; every entry already carries `scripts`, `runtime` and `caveats`, so the raw JSON is what `loadCatalog()` (the Electron test's) parses it to; and `builtinSkill`'s digest is core's `treeDigest`. The current Electron `catalog.e2e.test.ts`, `builtins.e2e.test.ts` and `knowledge.e2e.test.ts` (skills steps) match what the file ports, except where the task says so (the stand-in's `LICENSE` and Summarize meeting, the client's check instead of System, the switch count read from `builtins.list` instead of 12). The smoke file ran within the whole suite (`pnpm test:web-e2e`: 5 files, 14 tests, the built-UI check included) rather than on its own.
+
 - [ ] **Step 5: Commit**
 
 ```sh

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import type { DeskClient } from '@desk/client';
 import { clientFromDataDir } from '@desk/client/node';
-import { startDaemon, type RunningDaemon } from '@desk/daemon';
+import { startDaemon, type DaemonOptions, type RunningDaemon } from '@desk/daemon';
 import { startFakeModel, text, type FakeModelServer, type Script } from '@desk/fake-model';
 import { startWebServer, type WebServer } from '@desk/web-server';
 
@@ -35,11 +35,14 @@ export type WebE2E = {
   close(): Promise<void>;
 };
 
+/** deskd options an e2e file may set: a fake skill catalog and a stand-in uv (catalog.e2e.test.ts). */
+export type WebE2EDaemonOptions = Pick<DaemonOptions, 'catalog' | 'runtimes'>;
+
 /**
  * A real deskd (in process, on the fake model), desk web in front of it on a free port serving the built Angular app
  * (apps/web-ui/dist/browser: `pnpm test:web-e2e` builds it first), and headless Chromium.
  */
-export async function startWebE2E(o: { script?: Script } = {}): Promise<WebE2E> {
+export async function startWebE2E(o: { script?: Script; daemon?: WebE2EDaemonOptions } = {}): Promise<WebE2E> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'desk-web-e2e-')));
   const home = join(root, 'home');
   const dataDir = join(root, 'data');
@@ -60,7 +63,7 @@ export async function startWebE2E(o: { script?: Script } = {}): Promise<WebE2E> 
   try {
     const fake = await startFakeModel(o.script ?? (() => text('Noted.')));
     closers.push(() => fake.close());
-    const daemon = await startDaemon({ dataDir, port: 0, home, modelConfig: { baseURL: fake.url, apiKey: 'test' } });
+    const daemon = await startDaemon({ ...o.daemon, dataDir, port: 0, home, modelConfig: { baseURL: fake.url, apiKey: 'test' } });
     closers.push(() => daemon.stop());
     const warnings: string[] = [];
     const web = await startWebServer({ dataDir, port: 0, open: false, home, log: (m) => void warnings.push(m) });
