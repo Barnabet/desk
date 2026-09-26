@@ -95,8 +95,11 @@ export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 export const MemoryKind = z.enum(['fact', 'decision', 'preference', 'contact', 'note']);
 export type MemoryKind = z.infer<typeof MemoryKind>;
 
-export const SkillScope = z.enum(['project', 'global']);
+export const SkillScope = z.enum(['project', 'global', 'builtin']);
 export type SkillScope = z.infer<typeof SkillScope>;
+/** Scopes a skill can be written to; built-in skills ship with Desk and are read-only. */
+export const WritableSkillScope = z.enum(['project', 'global']);
+export type WritableSkillScope = z.infer<typeof WritableSkillScope>;
 
 /** Agent Skills naming: lowercase letters, digits and single hyphens, at most 64 characters. */
 export const SkillName = z

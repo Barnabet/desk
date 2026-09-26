@@ -22,7 +22,10 @@ const limit = z.number().int().min(1).max(5000).optional();
 const scope = { projectId: id.optional() };
 const none = z.object({});
 
-export const AppSettings = z.object({ notifications: z.boolean() });
+/** `system` follows macOS; main maps it to `nativeTheme.themeSource`, which every window's CSS sees as prefers-color-scheme. */
+export const Appearance = z.enum(['system', 'light', 'dark']);
+export type Appearance = z.infer<typeof Appearance>;
+export const AppSettings = z.object({ notifications: z.boolean(), appearance: Appearance });
 export type AppSettings = z.infer<typeof AppSettings>;
 export const AppSettingsPatch = AppSettings.partial();
 export type AppSettingsPatch = z.input<typeof AppSettingsPatch>;
@@ -91,6 +94,13 @@ export const channels = {
   'skills.version': z.object({ ...scope, name, version }),
   'skills.versionFile': z.object({ ...scope, name, version, path: relPath }),
   'skills.runtimeRetry': z.object({ ...scope, name }),
+
+  'builtins.list': z.object({ projectId: id.optional() }),
+  'builtins.get': z.object({ name }),
+  'builtins.file': z.object({ name, path: relPath }),
+  'builtins.setEnabled': z.object({ name, enabled: z.boolean() }),
+  'builtins.duplicate': z.object({ name, projectId: id.optional() }),
+  'builtins.retry': z.object({ name }),
 
   'catalog.list': none,
   'catalog.prepare': z.object({ id: name }),

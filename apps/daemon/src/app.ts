@@ -17,6 +17,7 @@ import { configRoutes } from './routes/config';
 import { knowledgeRoutes } from './routes/knowledge';
 import { projectRoutes } from './routes/projects';
 import { skillRoutes } from './routes/skills';
+import { builtinRoutes } from './routes/builtins';
 import { systemRoutes } from './routes/system';
 import { uiRoutes } from './routes/ui';
 
@@ -62,6 +63,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/v1', attachmentRoutes(deps));
   app.route('/v1', uiRoutes(deps));
   app.route('/v1', skillRoutes(deps));
+  app.route('/v1', builtinRoutes(deps));
   app.route('/v1', catalogRoutes(deps));
   app.route('/v1', serviceRoutes(deps));
   app.route('/v1', systemRoutes(deps));

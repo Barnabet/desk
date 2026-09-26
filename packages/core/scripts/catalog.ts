@@ -3,6 +3,9 @@
  *
  *   pnpm catalog:pin [ids…] [--ref <ref>]   resolve refs to commits and (re)compute digests in catalog.json
  *   pnpm catalog:check [ids…]               install each entry for real, build its runtime, run its smoke command in the sandbox
+ *   pnpm catalog:check --builtins [names…]  the same for Desk's built-in skills: verify each tree, build its environment, smoke it
+ *   pnpm catalog:sync                       copy catalog/shared/*.py over the copies inside first-party skills' scripts/
+ *   pnpm builtins:pin [names…]              re-pin builtins.json from catalog/skills (digests, counts, packages.txt)
  *
  * pin works on the raw JSON so new entries can start with `"sha": "HEAD"` and `"digest": "pending"`. Entries whose
  * repository archive is too large switch to files mode (the skill's files listed and fetched one by one). A Node
@@ -10,11 +13,11 @@
  * `npm:<spec> …` from npm itself (resolved as of the catalog date, no scripts run).
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CatalogFile, type CatalogEntry } from '@desk/protocol';
+import { BuiltinsFile, CatalogFile, type CatalogEntry } from '@desk/protocol';
 import { detectLicense, flattenLock, shellWord as shq } from '../src/catalog/curation';
 import {
   CatalogService,
@@ -23,6 +26,7 @@ import {
   EventStore,
   extractSubtree,
   httpFetch,
+  loadBuiltinsManifest,
   isScript,
   ModelRegistry,
   openDb,
@@ -30,17 +34,21 @@ import {
   readTree,
   runProcess,
   Runtime,
+  runtimeKey,
   scrubbedEnv,
   shellInvocation,
   SkillRuntimes,
   treeDigest,
   withSkillEnv,
   type ExtractedFile,
+  type SkillEnv,
 } from '../src/index';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CATALOG = join(here, '..', 'src', 'catalog', 'catalog.json');
+const BUILTINS = join(here, '..', 'src', 'skills', 'builtins.json');
 const BUILTIN = join(here, '..', '..', '..', 'catalog', 'skills');
+const SHARED = join(here, '..', '..', '..', 'catalog', 'shared');
 const LICENSE_FILE = /^(LICEN[CS]E|COPYING)(\.[A-Za-z]+)?$/i;
 
 const [command, ...rest] = process.argv.slice(2);
@@ -50,9 +58,54 @@ const ids = rest.filter((a, i) => !a.startsWith('--') && (refFlag < 0 || i !== r
 
 if (command === 'pin') await pin();
 else if (command === 'check') process.exit((await check()) ? 0 : 1);
+else if (command === 'sync') sync();
+else if (command === 'builtins-pin') builtinsPin();
 else {
-  console.error('usage: catalog.ts pin|check [ids…] [--ref <ref>]');
+  console.error('usage: catalog.ts pin|check|sync|builtins-pin [ids…] [--ref <ref>]');
   process.exit(2);
+}
+
+// ── sync ────────────────────────────────────────────────────────────────
+
+/** First-party skills keep their own copies of catalog/shared modules (each skill installs alone); refresh them. */
+function sync(): void {
+  const shared = readdirSync(SHARED).filter((f) => f.endsWith('.py'));
+  let changed = 0;
+  for (const skill of readdirSync(BUILTIN)) {
+    for (const name of shared) {
+      const copy = join(BUILTIN, skill, 'scripts', name);
+      if (!existsSync(copy)) continue;
+      const want = readFileSync(join(SHARED, name), 'utf8');
+      if (readFileSync(copy, 'utf8') === want) continue;
+      writeFileSync(copy, want);
+      changed++;
+      console.log(`synced ${skill}/scripts/${name}`);
+    }
+  }
+  console.log(changed ? `${changed} copies updated; run pnpm catalog:pin for the skills listed` : 'all copies are current');
+}
+
+// ── builtins ──────────────────────────────────────────────────────────
+
+/** Rewrites builtins.json from catalog/skills: digests, counts and each skill's packages.txt (spec 2026-09-26 §5). */
+function builtinsPin(): void {
+  const raw = JSON.parse(readFileSync(BUILTINS, 'utf8')) as { version: 1; updated: string; skills: Array<Record<string, any>> };
+  raw.updated = new Date().toISOString().slice(0, 10);
+  for (const s of raw.skills.filter((x) => !ids.length || ids.includes(x.name))) {
+    const files = readTree(join(BUILTIN, s.name));
+    const junk = files.find((f) => /(^|\/)(__pycache__|\.DS_Store)(\/|$)|\.pyc$/.test(f.path));
+    if (junk) throw new Error(`remove ${s.name}/${junk.path} first: it would become part of the built-in skill`);
+    const pk = files.find((f) => f.path === 'packages.txt');
+    const packages = pk ? pk.content.toString('utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [];
+    s.runtime = { ...(s.runtime ?? {}), python: { version: s.runtime?.python?.version ?? '3.12', packages } };
+    s.digest = treeDigest(files);
+    s.files = files.length;
+    s.bytes = files.reduce((n, f) => n + f.content.length, 0);
+    s.scripts = files.filter((f) => isScript(f.path, f.mode, f.content)).length;
+    console.log(`pinned ${s.name}: ${s.files} files · ${packages.length} packages`);
+  }
+  writeFileSync(BUILTINS, `${JSON.stringify(raw, null, 2)}\n`);
+  BuiltinsFile.parse(raw);
 }
 
 // ── pin ─────────────────────────────────────────────────────────────────
@@ -164,9 +217,26 @@ function resolveRef(repo: string, name: string): string {
 
 // ── check ───────────────────────────────────────────────────────────────
 
+/** Runs a skill's smoke command from its folder, sandboxed and writable only to a fresh workspace; returns its first line. */
+async function smokeIn(o: { dir: string; name: string; smoke: string[]; env: SkillEnv; dataDir: string; sandbox: boolean }): Promise<string> {
+  const ws = mkdtempSync(join(o.dataDir, 'ws-'));
+  const cmd = o.smoke.map(shq).join(' ');
+  const r = await runProcess({
+    ...shellInvocation(`cd ${shq(o.dir)} && ${cmd}`, { enabled: o.sandbox, writable: [ws] }),
+    cwd: ws,
+    env: { ...withSkillEnv(scrubbedEnv(ws), o.env), SKILL_DIR: o.dir, SKILL_NAME: o.name },
+    timeoutMs: 180_000,
+  });
+  if (r.exitCode !== 0) throw new Error(`smoke exited ${r.exitCode}: ${r.output.trim().split('\n').slice(-8).join('\n')}`);
+  return `smoke ok (${r.output.trim().split('\n')[0]?.slice(0, 80) ?? ''})`;
+}
+
 async function check(): Promise<boolean> {
+  const builtins = rest.includes('--builtins');
   const catalog = CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8')));
-  const entries = catalog.entries.filter((e) => !ids.length || ids.includes(e.id));
+  const entries = builtins ? [] : catalog.entries.filter((e) => !ids.length || ids.includes(e.id));
+  const manifest = loadBuiltinsManifest(JSON.parse(readFileSync(BUILTINS, 'utf8')));
+  const skills = builtins ? manifest.skills.filter((s) => !ids.length || ids.includes(s.name)) : [];
   const sandbox = await detectSandbox();
   if (!sandbox) console.warn('sandbox-exec is unavailable: smoke commands run unsandboxed');
   const dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'desk-catalog-check-')));
@@ -174,7 +244,7 @@ async function check(): Promise<boolean> {
   const store = new EventStore(db);
   const models = new ModelRegistry();
   let runtime: Runtime | null = null;
-  const runtimes = new SkillRuntimes({ dataDir, store, uv: process.env.DESK_UV ?? which('uv'), nodeExec: process.execPath, exists: (r) => !!runtime?.skills.get(r.scope, r.name, r.projectId) });
+  const runtimes = new SkillRuntimes({ dataDir, store, uv: process.env.DESK_UV ?? which('uv'), nodeExec: process.execPath, exists: (r) => r.scope === 'builtin' || !!runtime?.skills.get(r.scope, r.name, r.projectId) });
   runtime = new Runtime({ store, models, dataDir, adapter: createModelAdapter({ baseURL: 'http://127.0.0.1:9/v1', apiKey: 'unused' }, models), skillEnv: runtimes, sandboxAvailable: sandbox });
   const service = new CatalogService({ runtime, store, dataDir, catalog, builtinRoot: BUILTIN, runtimes });
   let ok = true;
@@ -191,24 +261,31 @@ async function check(): Promise<boolean> {
       await runtimes.settled(ref);
       const rt = runtimes.state(ref);
       if (rt.state === 'failed') throw new Error(`runtime failed: ${rt.reason}`);
-      let smoke = 'no smoke command';
-      if (e.smoke?.length) {
-        const skill = runtime.skills.get('global', e.id)!;
-        const ws = mkdtempSync(join(dataDir, 'ws-'));
-        const cmd = e.smoke.map(shq).join(' ');
-        const r = await runProcess({
-          ...shellInvocation(`cd ${shq(skill.dir)} && ${cmd}`, { enabled: sandbox, writable: [ws] }),
-          cwd: ws,
-          env: { ...withSkillEnv(scrubbedEnv(ws), runtimes.env(ref)), SKILL_DIR: skill.dir, SKILL_NAME: e.id },
-          timeoutMs: 180_000,
-        });
-        if (r.exitCode !== 0) throw new Error(`smoke exited ${r.exitCode}: ${r.output.trim().split('\n').slice(-8).join('\n')}`);
-        smoke = `smoke ok (${r.output.trim().split('\n')[0]?.slice(0, 80) ?? ''})`;
-      }
+      const smoke = e.smoke?.length
+        ? await smokeIn({ dir: runtime.skills.get('global', e.id)!.dir, name: e.id, smoke: e.smoke, env: runtimes.env(ref), dataDir, sandbox })
+        : 'no smoke command';
       console.log(`PASS ${e.id} · runtime ${rt.state} · ${smoke} · ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     } catch (err) {
       ok = false;
       console.log(`FAIL ${e.id}: ${(err as Error).message}`);
+    }
+  }
+  for (const s of skills) {
+    const ref = { scope: 'builtin' as const, name: s.name };
+    const spec = { digest: runtimeKey(s.runtime), runtime: s.runtime };
+    const dir = join(BUILTIN, s.name);
+    const t0 = Date.now();
+    try {
+      if (treeDigest(readTree(dir)) !== s.digest) throw new Error(`${s.name} does not match builtins.json: run pnpm builtins:pin ${s.name}`);
+      runtimes.setup(ref, spec, manifest.updated);
+      await runtimes.settled(ref);
+      const rt = runtimes.state(ref, spec.digest);
+      if (rt.state !== 'ready') throw new Error(`runtime ${rt.state}: ${rt.reason}`);
+      const smoke = s.smoke?.length ? await smokeIn({ dir, name: s.name, smoke: s.smoke, env: runtimes.env(ref, spec.digest), dataDir, sandbox }) : 'no smoke command';
+      console.log(`PASS ${s.name} · runtime ready · ${smoke} · ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    } catch (err) {
+      ok = false;
+      console.log(`FAIL ${s.name}: ${(err as Error).message}`);
     }
   }
   await runtime.shutdown();

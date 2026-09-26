@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
+import { agentTitle, messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
+import { clip } from '@desk/protocol';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
-import { ago, answeringLabel, clock, duration, href, waitHop, waitLabel, type LaneGeometry, type LineGeometry } from '@desk/ui-core';
+import { ago, answeringLabel, clock, duration, href, plural, waitHop, waitLabel, type LaneGeometry, type LineGeometry, type MessageLink } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 
 type StationG = LineGeometry['stations'][number];
@@ -29,10 +30,28 @@ function laneStatus(l: LaneGeometry, reviewRounds: number, wait: string | null, 
 
 const shortModel = (m: string) => m.replace(/^claude-/, '');
 
+const LINK_COLOR: Record<MessageLink['kind'], string> = { question: 'var(--wait)', answer: 'var(--wait)', note: 'var(--text-min)' };
+
+/** A link's accessible name and tooltip: one message says who wrote what to whom; a burst says how many, between whom, when. */
+function linkText(m: MessagesState, k: MessageLink): { name: string; title: string } {
+  const a = agentTitle(m, k.from);
+  const b = agentTitle(m, k.to);
+  if (k.count === 1) {
+    const kind = messageById(m, k.ids[0]!)?.kind ?? k.kind;
+    return { name: `${a} → ${b}, ${kind}, ${clock(k.firstTs)}`, title: `${a} → ${b} · ${kind} · ${clock(k.firstTs)}: ${clip(k.text, 160)}` };
+  }
+  const when = clock(k.firstTs) === clock(k.lastTs) ? clock(k.firstTs) : `${clock(k.firstTs)}–${clock(k.lastTs)}`;
+  return { name: `${k.count} messages between ${a} and ${b}, ${when}`, title: `${k.count} messages between ${a} and ${b} · ${when} · latest: ${clip(k.text, 120)}` };
+}
+
+/** Below Desk's line when the lanes are folded away: room for the stops, the "now" line and nothing else. */
+const DESK_ONLY_BELOW = 30;
+
 /**
  * The transit diagram: Desk's trunk with stations, thread lanes forking and rejoining, trains at "now".
  * The lanes scroll sideways (older history to the left) and follow "now" unless the user has scrolled back;
- * the label column and the legend stay put.
+ * the label column and the legend stay put. In `desk` mode (the conversation) the lanes, their labels and marks fold
+ * up into Desk's line; switching modes animates the fold both ways (CSS transitions, staggered by row).
  */
 export function LineDiagram(o: {
   g: LineGeometry;
@@ -42,6 +61,10 @@ export function LineDiagram(o: {
   /** The project's attention items: only a thread with one is "waiting on you". */
   attention: readonly AttentionItem[];
   now: number;
+  /** `desk`: Desk's line and its stops only, the lanes folded into it; `full`: everything. */
+  mode: 'desk' | 'full';
+  /** A thread whose lane stays lit while the others dim (its page is open). */
+  focus: string | null;
   onStation(s: StationG): void;
   /** Opens the pair sheet of two agents: a question mark's asker and its recipient (design spec §8 item 8). */
   onPair(a: string, b: string): void;
@@ -53,19 +76,31 @@ export function LineDiagram(o: {
   const scroller = useRef<HTMLDivElement>(null);
   /** Whether the view follows "now" (the user hasn't scrolled back into history). */
   const pinned = useRef(true);
-  /** The counterpart of the question mark under the pointer or focus: its label lights up. */
-  const [lit, setLit] = useState<string | null>(null);
+  /** The agents of the question mark or message link under the pointer or focus: their labels light up. */
+  const [lit, setLit] = useState<readonly string[]>([]);
   const hasQuestions = g.lanes.some((l) => l.marks.some((m) => m.kind === 'question'));
+  const collapsed = o.mode === 'desk';
+  const height = collapsed ? g.trunkY + DESK_ONLY_BELOW : g.height;
+  // Lanes fold in from the bottom up and unfold from the top down.
+  const lastRow = Math.max(0, ...g.lanes.map((l) => l.row));
+  const delay = (row: number) => ({ transitionDelay: `${(collapsed ? lastRow - row : row) * 30}ms` });
+  const dimmed = (threadId: string) => o.focus !== null && threadId !== o.focus;
+  const dim = (threadId: string) => (dimmed(threadId) ? ' line-dim' : '');
+  const running = g.lanes.filter((l) => (l.thread?.status ?? l.lane.status) === 'running').length;
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollLeft = el.scrollWidth;
   }, [g.contentWidth, g.nowX]);
   return (
-    <section className="line-diagram" aria-label="Line diagram: Desk and its threads since the brief" style={{ height: g.height }}>
+    <section
+      className={`line-diagram${collapsed ? ' collapsed' : ''}`}
+      aria-label={collapsed ? "Line diagram: Desk's stops since the brief" : 'Line diagram: Desk and its threads since the brief'}
+      style={{ height, ['--trunk-y' as string]: `${g.trunkY}px` }}
+    >
       <div
         className="line-scroll"
         ref={scroller}
-        style={{ left: g.viewportLeft, width: g.viewportWidth, height: g.height }}
+        style={{ left: g.viewportLeft, width: g.viewportWidth, height }}
         onScroll={(e) => {
           const el = e.currentTarget;
           pinned.current = el.scrollWidth - el.scrollLeft - el.clientWidth < 8;
@@ -74,30 +109,48 @@ export function LineDiagram(o: {
         <div className="line-canvas" style={{ width: g.contentWidth, height: g.height }}>
           <svg width={g.contentWidth} height={g.height} aria-hidden="true" className="line-svg">
             {g.ticks.map((t) => (
-              <path key={t.t} d={`M${t.x} 24 V${g.height}`} stroke="#E3DFD6" strokeDasharray="2 4" />
+              <path key={t.t} d={`M${t.x} 24 V${g.height}`} stroke="var(--rule-soft)" strokeDasharray="2 4" />
             ))}
-            <path d={`M${g.nowX} 22 V${g.height}`} stroke="#4A4740" strokeDasharray="3 3" />
+            <path d={`M${g.nowX} 22 V${g.height}`} stroke="var(--text-min)" strokeDasharray="3 3" />
             {g.lanes.map((l) => (
-              <g key={l.lane.threadId} opacity={l.lane.archived ? 0.45 : 1}>
-                <path d={l.fork} fill="none" stroke={l.forkColor} strokeWidth={4} strokeLinecap="round" />
-                {l.segments.map((s, i) => (
-                  <path key={i} d={s.d} fill="none" stroke={s.color} strokeWidth={4} strokeLinecap="round" strokeDasharray={s.dashed ? '3 5' : undefined} />
-                ))}
-                {l.rejoins.map((d, i) => (
-                  <path key={`r${i}`} d={d} fill="none" stroke={l.rejoinColor} strokeWidth={4} strokeLinecap="round" />
-                ))}
-                {l.stub ? <path className="line-stub" d={l.stub.d} fill="none" stroke="#8A857B" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" /> : null}
-                {l.marks
-                  .filter((m) => m.kind === 'detour')
-                  .map((m) => (
-                    <g key={`d${m.eventId}`}>
-                      <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke="#EFEAE0" strokeWidth={9} />
-                      <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke={l.color} strokeWidth={4} strokeLinecap="round" />
-                    </g>
+              <g key={l.lane.threadId} className="line-fold" style={delay(l.row)}>
+                <g opacity={(l.lane.archived ? 0.45 : 1) * (dimmed(l.lane.threadId) ? 0.3 : 1)}>
+                  <path d={l.fork} fill="none" stroke={l.forkColor} strokeWidth={4} strokeLinecap="round" />
+                  {l.segments.map((s, i) => (
+                    <path key={i} d={s.d} fill="none" stroke={s.color} strokeWidth={4} strokeLinecap="round" strokeDasharray={s.dashed ? '3 5' : undefined} />
                   ))}
+                  {l.rejoins.map((d, i) => (
+                    <path key={`r${i}`} d={d} fill="none" stroke={l.rejoinColor} strokeWidth={4} strokeLinecap="round" />
+                  ))}
+                  {l.stub ? <path className="line-stub" d={l.stub.d} fill="none" stroke="var(--muted)" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" /> : null}
+                  {l.marks
+                    .filter((m) => m.kind === 'detour')
+                    .map((m) => (
+                      <g key={`d${m.eventId}`}>
+                        <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke="var(--ground)" strokeWidth={9} />
+                        <path d={`M${m.x - 16} ${l.y} C${m.x - 8} ${l.y} ${m.x - 8} ${l.y - 12} ${m.x} ${l.y - 12} C${m.x + 8} ${l.y - 12} ${m.x + 8} ${l.y} ${m.x + 16} ${l.y}`} fill="none" stroke={l.color} strokeWidth={4} strokeLinecap="round" />
+                      </g>
+                    ))}
+                </g>
               </g>
             ))}
-            <path d={`M${g.trunkStart - 6} ${g.trunkY} H${g.nowX}`} stroke="#1C1B18" strokeWidth={6} strokeLinecap="round" />
+            <path d={`M${g.trunkStart - 6} ${g.trunkY} H${g.nowX}`} stroke="var(--ink)" strokeWidth={6} strokeLinecap="round" />
+            <g className="line-fold">
+              {g.links.map((k) => {
+                // A message crosses the lanes between its two ends over a halo, and lands on a dot; a burst both ways has two.
+                // Notes stay light so the lanes read first; questions and answers are drawn full strength.
+                const dir = Math.sign(k.y2 - k.y1);
+                const color = LINK_COLOR[k.kind];
+                return (
+                  <g key={`k${k.ids[0]}`} opacity={(k.kind === 'note' ? 0.55 : 1) * (dimmed(k.from) && dimmed(k.to) ? 0.3 : 1)}>
+                    <path d={`M${k.x} ${k.y1 + dir * 8} V${k.y2 - dir * 8}`} stroke="var(--ground)" strokeWidth={6} />
+                    <path d={`M${k.x} ${k.y1} V${k.y2}`} stroke={color} strokeWidth={k.kind === 'note' ? 1.5 : 2} strokeLinecap="round" strokeDasharray={k.kind === 'answer' ? '3 3' : undefined} />
+                    <circle cx={k.x} cy={k.y2} r={4} fill={color} stroke="var(--ground)" strokeWidth={1.5} />
+                    <circle cx={k.x} cy={k.y1} r={k.both ? 4 : 2.5} fill={color} stroke={k.both ? 'var(--ground)' : undefined} strokeWidth={k.both ? 1.5 : undefined} />
+                  </g>
+                );
+              })}
+            </g>
           </svg>
 
           {g.ticks.map((t) => (
@@ -127,119 +180,146 @@ export function LineDiagram(o: {
             </div>
           ))}
 
-          {g.lanes.flatMap((l) =>
-            l.marks
-              .filter((m) => m.kind === 'detour' || m.kind === 'sent_back' || m.kind === 'stalled')
-              .map((m) => (
-                <span key={`${l.lane.threadId}-${m.eventId}`} className={`line-mark line-mark-${m.kind}`} style={{ left: m.x, top: m.kind === 'detour' ? l.y + 8 : l.y - 24 }}>
-                  {m.kind === 'detour' ? (
-                    <>
-                      <span className="mono">
-                        {clock(m.ts)} {shortModel(m.label)}
-                      </span>
-                      <span className="sr-only">: rate limited, continued on the fallback model</span>
-                    </>
-                  ) : m.kind === 'sent_back' ? (
-                    `sent back · ${m.label}`
-                  ) : (
-                    'stalled'
-                  )}
-                </span>
-              )),
-          )}
-
-          {g.lanes.flatMap((l) =>
-            l.marks
-              .filter((m) => m.kind === 'question')
-              .map((m) => {
-                // A tracked question on its asker's lane (design spec §8 item 10); its state is the fold's.
-                const to = messageById(o.messages, m.eventId)?.to;
-                const state = messageById(o.messages, m.eventId)?.state ?? 'open';
-                return (
-                  <button
-                    key={`q-${m.eventId}`}
-                    type="button"
-                    className={`line-q line-q-${state}`}
-                    style={{ left: m.x, top: l.y }}
-                    aria-label={`${l.lane.title} asked ${m.label}, ${clock(m.ts)}`}
-                    title={`${l.lane.title} asked ${m.label} · ${clock(m.ts)} · ${state}`}
-                    onClick={() => to && o.onPair(l.lane.threadId, to)}
-                    onMouseEnter={() => setLit(to ?? null)}
-                    onMouseLeave={() => setLit(null)}
-                    onFocus={() => setLit(to ?? null)}
-                    onBlur={() => setLit(null)}
-                  />
-                );
-              }),
-          )}
-
-          {g.lanes.map((l) =>
-            l.stub ? (
-              <span key={`answering-${l.lane.threadId}`} className="line-answering" style={{ left: l.stub.x, top: l.y }} aria-hidden="true">
-                <span className="live-dot" />
-              </span>
-            ) : null,
-          )}
-
-          {g.lanes.map((l) => {
-            const approval = l.signal ? pendingApproval(l.lane.threadId) : undefined;
-            return l.signal ? (
-              <a key={`sig-${l.lane.threadId}`} className="line-signal" style={{ left: l.signal.x, top: l.y }} href={href({ name: 'attention', ...(approval ? { item: `approval:${approval.id}` } : {}) })}>
-                <span className="line-signal-chip">
-                  <strong>Waiting for your approval</strong> · <span className="mono">{l.signal.label}</span> · <span className="mono muted">{clock(l.signal.ts)}</span>
-                </span>
-                <span className="line-signal-dot" aria-hidden="true" />
-              </a>
-            ) : null;
-          })}
-
-          {g.lanes.map((l) => {
-            // A waiting lane whose wait leads to something that needs the user ends in a vermilion dot linking to it.
-            const hop = (l.thread?.status ?? l.lane.status) === 'waiting' ? waitHop(o.messages, l.lane.threadId, o.attention) : null;
-            return hop ? (
-              <a
-                key={`hop-${l.lane.threadId}`}
-                className="line-hop"
-                style={{ left: g.nowX, top: l.y }}
-                href={href({ name: 'attention', item: hop.item.id })}
-                aria-label={hop.label}
-                title={`${l.lane.title} waits on it: ${hop.label}`}
-              />
-            ) : null;
-          })}
-
-          {g.lanes.map((l) =>
-            l.trainX !== null ? (
-              <div key={`train-${l.lane.threadId}`}>
-                {l.thread?.activity ? (
-                  <span className="line-activity" style={{ left: l.trainX - 18, top: l.y - 26 }}>
-                    {l.thread.activity}
+          {/* Everything drawn on the lanes: folded into Desk's line, and out of reach, on the conversation. */}
+          <div className="line-fold-html" inert={collapsed}>
+            {g.lanes.flatMap((l) =>
+              l.marks
+                .filter((m) => m.kind === 'detour' || m.kind === 'sent_back' || m.kind === 'stalled')
+                .map((m) => (
+                  <span key={`${l.lane.threadId}-${m.eventId}`} className={`line-mark line-mark-${m.kind}${dim(l.lane.threadId)}`} style={{ left: m.x, top: m.kind === 'detour' ? l.y + 8 : l.y - 24 }}>
+                    {m.kind === 'detour' ? (
+                      <>
+                        <span className="mono">
+                          {clock(m.ts)} {shortModel(m.label)}
+                        </span>
+                        <span className="sr-only">: rate limited, continued on the fallback model</span>
+                      </>
+                    ) : m.kind === 'sent_back' ? (
+                      `sent back · ${m.label}`
+                    ) : (
+                      'stalled'
+                    )}
                   </span>
-                ) : null}
-                <a
-                  className="line-train"
-                  style={{ left: l.trainX, top: l.y }}
-                  href={threadHref(l.lane.threadId)}
-                  aria-label={`${l.lane.title}, running now`}
-                >
-                  <span aria-hidden="true" />
-                </a>
-              </div>
-            ) : null,
-          )}
+                )),
+            )}
 
-          {g.lanes.map((l) =>
-            l.inlineLabel ? (
-              <a
-                key={`title-${l.lane.threadId}`}
-                className={`line-lane-title${lit === l.lane.threadId ? ' lit' : ''}`}
-                style={{ left: l.inlineLabel.x, top: l.y - 20, maxWidth: l.inlineLabel.width }}
-                href={threadHref(l.lane.threadId)}
-              >
-                {l.lane.title}
-              </a>
-            ) : null,
-          )}
+            {g.links.map((k) => {
+              const t = linkText(o.messages, k);
+              const pair = [k.from, k.to];
+              return (
+                <button
+                  key={`link-${k.ids[0]}`}
+                  type="button"
+                  className={`line-link line-link-${k.kind}${k.live ? ' live' : ''}${dimmed(k.from) && dimmed(k.to) ? ' line-dim' : ''}`}
+                  style={{ left: k.x, top: Math.min(k.y1, k.y2), height: Math.abs(k.y2 - k.y1) }}
+                  aria-label={t.name}
+                  title={t.title}
+                  onClick={() => o.onPair(k.from, k.to)}
+                  onMouseEnter={() => setLit(pair)}
+                  onMouseLeave={() => setLit([])}
+                  onFocus={() => setLit(pair)}
+                  onBlur={() => setLit([])}
+                >
+                  {/* A round trip already shows as a dot at each end; a longer burst says how long. */}
+                  {k.count > 2 ? <span className="line-link-count">{k.count}</span> : null}
+                  {k.live ? <span className="line-link-pulse" aria-hidden="true" style={{ top: k.y1 < k.y2 ? 0 : '100%', ['--dy' as string]: `${k.y2 - k.y1}px` }} /> : null}
+                </button>
+              );
+            })}
+
+            {g.lanes.flatMap((l) =>
+              l.marks
+                .filter((m) => m.kind === 'question')
+                .map((m) => {
+                  // A tracked question on its asker's lane (design spec §8 item 10); its state is the fold's.
+                  const to = messageById(o.messages, m.eventId)?.to;
+                  const state = messageById(o.messages, m.eventId)?.state ?? 'open';
+                  return (
+                    <button
+                      key={`q-${m.eventId}`}
+                      type="button"
+                      className={`line-q line-q-${state}${dim(l.lane.threadId)}`}
+                      style={{ left: m.x, top: l.y }}
+                      aria-label={`${l.lane.title} asked ${m.label}, ${clock(m.ts)}`}
+                      title={`${l.lane.title} asked ${m.label} · ${clock(m.ts)} · ${state}`}
+                      onClick={() => to && o.onPair(l.lane.threadId, to)}
+                      onMouseEnter={() => setLit(to ? [to] : [])}
+                      onMouseLeave={() => setLit([])}
+                      onFocus={() => setLit(to ? [to] : [])}
+                      onBlur={() => setLit([])}
+                    />
+                  );
+                }),
+            )}
+
+            {g.lanes.map((l) =>
+              l.stub ? (
+                <span key={`answering-${l.lane.threadId}`} className={`line-answering${dim(l.lane.threadId)}`} style={{ left: l.stub.x, top: l.y }} aria-hidden="true">
+                  <span className="live-dot" />
+                </span>
+              ) : null,
+            )}
+
+            {g.lanes.map((l) => {
+              const approval = l.signal ? pendingApproval(l.lane.threadId) : undefined;
+              return l.signal ? (
+                <a key={`sig-${l.lane.threadId}`} className={`line-signal${dim(l.lane.threadId)}`} style={{ left: l.signal.x, top: l.y }} href={href({ name: 'attention', ...(approval ? { item: `approval:${approval.id}` } : {}) })}>
+                  <span className="line-signal-chip">
+                    <strong>Waiting for your approval</strong> · <span className="mono">{l.signal.label}</span> · <span className="mono muted">{clock(l.signal.ts)}</span>
+                  </span>
+                  <span className="line-signal-dot" aria-hidden="true" />
+                </a>
+              ) : null;
+            })}
+
+            {g.lanes.map((l) => {
+              // A waiting lane whose wait leads to something that needs the user ends in a vermilion dot linking to it.
+              const hop = (l.thread?.status ?? l.lane.status) === 'waiting' ? waitHop(o.messages, l.lane.threadId, o.attention) : null;
+              return hop ? (
+                <a
+                  key={`hop-${l.lane.threadId}`}
+                  className={`line-hop${dim(l.lane.threadId)}`}
+                  style={{ left: g.nowX, top: l.y }}
+                  href={href({ name: 'attention', item: hop.item.id })}
+                  aria-label={hop.label}
+                  title={`${l.lane.title} waits on it: ${hop.label}`}
+                />
+              ) : null;
+            })}
+
+            {g.lanes.map((l) =>
+              l.trainX !== null ? (
+                <div key={`train-${l.lane.threadId}`} className={dimmed(l.lane.threadId) ? 'line-dim' : undefined}>
+                  {l.thread?.activity ? (
+                    <span className="line-activity" style={{ left: l.trainX - 18, top: l.y - 26 }}>
+                      {l.thread.activity}
+                    </span>
+                  ) : null}
+                  <a
+                    className="line-train"
+                    style={{ left: l.trainX, top: l.y }}
+                    href={threadHref(l.lane.threadId)}
+                    aria-label={`${l.lane.title}, running now`}
+                  >
+                    <span aria-hidden="true" />
+                  </a>
+                </div>
+              ) : null,
+            )}
+
+            {g.lanes.map((l) =>
+              l.inlineLabel ? (
+                <a
+                  key={`title-${l.lane.threadId}`}
+                  className={`line-lane-title${lit.includes(l.lane.threadId) ? ' lit' : ''}${dim(l.lane.threadId)}`}
+                  style={{ left: l.inlineLabel.x, top: l.y - 20, maxWidth: l.inlineLabel.width }}
+                  href={threadHref(l.lane.threadId)}
+                >
+                  {l.lane.title}
+                </a>
+              ) : null,
+            )}
+          </div>
 
           {desk?.status === 'running' ? (
             <span className="line-desk-writing" style={{ left: g.nowX - 10, top: g.trunkY }}>
@@ -250,7 +330,7 @@ export function LineDiagram(o: {
         </div>
       </div>
 
-      <div className={`line-label${lit !== null && lit === desk?.id ? ' lit' : ''}`} style={{ top: g.trunkY - 15 }}>
+      <div className={`line-label${desk && lit.includes(desk.id) ? ' lit' : ''}`} style={{ top: g.trunkY - 15 }}>
         <span className="line-label-title">
           <span className="line-swatch line-swatch-desk" />
           Desk
@@ -259,40 +339,47 @@ export function LineDiagram(o: {
           {desk ? `${desk.status === 'running' ? 'writing' : desk.status} · ${shortModel(desk.model_override ?? desk.model)}` : ''}
         </span>
       </div>
-      {g.rows.map((l) => {
-        const id = l.lane.threadId;
-        const waiting = (l.thread?.status ?? l.lane.status) === 'waiting';
-        const wait = waiting ? waitLabel(o.messages, id, o.attention, o.now) : null;
-        // One hop further when what it waits on needs the user (design spec §8 item 11); the dot at the lane's end links there.
-        const hop = wait ? waitHop(o.messages, id, o.attention) : null;
-        const s = laneStatus(l, project.project.settings.review_rounds, wait && hop ? `${wait} ${hop.text}` : wait, o.now);
-        // An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3).
-        const answering = answeringLabel(o.messages, id);
-        return (
-          <a key={id} className={`line-label${lit === id ? ' lit' : ''}`} style={{ top: l.y - 15 }} href={threadHref(id)}>
-            <span className="line-label-title">
-              <span className="line-swatch" style={{ background: l.color }} />
-              {l.lane.title}
-            </span>
-            <span className={`line-label-sub status-text-${s.tone}`}>
-              {answering ? (
-                <>
-                  {s.tone} · <AnsweringBadge label={answering} />
-                </>
-              ) : (
-                s.text
-              )}
-            </span>
-          </a>
-        );
-      })}
-
+      <div className="line-fold-html line-labels" inert={collapsed}>
+        {g.rows.map((l) => {
+          const id = l.lane.threadId;
+          const waiting = (l.thread?.status ?? l.lane.status) === 'waiting';
+          const wait = waiting ? waitLabel(o.messages, id, o.attention, o.now) : null;
+          // One hop further when what it waits on needs the user (design spec §8 item 11); the dot at the lane's end links there.
+          const hop = wait ? waitHop(o.messages, id, o.attention) : null;
+          const s = laneStatus(l, project.project.settings.review_rounds, wait && hop ? `${wait} ${hop.text}` : wait, o.now);
+          // An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3).
+          const answering = answeringLabel(o.messages, id);
+          return (
+            <a key={id} className={`line-label${lit.includes(id) ? ' lit' : ''}${dim(id)}`} style={{ top: l.y - 15 }} href={threadHref(id)}>
+              <span className="line-label-title">
+                <span className="line-swatch" style={{ background: l.color }} />
+                {l.lane.title}
+              </span>
+              <span className={`line-label-sub status-text-${s.tone}`}>
+                {answering ? (
+                  <>
+                    {s.tone} · <AnsweringBadge label={answering} />
+                  </>
+                ) : (
+                  s.text
+                )}
+              </span>
+            </a>
+          );
+        })}
+      </div>
+      {g.lanes.length ? (
+        <a className="line-threads-link" style={{ top: g.trunkY - 12 }} href={href({ name: 'project', id: project.project.id, tab: 'threads' })}>
+          {plural(g.lanes.length, 'thread')}
+          {running ? ` · ${running} running` : ''} <span aria-hidden="true">›</span>
+        </a>
+      ) : null}
 
       <div className="line-legend" aria-hidden="true">
         <span><span className="line-swatch line-swatch-desk" />Desk</span>
-        <span><span className="line-swatch" style={{ background: '#2F5BD3' }} />running</span>
-        <span><span className="line-swatch" style={{ background: '#8A857B' }} />done</span>
-        <span><span className="line-swatch" style={{ background: '#A15C00' }} />waiting</span>
+        <span><span className="line-swatch" style={{ background: 'var(--run)' }} />running</span>
+        <span><span className="line-swatch" style={{ background: 'var(--muted)' }} />done</span>
+        <span><span className="line-swatch" style={{ background: 'var(--wait)' }} />waiting</span>
         <span><span className="line-legend-dot" />needs you</span>
         {hasQuestions ? (
           <span>
@@ -300,9 +387,18 @@ export function LineDiagram(o: {
             question
           </span>
         ) : null}
+        {g.links.length ? (
+          <span>
+            <svg width="18" height="14" viewBox="0 0 18 14">
+              <path d="M9 1.5 V10" stroke="var(--text-min)" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="9" cy="10.5" r="3" fill="var(--text-min)" />
+            </svg>
+            message
+          </span>
+        ) : null}
         <span>
           <svg width="18" height="10" viewBox="0 0 18 10">
-            <path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="#2F5BD3" strokeWidth="2" strokeLinecap="round" />
+            <path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="var(--run)" strokeWidth="2" strokeLinecap="round" />
           </svg>
           fallback
         </span>

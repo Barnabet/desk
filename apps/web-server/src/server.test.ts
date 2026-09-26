@@ -154,7 +154,7 @@ describe('startWebServer', () => {
     await a.closed;
     await sleep(50);
     expect(streams.length).toBe(claimed);
-    expect((await rpc(web!.port, secret, 'app.updateSettings', { notifications: false })).body).toEqual({ ok: true, value: { notifications: false } });
+    expect((await rpc(web!.port, secret, 'app.updateSettings', { notifications: false })).body).toEqual({ ok: true, value: { notifications: false, appearance: 'system' } });
     await until(() => hello() === false);
     await rpc(web!.port, secret, 'app.updateSettings', { notifications: true });
     await until(() => hello() === true);

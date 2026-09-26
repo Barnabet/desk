@@ -104,6 +104,8 @@ export interface RuntimeServices {
    * agent whose runtime is ready. `blocked` explains why `only`'s runtime cannot be used yet.
    */
   skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null };
+  /** Before a skill run: builds a built-in skill's environment on first use and waits for it (up to 5 minutes). */
+  prepareSkillRuntime(agentId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }>;
   /** Starts (or restarts, under an existing name) a project service in a thread's workspace. `by` = `user` or `agent:<id>`. */
   startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId?: string; sourceId?: string; by: string }): Promise<ServiceRow>;
   stopService(serviceId: string, by: string): Promise<ServiceRow>;

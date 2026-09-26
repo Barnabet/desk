@@ -11,6 +11,7 @@ import { SafeMarkdown } from '../components/SafeMarkdown';
 import { describeError, toast, toastError } from '../components/Toast';
 import { navigate } from '../router';
 import { useNow } from '../state/now';
+import { builtinKey } from './builtins/data';
 import { scopeArg, whoLabel } from './data';
 import { runtimeWords, sourceLabel } from './catalog/data';
 import { RuntimeLine } from './catalog/RuntimeLine';
@@ -165,6 +166,8 @@ export function SkillPanel(o: {
 
   const node = o.node;
   const current = history.find((h) => h.current);
+  /** The built-in skill this one was duplicated from, if any. */
+  const fromBuiltin = history.find((h) => h.origin?.startsWith('builtin:'))?.origin?.slice(8).split('@')[0];
   const scopeLabel = skill.scope === 'global' ? 'Global' : (o.projectNames.get(skill.projectId!) ?? 'Project');
   return (
     <article className="card skill-panel" aria-label={`Skill ${skill.name}`}>
@@ -202,6 +205,12 @@ export function SkillPanel(o: {
               </div>
               <RuntimeLine entry={o.catalog.item} install={o.catalog.install} onRetried={o.onChanged} />
             </div>
+          ) : null}
+          {fromBuiltin ? (
+            <p className="shadow-note">
+              Customised from the built-in skill <a href={href({ name: 'skills', skill: builtinKey(fromBuiltin) })}>{fromBuiltin}</a>. Agents use this copy instead; delete it to bring the
+              built-in back.
+            </p>
           ) : null}
           {detail.error ? (
             <p className="field-error" role="alert">

@@ -6,6 +6,7 @@ import type { RuntimeServices, ToolContext } from '../tools/types';
 export const NO_SERVICES = new Proxy({} as RuntimeServices, {
   get(_t, prop) {
     if (prop === 'skillEnv') return () => ({ bins: [], vars: {}, blocked: null, note: null });
+    if (prop === 'prepareSkillRuntime') return async () => ({ waitedMs: 0 });
     throw new Error(`Runtime services are not available in this test context (accessed ${String(prop)})`);
   },
 });

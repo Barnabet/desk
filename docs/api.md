@@ -106,7 +106,7 @@ Project services are long-lived processes (dev servers, APIs, workers) that Desk
 
 ## Skills
 
-Global skills live under `/v1/skills`, project skills under `/v1/projects/:id/skills`. On project routes, `GET` resolves project-then-global, the same way agents see skills. Writes target the route's scope.
+Global skills live under `/v1/skills`, project skills under `/v1/projects/:id/skills`. These routes list and change only the user's own skills; Desk's built-in skills have their own routes (next section). On project routes, `GET` resolves project-then-global. Writes target the route's scope.
 
 | Method | Path suffix | Body | Notes |
 |---|---|---|---|
@@ -115,11 +115,26 @@ Global skills live under `/v1/skills`, project skills under `/v1/projects/:id/sk
 | GET | `/:name/files/<path>` | | Raw file; escaping paths return 400 |
 | PUT | `/:name` | `SkillWriteRequest { description?, instructions?, files?[{path, content_base64}], remove_files?, change_note? }` | Creates the skill (201) or refines it (200). The previous version goes to history. A `SKILL.md` may be sent as a file |
 | DELETE | `/:name` | | The last version stays in history |
-| GET | `/:name/history` | | `[{ version, description, current, change_note, origin, ts }]`. `origin` is `user`, `agent:<id>` or `catalog:<id>@<sha>`; `origin` and `ts` are null for versions with no `skill.saved` record |
+| GET | `/:name/history` | | `[{ version, description, current, change_note, origin, ts }]`. `origin` is `user`, `agent:<id>`, `catalog:<id>@<sha>` or `builtin:<name>@<digest12>` (a duplicated built-in); `origin` and `ts` are null for versions with no `skill.saved` record |
 | POST | `/:name/restore` | `{ version }` | Restores that version as the newest one |
 | POST | `/import` | `{ path, name? }` | Copies a local skill directory (e.g. `~/.claude/skills/x`). The name defaults to the frontmatter `name`. 201 |
 
 Skill names match `^[a-z0-9]+(-[a-z0-9]+)*$` (≤ 64 chars); descriptions are ≤ 1024 chars. Size limits: at most 2 MB per file, 200 files and 10 MB per skill. Symlinks are skipped on install.
+
+## Built-in skills
+
+Desk's own skills (every file type, and web research) ship with the app, read-only, and are verified against their manifest (`packages/core/src/skills/builtins.json`) at start. Agents resolve skills project → global → built-in, so a user skill of the same name shadows one. A built-in that is turned off or damaged is hidden from agents. The design is in `docs/superpowers/specs/2026-09-26-builtin-skills-design.md`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/v1/builtin-skills[?project_id=]` | | `BuiltinSkillInfo[]`: `name`, `title`, `summary`, `caveats`, `description`, `scripts`, `enabled`, `broken` (reason or null), `shadowed_by` (`global`, `project` (with `project_id`) or null), `runtime { state: none\|preparing\|ready\|failed, reason }` |
+| GET | `/v1/builtin-skills/:name` | | Detail like a skill's (`scope: 'builtin'`); 404 for unknown names |
+| GET | `/v1/builtin-skills/:name/files/<path>` | | Raw file; escaping paths return 400 |
+| PUT | `/v1/builtin-skills/:name` | `{ enabled }` | Turns it off or on for every project (event `skill.builtin_toggled`); returns the `BuiltinSkillInfo` |
+| POST | `/v1/builtin-skills/:name/duplicate` | `{ scope?: 'global'\|'project', project_id? }` | Saves an ordinary, editable copy (origin `builtin:<name>@<digest12>`) that shadows the built-in until deleted; 201. 409 when a skill of that name exists in the scope; 400 for a project copy without `project_id` |
+| POST | `/v1/builtin-skills/:name/runtime/retry` | | Rebuilds its environment: `{ state, reason }`. 409 when this daemon has no skill runtimes |
+
+**Environments on first use.** A built-in's Python environment (`<data>/runtimes/builtin/_global/<name>`) is built when an agent first activates the skill, or at its first `skill_run`, which waits up to 5 minutes and then asks the agent to try again; a run that waited starts with `(Set up <name>'s Python environment first: first use only, <n> s.)`. The environment is keyed by the packages it installs, so a Desk update that changes them rebuilds it on next use, and a copy of a built-in without an environment of its own uses the built-in's. At start, setups a crash cut short are recorded as removed, and unmodified catalog copies of these skills (from before they were built in) are deleted so the built-ins take over.
 
 ## Skill catalog
 

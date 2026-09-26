@@ -54,6 +54,12 @@ All licences below were verified on 2026-09-24. Any entry that fails `catalog:ch
 | 19 | differential-review | trailofbits/skills → `plugins/differential-review/skills/differential-review` | CC-BY-SA-4.0 | Code | none |
 | 20 | webapp-testing | anthropics/skills → `skills/webapp-testing` | Apache-2.0 | Code | Python 3.12 + `playwright` + Chromium ⚠ |
 
+**Later additions (2026-09-24):**
+- **Plan 14** rewrote #10 and #11 and moved them to a new **Files & media** category (`files`).
+- **Plan 14** also added nine first-party file-type skills: `file-inspector`, `spreadsheets`, `presentations`, `images`, `audio-video`, `data-files`, `archives`, `markup-ebooks` and `email-calendar`. The spec is `2026-09-24-file-type-skills-design.md`.
+- **Plan 15** added the first-party `web-research` skill (Research), with a new `browser` runtime extra. The spec is `2026-09-24-web-research-design.md`.
+- The catalog now has 30 entries.
+
 **Runners-up, in order:**
 1. baoyu-translate (JimLiu/baoyu-skills, MIT)
 2. gh-fix-ci (openai/skills, Apache-2.0; needs a `gh` login)
@@ -178,9 +184,10 @@ All licences below were verified on 2026-09-24. Any entry that fails `catalog:ch
 - **Location:** `<data>/runtimes/<scope>/<projectId|_global>/<skill>/`, with `bin/` put first on PATH.
 - **Python:**
   1. `uv venv --python <version> --managed-python <env>/py`. uv caches the standalone CPython under `<data>/runtimes/uv`.
-  2. `uv pip install --python <env>/py --only-binary :all: --exclude-newer <catalog.updated> <packages>`
+  2. `uv pip install --python <env>/py --only-binary :all: --compile-bytecode --exclude-newer <catalog.updated> <packages>`
   3. The `bin/` links point at `py/bin`.
   4. `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` are set under `<data>/runtimes/uv`.
+  5. Tools get `VIRTUAL_ENV`, `PYTHONDONTWRITEBYTECODE=1` (installed skills stay unchanged; step 2 precompiles the packages) and `PYTHONUTF8=1` (UTF-8 text I/O on Windows too).
 - **Node:** for each lock entry:
   1. fetch the tarball from `registry.npmjs.org`
   2. verify its `integrity`

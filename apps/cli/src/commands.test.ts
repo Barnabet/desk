@@ -169,4 +169,19 @@ describe('launchd plist', () => {
     expect((await cli('skill', 'restore', 'my-skill', '1')).out).toContain('Restored my-skill v1 as v2');
     expect((await cli('skill', 'history', 'my-skill')).out).toContain('v2 (current) — Does my thing');
   });
+
+  it("lists, switches and duplicates Desk's built-in skills", async () => {
+    const listed = (await cli('skills')).out;
+    expect(listed).toContain('No skills\n\nBuilt into Desk:');
+    expect(listed).toMatch(/ {2}pdf-toolkit — .+ \(environment set up on first use\)/);
+    expect((await cli('skill', 'off', 'pdf-toolkit')).out).toContain('Turned off pdf-toolkit');
+    expect((await cli('skills')).out).toMatch(/pdf-toolkit — .+ \(off, environment/);
+    expect((await cli('skill', 'on', 'pdf-toolkit')).code).toBe(0);
+    await cli('project', 'new', 'Ops', '--goal', 'g');
+    expect((await cli('skill', 'duplicate', 'images', '-p', 'Ops')).out).toContain('Your copy is used instead of the built-in');
+    const inOps = (await cli('skills', 'Ops')).out;
+    expect(inOps).toContain('images (project, v1)');
+    expect(inOps).toMatch(/images — .+ \(shadowed by your project skill/);
+    expect((await cli('skill', 'off', 'nope')).code).toBe(1);
+  });
 });

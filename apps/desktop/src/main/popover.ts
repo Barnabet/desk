@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, type Rectangle } from 'electron';
 import { popoverPosition } from './popoverPosition';
+import { windowFill } from './theme';
 import { isAppUrl, rendererUrl } from './windows';
 
 const SIZE = { width: 400, height: 620 };
@@ -56,7 +57,7 @@ export class TrayPopover {
       skipTaskbar: true,
       alwaysOnTop: true,
       title: 'Desk',
-      backgroundColor: '#FBFAF7',
+      backgroundColor: windowFill('popover'),
       webPreferences: { preload: this.o.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false },
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

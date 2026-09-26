@@ -17,7 +17,8 @@ export type GlobalState = {
 export type RuntimeProgress = { step: string; done?: number; total?: number };
 
 /** The key the Skills screen uses for a skill. */
-export const runtimeKey = (scope: 'global' | 'project', projectId: string | null | undefined, name: string) => (scope === 'global' ? `global:${name}` : `project:${projectId}:${name}`);
+export const runtimeKey = (scope: 'global' | 'project' | 'builtin', projectId: string | null | undefined, name: string) =>
+  scope === 'project' ? `project:${projectId}:${name}` : `${scope}:${name}`;
 
 export const initialGlobalState = (): GlobalState => ({
   connection: { status: 'starting' },

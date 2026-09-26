@@ -33,9 +33,11 @@ function builtinCatalog(runtime: ReturnType<typeof newRuntime>) {
   return { catalog, skillRuntimes };
 }
 
+const BUILTINS = join(import.meta.dirname, '..', '..', '..', '..', 'catalog', 'skills');
+
 async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = false) {
   h = await createHarness();
-  const runtime = newRuntime(h);
+  const runtime = newRuntime(h, { builtins: { root: BUILTINS } });
   const extra = withCatalog ? builtinCatalog(runtime) : {};
   server = await startServer({ app: createApp({ runtime, store: h.store, models: h.models, token: 't', version: '1.0.0', ...extra }), store: h.store, token: 't', port: 0 });
   const client = new DeskClient({ baseUrl: `http://127.0.0.1:${server.port}`, token: 't' });
@@ -53,8 +55,8 @@ async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = fals
       revealLogs: async () => {},
       saveFile: async () => true,
       openMain: (route) => void opened.push(`main:${route ?? ''}`),
-      settings: () => ({ notifications: true }),
-      updateSettings: (p) => ({ notifications: p.notifications ?? true }),
+      settings: () => ({ notifications: true, appearance: 'system' }),
+      updateSettings: (p) => ({ notifications: p.notifications ?? true, appearance: p.appearance ?? 'system' }),
     },
     ...overrides,
   };
@@ -98,11 +100,29 @@ describe('IPC dispatch', () => {
     expect(await dispatch('catalog.prepare', { id: '../etc' }, ctx)).toMatchObject({ ok: false });
   });
 
+  it("lists, switches, reads and duplicates Desk's built-in skills", async () => {
+    const { ctx, runtime } = await setup();
+    const projectId = runtime.createProject({ name: 'Launch', goal: 'g' });
+    const list = await dispatch('builtins.list', { projectId }, ctx);
+    expect(list.ok && (list.value as unknown[]).length).toBe(12);
+    expect(await dispatch('builtins.setEnabled', { name: 'pdf-toolkit', enabled: false }, ctx)).toMatchObject({ ok: true, value: { name: 'pdf-toolkit', enabled: false } });
+    expect(await dispatch('builtins.get', { name: 'word-documents' }, ctx)).toMatchObject({ ok: true, value: { scope: 'builtin' } });
+    const file = await dispatch('builtins.file', { name: 'word-documents', path: 'SKILL.md' }, ctx);
+    expect(file.ok && new TextDecoder().decode(file.value as Uint8Array)).toMatch(/^---/);
+    expect(await dispatch('builtins.duplicate', { name: 'images', projectId }, ctx)).toMatchObject({ ok: true, value: { version: 1 } });
+    expect(await dispatch('builtins.duplicate', { name: 'images' }, ctx)).toMatchObject({ ok: true });
+    expect(runtime.skills.resolve('images', projectId)?.scope).toBe('project');
+    expect(await dispatch('builtins.retry', { name: 'images' }, ctx)).toMatchObject({ ok: false, error: { status: 409 } });
+    expect(await dispatch('builtins.setEnabled', { name: '../x', enabled: false }, ctx)).toMatchObject({ ok: false });
+  });
+
   it('rejects unknown channels and invalid payloads', async () => {
     const { ctx } = await setup();
     expect(await dispatch('nope', {}, ctx)).toMatchObject({ ok: false, error: { code: 'unknown_channel' } });
     expect(await dispatch('projects.get', { id: 5 }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
     expect(await dispatch('__proto__', {}, ctx)).toMatchObject({ ok: false, error: { code: 'unknown_channel' } });
+    expect(await dispatch('app.updateSettings', { appearance: 'sepia' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await dispatch('app.updateSettings', { appearance: 'dark' }, ctx)).toMatchObject({ ok: true, value: { appearance: 'dark' } });
   });
 
   it('maps daemon and runtime errors without leaking internals', async () => {

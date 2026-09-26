@@ -89,6 +89,12 @@ export type ChannelOutputs = {
   'skills.version': Out<Client['skills']['version']>;
   'skills.versionFile': Out<Client['skills']['versionFile']>;
   'skills.runtimeRetry': Out<Client['catalog']['retryRuntime']>;
+  'builtins.list': Out<Client['builtins']['list']>;
+  'builtins.get': Out<Client['builtins']['get']>;
+  'builtins.file': Out<Client['builtins']['file']>;
+  'builtins.setEnabled': Out<Client['builtins']['setEnabled']>;
+  'builtins.duplicate': Out<Client['builtins']['duplicate']>;
+  'builtins.retry': Out<Client['builtins']['retryRuntime']>;
   'catalog.list': Out<Client['catalog']['list']>;
   'catalog.prepare': Out<Client['catalog']['prepare']>;
   'catalog.file': Out<Client['catalog']['file']>;

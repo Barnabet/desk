@@ -1,6 +1,8 @@
 import type {
   AddSourceRequest,
   AttentionResponse,
+  BuiltinDuplicateRequest,
+  BuiltinSkillInfo,
   CatalogInstallRequest,
   CatalogInstallResult,
   CatalogItem,
@@ -253,6 +255,16 @@ export class DeskClient {
     retryRuntime: (s: SkillScopeRef, name: string) => this.request<{ state: RuntimeState; reason: string | null }>('POST', `${this.skillBase(s)}/${enc(name)}/runtime/retry`),
     runtimes: () => this.get<RuntimesReport>('/system/runtimes'),
     cleanupRuntimes: () => this.request<{ removed: number; bytes: number }>('POST', '/system/runtimes/cleanup'),
+  };
+
+  /** Desk's own skills: read-only, switchable, duplicable into ordinary skills (spec 2026-09-26-builtin-skills-design). */
+  builtins = {
+    list: (s: SkillScopeRef = {}) => this.get<BuiltinSkillInfo[]>(`/builtin-skills${s.projectId ? `?project_id=${enc(s.projectId)}` : ''}`),
+    get: (name: string) => this.get<SkillDetail>(`/builtin-skills/${enc(name)}`),
+    file: (name: string, path: string) => this.raw(`/builtin-skills/${enc(name)}/files/${encPath(path)}`),
+    setEnabled: (name: string, enabled: boolean) => this.put<BuiltinSkillInfo>(`/builtin-skills/${enc(name)}`, { enabled }),
+    duplicate: (name: string, req: BuiltinDuplicateRequest = {}) => this.post<SkillSaveResult>(`/builtin-skills/${enc(name)}/duplicate`, req),
+    retryRuntime: (name: string) => this.request<{ state: RuntimeState; reason: string | null }>('POST', `/builtin-skills/${enc(name)}/runtime/retry`),
   };
 
   models = {

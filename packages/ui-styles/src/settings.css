@@ -45,7 +45,7 @@
   padding: 10px 12px;
   border: 1px solid var(--rule);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   cursor: pointer;
 }
 .choice label.on {
@@ -107,7 +107,7 @@
   align-items: center;
   padding: 6px 8px;
   border-radius: 8px;
-  background: #fbfaf7;
+  background: var(--soft);
   border: 1px solid var(--rule-soft);
 }
 .policy-num {

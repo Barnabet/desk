@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-24",
+  "updated": "2026-09-26",
   "entries": [
     {
       "id": "paper-lookup",
@@ -528,70 +528,6 @@
         "PDF export (Playwright) and deploying to Vercel are not set up; decks are plain HTML files you can open anywhere."
       ],
       "scripts": 4
-    },
-    {
-      "id": "word-documents",
-      "title": "Word documents",
-      "category": "documents",
-      "summary": "Create, read and edit .docx files: write from Markdown, apply templates, replace text, insert and delete sections, set properties. Written by Desk.",
-      "license": "MIT",
-      "homepage": "https://github.com/Barnabet/desk",
-      "source": {
-        "type": "builtin",
-        "path": "word-documents"
-      },
-      "digest": "sha256:5866ec3264fc4c54705d9b46647d9aefd0204292a8896a3f8d4b2c83a7274b01",
-      "files": 9,
-      "bytes": 25152,
-      "runtime": {
-        "python": {
-          "version": "3.12",
-          "packages": [
-            "python-docx==1.2.0"
-          ]
-        }
-      },
-      "smoke": [
-        "sh",
-        "-c",
-        "python3 scripts/docx_create.py --help >/dev/null && python3 scripts/docx_read.py --help >/dev/null && echo ok"
-      ],
-      "caveats": [],
-      "scripts": 5
-    },
-    {
-      "id": "pdf-toolkit",
-      "title": "PDF toolkit",
-      "category": "documents",
-      "summary": "Read, create and change PDFs: text and tables, merge, split, rotate, fill forms, encrypt, and write reports from Markdown. Written by Desk.",
-      "license": "MIT",
-      "homepage": "https://github.com/Barnabet/desk",
-      "source": {
-        "type": "builtin",
-        "path": "pdf-toolkit"
-      },
-      "digest": "sha256:361b73e635d959e91e0a531346a282d365be016809cb6953ae2d4095dbeb6682",
-      "files": 10,
-      "bytes": 29362,
-      "runtime": {
-        "python": {
-          "version": "3.12",
-          "packages": [
-            "pypdf==6.19.0",
-            "pdfplumber==0.11.10",
-            "reportlab==5.0.1"
-          ]
-        }
-      },
-      "smoke": [
-        "sh",
-        "-c",
-        "python3 scripts/pdf_create.py --help >/dev/null && python3 scripts/pdf_text.py --help >/dev/null && echo ok"
-      ],
-      "caveats": [
-        "No OCR: scanned PDFs without a text layer cannot be read."
-      ],
-      "scripts": 7
     },
     {
       "id": "humanizer",

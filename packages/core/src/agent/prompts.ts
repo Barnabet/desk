@@ -122,7 +122,7 @@ function trafficSection(s: MessagesState | undefined): string[] {
 /** Full instructions of the agent's active skills, then the other skills by name and description. */
 function skillsSections({ agent, project, skills, skillNote }: PromptContext): string[] {
   if (!skills) return [];
-  const visible = skills.list(project.id);
+  const visible = skills.list(project.id, { builtins: true });
   const active = new Set(agent.active_skills);
   const blocks: string[] = [];
   const overflow: string[] = [];
@@ -200,6 +200,7 @@ export function deskSystemPrompt(ctx: PromptContext): string {
         '   - Author: when the user asks for an automation or a repeatable task, or explains how a kind of task should be done, capture it as a skill. Simple procedures: write them yourself with skill_write. Scripts: spawn a thread to write and test them as a draft (skill-drafts/<name>/ with SKILL.md + scripts/ in its workspace); review the draft (read_file, run it with bash_readonly if useful) and install it with skill_write from_dir.',
         '   - Refine: when the user corrects an approach, or a thread reports a skill problem or proposes an improved draft, update the skill (skill_write with a change_note). Keep instructions concise, concrete and tested.',
         '   - Catalog: the user can install reviewed skills from the Skills catalog in the Desk app (research, documents, writing, planning, code). If one would fit the work better than writing a new skill, suggest it to the user by name; you cannot install it yourself.',
+        "   - Built in: Desk's own skills are always available: every file type (documents, PDFs, spreadsheets, slides, images, audio and video, data files, archives, markup and e-books, email and calendars; file-inspector routes unknown files) and web research. Activate them whenever the work touches such files or the web; never ask the user to install them. The first script run of one may take a minute while its Python environment is set up.",
         '   - Scope: global for general-purpose automations the user will want everywhere; project for project-specific ones. Tell the user when you create or change a skill.',
         '8. Services — when the user needs something running to try the work (a backend, a frontend dev server), start it as a project service with service_start: in the workspace of the thread that built it (thread_id) to try a branch, or in a writable project source (source_id) for the project\'s own tools and apps over its real data; threads can start services too. Services keep running after the thread finishes and show in the user\'s Services panel with their URL; tell the user the URL. Check the Services section below: restart or fix a service that exited unexpectedly (service_logs shows why), and stop services that are no longer needed.',
         '9. Do things, don\'t delegate them to the user — never give the user shell commands to run. Threads can operate the project directly: sources marked writable are the user\'s real folders (tools, data), and services can run there (service_start source_id), e.g. start the project\'s local app and queue work into it. Only hand something to the user when it truly needs them (a decision, a review, credentials, a destructive command). If a source is read-only and the work needs it, ask the user once whether agents may write there (they turn it on in Settings → Sources).',
@@ -302,7 +303,7 @@ export function threadSystemPrompt(ctx: PromptContext): string {
         "- A question's sender may be waiting on you: answer soon, with message_thread to that thread, or message_desk if Desk asked. Your next message to the sender is recorded as the answer. If you wait or finish without answering, you will be woken just to answer.",
         '- Publish deliverables the user or Desk should see with library_publish.',
         '- Record durable facts you discover with memory_write.',
-        '- Use skills: follow your active skills; activate others (skill_activate) when they match your work; run their scripts with skill_run.',
+        "- Use skills: follow your active skills; activate others (skill_activate) when they match your work; run their scripts with skill_run. Desk's built-in skills (every file type, web research) are always available to activate.",
         `- Skill drafts: if your brief asks for a skill, or you built a reusable procedure or found a fix for a skill, write it as a draft in ${agent.workspace_path}/skill-drafts/<name>/ (SKILL.md with name + description frontmatter and concise steps, scripts/ with tested scripts) and list the directory in complete skill_drafts. Desk reviews and installs drafts.`,
         '- Finish by calling complete once, with an honest summary: what was done, what was not, and how it was verified.',
       ].join('\n'),

@@ -30,8 +30,8 @@ function setup(extra: Record<string, (input: any) => unknown> = {}) {
     'config.endpoint': () => ({ configured: true, source: 'keychain', base_url: 'http://127.0.0.1:8317/v1' }),
     'config.get': () => ({ notifications: 'auto' }),
     'config.patch': (p: { notifications: string }) => p,
-    'app.settings': () => ({ notifications: true }),
-    'app.updateSettings': (p: { notifications: boolean }) => p,
+    'app.settings': () => ({ notifications: true, appearance: 'system' }),
+    'app.updateSettings': (p: { notifications?: boolean; appearance?: string }) => ({ notifications: true, appearance: 'system', ...p }),
     'app.info': () => ({ version: '1.0.0', platform: 'darwin', packaged: true, dataDir: '/Users/me/Library/Application Support/Desk' }),
     'app.revealLogs': () => undefined,
     'models.list': () => [model('claude-opus-5-5'), model('claude-fable-5-1')],
@@ -78,6 +78,16 @@ describe('SystemScreen', () => {
     fireEvent.click(within(n).getByLabelText(/From deskd/));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'app.updateSettings')?.input).toEqual({ notifications: false }));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'config.patch')?.input).toEqual({ notifications: 'off' }));
+  });
+
+  it('switches the appearance', async () => {
+    const bridge = setup();
+    const a = screen.getByRole('region', { name: 'Appearance' });
+    await waitFor(() => expect(within(a).getByRole('button', { name: 'System' }).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(within(a).getByRole('button', { name: 'Dark' }));
+    await waitFor(() => expect(within(a).getByRole('button', { name: 'Dark' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(within(a).getByRole('button', { name: 'System' }).getAttribute('aria-pressed')).toBe('false');
+    expect(bridge.calls.find((c) => c.channel === 'app.updateSettings')?.input).toEqual({ appearance: 'dark' });
   });
 
   it('edits the model registry', async () => {

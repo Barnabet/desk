@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { chatEventId, keepStable, lineGeometry, plural, rowViews, ticks, type RowView } from '@desk/ui-core';
+import { chatEventId, keepStable, plural, rowViews, ticks, type RowView } from '@desk/ui-core';
 import { call } from '../bridge';
 import { EmptyState } from '../components/EmptyState';
 import { PairSheet } from '../components/PairSheet';
@@ -8,10 +8,9 @@ import { useGlobal } from '../state/global';
 import { useNow } from '../state/now';
 import { useSession } from '../state/session';
 import { markSeen } from '../state/unread';
-import { useWidth } from '../state/width';
+import { replaceRoute } from '../router';
 import { ChatItemView, chatDomId } from './ChatItems';
-import { Composer } from './Composer';
-import { LineDiagram } from './LineDiagram';
+import { Composer, useAttachments, useFileDrop } from './Composer';
 import { PlanPanel } from './PlanPanel';
 import { ServicesCard } from './ServicesCard';
 import { WhatsUp } from './WhatsUp';
@@ -43,7 +42,8 @@ function useDraft(projectId: string): [string, (v: string | ((d: string) => stri
   return [draft, setDraftState];
 }
 
-export function ConversationScreen({ projectId }: { projectId: string }) {
+/** The chat with Desk, its plan and services. `at`: a Desk stop's event id to scroll the chat to (from the timeline). */
+export function ConversationScreen({ projectId, at }: { projectId: string; at?: number }) {
   const s = useSession(projectId);
   const attention = useGlobal((g) => g.attention);
   const proxy = useGlobal((g) => g.system.proxy);
@@ -54,11 +54,11 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   // Services sit at the bottom of the left column; on narrow windows that column collapses, so they join the plan overlay.
   const narrow = useMediaQuery('(max-width: 1279px)');
   const [planOpen, setPlanOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const attachments = useAttachments(projectId, setDraft);
+  const drop = useFileDrop((files) => void attachments.attach(files));
   const pinned = useRef(true);
-  const width = useWidth(rootRef);
   const [shown, setShown] = useState(CHAT_PAGE);
   /** Scroll position to keep while older items are rendered above it. */
   const anchor = useRef<{ height: number; top: number } | null>(null);
@@ -67,6 +67,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
   const onAnswer = useCallback((t: string) => void answerRef.current(t), []);
   const onOwnWords = useCallback(() => textareaRef.current?.focus(), []);
   const jumpRef = useRef<(itemId: string) => void>(() => {});
+  const atRef = useRef<() => void>(() => {});
   const onJump = useCallback((itemId: string) => jumpRef.current(itemId), []);
   /** The pair sheet's two agents (design spec §8 item 8): local state, no route. */
   const [pairOf, setPairOf] = useState<readonly [string, string] | null>(null);
@@ -77,13 +78,6 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
 
   const projectAttention = useMemo(() => attention.filter((i) => i.project_id === projectId), [attention, projectId]);
   const attentionIds = useMemo(() => new Set(projectAttention.map((i) => i.id)), [projectAttention]);
-  const threads = s.project?.threads;
-  // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
-  const answeringIds = useMemo(() => new Set(Object.keys(s.messages.answering)), [s.messages.answering]);
-  const geometry = useMemo(
-    () => lineGeometry({ timeline: s.timeline, threads: threads ?? [], now, width, answering: answeringIds }),
-    [s.timeline, threads, now, width, answeringIds],
-  );
 
   useEffect(() => markSeen(projectId), [projectId, s.events.length]);
   useEffect(() => {
@@ -101,6 +95,9 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
     el.scrollTop = el.scrollHeight - anchor.current.height + anchor.current.top;
     anchor.current = null;
   }, [shown]);
+  useEffect(() => {
+    if (at !== undefined && s.status === 'ready') atRef.current();
+  }, [at, s.status]);
   useEffect(() => {
     if (!jumpTo) return;
     const el = document.getElementById(chatDomId(jumpTo));
@@ -153,12 +150,16 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
     if (index < start) setShown(items.length - index + 5);
     setJumpTo(items[index]!.id);
   };
-  const onStation = (st: { eventId: number }) => jumpToIndex(items.findIndex((i) => chatEventId(i) >= st.eventId));
+  // A Desk stop clicked on the timeline arrives as `at`: jump there once, then drop it so the same stop can jump again.
+  atRef.current = () => {
+    if (at === undefined) return;
+    jumpToIndex(items.findIndex((i) => chatEventId(i) >= at));
+    replaceRoute({ name: 'project', id: projectId, tab: 'conversation' });
+  };
   jumpRef.current = (itemId) => jumpToIndex(items.findIndex((i) => i.id === itemId));
 
   return (
-    <div className="conversation" ref={rootRef}>
-      <LineDiagram g={geometry} project={project} messages={s.messages} attention={projectAttention} now={now} onStation={onStation} onPair={onPair} />
+    <div className="conversation">
       <div className={`conv-body${planOpen ? ' plan-open' : ''}`}>
         <div className="conv-intro">
           <WhatsUp project={project} now={now} />
@@ -168,7 +169,12 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
           </button>
           {narrow ? null : <ServicesCard project={project} />}
         </div>
-        <section className="conv-chat" aria-label="Conversation with Desk">
+        <section className={`conv-chat${drop.dropping ? ' dropping' : ''}`} aria-label="Conversation with Desk" {...drop.handlers}>
+          {drop.dropping ? (
+            <div className="chat-drop" aria-hidden="true">
+              Drop to attach to the Library
+            </div>
+          ) : null}
           <div
             className="chat-list"
             ref={listRef}
@@ -212,7 +218,7 @@ export function ConversationScreen({ projectId }: { projectId: string }) {
               </div>
             ))}
           </div>
-          <Composer projectId={projectId} draft={draft} setDraft={setDraft} textareaRef={textareaRef} onSent={(t) => setPending((p) => [...p, t])} />
+          <Composer projectId={projectId} draft={draft} setDraft={setDraft} textareaRef={textareaRef} onSent={(t) => setPending((p) => [...p, t])} attachments={attachments} />
         </section>
         <div className="conv-side">
           <PlanPanel project={project} proxyDown={proxy === 'down'} attention={projectAttention} />

@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { resolveSettings, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
-import { agents, approvals, artifacts, attentionDismissals, memory, plans, projects, services, sources, usageTotals } from '../db/schema';
+import { agents, approvals, artifacts, attentionDismissals, builtinSkillSettings, memory, plans, projects, services, sources, usageTotals } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
   if (!ev.agent_id) throw new Error(`${ev.type} requires agent_id`);
@@ -187,6 +187,12 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
       return;
     case 'attention.dismissed':
       tx.insert(attentionDismissals).values({ item_id: ev.payload.item_id, project_id: ev.project_id, dismissed_at: ev.ts }).onConflictDoNothing().run();
+      return;
+    case 'skill.builtin_toggled':
+      tx.insert(builtinSkillSettings)
+        .values({ name: ev.payload.name, enabled: ev.payload.enabled, updated_at: ev.ts })
+        .onConflictDoUpdate({ target: builtinSkillSettings.name, set: { enabled: ev.payload.enabled, updated_at: ev.ts } })
+        .run();
       return;
     default:
       return;

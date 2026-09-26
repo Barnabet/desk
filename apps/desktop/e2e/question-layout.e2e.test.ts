@@ -34,6 +34,7 @@ beforeAll(async () => {
   app = await electron.launch({
     executablePath: electronPath as unknown as string,
     args: [appDir],
+    colorScheme: process.env.DESK_E2E_SCHEME === 'dark' ? 'dark' : 'light',
     env: { ...process.env, DESK_DATA_DIR: join(dir, 'data'), DESK_USER_DATA: join(dir, 'user'), DESK_E2E: '1' },
   });
 });

@@ -6,6 +6,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { NotFoundError, ValidationError } from '../errors';
 import { readAgentFileSync } from '../tools/agent-files';
 import type { SandboxGuard } from '../tools/sandbox';
+import type { BuiltinSkills } from './builtins';
 
 export const SKILL_FILE = 'SKILL.md';
 const HISTORY_DIR = '.history';
@@ -154,12 +155,22 @@ export class SkillStore {
   constructor(
     private readonly dataDir: string,
     private readonly guard?: SandboxGuard,
+    /** Desk's own skills, resolved after project and global ones (read-only). */
+    private readonly builtins?: BuiltinSkills,
   ) {}
 
   root(scope: SkillScope, projectId?: string): string {
+    if (scope === 'builtin') {
+      if (!this.builtins) throw new ValidationError('This daemon has no built-in skills');
+      return this.builtins.root;
+    }
     if (scope === 'global') return join(this.dataDir, 'skills');
     if (!projectId) throw new ValidationError('Project skills need a project id');
     return join(this.dataDir, 'projects', projectId, 'skills');
+  }
+
+  private writable(scope: SkillScope): void {
+    if (scope === 'builtin') throw new ValidationError('Built-in skills are read-only. Duplicate one to make your own version.');
   }
 
   /** Directories an agent of the project may read skills from. */
@@ -187,16 +198,19 @@ export class SkillStore {
   private summarize(scope: SkillScope, name: string, projectId?: string): SkillSummary {
     const dir = join(this.root(scope, projectId), name);
     const base = { name, scope, dir, version: this.currentVersion(scope, name, projectId) };
+    const damage = scope === 'builtin' ? (this.builtins?.broken(name) ?? null) : null;
     try {
       const { frontmatter } = parseSkillMd(readFileSync(join(dir, SKILL_FILE), 'utf8'));
-      return { ...base, description: checkDescription(frontmatter.description) };
+      const description = checkDescription(frontmatter.description);
+      return damage ? { ...base, description, error: damage } : { ...base, description };
     } catch (e) {
-      const error = existsSync(join(dir, SKILL_FILE)) ? (e as Error).message : 'SKILL.md is missing';
+      const error = damage ?? (existsSync(join(dir, SKILL_FILE)) ? (e as Error).message : 'SKILL.md is missing');
       return { ...base, description: '', error };
     }
   }
 
   listScope(scope: SkillScope, projectId?: string): SkillSummary[] {
+    if (scope === 'builtin') return this.builtins ? this.builtins.names().map((n) => this.summarize('builtin', n)) : [];
     const root = this.root(scope, projectId);
     if (!existsSync(root)) return [];
     return readdirSync(root, { withFileTypes: true })
@@ -205,11 +219,19 @@ export class SkillStore {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** Skills visible to a project (project skills shadow global ones), or only global skills without a project. */
-  list(projectId?: string): SkillSummary[] {
+  /**
+   * Skills visible to a project (project skills shadow global ones), or only global skills without a project.
+   * With `builtins`, as agents see them: plus Desk's usable built-in skills that no own skill shadows.
+   */
+  list(projectId?: string, opts: { builtins?: boolean } = {}): SkillSummary[] {
     const project = projectId ? this.listScope('project', projectId) : [];
     const own = new Set(project.map((s) => s.name));
-    return [...project, ...this.listScope('global').filter((s) => !own.has(s.name))].sort((a, b) => a.name.localeCompare(b.name));
+    const mine = [...project, ...this.listScope('global').filter((s) => !own.has(s.name))];
+    if (opts.builtins && this.builtins) {
+      const taken = new Set(mine.map((s) => s.name));
+      for (const n of this.builtins.names()) if (!taken.has(n) && this.builtins.usable(n)) mine.push(this.summarize('builtin', n));
+    }
+    return mine.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   resolve(name: string, projectId?: string): SkillSummary | undefined {
@@ -217,11 +239,12 @@ export class SkillStore {
     for (const scope of projectId ? (['project', 'global'] as const) : (['global'] as const)) {
       if (existsSync(join(this.root(scope, projectId), name))) return this.summarize(scope, name, projectId);
     }
-    return undefined;
+    return this.builtins?.usable(name) ? this.summarize('builtin', name) : undefined;
   }
 
   get(scope: SkillScope, name: string, projectId?: string): SkillDetail | undefined {
     checkSkillName(name);
+    if (scope === 'builtin' && !this.builtins?.entry(name)) return undefined;
     const dir = join(this.root(scope, projectId), name);
     if (!existsSync(dir)) return undefined;
     const summary = this.summarize(scope, name, projectId);
@@ -266,6 +289,7 @@ export class SkillStore {
 
   /** Creates or updates a skill atomically; the previous version (if any) moves to history. */
   save(input: SkillSaveInput): { version: number; dir: string; created: boolean; description: string } {
+    this.writable(input.scope);
     const name = checkSkillName(input.name);
     const root = this.root(input.scope, input.projectId);
     const dir = join(root, name);
@@ -327,6 +351,7 @@ export class SkillStore {
 
   /** Removes a skill; its last version stays in history and can be restored. */
   delete(scope: SkillScope, name: string, projectId?: string): void {
+    this.writable(scope);
     checkSkillName(name);
     if (!existsSync(join(this.root(scope, projectId), name))) throw new NotFoundError(`No ${scope} skill named ${name}`);
     this.archive(scope, name, projectId);
@@ -351,6 +376,7 @@ export class SkillStore {
 
   /** Brings back an earlier version as the newest one (history is never rewritten). */
   restore(scope: SkillScope, name: string, version: number, projectId?: string): { version: number; dir: string; created: boolean; description: string } {
+    this.writable(scope);
     const src = join(this.historyDir(scope, name, projectId), String(version));
     if (!existsSync(src)) throw new NotFoundError(`Skill ${name} has no version ${version}`);
     return this.save({ scope, name, fromDir: src, ...(projectId ? { projectId } : {}) });

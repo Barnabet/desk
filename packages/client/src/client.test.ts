@@ -16,9 +16,9 @@ afterEach(async () => {
 });
 
 const TOKEN = 'client-token';
-async function setup() {
+async function setup(extra: Parameters<typeof newRuntime>[1] = {}) {
   h = await createHarness();
-  const runtime = newRuntime(h);
+  const runtime = newRuntime(h, extra);
   server = await startServer({ app: createApp({ runtime, store: h.store, models: h.models, token: TOKEN, version: '1.0.0' }), store: h.store, token: TOKEN, port: 0 });
   const baseUrl = `http://127.0.0.1:${server.port}`;
   return { runtime, baseUrl, client: new DeskClient({ baseUrl, token: TOKEN }) };
@@ -60,6 +60,21 @@ describe('DeskClient', () => {
     const up = await client.library.upload(id, { name: 'brief.md', content_base64: Buffer.from('# Brief').toString('base64') });
     expect(new TextDecoder().decode(await client.library.file(id, up.path))).toBe('# Brief');
     expect((await client.config.endpoint().catch((e: ApiError) => e.status))).toBe(501);
+  });
+
+  it('lists, switches, reads and duplicates built-in skills', async () => {
+    const { client } = await setup({ builtins: { root: join(import.meta.dirname, '..', '..', '..', 'catalog', 'skills') } });
+    const { project } = await client.projects.create({ name: 'Files', goal: 'g' });
+    expect(await client.builtins.list({ projectId: project.id })).toHaveLength(12);
+    expect((await client.builtins.setEnabled('pdf-toolkit', false)).enabled).toBe(false);
+    expect((await client.builtins.get('word-documents')).scope).toBe('builtin');
+    expect(new TextDecoder().decode(await client.builtins.file('word-documents', 'SKILL.md'))).toMatch(/^---/);
+    const copy = await client.builtins.duplicate('images', { scope: 'project', project_id: project.id });
+    expect(copy.version).toBe(1);
+    const images = (await client.builtins.list({ projectId: project.id })).find((b) => b.name === 'images');
+    expect(images?.shadowed_by).toBe('project');
+    // No skill runtimes in this harness: the retry is refused.
+    await expect(client.builtins.retryRuntime('images')).rejects.toMatchObject({ status: 409 });
   });
 
   it('maps errors, retries once after refreshing credentials on 401, and reports an unreachable daemon', async () => {

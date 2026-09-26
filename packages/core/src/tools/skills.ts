@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { extname, isAbsolute, join } from 'node:path';
-import { SkillName, SkillScope } from '@desk/protocol';
+import { SkillName, WritableSkillScope } from '@desk/protocol';
 import { z } from 'zod';
 import type { SkillDetail, SkillStore, SkillSummary } from '../skills/store';
 import { getAgent } from '../state/queries';
@@ -81,13 +81,13 @@ function commandFor(file: string): string {
 
 export const skillListTool = defineTool({
   name: 'skill_list',
-  description: 'List the skills available in this project (project skills shadow global ones), optionally filtered by words matched against names and descriptions.',
+  description: "List the skills available in this project (project skills shadow global ones, which shadow Desk's built-in skills), optionally filtered by words matched against names and descriptions.",
   input: z.object({ query: z.string().optional() }),
   async execute({ query }, ctx) {
     const active = new Set(getAgent(ctx.services.store.db, ctx.agentId)?.active_skills ?? []);
     const words = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     const skills = ctx.services.skills
-      .list(ctx.projectId)
+      .list(ctx.projectId, { builtins: true })
       .filter((s) => words.every((w) => `${s.name} ${s.description}`.toLowerCase().includes(w)));
     if (!skills.length) return query ? `No skills match "${query}".` : 'No skills yet.';
     return skills.map((s) => formatSkillLine(s, active)).join('\n');
@@ -135,6 +135,7 @@ export const skillRunTool = defineTool({
   async execute({ name, script, args, stdin, timeout_s }, ctx) {
     const skill = resolveSkill(ctx, name);
     const file = locateScript(skill, script, ctx.services.skills);
+    const { waitedMs } = await ctx.services.prepareSkillRuntime(ctx.agentId, { scope: skill.scope, name: skill.name }, ctx.signal);
     const skillEnv = ctx.services.skillEnv(ctx.agentId, { scope: skill.scope, name: skill.name });
     if (skillEnv.blocked) throw new Error(skillEnv.blocked);
     const command = [commandFor(file), ...args.map(shellQuote)].join(' ');
@@ -147,7 +148,8 @@ export const skillRunTool = defineTool({
       ...(stdin !== undefined ? { stdin } : {}),
     });
     const status = r.aborted ? 'aborted' : r.timedOut ? `timed out after ${timeout_s}s` : `exit code ${r.exitCode}`;
-    return `[${status}]\n${r.output}`;
+    const setup = waitedMs >= 1000 ? `(Set up ${skill.name}'s Python environment first: first use only, ${Math.round(waitedMs / 1000)} s.)\n` : '';
+    return `${setup}[${status}]\n${r.output}`;
   },
 });
 
@@ -162,7 +164,7 @@ export const skillWriteTool = defineTool({
   ].join(' '),
   input: z.object({
     name: SkillName,
-    scope: SkillScope.default('project'),
+    scope: WritableSkillScope.default('project'),
     description: z.string().min(1).max(1024).optional(),
     instructions: z.string().min(1).optional(),
     files: z.array(z.object({ path: z.string().min(1), content: z.string() })).default([]),
@@ -193,7 +195,7 @@ export const skillWriteTool = defineTool({
 export const skillDeleteTool = defineTool({
   name: 'skill_delete',
   description: 'Delete a skill (its last version stays in history and the user can restore it). Needs approval.',
-  input: z.object({ name: SkillName, scope: SkillScope }),
+  input: z.object({ name: SkillName, scope: WritableSkillScope }),
   gate: { subject: () => ({}), unmatched: 'ask' },
   async execute({ name, scope }, ctx) {
     ctx.services.deleteSkill(scope, name, scope === 'project' ? ctx.projectId : undefined, {

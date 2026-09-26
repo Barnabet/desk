@@ -28,8 +28,8 @@ describe('live: desktop IPC against deskd and the model endpoint', () => {
         revealLogs: noop,
         saveFile: async () => false,
         openMain: () => {},
-        settings: () => ({ notifications: false }),
-        updateSettings: () => ({ notifications: false }),
+        settings: () => ({ notifications: false, appearance: 'system' }),
+        updateSettings: () => ({ notifications: false, appearance: 'system' }),
       },
     };
     try {

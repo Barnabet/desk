@@ -7,7 +7,7 @@ import { useGlobal } from '../../state/global';
 
 export const BAYS: Array<{ category: CatalogCategory; title: string; blurb: string }> = [
   { category: 'research', title: 'Research', blurb: 'Find sources, check facts, read the web.' },
-  { category: 'documents', title: 'Documents & data', blurb: 'Word, PDF, Excel, slides and datasets.' },
+  { category: 'documents', title: 'Documents & data', blurb: 'Conversion to Markdown, data analysis, Excel automation, HTML slides.' },
   { category: 'writing', title: 'Writing & diagrams', blurb: 'Clearer prose, rendered diagrams.' },
   { category: 'planning', title: 'Planning', blurb: 'Meetings, risks and decisions.' },
   { category: 'code', title: 'Code', blurb: 'Debugging, review and testing.' },

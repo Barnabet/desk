@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { BrowserWindow, protocol, session } from 'electron';
+import { windowFill } from './theme';
 
 export const APP_SCHEME = 'desk-app';
 export const APP_ORIGIN = `${APP_SCHEME}://ui`;
@@ -98,7 +99,7 @@ export function createMainWindow(o: { preload: string; route?: string }): Browse
     minHeight: 700,
     show: false,
     title: 'Desk',
-    backgroundColor: '#EFEAE0',
+    backgroundColor: windowFill('main'),
     ...(mac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 16 } } : {}),
     webPreferences: { preload: o.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: true },
   });

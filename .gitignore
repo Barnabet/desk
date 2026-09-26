@@ -11,3 +11,5 @@ apps/desktop/release/
 apps/desktop/.cache/
 apps/web-ui/dist/
 .angular/
+__pycache__/
+*.pyc

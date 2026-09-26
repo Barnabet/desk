@@ -55,11 +55,15 @@ export function webHandlerContext(d: WebContextDeps, senderId: number): HandlerC
       },
       saveFile: async () => notOffered('Saving a file'),
       openMain: () => notOffered('Opening the main window'),
-      settings: () => ({ notifications: d.settings.get().notifications }),
+      // A browser page follows the system's light or dark setting (prefers-color-scheme); only the Desk app can override it.
+      settings: () => ({ notifications: d.settings.get().notifications, appearance: 'system' }),
       updateSettings: (patch) => {
+        if (patch.appearance !== undefined && patch.appearance !== 'system') {
+          throw new UserFacingError('not_offered', 'The web UI follows your system’s light or dark setting. Choosing one is only offered in the Desk app.');
+        }
         const next = d.settings.update(patch.notifications === undefined ? {} : { notifications: patch.notifications });
         d.onSettingsChange?.();
-        return { notifications: next.notifications };
+        return { notifications: next.notifications, appearance: 'system' };
       },
     },
   };

@@ -80,12 +80,19 @@ describe('the web HandlerContext', () => {
 
   it('keeps the notification setting in web-settings.json and reports the change', async () => {
     const { ctx, events, settings } = setup();
-    expect(await dispatch('app.settings', {}, ctx)).toEqual({ ok: true, value: { notifications: true } });
-    expect(await dispatch('app.updateSettings', { notifications: false }, ctx)).toEqual({ ok: true, value: { notifications: false } });
+    expect(await dispatch('app.settings', {}, ctx)).toEqual({ ok: true, value: { notifications: true, appearance: 'system' } });
+    expect(await dispatch('app.updateSettings', { notifications: false }, ctx)).toEqual({ ok: true, value: { notifications: false, appearance: 'system' } });
     expect(events).toEqual(['settings']);
     expect(JSON.parse(readFileSync(webPaths(dataDir).settings, 'utf8'))).toEqual({ notifications: false });
     settings.update({ port: 7500 });
-    expect(await dispatch('app.settings', {}, ctx)).toEqual({ ok: true, value: { notifications: false } });
+    expect(await dispatch('app.settings', {}, ctx)).toEqual({ ok: true, value: { notifications: false, appearance: 'system' } });
+  });
+
+  it('follows the system appearance: choosing light or dark is only offered in the Desk app', async () => {
+    const { ctx, events } = setup();
+    expect(await dispatch('app.updateSettings', { appearance: 'dark' }, ctx)).toMatchObject({ ok: false, error: { code: 'not_offered' } });
+    expect(await dispatch('app.updateSettings', { appearance: 'system' }, ctx)).toEqual({ ok: true, value: { notifications: true, appearance: 'system' } });
+    expect(events).toEqual(['settings']);
   });
 
   it('starts, restarts and stops deskd, reconnecting the broker after each', async () => {
