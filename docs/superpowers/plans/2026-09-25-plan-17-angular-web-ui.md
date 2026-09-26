@@ -4452,7 +4452,7 @@ desk web starts, restarts and stops deskd itself (spec §3). When the desktop ap
 
 **Deviation (review fix):** the plan first took the plist's existence alone as "installed". desk web honours `DESK_DATA_DIR` (W0c.16's smoke runs with one), and the plist pins `--data-dir` to the app's data dir, so desk web on another data dir kickstarted and booted out the user's real deskd and then timed out on its own `daemon.json`. `webAgent` now also requires the plist's `ProgramArguments` to hold `--data-dir` followed by this manager's data dir (XML-unescaped, compared after `path.resolve`); both `plist()` and the CLI's `plistFor` write that pair. Two cases cover it: another data dir (spawn and pid stop, no `launchctl`, the plist untouched) and an escaped data dir.
 
-**Deviation (W2a.1's review fix):** `unescapeXml` looks a named entity up with `Object.hasOwn`, so `&constructor;` in a hand-edited plist stays as it is instead of becoming `Object`'s source text (the prototype-lookup sweep of W2a.1's review).
+**Deviation (W2a.1's review fix):** `unescapeXml` looks a named entity up with `Object.hasOwn`, so `&constructor;` in a hand-edited plist stays as it is instead of becoming `Object`'s source text (the prototype-lookup sweep of W2a.1's review). A later commit (2cefd71) adds its test to `packages/bff/src/server/daemon.test.ts`'s `DaemonManager in web mode`: "leaves an entity named after an Object.prototype member as it is, and undoes a character reference, in a hand-written plist", a plist whose `--data-dir` ends in `&constructor;&#65;`, which matches a data dir ending in `&constructor;A` (`installed`) and not one ending in `&constructor;&#65;` (`unsupported`); it fails on the old lookup.
 
 **Files:**
 - Modify: `packages/bff/src/contract/types.ts`, `packages/bff/src/server/daemon.ts`
@@ -26041,6 +26041,8 @@ git commit -m "feat(web-ui): the thread tabs: result, diff, workspace files, ski
 
 `RouteView.tsx` draws the stops as numbered discs on a serpentine (`routeLayout` from `@desk/ui-core`, measured on the host with the desktop's 900 px fallback and a 520 px minimum): the path taken, the live stretch in blue after a revision, the "Now" disc and the dashed "Next: report to Desk" while the thread runs, each disc's glyph (tool count, ✉ for a stop that holds only messages, R1 for a revision, the sender's initials, ↩ for an answer run), its label (title, subtitle, quote; a detour's label sits above), the count of message cards beside it, and the legend. A disc is a button named "Stop N: title, subtitle, K messages" and pressed when selected. The React file has no test; this spec is new.
 
+**Deviation (review fix):** the spec gains a fourth case, a running thread with a revision and a message from another thread: the `R1` disc, the two live (`#2F5BD3`, 2.5) pieces after the revision, the `1 ✉` count and a name ending in `, 1 message`. It fails if any of those template parts goes (4 tests).
+
 **Files:**
 - Create: `apps/web-ui/src/app/threads/route-view.ts`
 - Test: `apps/web-ui/src/app/threads/route-view.spec.ts`
@@ -26124,6 +26126,26 @@ describe('RouteView', () => {
     const paths = [...document.querySelectorAll('.route-svg path')];
     expect(paths).toHaveLength(3);
     expect(paths.at(-1)!.getAttribute('stroke-dasharray')).toBe('4 5');
+  });
+
+  it('draws the live stretch after a revision, and counts the messages from other threads beside their stop', async () => {
+    const revision: TranscriptEntry = { kind: 'revision', id: 'e:7', ts: TS, round: 1, feedback: 'Less salesy' };
+    const note: TranscriptEntry = { kind: 'incoming', id: 'e:8', ts: TS, fromAgentId: 'a', fromLabel: 'thread "Auth API" (a)', messageKind: 'note', text: 'The API moved to v2.' };
+    await mount([brief, revision, note], { running: true });
+    const back = screen.getByRole('button', { name: /^Stop 2: Desk sent it back, round 1 of 2 · / });
+    expect(back.textContent).toBe('R1');
+    const messages = screen.getByRole('button', { name: /^Stop 3: / });
+    expect(messages.getAttribute('aria-label')).toMatch(/^Stop 3: Messages, \d\d:\d\d, 1 message$/);
+    expect(messages.textContent).toBe('✉');
+    expect(document.querySelector('.route-cards')!.textContent).toBe('1 ✉');
+    // Brief → revision is the route taken; revision → messages → now is live; now → next is dashed.
+    const paths = [...document.querySelectorAll('.route-svg path')].map((p) => [p.getAttribute('stroke'), p.getAttribute('stroke-width')]);
+    expect(paths).toEqual([
+      ['#1C1B18', '2'],
+      ['#2F5BD3', '2.5'],
+      ['#2F5BD3', '2.5'],
+      ['#8A857B', '2'],
+    ]);
   });
 });
 ```
@@ -26283,7 +26305,7 @@ export class RouteView {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/threads/route-view.spec.ts)`
-Expected: PASS (3 tests).
+Expected: PASS (4 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -28670,7 +28692,7 @@ Expected: PASS. This section's tasks change nothing the root suite runs (bff, ui
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (3), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (4), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the e2e**
 

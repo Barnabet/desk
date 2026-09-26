@@ -69,4 +69,24 @@ describe('RouteView', () => {
     expect(paths).toHaveLength(3);
     expect(paths.at(-1)!.getAttribute('stroke-dasharray')).toBe('4 5');
   });
+
+  it('draws the live stretch after a revision, and counts the messages from other threads beside their stop', async () => {
+    const revision: TranscriptEntry = { kind: 'revision', id: 'e:7', ts: TS, round: 1, feedback: 'Less salesy' };
+    const note: TranscriptEntry = { kind: 'incoming', id: 'e:8', ts: TS, fromAgentId: 'a', fromLabel: 'thread "Auth API" (a)', messageKind: 'note', text: 'The API moved to v2.' };
+    await mount([brief, revision, note], { running: true });
+    const back = screen.getByRole('button', { name: /^Stop 2: Desk sent it back, round 1 of 2 · / });
+    expect(back.textContent).toBe('R1');
+    const messages = screen.getByRole('button', { name: /^Stop 3: / });
+    expect(messages.getAttribute('aria-label')).toMatch(/^Stop 3: Messages, \d\d:\d\d, 1 message$/);
+    expect(messages.textContent).toBe('✉');
+    expect(document.querySelector('.route-cards')!.textContent).toBe('1 ✉');
+    // Brief → revision is the route taken; revision → messages → now is live; now → next is dashed.
+    const paths = [...document.querySelectorAll('.route-svg path')].map((p) => [p.getAttribute('stroke'), p.getAttribute('stroke-width')]);
+    expect(paths).toEqual([
+      ['#1C1B18', '2'],
+      ['#2F5BD3', '2.5'],
+      ['#2F5BD3', '2.5'],
+      ['#8A857B', '2'],
+    ]);
+  });
 });
