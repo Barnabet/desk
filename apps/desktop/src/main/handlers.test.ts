@@ -94,7 +94,7 @@ describe('IPC dispatch', () => {
     const { ctx, runtime } = await setup();
     const projectId = runtime.createProject({ name: 'Launch', goal: 'g' });
     const list = await dispatch('builtins.list', { projectId }, ctx);
-    expect(list.ok && (list.value as unknown[]).length).toBe(12);
+    expect(list.ok && (list.value as unknown[]).length).toBe(13);
     expect(await dispatch('builtins.setEnabled', { name: 'pdf-toolkit', enabled: false }, ctx)).toMatchObject({ ok: true, value: { name: 'pdf-toolkit', enabled: false } });
     expect(await dispatch('builtins.get', { name: 'word-documents' }, ctx)).toMatchObject({ ok: true, value: { scope: 'builtin' } });
     const file = await dispatch('builtins.file', { name: 'word-documents', path: 'SKILL.md' }, ctx);

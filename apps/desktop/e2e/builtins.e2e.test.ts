@@ -50,7 +50,7 @@ describe('built-in skills, end to end', () => {
 
     const group = page.getByRole('region', { name: 'Built into Desk' });
     await group.waitFor();
-    expect(await group.getByRole('switch').count()).toBe(12);
+    expect(await group.getByRole('switch').count()).toBe(13);
     await group.getByText('Set up on first use').first().waitFor();
     await shot(page, 'b1-builtins');
 

@@ -72,7 +72,7 @@ describe.skipIf(!packaged)('packaged app', () => {
     expect(health).toMatchObject({ version: '1.0.0' });
     // Desk's built-in skills load from Resources and match builtins.json.
     const builtins = await client.builtins.list();
-    expect(builtins).toHaveLength(12);
+    expect(builtins).toHaveLength(13);
     expect(builtins.filter((b) => b.broken).map((b) => b.name)).toEqual([]);
 
     const page = await app.firstWindow();

@@ -65,7 +65,7 @@ describe('DeskClient', () => {
   it('lists, switches, reads and duplicates built-in skills', async () => {
     const { client } = await setup({ builtins: { root: join(import.meta.dirname, '..', '..', '..', 'catalog', 'skills') } });
     const { project } = await client.projects.create({ name: 'Files', goal: 'g' });
-    expect(await client.builtins.list({ projectId: project.id })).toHaveLength(12);
+    expect(await client.builtins.list({ projectId: project.id })).toHaveLength(13);
     expect((await client.builtins.setEnabled('pdf-toolkit', false)).enabled).toBe(false);
     expect((await client.builtins.get('word-documents')).scope).toBe('builtin');
     expect(new TextDecoder().decode(await client.builtins.file('word-documents', 'SKILL.md'))).toMatch(/^---/);

@@ -33,7 +33,7 @@ describe('the built-in manifest', () => {
       .filter((d) => existsSync(join(SKILLS, d, 'SKILL.md')))
       .sort();
     expect(manifest.skills.map((s) => s.name).sort()).toEqual(dirs);
-    expect(dirs).toHaveLength(12);
+    expect(dirs).toHaveLength(13);
   });
 
   it('matches every tree (run pnpm builtins:pin after editing a skill)', () => {
@@ -52,6 +52,12 @@ describe('the built-in manifest', () => {
         .filter((l) => l && !l.startsWith('#'));
       expect(s.runtime.python?.packages, s.name).toEqual(lines);
     }
+  });
+
+  it('ships automation-scripts without Python packages', () => {
+    const s = manifest.skills.find((x) => x.name === 'automation-scripts');
+    expect(s?.runtime.python?.packages).toEqual([]);
+    expect(s).toMatchObject({ title: 'Automation scripts', scripts: 2, smoke: ['python3', 'scripts/selftest.py'] });
   });
 
   it('is no longer in the catalog', () => {

@@ -47,7 +47,7 @@ describe('built-in skills in the runtime', () => {
   it('lists built-ins with their switch, shadowing and runtime', () => {
     const rt = newRuntime(h, { builtins: { root: SKILLS } });
     const pdf = () => rt.listBuiltins().find((b) => b.name === 'pdf-toolkit')!;
-    expect(rt.listBuiltins()).toHaveLength(12);
+    expect(rt.listBuiltins()).toHaveLength(13);
     expect(pdf()).toMatchObject({ enabled: true, broken: null, shadowed_by: null, runtime: { state: 'none' } });
     expect(pdf().description.length).toBeGreaterThan(20);
     rt.setBuiltinEnabled('pdf-toolkit', false);
