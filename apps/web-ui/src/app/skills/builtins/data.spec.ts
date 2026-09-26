@@ -121,8 +121,11 @@ describe('injectBuiltins', () => {
     await settle();
     const before = lists();
     expect(vi.getTimerCount()).toBe(1);
+    const removed = vi.spyOn(window, 'removeEventListener');
     fixture.destroy();
     expect(vi.getTimerCount()).toBe(0);
+    expect(removed).toHaveBeenCalledWith('focus', expect.any(Function));
+    removed.mockRestore();
     window.dispatchEvent(new Event('focus'));
     vi.advanceTimersByTime(60_000);
     await settle();

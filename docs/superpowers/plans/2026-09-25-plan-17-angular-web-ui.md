@@ -33641,8 +33641,9 @@ A port of `ReviewSheet.tsx`: `catalog.prepare` fetches and verifies the pinned f
 Create `apps/web-ui/src/app/skills/catalog/review-sheet.spec.ts`:
 
 ```ts
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
+import { fireEvent, render, screen, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { CatalogItem } from '@desk/protocol';
@@ -33764,7 +33765,25 @@ describe('ReviewSheet', () => {
     });
     expect((await within(sheet).findByRole('alert')).textContent).toBe("Couldn't prepare this skill: paper-lookup does not match the catalog");
     expect((within(sheet).getByRole('button', { name: 'Install' }) as HTMLButtonElement).disabled).toBe(true);
-    await waitFor(() => expect(sheet.querySelector('.review')).toBeNull());
+    expect(within(sheet).queryByText('Fetching the pinned files and checking them…')).toBeNull();
+  });
+
+  it('prepares once for its id, even when the call reads a signal that changes later', async () => {
+    // The real bridge can read its signedOut signal inside call() (a sign-in retry); prepare must not track it.
+    const signedIn = signal(true);
+    const { bridge, sheet } = await setup({
+      handlers: {
+        'catalog.prepare': ({ id }: { id: string }) => {
+          signedIn();
+          return reviewOf(catalogItems().find((i) => i.id === id)!);
+        },
+      },
+    });
+    await within(sheet).findByText('Search free scholarly APIs for papers.');
+    signedIn.set(false);
+    TestBed.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bridge.calls.filter((c) => c.channel === 'catalog.prepare')).toHaveLength(1);
   });
 });
 ```
@@ -33779,7 +33798,7 @@ Expected: FAIL. The test build stops with `Could not resolve "./review-sheet"`.
 Create `apps/web-ui/src/app/skills/catalog/review-sheet.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import type { CatalogEntry, CatalogItem, CatalogReview, ReviewWarningKind } from '@desk/protocol';
 import { bytes, skillKey, type SkillRef } from '@desk/ui-core';
 import { Button } from '../../components/button';
@@ -33997,14 +34016,14 @@ export class ReviewSheet {
 
   constructor() {
     // React's effect on [id]: prepare the entry, open its SKILL.md, and drop a late answer for another entry.
+    // The call runs untracked, so a signal it reads (the bridge's signedOut on a sign-in retry) never prepares again.
     effect((onCleanup) => {
       const id = this.id();
       let live = true;
       onCleanup(() => (live = false));
       this.review.set(null);
       this.error.set(null);
-      this.bridge
-        .call('catalog.prepare', { id })
+      untracked(() => this.bridge.call('catalog.prepare', { id }))
         .then((r) => {
           if (!live) return;
           this.review.set(r);
@@ -34069,10 +34088,12 @@ export class ReviewSheet {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/catalog/review-sheet.spec.ts)`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation (review fix):** two fixes. (1) The last case ended with `await waitFor(() => expect(sheet.querySelector('.review')).toBeNull())`, which always passed: the error branch never renders `.review`. It now checks that "Fetching the pinned files and checking them…" is gone. (2) The prepare `effect` called `catalog.prepare` while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would prepare the entry again when it changed. The call now runs in `untracked`, as `TerritoryInspector`'s plan fetch and `injectSkills` do, and a sixth case (a handler that reads a signal, which then changes) fails without it (6 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -37377,7 +37398,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (5), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (4 together), `skills/skill-panel.spec.ts` (7), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (4 together), `skills/skill-panel.spec.ts` (7), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 

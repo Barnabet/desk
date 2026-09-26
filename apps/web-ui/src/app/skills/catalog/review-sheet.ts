@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import type { CatalogEntry, CatalogItem, CatalogReview, ReviewWarningKind } from '@desk/protocol';
 import { bytes, skillKey, type SkillRef } from '@desk/ui-core';
 import { Button } from '../../components/button';
@@ -216,14 +216,14 @@ export class ReviewSheet {
 
   constructor() {
     // React's effect on [id]: prepare the entry, open its SKILL.md, and drop a late answer for another entry.
+    // The call runs untracked, so a signal it reads (the bridge's signedOut on a sign-in retry) never prepares again.
     effect((onCleanup) => {
       const id = this.id();
       let live = true;
       onCleanup(() => (live = false));
       this.review.set(null);
       this.error.set(null);
-      this.bridge
-        .call('catalog.prepare', { id })
+      untracked(() => this.bridge.call('catalog.prepare', { id }))
         .then((r) => {
           if (!live) return;
           this.review.set(r);

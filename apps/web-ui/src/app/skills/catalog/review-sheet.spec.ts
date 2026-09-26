@@ -1,5 +1,6 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
+import { fireEvent, render, screen, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { CatalogItem } from '@desk/protocol';
@@ -121,6 +122,24 @@ describe('ReviewSheet', () => {
     });
     expect((await within(sheet).findByRole('alert')).textContent).toBe("Couldn't prepare this skill: paper-lookup does not match the catalog");
     expect((within(sheet).getByRole('button', { name: 'Install' }) as HTMLButtonElement).disabled).toBe(true);
-    await waitFor(() => expect(sheet.querySelector('.review')).toBeNull());
+    expect(within(sheet).queryByText('Fetching the pinned files and checking them…')).toBeNull();
+  });
+
+  it('prepares once for its id, even when the call reads a signal that changes later', async () => {
+    // The real bridge can read its signedOut signal inside call() (a sign-in retry); prepare must not track it.
+    const signedIn = signal(true);
+    const { bridge, sheet } = await setup({
+      handlers: {
+        'catalog.prepare': ({ id }: { id: string }) => {
+          signedIn();
+          return reviewOf(catalogItems().find((i) => i.id === id)!);
+        },
+      },
+    });
+    await within(sheet).findByText('Search free scholarly APIs for papers.');
+    signedIn.set(false);
+    TestBed.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bridge.calls.filter((c) => c.channel === 'catalog.prepare')).toHaveLength(1);
   });
 });
