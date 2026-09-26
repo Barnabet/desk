@@ -9,6 +9,7 @@ import { injectBuiltins } from './data';
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 /** A component that only holds injectBuiltins(), as SkillsScreen does. */

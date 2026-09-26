@@ -32913,6 +32913,7 @@ import { injectBuiltins } from './data';
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 /** A component that only holds injectBuiltins(), as SkillsScreen does. */
@@ -33124,7 +33125,7 @@ Expected: PASS (6 tests).
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
-**Deviation (review fix):** the spec block above is the committed `data.spec.ts`. The plan first had 4 cases; the review follow-ups added the two teardown cases (76062de added one, 9a18f08 split it into these two: a list asked for while one ran is not run once the component is gone, and the poll and the focus listener are cleared on destroy; 54c9a15 pinned the listener's removal), so 6 tests. The review after W3a.6 made the teardown case exact: it spies on `window.addEventListener`, keeps the focus handler the hook added, and expects that very function to be removed (it failed when the removal was given another function).
+**Deviation (review fix):** the spec block above is the committed `data.spec.ts`. The plan first had 4 cases; the review follow-ups added the two teardown cases (76062de added one, 9a18f08 split it into these two: a list asked for while one ran is not run once the component is gone, and the poll and the focus listener are cleared on destroy; 54c9a15 pinned the listener's removal), so 6 tests. The review after W3a.6 made the teardown case exact: it spies on `window.addEventListener`, keeps the focus handler the hook added, and expects that very function to be removed (it failed when the removal was given another function). The review after W3a.7 added `vi.restoreAllMocks()` to the file's `afterEach`, so a failing case cannot leak its spies into the next.
 
 - [ ] **Step 6: Commit**
 
@@ -34764,6 +34765,36 @@ describe('SkillPanel', () => {
     expect(bridge.calls.find((c) => c.channel === 'skills.remove')?.input).toEqual({ name: 'email-sequence' });
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Restored v1 as a new version.', 'Deleted email-sequence.']);
   });
+  it('drops a file that lands after another skill opened', async () => {
+    let release: (data: Uint8Array) => void = () => {};
+    const { view, panel } = await setup({ handlers: { 'skills.file': () => new Promise<Uint8Array>((resolve) => (release = resolve)) } });
+    fireEvent.click(await within(panel).findByRole('tab', { name: /^Files/ }));
+    fireEvent.click(within(panel).getByRole('button', { name: /scripts\/count\.py/ }));
+    await view.rerender({ inputs: { skill: { scope: 'project', projectId: 'p1', name: 'brand-voice' } }, partialUpdate: true });
+    await waitFor(() => expect(panel.getAttribute('aria-label')).toBe('Skill brand-voice'));
+    release(new TextEncoder().encode('print(1)'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(within(panel).getByRole('tab', { name: /^Files/ }));
+    expect(within(panel).getByText('Pick a file to view it.')).toBeTruthy();
+    expect(within(panel).queryByText('print(1)')).toBeNull();
+  });
+
+  it("drops a delete's close that lands after another skill opened, and never marks that skill's Delete busy", async () => {
+    let release: (r: { ok: true }) => void = () => {};
+    const { view, outputs, panel } = await setup({ handlers: { 'skills.remove': () => new Promise<{ ok: true }>((resolve) => (release = resolve)) } });
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete email-sequence?' })).getByRole('button', { name: 'Delete' }));
+    expect(within(panel).getByRole('button', { name: 'Delete' }).getAttribute('aria-busy')).toBe('true');
+    // rerender drops the output listeners it is not given again.
+    await view.rerender({ inputs: { skill: { scope: 'project', projectId: 'p1', name: 'brand-voice' } }, on: outputs, partialUpdate: true });
+    await waitFor(() => expect(panel.getAttribute('aria-label')).toBe('Skill brand-voice'));
+    expect(within(panel).getByRole('button', { name: 'Delete' }).getAttribute('aria-busy')).toBeNull();
+    release({ ok: true });
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(1));
+    expect(outputs.close).not.toHaveBeenCalled();
+    expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Deleted email-sequence.']);
+  });
+
   it('says when the skill is a copy of a built-in one, with a link to the built-in', async () => {
     const { panel } = await setup({
       skill: { scope: 'global', name: 'pdf-toolkit' },
@@ -35015,7 +35046,7 @@ export class Compare {
                   @if (h.current) {
                     <span class="chip chip-done">current</span>
                   } @else {
-                    <button deskButton size="sm" [pending]="busy() === 'restore-' + h.version" (click)="askRestore(h.version)">Restore</button>
+                    <button deskButton size="sm" [pending]="busyHere() === 'restore-' + h.version" (click)="askRestore(h.version)">Restore</button>
                   }
                 </li>
               }
@@ -35030,7 +35061,7 @@ export class Compare {
         <button deskButton variant="primary" (click)="edit.emit(d)">Edit</button>
         <button deskButton (click)="askDesk.emit()">Refine with Desk</button>
         <span class="grow"></span>
-        <button deskButton variant="ghost" [pending]="busy() === 'delete'" (click)="askDelete()">Delete</button>
+        <button deskButton variant="ghost" [pending]="busyHere() === 'delete'" (click)="askDelete()">Delete</button>
       </div>
     } @else {
       <p class="muted">Loading…</p>
@@ -35073,7 +35104,12 @@ export class SkillPanel {
   protected readonly history = signal<SkillHistoryEntry[]>([]);
   protected readonly error = signal<string | null>(null);
   protected readonly confirming = signal<Confirming | null>(null);
-  protected readonly busy = signal<string | null>(null);
+  /** The action running, and the skill it runs on: a late one never marks another skill's button. */
+  private readonly busy = signal<{ key: string; what: string } | null>(null);
+  protected readonly busyHere = computed(() => {
+    const b = this.busy();
+    return b && b.key === this.key() ? b.what : null;
+  });
   private readonly reload = signal(0);
 
   protected readonly current = computed(() => this.history().find((h) => h.current));
@@ -35146,11 +35182,13 @@ export class SkillPanel {
 
   protected async openFile(path: string): Promise<void> {
     const skill = this.skill();
+    const key = this.key();
     try {
       const data = await this.bridge.call('skills.file', { ...scopeArg(skill), name: skill.name, path });
-      this.file.set({ path, data });
+      // Another skill opened meanwhile: this file is not one of its files.
+      if (this.key() === key) this.file.set({ path, data });
     } catch (err) {
-      this.toasts.error(err);
+      if (this.key() === key) this.toasts.error(err);
     }
   }
 
@@ -35169,25 +35207,30 @@ export class SkillPanel {
 
   protected remove(): void {
     const skill = this.skill();
+    const key = this.key();
     void this.act('delete', () => this.bridge.call('skills.remove', { ...scopeArg(skill), name: skill.name }), `Deleted ${skill.name}.`).then((ok) => {
-      if (ok) this.close.emit();
+      // Closing now would close the skill the user opened since.
+      if (ok && this.key() === key) this.close.emit();
     });
   }
 
+  /** Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload does not. */
   private async act(what: string, fn: () => Promise<unknown>, done: string): Promise<boolean> {
+    const mine = { key: this.key(), what };
     this.confirming.set(null);
-    this.busy.set(what);
+    this.busy.set(mine);
     try {
       await fn();
       this.toasts.toast({ tone: 'info', message: done });
       this.changed.emit();
-      this.reload.update((r) => r + 1);
+      if (this.key() === mine.key) this.reload.update((r) => r + 1);
       return true;
     } catch (err) {
       this.toasts.error(err);
       return false;
     } finally {
-      this.busy.set(null);
+      // Clears only its own mark, so an action started on the new skill keeps its own.
+      this.busy.update((b) => (b === mine ? null : b));
     }
   }
 }
@@ -35196,12 +35239,14 @@ export class SkillPanel {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-panel.spec.ts)`
-Expected: PASS (8 tests).
+Expected: PASS (10 tests; 8 before the review fix below).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
-**Deviation:** two changes from the plan's first code, both for the port conventions; the blocks above are the committed files. (1) Both fetch `effect`s (the panel's `skills.get` and `skills.history`, `Compare`'s two `skills.version`) called the bridge while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would fetch again when it changed. The calls now run in `untracked`, as `ReviewSheet`'s prepare does since W3a.5's review, and a new case (handlers that read a signal, which then changes) fails without either one (it counted 2 `skills.get` calls without the panel's, 4 `skills.version` calls without `Compare`'s): 8 tests, not 7. (2) `Compare`'s `from` and `to` were `linkedSignal`s sourced from `versions`, an array rebuilt with every history fetch. They kept their value anyway (`prev?.value`), but user-editable state derives from a computed primitive: they are now sourced from `firstFrom` and `firstTo` (the versions React's `useState` seeds), with the same keep-the-pick computation. Otherwise the code is `SkillPanel.tsx` as it is on `web-ui` since the merge of master (8883229), unchanged after it: the scope chip still shows Global or the project's name (`SkillRef`'s scope is `'global' | 'project'`; built-ins open in `BuiltinPanel`, W3a.8b), the "Customised from the built-in skill" note links to `#/skills/builtin:<name>`, and every action (Edit, Refine with Desk, Restore, Delete) is offered for both scopes, as in React. The spec failed first on `Could not resolve "./skill-panel"`, with the Angular compiler's `TS2307` beside it.
+**Deviation:** two changes from the plan's first code, both for the port conventions; the blocks above are the committed files. (1) Both fetch `effect`s (the panel's `skills.get` and `skills.history`, `Compare`'s two `skills.version`) called the bridge while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would fetch again when it changed. The calls now run in `untracked`, as `ReviewSheet`'s prepare does since W3a.5's review, and a new case (handlers that read a signal, which then changes) fails without either one (it counted 2 `skills.get` calls without the panel's, 4 `skills.version` calls without `Compare`'s): 8 tests, not 7. (2) `Compare`'s `from` and `to` were `linkedSignal`s sourced from `versions`, an array rebuilt with every history fetch. They kept their value anyway (`prev?.value`), but user-editable state derives from a computed primitive: they are now sourced from `firstFrom` and `firstTo` (the versions React's `useState` seeds), with the same keep-the-pick computation. Otherwise the code is `SkillPanel.tsx` as it is on `web-ui` since the merge of master (8883229), unchanged after it: the scope chip still shows Global or the project's name (`SkillRef`'s scope is `'global' | 'project'`; built-ins open in `BuiltinPanel`, W3a.8b), the "Customised from the built-in skill" note links to `#/skills/builtin%3A<name>`, and every action (Edit, Refine with Desk, Restore, Delete) is offered for both scopes, as in React. The spec failed first on `Could not resolve "./skill-panel"`, with the Angular compiler's `TS2307` beside it.
+
+**Deviation (review fix):** the blocks above are the committed files. A file, delete or restore answer could land after another skill opened: `openFile` set the old skill's file on the new one (the Files tab then showed it), a delete closed the skill the user had opened since, and `busy` was one string for every skill, so the new skill's Delete or Restore showed the old action as pending. `openFile`, `remove` and `act` now capture `key()` before their `await` and drop what lands for another key: no `file`, no error toast for the old file, no `close`, no reload. `busy` holds `{ key, what }` and the template reads `busyHere()` (the action only while its skill is open); `act` clears only its own mark, so the old key's still clears and an action started on the new skill keeps its own. The old action's toast and `changed` still come, since it did happen and the list changed. Two cases hold a `skills.file` and a `skills.remove` answer, switch the skill, then release them: the old content is not shown ("Pick a file to view it."), the new skill's Delete is not busy, and `close` is not emitted (each failed without its fix; the second passes `on` again to `rerender`, which drops the output listeners it is not given). 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -37505,7 +37550,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (8), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (10), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 

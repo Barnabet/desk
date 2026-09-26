@@ -226,7 +226,7 @@ export class Compare {
                   @if (h.current) {
                     <span class="chip chip-done">current</span>
                   } @else {
-                    <button deskButton size="sm" [pending]="busy() === 'restore-' + h.version" (click)="askRestore(h.version)">Restore</button>
+                    <button deskButton size="sm" [pending]="busyHere() === 'restore-' + h.version" (click)="askRestore(h.version)">Restore</button>
                   }
                 </li>
               }
@@ -241,7 +241,7 @@ export class Compare {
         <button deskButton variant="primary" (click)="edit.emit(d)">Edit</button>
         <button deskButton (click)="askDesk.emit()">Refine with Desk</button>
         <span class="grow"></span>
-        <button deskButton variant="ghost" [pending]="busy() === 'delete'" (click)="askDelete()">Delete</button>
+        <button deskButton variant="ghost" [pending]="busyHere() === 'delete'" (click)="askDelete()">Delete</button>
       </div>
     } @else {
       <p class="muted">Loading…</p>
@@ -284,7 +284,12 @@ export class SkillPanel {
   protected readonly history = signal<SkillHistoryEntry[]>([]);
   protected readonly error = signal<string | null>(null);
   protected readonly confirming = signal<Confirming | null>(null);
-  protected readonly busy = signal<string | null>(null);
+  /** The action running, and the skill it runs on: a late one never marks another skill's button. */
+  private readonly busy = signal<{ key: string; what: string } | null>(null);
+  protected readonly busyHere = computed(() => {
+    const b = this.busy();
+    return b && b.key === this.key() ? b.what : null;
+  });
   private readonly reload = signal(0);
 
   protected readonly current = computed(() => this.history().find((h) => h.current));
@@ -357,11 +362,13 @@ export class SkillPanel {
 
   protected async openFile(path: string): Promise<void> {
     const skill = this.skill();
+    const key = this.key();
     try {
       const data = await this.bridge.call('skills.file', { ...scopeArg(skill), name: skill.name, path });
-      this.file.set({ path, data });
+      // Another skill opened meanwhile: this file is not one of its files.
+      if (this.key() === key) this.file.set({ path, data });
     } catch (err) {
-      this.toasts.error(err);
+      if (this.key() === key) this.toasts.error(err);
     }
   }
 
@@ -380,25 +387,30 @@ export class SkillPanel {
 
   protected remove(): void {
     const skill = this.skill();
+    const key = this.key();
     void this.act('delete', () => this.bridge.call('skills.remove', { ...scopeArg(skill), name: skill.name }), `Deleted ${skill.name}.`).then((ok) => {
-      if (ok) this.close.emit();
+      // Closing now would close the skill the user opened since.
+      if (ok && this.key() === key) this.close.emit();
     });
   }
 
+  /** Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload does not. */
   private async act(what: string, fn: () => Promise<unknown>, done: string): Promise<boolean> {
+    const mine = { key: this.key(), what };
     this.confirming.set(null);
-    this.busy.set(what);
+    this.busy.set(mine);
     try {
       await fn();
       this.toasts.toast({ tone: 'info', message: done });
       this.changed.emit();
-      this.reload.update((r) => r + 1);
+      if (this.key() === mine.key) this.reload.update((r) => r + 1);
       return true;
     } catch (err) {
       this.toasts.error(err);
       return false;
     } finally {
-      this.busy.set(null);
+      // Clears only its own mark, so an action started on the new skill keeps its own.
+      this.busy.update((b) => (b === mine ? null : b));
     }
   }
 }

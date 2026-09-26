@@ -194,6 +194,36 @@ describe('SkillPanel', () => {
     expect(bridge.calls.find((c) => c.channel === 'skills.remove')?.input).toEqual({ name: 'email-sequence' });
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Restored v1 as a new version.', 'Deleted email-sequence.']);
   });
+  it('drops a file that lands after another skill opened', async () => {
+    let release: (data: Uint8Array) => void = () => {};
+    const { view, panel } = await setup({ handlers: { 'skills.file': () => new Promise<Uint8Array>((resolve) => (release = resolve)) } });
+    fireEvent.click(await within(panel).findByRole('tab', { name: /^Files/ }));
+    fireEvent.click(within(panel).getByRole('button', { name: /scripts\/count\.py/ }));
+    await view.rerender({ inputs: { skill: { scope: 'project', projectId: 'p1', name: 'brand-voice' } }, partialUpdate: true });
+    await waitFor(() => expect(panel.getAttribute('aria-label')).toBe('Skill brand-voice'));
+    release(new TextEncoder().encode('print(1)'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.click(within(panel).getByRole('tab', { name: /^Files/ }));
+    expect(within(panel).getByText('Pick a file to view it.')).toBeTruthy();
+    expect(within(panel).queryByText('print(1)')).toBeNull();
+  });
+
+  it("drops a delete's close that lands after another skill opened, and never marks that skill's Delete busy", async () => {
+    let release: (r: { ok: true }) => void = () => {};
+    const { view, outputs, panel } = await setup({ handlers: { 'skills.remove': () => new Promise<{ ok: true }>((resolve) => (release = resolve)) } });
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete email-sequence?' })).getByRole('button', { name: 'Delete' }));
+    expect(within(panel).getByRole('button', { name: 'Delete' }).getAttribute('aria-busy')).toBe('true');
+    // rerender drops the output listeners it is not given again.
+    await view.rerender({ inputs: { skill: { scope: 'project', projectId: 'p1', name: 'brand-voice' } }, on: outputs, partialUpdate: true });
+    await waitFor(() => expect(panel.getAttribute('aria-label')).toBe('Skill brand-voice'));
+    expect(within(panel).getByRole('button', { name: 'Delete' }).getAttribute('aria-busy')).toBeNull();
+    release({ ok: true });
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(1));
+    expect(outputs.close).not.toHaveBeenCalled();
+    expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Deleted email-sequence.']);
+  });
+
   it('says when the skill is a copy of a built-in one, with a link to the built-in', async () => {
     const { panel } = await setup({
       skill: { scope: 'global', name: 'pdf-toolkit' },
