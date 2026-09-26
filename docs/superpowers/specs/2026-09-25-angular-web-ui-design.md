@@ -75,7 +75,7 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
 | `app.pickFolder` | native dialog | Handled in the web DeskBridge: it opens the **folder browser** sheet and resolves with the chosen path or `null`, the same contract as the native dialog. The sheet also accepts a typed path, which deskd checks (§4.7). |
 | — (new) `fs.listDirs` | — | Web only, in a `webChannels` map that the web server validates and dispatches exactly as it does `channels`: `{ path?, hidden? }` → `{ path, parent, dirs: [{ name, path }] }`. It lists directories only, hidden ones only with `hidden: true` (for `~/.claude/skills`), under the user's home or an existing source. It resolves symlinks and never lists the Desk data dir. |
 | `app.revealLogs` | reveal in Finder | Opens the logs folder with the platform opener (`open`, `explorer`, `xdg-open`) on this computer. |
-| `app.saveFile` | save dialog | Handled in the web DeskBridge: a Blob of type `application/octet-stream` and `<a download>`, revoked right after the click. |
+| `app.saveFile` | save dialog | Handled in the web DeskBridge: a Blob of type `application/octet-stream` and `<a download>`; its URL is revoked just after the click (in a zero-delay timeout). |
 | `app.openMain` | focus the window | Not called. |
 | `app.settings` / `updateSettings` | `{ notifications }` in the app's settings file | The same shape, in `<data>/web-settings.json`. `notifications` means browser notifications (§5), and the browser also asks for permission. |
 | `daemon.status/start/restart/stop` | LaunchAgent or bundled deskd | `DaemonManager` in a new `web` mode. Status comes from health and `daemon.json`. When the Electron app's LaunchAgent is installed (macOS) and runs deskd for desk web's data dir (the plist's `--data-dir`), start and restart go through `launchctl` (bootstrap, or `kickstart -k`, of the existing plist; start uses `-k` too when the loaded job's deskd left `daemon.json` but does not answer) and stop is `launchctl bootout`, because `KeepAlive` would undo a signal. The web host never writes or removes the plist. A LaunchAgent that runs deskd for another data dir (desk web under `DESK_DATA_DIR`) is left alone. Otherwise start spawns the repo's deskd through tsx, as dev mode does, and stop signals the pid in `daemon.json`. deskd has no shutdown route. |
@@ -122,7 +122,7 @@ The threat model is other web pages open in the user's browser (CSRF, DNS rebind
     - A test fails if `[innerHTML]` or `bypassSecurityTrust` appears anywhere under `apps/web-ui/src`.
 
     The React `SafeMarkdown` test cases are ported as they are.
-11. **Agent files.** Unlike Electron, a browser lets the user open an image in a new tab, and a `blob:` URL document has desk web's origin. So the web `FileViewer` shows SVG as source text, never as an image. Image Blobs use raster types only (`png`, `jpeg`, `gif`, `webp`). Download Blobs are `application/octet-stream` and are revoked right after the click.
+11. **Agent files.** Unlike Electron, a browser lets the user open an image in a new tab, and a `blob:` URL document has desk web's origin. So the web `FileViewer` shows SVG as source text, never as an image. Image Blobs use raster types only (`png`, `jpeg`, `gif`, `webp`). Download Blobs are `application/octet-stream`, and their URLs are revoked just after the click (in a zero-delay timeout).
 12. **The folder browser** lists directory names only, only under the user's home or registered sources, and never the data dir. A typed path is checked by deskd (item 7).
 
 ## 5. The Angular app

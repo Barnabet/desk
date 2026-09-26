@@ -24878,7 +24878,7 @@ Expected: no line for a file under `apps/web-ui/src/app/attention/`, `apps/web-u
 
 ## Section W2a · threads: ThreadsScreen, ThreadRoster, ThreadDetail, RouteView, Transcript, the tabs, FileViewer
 
-**Goal:** the web Threads screen reaches parity with the desktop's. This section ports `apps/desktop/src/renderer/threads/` (`ThreadsScreen`, `ThreadRoster` with its `ThreadCard`, `ThreadDetail`, `RouteView`, `Transcript`, and `tabs/`: `ResultTab`, `DiffTab`, `FilesTab`, `SkillDraftsTab`, `UsageTab`) and `components/FileViewer.tsx`, with `components/SkillBadge.tsx` (the threads are its only React users). The messaging UI comes with them: the Ask / Reopen / Resume composer, message cards inside their stop in place of the sends' tool rows, answer-run stops (live, answered, muted closures) with the question they answer, `?at=` opening the stop that holds a message once, the roster's wait line that opens the pair sheet, and the one-hop link to what needs the user. `FileViewer` follows spec §4.11: SVG is shown as source text, image Blobs are raster only (`png`, `jpeg`, `gif`, `webp`), and "Save a copy…" goes through `DeskBridge`'s `app.saveFile` (an `application/octet-stream` Blob, revoked right after the click). `#/p/<id>/threads[/<thread>][?at=<event>]` then shows the screen, and the W1 e2e file gains the threads steps plus a thread on a git source (route, Diff, Files, an SVG shown as text and downloaded). Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §4.10, §4.11, §5, §6 (the Threads row), §7 (W2: "thread detail and diff").
+**Goal:** the web Threads screen reaches parity with the desktop's. This section ports `apps/desktop/src/renderer/threads/` (`ThreadsScreen`, `ThreadRoster` with its `ThreadCard`, `ThreadDetail`, `RouteView`, `Transcript`, and `tabs/`: `ResultTab`, `DiffTab`, `FilesTab`, `SkillDraftsTab`, `UsageTab`) and `components/FileViewer.tsx`, with `components/SkillBadge.tsx` (the threads are its only React users). The messaging UI comes with them: the Ask / Reopen / Resume composer, message cards inside their stop in place of the sends' tool rows, answer-run stops (live, answered, muted closures) with the question they answer, `?at=` opening the stop that holds a message once, the roster's wait line that opens the pair sheet, and the one-hop link to what needs the user. `FileViewer` follows spec §4.11: SVG is shown as source text, image Blobs are raster only (`png`, `jpeg`, `gif`, `webp`), and "Save a copy…" goes through `DeskBridge`'s `app.saveFile` (an `application/octet-stream` Blob whose URL is revoked just after the click, in a zero-delay timeout). `#/p/<id>/threads[/<thread>][?at=<event>]` then shows the screen, and the W1 e2e file gains the threads steps plus a thread on a git source (route, Diff, Files, an SVG shown as text and downloaded). Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §4.10, §4.11, §5, §6 (the Threads row), §7 (W2: "thread detail and diff").
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Angular commands go through `scripts/ng.mjs` (it picks a Node that satisfies `^22.22.3`); while iterating run only the named specs: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: no parallel test runs, and only Task W2a.7 starts Chromium (never together with another Chromium or Electron run).
 
@@ -28653,12 +28653,12 @@ Expected: exit 0: the root `tsc`, the desktop's, the web e2e's (`flows.e2e.test.
 - [ ] **Step 2: The root suite**
 
 Run: `pnpm exec vitest run --maxWorkers=2`
-Expected: PASS. This section changes nothing the root suite runs (bff, ui-core, the servers, the desktop's `ThreadsScreen.test.tsx` and `thread-route.test.ts`); the run proves it.
+Expected: PASS. This section's tasks change nothing the root suite runs (bff, ui-core, the servers, the desktop's `ThreadsScreen.test.tsx` and `thread-route.test.ts`), except W2a.1's review fix, whose tests the root suite runs: ui-core's `files.test.ts` and `row-views.test.ts`, the desktop's `FileViewer.test.tsx` and `ConversationScreen.test.tsx`, and bff's `daemon.test.ts`; the run proves them.
 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (5), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (3), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (3), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (3), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (3), `threads/transcript.spec.ts` (6), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the e2e**
 
@@ -28670,7 +28670,17 @@ Expected: the build succeeds; then PASS (1 file, 3 tests). With `DESK_E2E_SHOTS=
 - [ ] **Step 5: The desktop app is untouched**
 
 Run: `git diff --stat "$(git log -1 --format=%H --grep='the file viewer (SVG as text')~1" HEAD -- apps/desktop`
-Expected: no output: nothing under `apps/desktop` changed since the parent of W2a's first commit (W2a.1); the React threads and their tests are as they were.
+Expected: exactly these four files, and nothing else under `apps/desktop`:
+
+```
+ .../src/renderer/components/FileViewer.test.tsx    | 46 ++++++++++++++++++++++
+ .../desktop/src/renderer/components/FileViewer.tsx |  5 ++-
+ .../src/renderer/conversation/ChatItems.tsx        |  2 +-
+ .../conversation/ConversationScreen.test.tsx       |  5 +++
+ 4 files changed, 55 insertions(+), 3 deletions(-)
+```
+
+Note: W2a.1's review fix (`fix(desktop): a nameless path saves as 'file', …`, d1c14db) is the only change to `apps/desktop` since the parent of W2a's first commit: `FileViewer.tsx`'s download name, `ChatItems.tsx`'s `titleOf`, the new `FileViewer.test.tsx` and one more `ConversationScreen.test.tsx` expectation. The React threads and their tests are as they were.
 
 ---
 
