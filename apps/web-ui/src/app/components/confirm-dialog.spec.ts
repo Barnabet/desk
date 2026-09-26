@@ -23,4 +23,22 @@ describe('ConfirmDialog', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(cancel).toHaveBeenCalledTimes(2);
   });
+
+  it('takes its sheet out of the body and gives the focus back when it closes', async () => {
+    const before = document.createElement('button');
+    document.body.append(before);
+    before.focus();
+    const view = await render(`@if (open) { <div deskConfirmDialog title="Stop deskd?" confirmLabel="Stop"><p>Running threads pause.</p></div> }`, {
+      imports: [ConfirmDialog],
+      componentProperties: { open: true },
+    });
+    await view.fixture.whenStable();
+    // The Sheet is nested in ConfirmDialog, so only its own onDestroy takes it back out of document.body.
+    expect(screen.getByRole('dialog', { name: 'Stop deskd?' }).parentElement!.parentElement).toBe(document.body);
+    await view.rerender({ componentProperties: { open: false } });
+    await view.fixture.whenStable();
+    expect(document.querySelector('.sheet-backdrop')).toBeNull();
+    expect(document.activeElement).toBe(before);
+    before.remove();
+  });
 });
