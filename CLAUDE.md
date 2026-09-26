@@ -19,6 +19,7 @@ pnpm test:e2e     # builds the app and runs the Playwright-for-Electron suite (o
 pnpm package:desktop   # unsigned (ad hoc) Desk.app → apps/desktop/release/*.dmg + .zip with the bundled deskd and pinned uv; enables e2e/packaged
 pnpm catalog:pin [ids]    # re-pin catalog.json entries: commit SHAs, digests, script counts, Node locks (lock_from)
 pnpm catalog:check [ids]  # install each catalog entry for real (uv on PATH or DESK_UV), build its runtime, run its smoke command sandboxed
+pnpm catalog:sync         # copy catalog/shared/*.py over the copies inside first-party skills (then catalog:pin them)
 ```
 
 There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly. The desktop app is the exception: esbuild bundles its main and preload, and Vite builds its renderer.
@@ -49,7 +50,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `workspaces/inspect.ts`: thread diff and confined workspace browsing.
   - `services/manager.ts`: project services' processes (spawn, capped logs, loopback URL detection, orphan reaping); `tools/services.ts` holds the agent tools.
   - `attachments/`: images agents looked at, content-addressed in `<data>/attachments` (`tools/vision.ts` is `view_image`; `agent/transcript.ts` shows the 8 most recent as pixels).
-  - `catalog/`: the skill catalog. `catalog.json` holds the 20 pinned entries; `service.ts` fetches, verifies, stages and installs them; `runtimes.ts` builds Desk-managed environments (uv Python, npm lock, node shim, compat shims); `tar.ts`, `digest.ts`, `review.ts`; `curation.ts` holds helpers for `scripts/catalog.ts`.
+  - `catalog/`: the skill catalog. `catalog.json` holds the 30 pinned entries; `service.ts` fetches, verifies, stages and installs them; `runtimes.ts` builds Desk-managed environments (uv Python, npm lock, node shim, compat shims); `tar.ts`, `digest.ts`, `review.ts`; `curation.ts` holds helpers for `scripts/catalog.ts`.
   - `model/endpoint.ts`, `model/switchable.ts`: endpoint resolution (env → file → Keychain) and a runtime-configurable adapter.
   - `testing/`: the harness, exported as `@desk/core/testing`.
 - `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle, `notifier.ts` (macOS notifications), `scripts/bundle.mjs`.
@@ -59,7 +60,8 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `src/preload/`: exposes only `window.desk.{invoke,on,platform}`.
   - `src/renderer/`: React UI; talks to main only through `bridge.ts`. Agent text goes through `SafeMarkdown`.
 - `test/fake-model`: a scriptable OpenAI-compatible server. Every non-live test talks to it.
-- `catalog/skills/`: Desk's first-party catalog skills (`word-documents`, `pdf-toolkit`). After editing them, run `pnpm catalog:pin word-documents pdf-toolkit`; `catalog.test.ts` fails when a digest is stale.
+- `catalog/skills/`: Desk's first-party catalog skills: one per file-type group (`file-inspector`, `word-documents`, `pdf-toolkit`, `spreadsheets`, `presentations`, `images`, `audio-video`, `data-files`, `archives`, `markup-ebooks`, `email-calendar`; spec `2026-09-24-file-type-skills-design.md`) and `web-research` (spec `2026-09-24-web-research-design.md`). Each is SKILL.md + Python scripts with a `scripts/selftest.py` (its catalog smoke command) and must run on Windows too (`firstparty.test.ts` lints for that). After editing one, run `pnpm catalog:pin <id>`; `catalog.test.ts` fails when a digest is stale.
+- `catalog/shared/`: the source of truth for modules copied into those skills (`_common.py` CLI plumbing, `_render.py` LibreOffice/PDF/Typst/pandoc/ffmpeg helpers, `_cache.py` the content-addressed cache for big files, `_paging.py` paged listings with the exact next command, `_pandoc_safe.py` keeps pandoc inside a document's folder). Edit them here, then `pnpm catalog:sync`.
 
 ## Conventions
 
