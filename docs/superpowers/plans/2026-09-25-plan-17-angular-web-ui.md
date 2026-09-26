@@ -40382,9 +40382,9 @@ Step 2 failed as expected: "leaves no placeholder screen behind" (`expected true
 
 **Interfaces:**
 - Consumes: `channels` (`@desk/bff/contract`), `webChannels` (`@desk/web-server/contract`), `Route`, `PROJECT_TABS` (`@desk/ui-core`), `screenFor` (W3b.4).
-- Produces: the spec §6 guard. It fails when the React renderer calls an operation the web UI never calls (except the host-only `app.openMain` and `daemon.repair`), when the web UI calls a host-only operation or the renderer stops calling one (so the list stays honest), when a `webChannels` operation goes uncalled, when either UI builds an operation name at run time, or when a route other than `tray` has no screen.
+- Produces: the spec §6 guard. It fails when the React renderer calls an operation the web UI never calls (except the host-only `app.openMain` and `daemon.repair`), when the web UI calls a host-only operation or the renderer stops calling one (so the list stays honest), when a `webChannels` operation goes uncalled, when either UI calls with a first argument the scan cannot read (a name built at run time, a variable, a table, a nested call, or a quoted name that is no operation), or when a route other than `tray` has no screen.
 
-"Calls" means the operation's name, quoted, in the first argument of a `call(…)` in a non-test source: `call('x', …)` in the renderer, `this.bridge.call('x', …)` in the web UI, and both names of a conditional between two literals (the connection overlay's Start/Restart). Tests and test helpers (`*.test.ts(x)`, `renderer/test/`, `*.spec.ts`, `src/app/testing/`) are left out, and a name counts only when `channels` or `webChannels` has it. The one name built at run time, ``call(`daemon.${what}`, {})`` in the React `SystemScreen`, becomes a choice between literal calls, as the web port already writes it (W3b.2). Operations neither UI calls (`health`, `projects.list`, …) are not the guard's concern.
+"Calls" means the operation's name, quoted, in the first argument of a `call(…)` in a non-test source, comments aside: `call('x', …)` in the renderer, `this.bridge.call('x', …)` in the web UI (type arguments may nest once, `call<Foo<'x'>>('x', …)`), and both names of a conditional between two literals (the connection overlay's Start/Restart). Any other first argument is flagged, except a declaration's first parameter (`op: C`, `op?: C`) and `this`/`null` (`fn.call(this, …)`). Tests and test helpers (`*.test.ts(x)`, `renderer/test/`, `*.spec.ts`, `src/app/testing/`) are left out, and a name counts only when `channels` or `webChannels` has it. The one name built at run time, ``call(`daemon.${what}`, {})`` in the React `SystemScreen`, becomes a choice between literal calls, as the web port already writes it (W3b.2). Operations neither UI calls (`health`, `projects.list`, …) are not the guard's concern.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -40433,30 +40433,69 @@ const webSources = () => walk(SRC, (p) => /\.(ts|html)$/.test(p) && !p.endsWith(
 /** The React renderer's modules: not its `*.test.ts(x)`, not `test/`. */
 const reactSources = () => walk(RENDERER, (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) && !p.includes(`${sep}test${sep}`));
 
-/** The operations a source calls: every quoted operation name in the first argument of a `call(…)`. */
+/** `text` without its comments. Strings (quoted or template) are matched first and kept, so a `//` inside one stays. */
+function withoutComments(text: string): string {
+  return text.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_comment, kept?: string) => kept ?? ' ');
+}
+
+/** Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its first `,` or `)`. */
+function callsIn(text: string): Array<{ call: string; first: string }> {
+  return [...withoutComments(text).matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)].map((m) => ({ call: m[0], first: m[1]!.trim() }));
+}
+
+/** The names a first argument holds when the scan can read it: one quoted name, or a conditional between two; else null. */
+function namesIn(first: string): string[] | null {
+  const one = /^(['"`])([A-Za-z][\w.]*)\1$/.exec(first);
+  if (one) return [one[2]!];
+  const either = /^[^?]+\?\s*(['"`])([A-Za-z][\w.]*)\1\s*:\s*(['"`])([A-Za-z][\w.]*)\3$/.exec(first);
+  return either ? [either[2]!, either[4]!] : null;
+}
+
+/** A declaration's first parameter (`op: C`, `op?: C`: signatures and overloads), or `fn.call(this | null, …)`: no operation call. */
+const notACall = (first: string) => /^[A-Za-z_$][\w$]*\??:/.test(first) || first === 'this' || first === 'null';
+
+/** The operations a source calls: the names of every readable first argument of a `call(…)` that `channels` or `webChannels` has. */
 function calledOps(text: string): string[] {
   const found = new Set<string>();
-  for (const call of text.matchAll(/\bcall\s*(?:<[^>]*>)?\(\s*([^,)]*)/g)) {
-    for (const name of call[1]!.matchAll(/(['"`])([A-Za-z][\w.]*)\1/g)) if (OPERATIONS.has(name[2]!)) found.add(name[2]!);
-  }
+  for (const { first } of callsIn(text)) for (const name of namesIn(first) ?? []) if (OPERATIONS.has(name)) found.add(name);
   return [...found].sort();
 }
 
-/** Calls whose operation name is a template with a substitution: the scan cannot see which operations they reach. */
+/**
+ * Calls the scan cannot read: every `call(…)` whose first argument is neither one quoted operation name nor a
+ * conditional between two, declarations and `this`/`null` aside. A name built at run time (a template, a variable,
+ * a table, a call) lands here, and so does a quoted name that is no operation.
+ */
 function dynamicCalls(text: string): string[] {
-  return [...text.matchAll(/\bcall\s*(?:<[^>]*>)?\(\s*`[^`]*\$\{[^`]*`/g)].map((m) => m[0]);
+  return callsIn(text)
+    .filter(({ first }) => !notACall(first) && !(namesIn(first)?.every((name) => OPERATIONS.has(name)) ?? false))
+    .map(({ call }) => call);
 }
 
 const opsIn = (files: string[]) => new Set(files.flatMap((f) => calledOps(readFileSync(f, 'utf8'))));
 
 describe('parity with the desktop app (spec §6)', () => {
-  it('reads operation names from calls, and spots names built at run time', () => {
+  it('reads operation names from calls, ignores comments, and flags any name it cannot read', () => {
     expect(calledOps("void call('daemon.status', {}).then(setS);")).toEqual(['daemon.status']);
     expect(calledOps("this.bridge\n  .call(op === 'start' ? 'daemon.start' : 'daemon.restart', {})")).toEqual(['daemon.restart', 'daemon.start']);
     expect(calledOps("await this.bridge.call(\n  'models.replace',\n  { models },\n);")).toEqual(['models.replace']);
     expect(calledOps("call<'usage'>('usage', {}); fn.call(this, 'usage'); call(op, input); call('not.an.op', {});")).toEqual(['usage']);
+    expect(calledOps("call<ChannelOutput<'usage'>>('usage', {});")).toEqual(['usage']);
+    expect(calledOps("// React: this.bridge.call('projects.archive', { id })\n/* call('projects.delete', {}) */")).toEqual([]);
     expect(dynamicCalls('setS(await call(`daemon.${what}`, {}));')).toEqual(['call(`daemon.${what}`']);
     expect(dynamicCalls("setS(await call('daemon.stop', {}));")).toEqual([]);
+    expect(dynamicCalls("this.bridge.call(op === 'start' ? 'daemon.start' : 'daemon.restart', {})")).toEqual([]);
+    for (const text of [
+      "const op = what === 'stop' ? 'daemon.stop' : 'daemon.repair'; call(op, {})",
+      "const OPS = { stop: 'daemon.stop', start: 'daemon.start' } as const; call(OPS[what], {})",
+      "const f = (op: 'daemon.stop' | 'daemon.start') => call(op, {})",
+      "call(isOn() ? 'daemon.stop' : 'daemon.repair', {})",
+      "call('not.an.op', {})",
+    ]) {
+      expect(dynamicCalls(text), text).toHaveLength(1);
+    }
+    expect(dynamicCalls('call<C extends Channel>(op: C, input: ChannelInput<C>): Promise<ChannelOutput<C>>;\ncall(op?: string): void;')).toEqual([]);
+    expect(dynamicCalls("fn.call(this, 'usage'); fn.call(null, 1); // this.bridge.call(op, {})")).toEqual([]);
   });
 
   it('reads the sources of both UIs, and no tests', () => {
@@ -40543,6 +40582,12 @@ Run: `pnpm typecheck`
 Expected: exit 0 (the desktop `tsc` checks the new expression: every branch is a `Promise<DaemonStatus>`).
 
 **Deviation (as run):** `parity.spec.ts` and the `SystemScreen.tsx` edit are the blocks above, unchanged, and the anchor matched as written. Step 2 failed exactly as expected (2 of 7: `daemon.repair` in the honest-list case, ``system/SystemScreen.tsx: call(`daemon.${what}` `` in the literal-names case); Step 4 passed 7 of 7. `SystemScreen.test.tsx` has 7 cases since the merge of master (its appearance case), not 6; it is unchanged and passes. What the guard reads, after every W3a and W3b screen (built-ins, catalog, skills, system, palette): the renderer calls 76 operations once `act` is literal (`daemon.stop` and `daemon.repair` join the 74 it named before), and the web UI calls 75. The renderer's only operations the web UI does not call are `app.openMain` (the tray's) and `daemon.repair`, which is `HOST_ONLY`, as spec §3 says (`app.openExternal`, `app.pickFolder` and `app.saveFile` are called, and answered inside the web `DeskBridge`). The web UI's only operation the renderer does not call is `fs.listDirs` (the folder browser, `webChannels`' one entry). The one conditional between literals on each side is the connection overlay's Start/Restart; the only other `call(` matches with no literal are the two bridges' own `call` declarations and a doc comment in `builtin-panel.ts`. Neither UI calls `health`, `overview`, `projects.list`, `projects.chat`, `projects.usage`, `projects.events`, `threads.list`, `threads.get`, `threads.transcript`, `attention.list` or `skills.versionFile`, which the guard leaves alone (spec §6).
+
+**Deviation (review fix):** the guard flags every operation name it cannot read, ignores comments, and sees nested generics. The block above is the file as fixed. The first version flagged only a template literal with a substitution, and `calledOps` skipped any call whose first argument held no quoted name, so each of these compiled and slipped through with no operation and no flag, breaking spec §6's promise that dynamic calls "become literal names in both UIs, so the scan sees them": `const op = what === 'stop' ? 'daemon.stop' : 'daemon.repair'; call(op, {})`, `call(OPS[what], {})` over an `as const` table, `const f = (op: 'daemon.stop' | 'daemon.start') => call(op, {})`, and `call(isOn() ? 'daemon.stop' : 'daemon.repair', {})` (the capture `[^,)]*` stops at the first `)`).
+- `withoutComments` strips `//` and `/* */` comments before both rules, keeping quoted and template strings as they are, so a comment such as `// React: this.bridge.call('projects.archive', …)` credits no operation.
+- `dynamicCalls` flags every `call(…)` whose first argument is neither one quoted operation name nor a conditional between two (`namesIn`), a quoted name that no operation has included; declarations (`op: C`, `op?: C`: the three `DeskBridge.call` overloads and the renderer's `bridge.ts` `call`) and `this`/`null` are exempt (`notACall`). The doc comment in `builtin-panel.ts` (``Marks a call (`<name>|<what>`)``) was the only other match, and comment stripping removes it.
+- Type arguments may nest once: `(?:<(?:[^<>]|<[^<>]*>)*>)?` in place of `(?:<[^>]*>)?`, so `call<ChannelOutput<'usage'>>('usage', {})` is read.
+- The first case pins all of it: the four snippets above and `call('not.an.op', {})` must each be flagged, a line and a block comment credit nothing, the nested generic is read, and the connection overlay's conditional, two declarations and `fn.call(this | null, …)` are not flagged. Each new expectation failed against the old regexes first (7 of them, seen with `expect.soft`); the case now passes, and so do the other six. On the committed sources the operation sets are unchanged (the renderer 76, the web UI 75) and nothing is flagged.
 
 - [ ] **Step 5: Commit**
 

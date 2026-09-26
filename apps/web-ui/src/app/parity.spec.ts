@@ -40,30 +40,69 @@ const webSources = () => walk(SRC, (p) => /\.(ts|html)$/.test(p) && !p.endsWith(
 /** The React renderer's modules: not its `*.test.ts(x)`, not `test/`. */
 const reactSources = () => walk(RENDERER, (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) && !p.includes(`${sep}test${sep}`));
 
-/** The operations a source calls: every quoted operation name in the first argument of a `call(…)`. */
+/** `text` without its comments. Strings (quoted or template) are matched first and kept, so a `//` inside one stays. */
+function withoutComments(text: string): string {
+  return text.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_comment, kept?: string) => kept ?? ' ');
+}
+
+/** Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its first `,` or `)`. */
+function callsIn(text: string): Array<{ call: string; first: string }> {
+  return [...withoutComments(text).matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)].map((m) => ({ call: m[0], first: m[1]!.trim() }));
+}
+
+/** The names a first argument holds when the scan can read it: one quoted name, or a conditional between two; else null. */
+function namesIn(first: string): string[] | null {
+  const one = /^(['"`])([A-Za-z][\w.]*)\1$/.exec(first);
+  if (one) return [one[2]!];
+  const either = /^[^?]+\?\s*(['"`])([A-Za-z][\w.]*)\1\s*:\s*(['"`])([A-Za-z][\w.]*)\3$/.exec(first);
+  return either ? [either[2]!, either[4]!] : null;
+}
+
+/** A declaration's first parameter (`op: C`, `op?: C`: signatures and overloads), or `fn.call(this | null, …)`: no operation call. */
+const notACall = (first: string) => /^[A-Za-z_$][\w$]*\??:/.test(first) || first === 'this' || first === 'null';
+
+/** The operations a source calls: the names of every readable first argument of a `call(…)` that `channels` or `webChannels` has. */
 function calledOps(text: string): string[] {
   const found = new Set<string>();
-  for (const call of text.matchAll(/\bcall\s*(?:<[^>]*>)?\(\s*([^,)]*)/g)) {
-    for (const name of call[1]!.matchAll(/(['"`])([A-Za-z][\w.]*)\1/g)) if (OPERATIONS.has(name[2]!)) found.add(name[2]!);
-  }
+  for (const { first } of callsIn(text)) for (const name of namesIn(first) ?? []) if (OPERATIONS.has(name)) found.add(name);
   return [...found].sort();
 }
 
-/** Calls whose operation name is a template with a substitution: the scan cannot see which operations they reach. */
+/**
+ * Calls the scan cannot read: every `call(…)` whose first argument is neither one quoted operation name nor a
+ * conditional between two, declarations and `this`/`null` aside. A name built at run time (a template, a variable,
+ * a table, a call) lands here, and so does a quoted name that is no operation.
+ */
 function dynamicCalls(text: string): string[] {
-  return [...text.matchAll(/\bcall\s*(?:<[^>]*>)?\(\s*`[^`]*\$\{[^`]*`/g)].map((m) => m[0]);
+  return callsIn(text)
+    .filter(({ first }) => !notACall(first) && !(namesIn(first)?.every((name) => OPERATIONS.has(name)) ?? false))
+    .map(({ call }) => call);
 }
 
 const opsIn = (files: string[]) => new Set(files.flatMap((f) => calledOps(readFileSync(f, 'utf8'))));
 
 describe('parity with the desktop app (spec §6)', () => {
-  it('reads operation names from calls, and spots names built at run time', () => {
+  it('reads operation names from calls, ignores comments, and flags any name it cannot read', () => {
     expect(calledOps("void call('daemon.status', {}).then(setS);")).toEqual(['daemon.status']);
     expect(calledOps("this.bridge\n  .call(op === 'start' ? 'daemon.start' : 'daemon.restart', {})")).toEqual(['daemon.restart', 'daemon.start']);
     expect(calledOps("await this.bridge.call(\n  'models.replace',\n  { models },\n);")).toEqual(['models.replace']);
     expect(calledOps("call<'usage'>('usage', {}); fn.call(this, 'usage'); call(op, input); call('not.an.op', {});")).toEqual(['usage']);
+    expect(calledOps("call<ChannelOutput<'usage'>>('usage', {});")).toEqual(['usage']);
+    expect(calledOps("// React: this.bridge.call('projects.archive', { id })\n/* call('projects.delete', {}) */")).toEqual([]);
     expect(dynamicCalls('setS(await call(`daemon.${what}`, {}));')).toEqual(['call(`daemon.${what}`']);
     expect(dynamicCalls("setS(await call('daemon.stop', {}));")).toEqual([]);
+    expect(dynamicCalls("this.bridge.call(op === 'start' ? 'daemon.start' : 'daemon.restart', {})")).toEqual([]);
+    for (const text of [
+      "const op = what === 'stop' ? 'daemon.stop' : 'daemon.repair'; call(op, {})",
+      "const OPS = { stop: 'daemon.stop', start: 'daemon.start' } as const; call(OPS[what], {})",
+      "const f = (op: 'daemon.stop' | 'daemon.start') => call(op, {})",
+      "call(isOn() ? 'daemon.stop' : 'daemon.repair', {})",
+      "call('not.an.op', {})",
+    ]) {
+      expect(dynamicCalls(text), text).toHaveLength(1);
+    }
+    expect(dynamicCalls('call<C extends Channel>(op: C, input: ChannelInput<C>): Promise<ChannelOutput<C>>;\ncall(op?: string): void;')).toEqual([]);
+    expect(dynamicCalls("fn.call(this, 'usage'); fn.call(null, 1); // this.bridge.call(op, {})")).toEqual([]);
   });
 
   it('reads the sources of both UIs, and no tests', () => {
