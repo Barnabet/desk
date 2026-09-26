@@ -93,6 +93,8 @@ export const EventBody = z.discriminatedUnion('type', [
     'skill.runtime_changed',
     z.object({ scope: SkillScope, name: SkillName, state: z.enum(['preparing', 'ready', 'failed', 'removed']), reason: z.string().nullable() }),
   ),
+  /** The user turned one of Desk's built-in skills off or on (global; project_id is GLOBAL_PROJECT_ID). */
+  event('skill.builtin_toggled', z.object({ name: SkillName, enabled: z.boolean() })),
   event('plan.updated', z.object({ items: z.array(PlanItem) })),
   /** Desk's short account of the project for the user: what is happening now, what is next, what waits on them. */
   event('whats_up.updated', z.object({ text: z.string().min(1) })),

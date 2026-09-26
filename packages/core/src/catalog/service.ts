@@ -12,6 +12,7 @@ import {
   type RuntimeState,
   type SkillScope,
   type StoredEvent,
+  type WritableSkillScope,
 } from '@desk/protocol';
 import catalogData from './catalog.json' with { type: 'json' };
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
@@ -27,6 +28,8 @@ import { DEFAULT_CAPS, extractSubtree, type ExtractedFile } from './tar';
 export type CatalogFetch = (url: string) => Promise<AsyncIterable<Uint8Array>>;
 
 export type SkillRef = { scope: SkillScope; name: string; projectId?: string };
+/** A skill the catalog installs: never a built-in one. */
+type CatalogRef = SkillRef & { scope: WritableSkillScope };
 
 /** What the catalog needs from the runtime manager (Plan 13 Task 3); absent means "no runtime". */
 export type CatalogRuntimes = {
@@ -145,7 +148,7 @@ export class CatalogService {
     const entry = this.entry(id);
     const req = CatalogInstallRequest.parse(request);
     if (req.scope === 'project' && !req.project_id) throw new ValidationError('A project install needs project_id');
-    const ref: SkillRef = { scope: req.scope, name: entry.id, ...(req.scope === 'project' ? { projectId: req.project_id! } : {}) };
+    const ref: CatalogRef = { scope: req.scope, name: entry.id, ...(req.scope === 'project' ? { projectId: req.project_id! } : {}) };
     const current = this.installOf(entry, ref, this.o.store.list({ types: ['skill.saved', 'skill.deleted'] }));
     if (current?.state === 'name_taken') {
       throw new ConflictError(`A skill named ${entry.id} already exists here and did not come from the catalog. Rename or delete it first.`);
@@ -172,7 +175,7 @@ export class CatalogService {
   }
 
   /** Rebuilds the runtime of an installed catalog skill (after a failure, or when its environment went missing). */
-  retryRuntime(ref: SkillRef): { state: RuntimeState; reason: string | null } {
+  retryRuntime(ref: CatalogRef): { state: RuntimeState; reason: string | null } {
     const entry = this.catalog.entries.find((e) => e.id === ref.name);
     const install = entry ? this.installOf(entry, ref, this.o.store.list({ types: ['skill.saved', 'skill.deleted'] })) : null;
     if (!entry || !install || install.state === 'name_taken') throw new NotFoundError(`${ref.name} was not installed from the catalog`);
@@ -182,7 +185,7 @@ export class CatalogService {
   }
 
   /** The install state of an entry in one scope, from the skill.saved log; null when no skill of that name exists there. */
-  private installOf(entry: CatalogEntry, ref: SkillRef, log: StoredEvent[]): CatalogInstall | null {
+  private installOf(entry: CatalogEntry, ref: CatalogRef, log: StoredEvent[]): CatalogInstall | null {
     let history: string[] = [];
     for (const e of log) {
       if (e.type !== 'skill.saved' && e.type !== 'skill.deleted') continue;

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SkillName, SkillScope } from './domain';
+import { SkillName, SkillScope, WritableSkillScope } from './domain';
 
 /** The skill catalog: reviewed Agent Skills pinned to a commit and a content digest (spec: 2026-09-24-skill-catalog-design). */
 
@@ -123,7 +123,7 @@ export const CatalogInstallState = z.enum(['not_installed', 'installed', 'update
 export type CatalogInstallState = z.infer<typeof CatalogInstallState>;
 
 export const CatalogInstall = z.object({
-  scope: SkillScope,
+  scope: WritableSkillScope,
   project_id: z.string().nullable(),
   state: CatalogInstallState,
   /** The catalog commit of the installed version (null when not from the catalog). */
@@ -138,7 +138,7 @@ export const CatalogItem = CatalogEntry.extend({ installs: z.array(CatalogInstal
 export type CatalogItem = z.infer<typeof CatalogItem>;
 
 export const CatalogInstallRequest = z.object({
-  scope: SkillScope.default('global'),
+  scope: WritableSkillScope.default('global'),
   project_id: z.string().min(1).optional(),
   /** Required to replace a catalog skill that was edited locally. */
   replace_modified: z.boolean().default(false),
@@ -146,7 +146,7 @@ export const CatalogInstallRequest = z.object({
 export type CatalogInstallRequest = z.input<typeof CatalogInstallRequest>;
 
 export const CatalogInstallResult = z.object({
-  skill: z.object({ name: SkillName, scope: SkillScope, version: z.number().int(), project_id: z.string().nullable() }),
+  skill: z.object({ name: SkillName, scope: WritableSkillScope, version: z.number().int(), project_id: z.string().nullable() }),
   state: CatalogInstallState,
   runtime: RuntimeState,
 });

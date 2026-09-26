@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { extname, isAbsolute, join } from 'node:path';
-import { SkillName, SkillScope } from '@desk/protocol';
+import { SkillName, WritableSkillScope } from '@desk/protocol';
 import { z } from 'zod';
 import type { SkillDetail, SkillStore, SkillSummary } from '../skills/store';
 import { getAgent } from '../state/queries';
@@ -162,7 +162,7 @@ export const skillWriteTool = defineTool({
   ].join(' '),
   input: z.object({
     name: SkillName,
-    scope: SkillScope.default('project'),
+    scope: WritableSkillScope.default('project'),
     description: z.string().min(1).max(1024).optional(),
     instructions: z.string().min(1).optional(),
     files: z.array(z.object({ path: z.string().min(1), content: z.string() })).default([]),
@@ -193,7 +193,7 @@ export const skillWriteTool = defineTool({
 export const skillDeleteTool = defineTool({
   name: 'skill_delete',
   description: 'Delete a skill (its last version stays in history and the user can restore it). Needs approval.',
-  input: z.object({ name: SkillName, scope: SkillScope }),
+  input: z.object({ name: SkillName, scope: WritableSkillScope }),
   gate: { subject: () => ({}), unmatched: 'ask' },
   async execute({ name, scope }, ctx) {
     ctx.services.deleteSkill(scope, name, scope === 'project' ? ctx.projectId : undefined, {
