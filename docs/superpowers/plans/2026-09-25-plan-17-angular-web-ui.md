@@ -34568,6 +34568,7 @@ A port of `SkillPanel.tsx`: the skill's name and scope, its description, where i
 Create `apps/web-ui/src/app/skills/skill-panel.spec.ts`:
 
 ```ts
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34679,6 +34680,30 @@ describe('SkillPanel', () => {
     expect(await within(panel).findByText("Couldn't load this skill")).toBeTruthy();
     expect(panel.textContent).toContain('No skill named email-sequence');
     expect(within(panel).queryByRole('tab')).toBeNull();
+  });
+
+  it('fetches the skill and each pair once, even when a call reads a signal that changes later', async () => {
+    // The real bridge can read its signedOut signal inside call() (a sign-in retry); neither fetch may track it.
+    const signedIn = signal(true);
+    const { bridge, panel } = await setup({
+      handlers: {
+        'skills.get': () => {
+          signedIn();
+          return detail(2, 'Plan the sequence.');
+        },
+        'skills.version': ({ version }: { version: number }) => {
+          signedIn();
+          return detail(version, 'Plan the sequence.');
+        },
+      },
+    });
+    fireEvent.click(await within(panel).findByRole('tab', { name: 'History · 2' }));
+    expect(await within(panel).findByText('The instructions are the same.')).toBeTruthy();
+    signedIn.set(false);
+    TestBed.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(bridge.calls.filter((c) => c.channel === 'skills.get')).toHaveLength(1);
+    expect(bridge.calls.filter((c) => c.channel === 'skills.version')).toHaveLength(2);
   });
 
   it('compares any two versions: the instruction lines and the files that changed', async () => {
@@ -34829,9 +34854,12 @@ export class Compare {
   protected readonly chip = CHIP;
   protected readonly bytes = bytes;
   protected readonly versions = computed(() => this.history().map((h) => h.version));
-  /** The two versions compared: first the one before the current and the current, then whatever the user picks (React's useState). */
-  protected readonly from = linkedSignal<number[], number>({ source: this.versions, computation: (v, prev) => prev?.value ?? v.at(-2) ?? v[0] ?? 1 });
-  protected readonly to = linkedSignal<number[], number>({ source: this.versions, computation: (v, prev) => prev?.value ?? v.at(-1) ?? 1 });
+  /** The versions first compared: the one before the current, and the current (React's useState seeds). */
+  private readonly firstFrom = computed(() => this.versions().at(-2) ?? this.versions()[0] ?? 1);
+  private readonly firstTo = computed(() => this.versions().at(-1) ?? 1);
+  /** The two versions compared: the first ones, then whatever the user picks, kept when the history is fetched again (React's useState). */
+  protected readonly from = linkedSignal<number, number>({ source: this.firstFrom, computation: (v, prev) => prev?.value ?? v });
+  protected readonly to = linkedSignal<number, number>({ source: this.firstTo, computation: (v, prev) => prev?.value ?? v });
   protected readonly pair = signal<[SkillDetail, SkillDetail] | null>(null);
   protected readonly error = signal<string | null>(null);
   private readonly key = computed(() => skillKey(this.skill()));
@@ -34860,7 +34888,8 @@ export class Compare {
       let live = true;
       onCleanup(() => (live = false));
       this.pair.set(null);
-      Promise.all([this.bridge.call('skills.version', { ...scopeArg(skill), name: skill.name, version: from }), this.bridge.call('skills.version', { ...scopeArg(skill), name: skill.name, version: to })])
+      // The calls run untracked, so a signal the bridge reads (signedOut on a sign-in retry) never fetches the pair again.
+      untracked(() => Promise.all([this.bridge.call('skills.version', { ...scopeArg(skill), name: skill.name, version: from }), this.bridge.call('skills.version', { ...scopeArg(skill), name: skill.name, version: to })]))
         .then(([a, b]) => {
           if (!live) return;
           this.pair.set([a, b]);
@@ -35080,7 +35109,8 @@ export class SkillPanel {
       let live = true;
       onCleanup(() => (live = false));
       this.error.set(null);
-      Promise.all([this.bridge.call('skills.get', { ...scopeArg(skill), name: skill.name }), this.bridge.call('skills.history', { ...scopeArg(skill), name: skill.name })])
+      // The calls run untracked, so a signal the bridge reads (signedOut on a sign-in retry) never fetches the skill again.
+      untracked(() => Promise.all([this.bridge.call('skills.get', { ...scopeArg(skill), name: skill.name }), this.bridge.call('skills.history', { ...scopeArg(skill), name: skill.name })]))
         .then(([d, h]) => {
           if (!live) return;
           this.detail.set(d);
@@ -35166,10 +35196,12 @@ export class SkillPanel {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-panel.spec.ts)`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation:** two changes from the plan's first code, both for the port conventions; the blocks above are the committed files. (1) Both fetch `effect`s (the panel's `skills.get` and `skills.history`, `Compare`'s two `skills.version`) called the bridge while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would fetch again when it changed. The calls now run in `untracked`, as `ReviewSheet`'s prepare does since W3a.5's review, and a new case (handlers that read a signal, which then changes) fails without either one (it counted 2 `skills.get` calls without the panel's, 4 `skills.version` calls without `Compare`'s): 8 tests, not 7. (2) `Compare`'s `from` and `to` were `linkedSignal`s sourced from `versions`, an array rebuilt with every history fetch. They kept their value anyway (`prev?.value`), but user-editable state derives from a computed primitive: they are now sourced from `firstFrom` and `firstTo` (the versions React's `useState` seeds), with the same keep-the-pick computation. Otherwise the code is `SkillPanel.tsx` as it is on `web-ui` since the merge of master (8883229), unchanged after it: the scope chip still shows Global or the project's name (`SkillRef`'s scope is `'global' | 'project'`; built-ins open in `BuiltinPanel`, W3a.8b), the "Customised from the built-in skill" note links to `#/skills/builtin:<name>`, and every action (Edit, Refine with Desk, Restore, Delete) is offered for both scopes, as in React. The spec failed first on `Could not resolve "./skill-panel"`, with the Angular compiler's `TS2307` beside it.
 
 - [ ] **Step 5: Commit**
 
@@ -37473,7 +37505,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (7), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (8), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
