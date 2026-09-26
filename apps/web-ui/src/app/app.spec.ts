@@ -336,4 +336,20 @@ describe('App', () => {
     // Closed, not only hidden: signing in again shows no palette nobody asked for.
     expect(TestBed.inject(PaletteToggle).open()).toBe(false);
   });
+
+  it('leaves ⌘K to the browser while the page shows its error fallback, and closes an open palette', async () => {
+    go('#/map');
+    const { view } = await renderApp();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Search Desk' });
+    // What DeskErrorHandler does with two render errors: the screen's boundary takes the first, the whole page's the second.
+    const boundaries = TestBed.inject(ErrorBoundaries);
+    boundaries.report(new Error('screen boom'));
+    boundaries.report(new Error('page boom'));
+    await view.fixture.whenStable();
+    expect(screen.getByText('Desk hit an error')).toBeTruthy();
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+    expect(pressCmdK().defaultPrevented).toBe(false);
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+  });
 });

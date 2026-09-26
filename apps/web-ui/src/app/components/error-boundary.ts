@@ -64,6 +64,8 @@ export class ErrorBoundary {
   /** The failure, dropped whenever the key changes, as the desktop's `<ErrorBoundary key=…>` remounts on a new key. */
   private readonly failure = linkedSignal<string, Error | null>({ source: this.resetKey, computation: () => null });
   protected readonly error = this.failure.asReadonly();
+  /** Whether it shows its fallback, as a signal (App rests ⌘K while the whole page's does). */
+  readonly failing = computed(() => this.error() !== null);
   protected readonly whole = computed(() => this.scope() === 'whole');
   protected readonly screenBody = SCREEN_BODY;
   protected readonly wholeBody = WHOLE_BODY;

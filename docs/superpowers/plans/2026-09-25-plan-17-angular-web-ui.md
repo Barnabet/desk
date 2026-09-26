@@ -305,7 +305,7 @@ The plan has 108 tasks in 11 sections, one commit per task. The sections follow 
 **Later phases (W2, W3)**
 - **SVG is shown as text in `FileViewer`.** Image Blobs are raster-only.
 - **`SkillBadge` is ported in W2a**, because the threads are its only React users.
-- **`PaletteToggle`** (a root injectable) listens for ⌘K / Ctrl-K while `App` shows the shell (`setEnabled`; not while signed out or during onboarding, where the key stays the browser's), and `App` renders `CommandPalette` only while the palette is open.
+- **`PaletteToggle`** (a root injectable) listens for ⌘K / Ctrl-K while `App` shows the shell (`setEnabled`; not while signed out, during onboarding or while the whole-page error fallback shows, where the key stays the browser's), and `App` renders `CommandPalette` only while the palette is open.
 - **⌘N and ⌘1–⌘4 are not ported.** They are native menu accelerators (spec §5 does not port menus), and the browser uses them for windows and tabs.
 - **The parity guard rules** (W3b.5, `parity.spec.ts`):
   - Every operation the React renderer calls literally is called by the web UI, apart from `HOST_ONLY` = `app.openMain` and `daemon.repair`.
@@ -12609,6 +12609,8 @@ export class ErrorBoundary {
   /** The failure, dropped whenever the key changes, as the desktop's `<ErrorBoundary key=…>` remounts on a new key. */
   private readonly failure = linkedSignal<string, Error | null>({ source: this.resetKey, computation: () => null });
   protected readonly error = this.failure.asReadonly();
+  /** Whether it shows its fallback, as a signal (App rests ⌘K while the whole page's does; W3b.3's second review fix). */
+  readonly failing = computed(() => this.error() !== null);
   protected readonly whole = computed(() => this.scope() === 'whole');
   protected readonly screenBody = SCREEN_BODY;
   protected readonly wholeBody = WHOLE_BODY;
@@ -39453,7 +39455,7 @@ What the screen shows stays clear of secrets: `daemon.status` is `DaemonStatus` 
 **Files:**
 - Create: `apps/web-ui/src/app/components/command-palette.ts`
 - Modify: `apps/web-ui/src/app/app.ts` (W0c.14), `apps/web-ui/src/app/app.spec.ts` (W0c.14)
-- Test: `apps/web-ui/src/app/components/command-palette.spec.ts` (ported from `apps/desktop/src/renderer/components/CommandPalette.test.tsx`, plus closing, plus the review fix's memory-search case), one new `app.spec.ts` case (⌘K and ⌘P in the shell), and three for the review fix (⌘K outside the shell)
+- Test: `apps/web-ui/src/app/components/command-palette.spec.ts` (ported from `apps/desktop/src/renderer/components/CommandPalette.test.tsx`, plus closing, plus the review fix's memory-search case), one new `app.spec.ts` case (⌘K and ⌘P in the shell), three for the review fix (⌘K outside the shell), and one for the second review fix (⌘K while the page shows its error fallback); `components/error-boundary.ts` (W0c.11) gains `failing` in the second review fix
 
 **Interfaces:**
 - Consumes: `DeskBridge` (`call` with `skills.list`, `library.list`, `catalog.list`, `builtins.list`, `builtins.setEnabled`, `memory.list`), `GlobalStore` (`state().overview`), `RouteService` (`navigate`), `ToastService`, `FakeDeskBridge`, `provideGlobal` (W0c); `ProjectSwitcher`'s ⌘P / Ctrl-P (W0c.12, dialog "Switch project"); `catalogItems`, `install` (W3a.2, specs); `builtin` (W3a.2b, spec); `GROUP_ORDER` (with master's `Built-in skills` group), `rankPalette`, `PaletteItem` (with master's optional `run`), `href` (`@desk/ui-core`); `clip`, `ArtifactKind`, `BuiltinSkillInfo`, `CatalogItem` (`@desk/protocol`); `SkillSummary` (`@desk/client`).
@@ -39662,7 +39664,7 @@ function pressCmdK(): KeyboardEvent {
 }
 ```
 
-and add these cases as the last ones in `describe('App', …)` (the first is the task's; the other three are the review fix's):
+and add these cases as the last ones in `describe('App', …)` (the first is the task's; the next three are the review fix's, the last the second review fix's):
 
 ```ts
   it('opens the command palette with ⌘K and the project switcher with ⌘P, and adds no palette element while it is closed', async () => {
@@ -39712,6 +39714,22 @@ and add these cases as the last ones in `describe('App', …)` (the first is the
     await view.fixture.whenStable();
     expect(screen.getByRole('heading', { name: 'Open Desk from your terminal' })).toBeTruthy();
     // Closed, not only hidden: signing in again shows no palette nobody asked for.
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+  });
+
+  it('leaves ⌘K to the browser while the page shows its error fallback, and closes an open palette', async () => {
+    go('#/map');
+    const { view } = await renderApp();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Search Desk' });
+    // What DeskErrorHandler does with two render errors: the screen's boundary takes the first, the whole page's the second.
+    const boundaries = TestBed.inject(ErrorBoundaries);
+    boundaries.report(new Error('screen boom'));
+    boundaries.report(new Error('page boom'));
+    await view.fixture.whenStable();
+    expect(screen.getByText('Desk hit an error')).toBeTruthy();
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+    expect(pressCmdK().defaultPrevented).toBe(false);
     expect(TestBed.inject(PaletteToggle).open()).toBe(false);
   });
 ```
@@ -40059,7 +40077,45 @@ After (injecting it here starts the ⌘K listener with the app):
   protected readonly palette = inject(PaletteToggle);
 ```
 
-The constructor (the review fix: ⌘K only in the shell), before:
+The whole-page boundary (the second review fix: ⌘K rests while the page shows its error fallback). The Angular import, before:
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, ViewEncapsulation } from '@angular/core';
+```
+
+After:
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, viewChild, ViewEncapsulation } from '@angular/core';
+```
+
+The template, before:
+
+```html
+      <div deskErrorBoundary scope="whole">
+```
+
+After:
+
+```html
+      <div deskErrorBoundary scope="whole" #page>
+```
+
+The class body, before:
+
+```ts
+  protected readonly route = this.routes.route;
+```
+
+After:
+
+```ts
+  protected readonly route = this.routes.route;
+  /** The whole-page boundary (absent while signed out). */
+  private readonly page = viewChild('page', { read: ErrorBoundary });
+```
+
+The constructor (the review fix: ⌘K only in the shell; the second review fix adds the boundary's condition), before:
 
 ```ts
     effect(() => {
@@ -40071,8 +40127,8 @@ After:
 
 ```ts
     // ⌘K works only in the shell (React's listener lives in CommandPalette, which only its Shell mounts): not while signed
-    // out, and not during onboarding.
-    effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding'));
+    // out, not during onboarding, and not while the whole page shows its error fallback (which unmounts the React Shell).
+    effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding' && !this.page()?.failing()));
     effect(() => {
       const name = this.route().name;
       if (this.bridge.signedOut()) return;
@@ -40096,6 +40152,8 @@ The React sources were re-read on `web-ui` after the merge of master (8883229). 
 - ⌘K was live outside the shell. `PaletteToggle` listened from `App`'s start, while React's listener lives inside `CommandPalette`, which only its `Shell` mounts. So on the web, during onboarding or while signed out, ⌘K was `preventDefault`ed (the browser's own shortcut blocked), and the palette opened later, uninvited, when the shell appeared; an open palette also survived signing out and in. `PaletteToggle` now has a private `enabled` signal (off at the start) and `setEnabled(on)`; turning it off also closes the palette, and the key handler returns before `preventDefault` while it is off. `App`'s constructor adds `effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding'))`, the same two conditions its template uses to show the shell. Three `app.spec.ts` cases, each failing first (`expected true to be false`): "leaves ⌘K to the browser during onboarding, and opens no palette once onboarding is done", "leaves ⌘K to the browser while signed out" and "closes an open palette when this browser signs out". The palette spec's `PaletteHost` (the palette as `App`'s shell renders it) now calls `setEnabled(true)` in its constructor, as `App` does in the shell; its four cases are otherwise unchanged.
 - The memory search restarted on every `desk:global` push: its effect read the whole `global()` state, so a push reset the 250 ms timer and dropped answers already on their way. It now reads `memoryProjects`, a `computed` of the first 8 projects' ids and names with an `equal` that compares them, so a push that changes anything else leaves it alone. "keeps a pending memory search when a global push changes something else" (new) pushes an attention-count change during the rest and again while `memory.list` is answering; it failed first (the first answer was dropped and a second search sent).
 - Known gap, as on the desktop: turning a built-in skill off or on from the palette leaves an open Skills screen stale until its next poll. React's palette behaves the same (`builtins.setEnabled` is called in place and nothing tells the Skills screen), so it is not changed here.
+
+**Deviation (review fix, the second, before W3b.5):** ⌘K rests while the page shows its error fallback. When the whole-page boundary caught an error, the page showed "Desk hit an error" and no shell, yet ⌘K stayed enabled and `preventDefault`ed, and an open palette stayed open in `PaletteToggle`; on the desktop that boundary unmounts `CommandPalette`, listener and all. `ErrorBoundary` (W0c.11) gains a public `failing` (a `computed` of its error, beside the untracked `failed()` its registry uses), `App` names the whole-page boundary `#page` and reads it with `viewChild('page', { read: ErrorBoundary })`, and the `setEnabled` effect adds `&& !this.page()?.failing()`, which also closes an open palette. The blocks above are the files as fixed. "leaves ⌘K to the browser while the page shows its error fallback, and closes an open palette" (new, the last `app.spec.ts` case) opens the palette on `#/map`, reports two errors (the screen's boundary takes the first, the whole page's the second) and presses ⌘K; it failed first (`expected true to be false`: the palette was still open).
 
 - [ ] **Step 6: Commit**
 

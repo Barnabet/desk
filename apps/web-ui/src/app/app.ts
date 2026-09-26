@@ -1,5 +1,5 @@
 import { DOCUMENT, NgComponentOutlet, NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, ViewEncapsulation } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, viewChild, ViewEncapsulation } from '@angular/core';
 import { CommandPalette, PaletteToggle } from './components/command-palette';
 import { ConnectionOverlay } from './components/connection-overlay';
 import { ErrorBoundary } from './components/error-boundary';
@@ -50,7 +50,7 @@ function guardFileDrops(doc: Document): () => void {
         <main class="screen"><div deskSignedOut></div></main>
       </div>
     } @else {
-      <div deskErrorBoundary scope="whole">
+      <div deskErrorBoundary scope="whole" #page>
         <ng-template>
           @if (route().name === 'onboarding') {
             @for (view of screen(); track view.key) {
@@ -104,6 +104,8 @@ export class App {
   protected readonly palette = inject(PaletteToggle);
   private readonly routes = inject(RouteService);
   protected readonly route = this.routes.route;
+  /** The whole-page boundary (absent while signed out). */
+  private readonly page = viewChild('page', { read: ErrorBoundary });
   protected readonly project = computed(() => {
     const r = this.route();
     return r.name === 'project' ? r : null;
@@ -141,8 +143,8 @@ export class App {
       stopDrops();
     });
     // ⌘K works only in the shell (React's listener lives in CommandPalette, which only its Shell mounts): not while signed
-    // out, and not during onboarding.
-    effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding'));
+    // out, not during onboarding, and not while the whole page shows its error fallback (which unmounts the React Shell).
+    effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding' && !this.page()?.failing()));
     effect(() => {
       const name = this.route().name;
       if (this.bridge.signedOut()) return;
