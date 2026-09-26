@@ -1,15 +1,19 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 type Command = { name: string; args: string[]; cwd: string; stdio?: unknown };
 type WebDev = {
   webDevCommands(root: string, args?: string[]): Command[];
   runTogether(commands: Command[], o?: { log?(line: string): void }): { done: Promise<number>; stop(): void };
+  stopChild(child: { pid?: number; kill(signal: string): void }, platform?: string, run?: (...args: unknown[]) => unknown): void;
 };
 
-const dev = (await import(new URL('./web-dev.mjs', import.meta.url).href)) as WebDev;
+const url = new URL('./web-dev.mjs', import.meta.url).href;
+const dev = (await import(url)) as WebDev;
+const { isMain } = (await import(new URL('./ng.mjs', import.meta.url).href)) as { isMain(url: string, argv1?: string): boolean };
 const root = fileURLToPath(new URL('..', import.meta.url));
 const node = (code: string, name = 'child'): Command => ({ name, args: ['-e', code], cwd: root, stdio: 'ignore' });
 
@@ -49,5 +53,32 @@ describe('pnpm web', () => {
     run.stop();
     expect(await run.done).toBe(0);
     expect(lines).toEqual([]);
+  });
+
+  it('stops a child with SIGTERM, and on Windows its whole tree with taskkill', () => {
+    const calls: unknown[][] = [];
+    const run = (...args: unknown[]) => calls.push(args);
+    const child = { pid: 4242, kill: vi.fn() };
+    dev.stopChild(child, 'win32', run);
+    expect(calls).toEqual([['taskkill', ['/pid', '4242', '/T', '/F'], { stdio: 'ignore', windowsHide: true }]]);
+    expect(child.kill).not.toHaveBeenCalled();
+    dev.stopChild(child, 'darwin', run);
+    dev.stopChild(child, 'linux', run);
+    // A child that never started has no tree to end.
+    dev.stopChild({ kill: child.kill }, 'win32', run);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGTERM'], ['SIGTERM']]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('starts only as the script Node runs, also through a symlinked folder', () => {
+    expect(readFileSync(fileURLToPath(url), 'utf8')).toContain('\nif (isMain(import.meta.url)) main(process.argv.slice(2));\n');
+    const dir = mkdtempSync(join(tmpdir(), 'desk-web-dev-'));
+    try {
+      symlinkSync(join(root, 'scripts'), join(dir, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+      expect(isMain(url, join(dir, 'linked', 'web-dev.mjs'))).toBe(true);
+      expect(isMain(url, join(dir, 'linked', 'ng.mjs'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

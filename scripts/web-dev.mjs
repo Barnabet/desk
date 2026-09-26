@@ -2,9 +2,10 @@
 // `pnpm web` (spec §9): rebuilds apps/web-ui on every change (ng build --watch, development) and runs `desk web --dev`,
 // which serves apps/web-ui/dist/browser and reloads the page after each rebuild. Extra arguments go to desk web
 // (`pnpm web --port 7500 --no-open`). Ctrl-C stops both; if either stops on its own, the other is stopped too.
-import { spawn } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn, spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isMain } from './ng.mjs';
 
 /** The two processes `pnpm web` runs, as arguments to this Node (no shell, so Windows works too). */
 export function webDevCommands(root, args = []) {
@@ -26,7 +27,17 @@ export function webDevCommands(root, args = []) {
 }
 
 /**
- * Runs the commands with this Node until one exits, then stops the others with SIGTERM. `done` resolves once all have
+ * Stops a child and whatever it started. Elsewhere that is SIGTERM, which ng.mjs passes on to the Angular CLI. On Windows
+ * kill() ends only the child, at once, so ng.mjs could not pass anything on and `ng build --watch` would keep running:
+ * `taskkill /T /F` ends the whole tree. `run` is spawnSync (a spec passes its own).
+ */
+export function stopChild(child, platform = process.platform, run = spawnSync) {
+  if (platform === 'win32' && child.pid !== undefined) run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  else child.kill('SIGTERM');
+}
+
+/**
+ * Runs the commands with this Node until one exits, then stops the others (`stopChild`). `done` resolves once all have
  * exited: with the first exit code (1 for a signal or a spawn error), or with 0 after `stop()`.
  */
 export function runTogether(commands, o = {}) {
@@ -35,7 +46,7 @@ export function runTogether(commands, o = {}) {
   let first = null;
   const running = commands.map((c) => ({ c, child: spawn(process.execPath, c.args, { cwd: c.cwd, stdio: c.stdio ?? 'inherit', env: process.env }) }));
   const stopAll = () => {
-    for (const { child } of running) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    for (const { child } of running) if (child.exitCode === null && child.signalCode === null) stopChild(child);
   };
   const exits = running.map(
     ({ c, child }) =>
@@ -70,4 +81,4 @@ function main(args) {
   });
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) main(process.argv.slice(2));
+if (isMain(import.meta.url)) main(process.argv.slice(2));

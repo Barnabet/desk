@@ -8,10 +8,10 @@
  * inherit an older Node on PATH), else exits with a message. The rest of the repository keeps its own Node.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const NODE_RANGE = '^22.22.3 || ^24.15.0 || >=26';
 
@@ -62,6 +62,20 @@ export function binOf(cwd, pkg, bin) {
   return join(dir, rel);
 }
 
+/**
+ * Whether the module at `url` (its import.meta.url) is the script Node was started with. Both sides are real paths: Node
+ * resolves symlinks in import.meta.url but not in argv[1], so a script run through a symlinked folder would otherwise
+ * exit 0 without doing anything.
+ */
+export function isMain(url, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
 function main(args) {
   const node = pickNode({ execPath: process.execPath, version: process.version, nvmDir: defaultNvmDir() });
   if (!node) {
@@ -81,4 +95,4 @@ function main(args) {
   child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) main(process.argv.slice(2));
+if (isMain(import.meta.url)) main(process.argv.slice(2));
