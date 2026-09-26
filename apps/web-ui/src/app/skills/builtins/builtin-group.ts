@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
 import { runtimeKey } from '@desk/bff/contract';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { ToastService } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
 import { GlobalStore } from '../../core/global.store';
+import { SkillsRefresh } from '../skills-refresh';
 import { builtinKey, runtimeLabel } from './data';
 
 const OPEN_KEY = 'desk.builtinsOpen';
@@ -31,16 +32,26 @@ export class BuiltinSwitch {
   readonly changed = output<void>();
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about a switch that lands after its host (the group or the panel) closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
+  /** Set once the switch is gone (its group or panel closed while the call ran): `changed` then reaches no one. */
+  private closed = false;
   /** The built-ins whose switch call is running: the panel's switch shows only its own skill's, whichever one it shows now. */
   private readonly running = signal<ReadonlySet<string>>(new Set());
   protected readonly pending = computed(() => this.running().has(this.item().name));
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
+  }
 
   protected async toggle(): Promise<void> {
     const item = this.item();
     this.running.update((r) => new Set(r).add(item.name));
     try {
       await this.bridge.call('builtins.setEnabled', { name: item.name, enabled: !item.enabled });
-      this.changed.emit();
+      // `changed` while the switch is shown, else the screen itself (never both).
+      if (this.closed) this.screen?.changed();
+      else this.changed.emit();
     } catch (err) {
       this.toasts.error(err);
     } finally {

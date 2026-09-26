@@ -545,6 +545,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/skills/builtins/{builtin-group,builtin-panel}.ts`, `skills/builtins/builtins.spec.ts` | W3a.8b |
 | `src/app/skills/skills-screen.ts` + spec, `skills/catalog/catalog.spec.ts` | W3a.9 |
 | `src/app/skills/skills-refresh.ts`; `skills/{skill-panel,skills-screen}.ts`, `skills/builtins/builtin-panel.ts`, `skills/skills-screen.spec.ts` changed | W3a.9 (review fix: a panel's late change reaches the screen) |
+| `skills/builtins/builtin-group.ts`, `skills/catalog/review-sheet.ts`, `skills/skills-refresh.ts`, `skills/skills-screen.spec.ts`, `apps/web-ui/e2e/catalog.e2e.test.ts` changed | the review follow-ups after W3a.10 (a late switch or install reaches the screen; the catalog e2e refuses the network) |
 | `apps/web-ui/e2e/catalog.e2e.test.ts` | W3a.10 |
 | `src/app/system/models-editor.ts` + spec | W3b.1 |
 | `src/app/system/system-screen.ts` + spec | W3b.2 |
@@ -32030,7 +32031,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 - `apps/web-ui/src/app/skills/import-sheet.ts`: `ImportSheet` (React's private `ImportSheet` in `SkillsScreen.tsx`) — `div[deskImportSheet]` (`display: contents`), inputs `path`, `projects` (required), outputs `done: SkillRef`, `close`.
 - `apps/web-ui/src/app/skills/builtins/builtin-group.ts`: `BuiltinSwitch` — `button[deskBuiltinSwitch]` (host `role="switch"`, class `switch`), inputs `item`, `label`, output `changed`; `BuiltinRuntime` — `span[deskBuiltinRuntime]` (host class `runtime-line <state>`), input `item`; `BuiltinGroup` — `section[deskBuiltinGroup]` (host class `builtin-group`, `aria-label="Built into Desk"`), inputs `items`, `selected: string | null`, `collapsible` (default `false`; localStorage `desk.builtinsOpen`), outputs `selectSkill: string`, `changed`.
 - `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`: `BuiltinPanel` — `article[deskBuiltinPanel]` (host `class="card skill-panel"`, `aria-label="Built-in skill <name>"`), inputs `item: BuiltinSkillInfo`, `projects` (both required), outputs `duplicated: SkillRef`, `changed`, `close`.
-- `apps/web-ui/src/app/skills/skills-refresh.ts`: `SkillsRefresh` (abstract class, `changed(): void`), provided by `SkillsScreen` (`useExisting`) and injected optionally by `SkillPanel` and `BuiltinPanel`, which call it for a delete, restore, Retry or copy that lands after the panel closed (W3a.9's review fix).
+- `apps/web-ui/src/app/skills/skills-refresh.ts`: `SkillsRefresh` (abstract class, `changed(): void`), provided by `SkillsScreen` (`useExisting`) and injected optionally by `SkillPanel` and `BuiltinPanel`, which call it for a delete, restore, Retry or copy that lands after the panel closed (W3a.9's review fix), and by `BuiltinSwitch` and `ReviewSheet`, for a switch that lands after its group or panel closed and an install that lands after the sheet closed (the review follow-ups after W3a.10).
 - `apps/web-ui/src/app/skills/skills-screen.ts`: `SkillsScreen` — `div[deskSkillsScreen]` (host class `skills`, plus ` with-panel` while a skill is open), inputs `skill?: string`, `catalog: boolean` (default `false`), `review?: string`. `screenFor({ name: 'skills', skill })` → `{ component: SkillsScreen, inputs: { skill, catalog: false, review: undefined } }`; `screenFor({ name: 'catalog', review })` → `{ component: SkillsScreen, inputs: { skill: undefined, catalog: true, review } }` (every key present, so `NgComponentOutlet` never keeps a stale input when `#/skills` and `#/skills/catalog` share the screen).
 - `apps/web-ui/e2e/harness.ts`: `WebE2EDaemonOptions` (`Pick<DaemonOptions, 'catalog' | 'runtimes'>`) and `startWebE2E(o?: { script?: Script; daemon?: WebE2EDaemonOptions })`, spread into `startDaemon`.
 - `apps/web-ui/e2e/catalog.e2e.test.ts` (its own `go`, `openAt`, `hashOf`, `uvStub`, `builtinSkill`, `offlineCatalog`, `titleOf`).
@@ -33867,7 +33868,7 @@ Expected: FAIL. The test build stops with `Could not resolve "./review-sheet"`.
 Create `apps/web-ui/src/app/skills/catalog/review-sheet.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import type { CatalogEntry, CatalogItem, CatalogReview, ReviewWarningKind } from '@desk/protocol';
 import { bytes, skillKey, type SkillRef } from '@desk/ui-core';
 import { Button } from '../../components/button';
@@ -33878,6 +33879,7 @@ import { Sheet } from '../../components/sheet';
 import { describeError, ToastService } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
 import { RouteService } from '../../core/route.service';
+import { SkillsRefresh } from '../skills-refresh';
 import { actionFor, installRef, runtimePackages, runtimeWords, sourceLabel } from './data';
 import { RuntimeLine } from './runtime-line';
 
@@ -34029,6 +34031,10 @@ export class ReviewSheet {
   private readonly bridge = inject(DeskBridge);
   private readonly routes = inject(RouteService);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about an install that lands after this sheet closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
+  /** Set once the sheet is gone (browser Back while the install ran): `changed` then reaches no one. */
+  private closed = false;
   protected readonly warning = WARNING;
   protected readonly bytes = bytes;
   protected readonly runtimeWords = runtimeWords;
@@ -34084,6 +34090,7 @@ export class ReviewSheet {
   });
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
     // React's effect on [id]: prepare the entry, open its SKILL.md, and drop a late answer for another entry.
     // The call runs untracked, so a signal it reads (the bridge's signedOut on a sign-in retry) never prepares again.
     effect((onCleanup) => {
@@ -34145,7 +34152,9 @@ export class ReviewSheet {
       const ref: SkillRef = r.skill.scope === 'global' ? { scope: 'global', name: r.skill.name } : { scope: 'project', projectId: r.skill.project_id!, name: r.skill.name };
       this.installed.set(ref);
       this.toasts.toast({ tone: 'info', message: `${kind === 'update' ? 'Updated' : 'Installed'} ${r.skill.name}.` });
-      this.changed.emit();
+      // `changed` while the sheet is open, else the screen itself (never both): browser Back closes it mid-install.
+      if (this.closed) this.screen?.changed();
+      else this.changed.emit();
     } catch (err) {
       this.toasts.error(err);
     } finally {
@@ -34170,6 +34179,8 @@ Expected: exit 0.
 **Deviation (review fix):** two fixes. (1) The last case ended with `await waitFor(() => expect(sheet.querySelector('.review')).toBeNull())`, which always passed: the error branch never renders `.review`. It now checks that "Fetching the pinned files and checking them…" is gone. (2) The prepare `effect` called `catalog.prepare` while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would prepare the entry again when it changed. The call now runs in `untracked`, as `TerritoryInspector`'s plan fetch and `injectSkills` do, and a sixth case (a handler that reads a signal, which then changes) fails without it (6 tests). The review after W3a.6 added the proof that the loading text appears at all: the failure case holds its prepare handler on a promise, checks "Fetching the pinned files and checking them…" is shown, then releases it and checks the text is gone once the error shows (still 6 tests).
 
 **Deviation (review fix, after W3a.8):** the blocks above are the committed files. Cancel, Escape and a backdrop click closed the sheet while an install was running; the screen then destroys the sheet, and the install's late `changed` was dropped (Angular's NG0953), so the screen never listed the skills and the catalog again. React still delivers `onChanged` in that case. While `pending()`, the sheet now ignores close: Cancel is `[disabled]="pending()"`, and both it and the `Sheet`'s `(close)` (Escape and the backdrop) go through `dismiss()`, which does nothing while the install runs. A seventh case holds `catalog.install`, tries Cancel, Escape and the backdrop, expects no `close`, then releases it and expects `changed` and "paper-lookup is installed for every project." It failed without the fix, first on Cancel's `disabled`, and with only `[disabled]` on `close` called 3 times (jsdom still dispatches a click to a disabled button, so the guard is `dismiss()`'s). The same fix went into W3a.8's `SkillEditor` and `ImportSheet`. 7 tests.
+
+**Deviation (review fix, after W3a.10):** the blocks above are the committed files. The guard above covers Cancel, Escape and the backdrop, but browser Back while an install runs still destroys the sheet (it was opened with `replace`, so Back leaves `#/skills/catalog/<id>`) while `SkillsScreen` stays mounted, and the late `changed` was dropped (NG0953): the skills and the catalog were not listed again until the next focus or poll. The sheet now does what W3a.9's review fix made the panels do: it injects `SkillsRefresh` (`{ optional: true }`, so this spec renders it alone) and notes when it is destroyed (`DestroyRef`); `install()` emits `changed` while the sheet is open and calls the screen's `changed()` once it closed, never both. The case is in W3a.9's spec (its twelfth): a held `catalog.install`, the hash set to `#/skills`, the release, then one more global `skills.list` and no NG0953; it failed first (1 call, not 2). Still 7 tests here.
 
 - [ ] **Step 5: Commit**
 
@@ -36274,12 +36285,13 @@ Expected: FAIL. The test build stops with `Could not resolve "./builtin-group"`.
 Create `apps/web-ui/src/app/skills/builtins/builtin-group.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
 import { runtimeKey } from '@desk/bff/contract';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { ToastService } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
 import { GlobalStore } from '../../core/global.store';
+import { SkillsRefresh } from '../skills-refresh';
 import { builtinKey, runtimeLabel } from './data';
 
 const OPEN_KEY = 'desk.builtinsOpen';
@@ -36307,16 +36319,26 @@ export class BuiltinSwitch {
   readonly changed = output<void>();
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about a switch that lands after its host (the group or the panel) closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
+  /** Set once the switch is gone (its group or panel closed while the call ran): `changed` then reaches no one. */
+  private closed = false;
   /** The built-ins whose switch call is running: the panel's switch shows only its own skill's, whichever one it shows now. */
   private readonly running = signal<ReadonlySet<string>>(new Set());
   protected readonly pending = computed(() => this.running().has(this.item().name));
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
+  }
 
   protected async toggle(): Promise<void> {
     const item = this.item();
     this.running.update((r) => new Set(r).add(item.name));
     try {
       await this.bridge.call('builtins.setEnabled', { name: item.name, enabled: !item.enabled });
-      this.changed.emit();
+      // `changed` while the switch is shown, else the screen itself (never both).
+      if (this.closed) this.screen?.changed();
+      else this.changed.emit();
     } catch (err) {
       this.toasts.error(err);
     } finally {
@@ -36713,7 +36735,9 @@ Expected: PASS: `tokens.test.ts` finds no color literal in the new files.
 - **The Duplicate sheet ignores close while its call runs.** Cancel is `[disabled]` while the copy is made, and both it and the `Sheet`'s `(close)` (Escape, the backdrop) go through `dismiss()`, which does nothing meanwhile, so `duplicated` still reaches the screen (W3a.8's review fix). Case 8: the sheet stayed open through Cancel, Escape and the backdrop, then closed with `duplicated`; against the first code Cancel was never disabled.
 - **The Duplicate sheet resets per built-in.** `duplicating` is `linkedSignal<string, boolean>({ source: this.name, computation: () => false })`, like `SkillPanel`'s `confirming` since W3a.7's second review fix, so an open sheet never duplicates the next built-in. A copy that lands after another built-in opened still toasts, and emits `changed` (the screen lists the skills, the catalog and the built-ins again: W3a.9 binds the panel's `changed` to its whole `changed()`, so the copy is listed right away rather than at the next focus or poll) instead of `duplicated`, which would open the copy and leave the built-in the user opened, as `SkillPanel`'s late delete keeps its `changed` and drops its `close`. Case 9: the sheet stayed open over archives, and the late copy emitted `duplicated`.
 
-**Deviation (review fix, after W3a.9):** the block above is the committed `builtin-panel.ts`. The panel is destroyed when the route leaves `builtin:<name>` while a Duplicate runs (Back to the catalog, or plain `#/skills`) and `SkillsScreen` stays; Angular then dropped the late `duplicated` or `changed` with NG0953, so the new user skill was not listed until the next focus or poll, where React's closure still refreshes the lists. The screen, not the panel's output, now hears it: the panel injects W3a.9's `SkillsRefresh` (`{ optional: true }`) and notes when it is destroyed (`DestroyRef`); `landed()` emits `changed` while the panel is open and calls the screen's `changed()` once it closed, never both. A copy that lands after the panel closed only lists again (nothing opens: the user went elsewhere), and Retry goes through `landed()` too. The case is W3a.9's ninth; it failed first (1 global `skills.list` call, not 2, and NG0953 in `console.warn`). `BuiltinSwitch`'s own `changed`, which the panel forwards, is left as it is. 9 tests here, as before.
+**Deviation (review fix, after W3a.9):** the block above is the committed `builtin-panel.ts`. The panel is destroyed when the route leaves `builtin:<name>` while a Duplicate runs (Back to the catalog, or plain `#/skills`) and `SkillsScreen` stays; Angular then dropped the late `duplicated` or `changed` with NG0953, so the new user skill was not listed until the next focus or poll, where React's closure still refreshes the lists. The screen, not the panel's output, now hears it: the panel injects W3a.9's `SkillsRefresh` (`{ optional: true }`) and notes when it is destroyed (`DestroyRef`); `landed()` emits `changed` while the panel is open and calls the screen's `changed()` once it closed, never both. A copy that lands after the panel closed only lists again (nothing opens: the user went elsewhere), and Retry goes through `landed()` too. The case is W3a.9's ninth; it failed first (1 global `skills.list` call, not 2, and NG0953 in `console.warn`). `BuiltinSwitch`'s own `changed`, which the panel forwards, was left as it was then (the next note). 9 tests here, as before.
+
+**Deviation (review fix, after W3a.10):** the block above is the committed `builtin-group.ts`. A switch whose `builtins.setEnabled` answers after its host was destroyed (the group when the route moves to the catalog or the view changes between map and list, or the panel when the route leaves the built-in) emitted `changed` from a destroyed component, so Angular dropped it (NG0953) and the built-ins list stayed stale until the next focus or 30 s poll. `BuiltinSwitch` now injects `SkillsRefresh` (`{ optional: true }`) and notes when it is destroyed (`DestroyRef`): it emits `changed` while shown and calls the screen's `changed()` once gone, never both (the screen lists the skills and the catalog as well as the built-ins, which changes nothing they show). The case is in W3a.9's spec (its eleventh): a held `builtins.setEnabled` from the map's group, the hash set to `#/skills/catalog` (the group goes), the release, then one more `builtins.list` and no NG0953; it failed first (1 call, not 2). 9 tests here, as before.
 
 The spec failed first on `Could not resolve "./builtin-group"` and `"./builtin-panel"`. Nothing else departs from `BuiltinGroup.tsx` and `BuiltinPanel.tsx` (master bd87256, unchanged on `web-ui` since the merge but for their imports): the panel never offers Edit or anything that writes a built-in's files, and the switch only asks deskd (`builtins.setEnabled`). 9 tests.
 
@@ -36752,6 +36776,7 @@ import type { ProjectSummary } from '@desk/protocol';
 import { RouteService } from '../core/route.service';
 import { screenFor } from '../screen-for';
 import { builtin } from '../testing/builtins';
+import { catalogItems, reviewOf } from '../testing/catalog';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
 import { SkillsScreen } from './skills-screen';
 
@@ -37013,6 +37038,51 @@ describe('SkillsScreen', () => {
     expect(logged()).toEqual([]);
   });
 
+  it('lists the built-ins again when a switch lands after its group closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' })],
+      'builtins.setEnabled': () => new Promise((resolve) => (release = () => resolve({ ok: true }))),
+    });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'builtins.list').length;
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    fireEvent.click(within(group).getByRole('switch', { name: 'PDF toolkit' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'builtins.setEnabled')?.input).toEqual({ name: 'pdf-toolkit', enabled: false }));
+    window.location.hash = '#/skills/catalog';
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Built into Desk' })).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
+  });
+
+  it('lists your skills again when an install lands after its review sheet closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'catalog.list': () => catalogItems(),
+      'catalog.prepare': ({ id }: { id: string }) => reviewOf(catalogItems().find((i) => i.id === id)!),
+      'catalog.install': ({ id }: { id: string }) =>
+        new Promise((resolve) => (release = () => resolve({ skill: { name: id, scope: 'global', version: 1, project_id: null }, state: 'installed', runtime: 'ready' }))),
+    });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    window.location.hash = '#/skills/catalog/paper-lookup';
+    const sheet = await screen.findByRole('dialog', { name: 'Install Paper lookup' });
+    const install = within(sheet).getByRole('button', { name: 'Install' });
+    await waitFor(() => expect(install.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(install);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'catalog.install')?.input).toEqual({ id: 'paper-lookup' }));
+    window.location.hash = '#/skills';
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills');
+    expect(logged()).toEqual([]);
+  });
+
   it('is what #/skills and #/skills/catalog show, with the skill or the review the route names', () => {
     expect(screenFor({ name: 'skills', skill: 'global:pdf' })).toEqual({ component: SkillsScreen, inputs: { skill: 'global:pdf', catalog: false, review: undefined } });
     expect(screenFor({ name: 'skills' })).toEqual({ component: SkillsScreen, inputs: { skill: undefined, catalog: false, review: undefined } });
@@ -37214,9 +37284,10 @@ Create `apps/web-ui/src/app/skills/skills-refresh.ts` (the review fix):
 
 ```ts
 /**
- * The skills screen, as its panels see it. A delete, restore or copy that lands after its panel closed (the route left
- * the skill while the call ran) cannot emit `changed` any more, so the panel tells the screen through this instead, and
- * the new or removed skill still shows (SkillsScreen provides it).
+ * The skills screen, as its panels and sheets see it. A delete, restore, copy, switch or catalog install that lands after
+ * its panel, group or review sheet closed (the route left it while the call ran) cannot emit `changed` any more, so the
+ * component tells the screen through this instead, and the new, removed or switched skill still shows (SkillsScreen
+ * provides it).
  */
 export abstract class SkillsRefresh {
   /** List the skills, the catalog and the built-ins again. */
@@ -37590,7 +37661,7 @@ After:
 - [ ] **Step 5: Run the specs**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skills-screen.spec.ts --include src/app/skills/catalog/catalog.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 10 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line (15 tests; 13 before the review fix below).
+Expected: PASS: the 12 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line (17 tests; 13 before the first review fix below, 15 before the second).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
 Expected: PASS, unchanged: no `app.spec.ts` case renders `#/skills` or `#/skills/catalog` (W0c.14's cases open the map, onboarding, two projects' threads, System and the tray; W3b.3's shortcut case opens the map).
@@ -37601,6 +37672,8 @@ Expected: exit 0.
 **Deviation (from the review of W3a.8b):** the blocks above are the committed files. `BuiltinPanel`'s `(changed)` is bound to the screen's whole `changed()` (the skills, the catalog and the built-ins listed again, and the panel's version bumped), not to `refreshBuiltins()` as React's `onChanged={() => void builtins.refresh()}` is. Since W3a.8b's review, a copy that lands after another built-in opened emits only `changed` (not `duplicated`, which would leave the built-in the user opened), so with the built-ins alone listed again the new user skill would not show until the next focus or 30 s poll. The panel's switch and Retry go through the same output, and list a little more than React does, which changes nothing they show. `BuiltinGroup`'s `(changed)` stays `refreshBuiltins()`, as in React: its switches change only the built-ins. A new case (8 in the skills-screen spec, above the route case) holds `builtins.duplicate`, opens Images, releases the copy and expects one more global `skills.list` call while `#/skills/builtin%3Aimages` stays open; it failed with the panel bound to `refreshBuiltins()` (1 call, not 2). `changed()`'s doc comment says why. The specs failed first on `TS2307: Cannot find module './skills-screen'` (and `'../skills-screen'`), the Angular compiler's form of the resolve error. Nothing else departs from `SkillsScreen.tsx`, `SkillsScreen.test.tsx` and `Catalog.test.tsx` as they are on `web-ui` since the merge of master (8883229), unchanged after it: `screen-for.ts` imports `SkillsScreen` just above `ThreadsScreen`, since its relative imports are not sorted. 8 + 4 cases, and `screen-for.spec.ts`'s one.
 
 **Deviation (review fix, after W3a.9):** the blocks above (and W3a.7's `skill-panel.ts`, W3a.8b's `builtin-panel.ts`) are the committed files. `BuiltinPanel` and `SkillPanel` are destroyed when the route leaves their skill while a call runs (a Duplicate, a delete or a restore; for example Back to the catalog, or `#/skills`), and `SkillsScreen` stays mounted; Angular drops their late `duplicated`, `changed` or `close` with NG0953, so the new or removed skill was not listed until the next focus or poll (React's closure still refreshes the lists). The screen now hears it directly: `skills/skills-refresh.ts` holds the abstract class `SkillsRefresh` (`changed(): void`), which the screen provides with `{ provide: SkillsRefresh, useExisting: forwardRef(() => SkillsScreen) }` and implements with its (now public) `changed()`; both panels inject it optionally and call it only once they are destroyed, emitting `changed` while open, never both. `changed()` does nothing once the screen itself is gone (a `DestroyRef` flag; the three lists' `singleFlight`s are stopped by their own `DestroyRef` as well). Two cases, above the route case: a held `builtins.duplicate` (the ninth) and a held `skills.remove` (the tenth), each released after the hash is set to `#/skills/catalog`, expect one more global `skills.list` call, the hash unchanged and no NG0953 in `console.error` or `console.warn` (`watchConsole`, with `vi.restoreAllMocks` after each case). Both failed first (1 call, not 2). 10 + 4 cases, and `screen-for.spec.ts`'s one.
+
+**Deviation (review fix, after W3a.10):** the spec block above (and `skills-refresh.ts`'s doc comment, W3a.5's `review-sheet.ts` and W3a.8b's `builtin-group.ts`) are the committed files. Two more components could answer after they were destroyed while the screen stayed: `BuiltinSwitch` (its group goes when the route moves to the catalog) and `ReviewSheet` (browser Back leaves the review while an install runs). Both now use `SkillsRefresh` as the panels do. Two cases, above the route case: a held `builtins.setEnabled` released after the hash is set to `#/skills/catalog` expects one more `builtins.list` call (the eleventh), and a held `catalog.install` released after the hash is set to `#/skills` expects one more global `skills.list` call (the twelfth); each also expects the hash unchanged and no NG0953. Both failed first (1 call, not 2). 12 + 4 cases, and `screen-for.spec.ts`'s one.
 
 - [ ] **Step 6: Commit**
 
@@ -37716,7 +37789,11 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'desk-web-catalog-'));
   const builtinRoot = join(dir, 'skills');
   catalog = offlineCatalog(builtinRoot);
-  e2e = await startWebE2E({ daemon: { catalog: { builtinRoot, file: catalog }, runtimes: { uv: uvStub(dir) } } });
+  // Only the local stand-ins are reviewed or installed, so deskd's catalog never needs the network: a fetch fails the step.
+  const offline = async (url: string): Promise<never> => {
+    throw new Error(`network is off in this test: ${url}`);
+  };
+  e2e = await startWebE2E({ daemon: { catalog: { builtinRoot, file: catalog, fetch: offline }, runtimes: { uv: uvStub(dir) } } });
 });
 
 afterAll(async () => {
@@ -37947,6 +38024,8 @@ Expected: PASS (2 tests): without `daemon`, deskd starts as before.
 
 **As run:** the blocks above are the committed files, unchanged: Step 2 failed with the TS2353 above, every "before" anchor in `harness.ts` matched W0d.9's text, and the file passed its 3 tests on its first Chromium run (about 7 s), downloading nothing. Checked before it ran, on `web-ui` after the merge of master (8883229): the shipped `catalog.json` has 18 entries in the five bays' categories (research 5, documents 4, writing 3, planning 2, code 4) and none in `files`, so no "Files & media" region; `excel-automation` and `summarize-meeting` are in it; every entry already carries `scripts`, `runtime` and `caveats`, so the raw JSON is what `loadCatalog()` (the Electron test's) parses it to; and `builtinSkill`'s digest is core's `treeDigest`. The current Electron `catalog.e2e.test.ts`, `builtins.e2e.test.ts` and `knowledge.e2e.test.ts` (skills steps) match what the file ports, except where the task says so (the stand-in's `LICENSE` and Summarize meeting, the client's check instead of System, the switch count read from `builtins.list` instead of 12). The smoke file ran within the whole suite (`pnpm test:web-e2e`: 5 files, 14 tests, the built-UI check included) rather than on its own.
 
+**Deviation (review follow-up, after W3a.10):** the block above is the committed file. `beforeAll` passes deskd a catalog `fetch` that throws "network is off in this test: <url>", so the file enforces what it claims: only the two local stand-ins (`source.type: 'builtin'`, read from `builtinRoot`) are reviewed or installed, the uv stand-in builds their runtime, and any step that would download (a GitHub entry's files or archive, the only callers of the catalog's `fetch`) fails instead. The harness's `daemon` option already takes it (`WebE2EDaemonOptions` is `Pick<DaemonOptions, 'catalog' | 'runtimes'>`, and `DaemonOptions['catalog']` has `fetch`). It ran in W3a.11's whole suite.
+
 - [ ] **Step 5: Commit**
 
 ```sh
@@ -37975,7 +38054,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (10), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (12), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 

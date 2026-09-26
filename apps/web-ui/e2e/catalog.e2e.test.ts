@@ -77,7 +77,11 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'desk-web-catalog-'));
   const builtinRoot = join(dir, 'skills');
   catalog = offlineCatalog(builtinRoot);
-  e2e = await startWebE2E({ daemon: { catalog: { builtinRoot, file: catalog }, runtimes: { uv: uvStub(dir) } } });
+  // Only the local stand-ins are reviewed or installed, so deskd's catalog never needs the network: a fetch fails the step.
+  const offline = async (url: string): Promise<never> => {
+    throw new Error(`network is off in this test: ${url}`);
+  };
+  e2e = await startWebE2E({ daemon: { catalog: { builtinRoot, file: catalog, fetch: offline }, runtimes: { uv: uvStub(dir) } } });
 });
 
 afterAll(async () => {

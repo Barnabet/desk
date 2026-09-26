@@ -6,6 +6,7 @@ import type { ProjectSummary } from '@desk/protocol';
 import { RouteService } from '../core/route.service';
 import { screenFor } from '../screen-for';
 import { builtin } from '../testing/builtins';
+import { catalogItems, reviewOf } from '../testing/catalog';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
 import { SkillsScreen } from './skills-screen';
 
@@ -264,6 +265,51 @@ describe('SkillsScreen', () => {
     release();
     await waitFor(() => expect(lists()).toBe(before + 1));
     expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
+  });
+
+  it('lists the built-ins again when a switch lands after its group closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' })],
+      'builtins.setEnabled': () => new Promise((resolve) => (release = () => resolve({ ok: true }))),
+    });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'builtins.list').length;
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    fireEvent.click(within(group).getByRole('switch', { name: 'PDF toolkit' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'builtins.setEnabled')?.input).toEqual({ name: 'pdf-toolkit', enabled: false }));
+    window.location.hash = '#/skills/catalog';
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Built into Desk' })).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
+  });
+
+  it('lists your skills again when an install lands after its review sheet closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'catalog.list': () => catalogItems(),
+      'catalog.prepare': ({ id }: { id: string }) => reviewOf(catalogItems().find((i) => i.id === id)!),
+      'catalog.install': ({ id }: { id: string }) =>
+        new Promise((resolve) => (release = () => resolve({ skill: { name: id, scope: 'global', version: 1, project_id: null }, state: 'installed', runtime: 'ready' }))),
+    });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    window.location.hash = '#/skills/catalog/paper-lookup';
+    const sheet = await screen.findByRole('dialog', { name: 'Install Paper lookup' });
+    const install = within(sheet).getByRole('button', { name: 'Install' });
+    await waitFor(() => expect(install.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(install);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'catalog.install')?.input).toEqual({ id: 'paper-lookup' }));
+    window.location.hash = '#/skills';
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills');
     expect(logged()).toEqual([]);
   });
 

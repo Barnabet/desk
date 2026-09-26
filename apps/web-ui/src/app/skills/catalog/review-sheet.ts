@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import type { CatalogEntry, CatalogItem, CatalogReview, ReviewWarningKind } from '@desk/protocol';
 import { bytes, skillKey, type SkillRef } from '@desk/ui-core';
 import { Button } from '../../components/button';
@@ -9,6 +9,7 @@ import { Sheet } from '../../components/sheet';
 import { describeError, ToastService } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
 import { RouteService } from '../../core/route.service';
+import { SkillsRefresh } from '../skills-refresh';
 import { actionFor, installRef, runtimePackages, runtimeWords, sourceLabel } from './data';
 import { RuntimeLine } from './runtime-line';
 
@@ -160,6 +161,10 @@ export class ReviewSheet {
   private readonly bridge = inject(DeskBridge);
   private readonly routes = inject(RouteService);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about an install that lands after this sheet closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
+  /** Set once the sheet is gone (browser Back while the install ran): `changed` then reaches no one. */
+  private closed = false;
   protected readonly warning = WARNING;
   protected readonly bytes = bytes;
   protected readonly runtimeWords = runtimeWords;
@@ -215,6 +220,7 @@ export class ReviewSheet {
   });
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
     // React's effect on [id]: prepare the entry, open its SKILL.md, and drop a late answer for another entry.
     // The call runs untracked, so a signal it reads (the bridge's signedOut on a sign-in retry) never prepares again.
     effect((onCleanup) => {
@@ -276,7 +282,9 @@ export class ReviewSheet {
       const ref: SkillRef = r.skill.scope === 'global' ? { scope: 'global', name: r.skill.name } : { scope: 'project', projectId: r.skill.project_id!, name: r.skill.name };
       this.installed.set(ref);
       this.toasts.toast({ tone: 'info', message: `${kind === 'update' ? 'Updated' : 'Installed'} ${r.skill.name}.` });
-      this.changed.emit();
+      // `changed` while the sheet is open, else the screen itself (never both): browser Back closes it mid-install.
+      if (this.closed) this.screen?.changed();
+      else this.changed.emit();
     } catch (err) {
       this.toasts.error(err);
     } finally {
