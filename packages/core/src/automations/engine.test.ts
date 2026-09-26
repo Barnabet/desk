@@ -161,6 +161,8 @@ describe('AutomationEngine', () => {
     await setup();
     create(waitDef(), 'b');
     const id = create({ title: 'Sub', steps: [{ id: 's', title: 'S', kind: 'automation', automation: 'b' }] }, 'a');
+    // Every kind has an executor by now: take the sub-automation one away.
+    (rt.engine as unknown as { executors: Map<string, unknown> }).executors.delete('automation');
     const r = await run(id);
     expect(getStepRun(h.store.db, r, 's')).toMatchObject({ status: 'failed', error: 'No executor for automation steps' });
     expect(getRun(h.store.db, r)!.status).toBe('failed');

@@ -1,6 +1,7 @@
 import { lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  MAX_SUB_DEPTH,
   RETRY_BACKOFF_MS,
   SUMMARY_MAX,
   type AutomationDefinition,
@@ -30,7 +31,7 @@ import { evalExpr, parseExpr, type Expr } from './expr';
 import { ensureStepDir, logFile, prepareRunFolder, runDir, stepDir } from './folders';
 import { activeGrantRules, addGrant, deriveGrant } from './grants';
 import { isSettled, readiness, TERMINAL_STEP, type StepState } from './graph';
-import { getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepAgentOf, stepAgentsOf, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
+import { findAutomation, getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepAgentOf, stepAgentsOf, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
 import { exprScope, matchUpstream, templateScope, timezoneOf } from './scope';
 import { nextClock } from './schedule';
 import { lastLine, parseStepOutput, runScript } from './script';
@@ -83,6 +84,7 @@ export function activeMs(events: StoredEvent[], nowMs: number): number {
   return open !== null ? total + Math.max(0, nowMs - open) : total;
 }
 
+const PARENT_ENDED = 'Its parent run ended';
 const NUDGE = 'Call complete with your result, or fail_step with the reason. Nobody reads plain replies in an automation run.';
 
 export type ScriptHost = {
@@ -108,6 +110,8 @@ export type StartRunOptions = {
   triggerIndex?: number;
   dueAt?: string;
   caughtUp?: number;
+  /** A caller-chosen id: a sub-automation step records it before the child can finish. */
+  runId?: string;
 };
 
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -131,6 +135,10 @@ export class AutomationEngine {
   private readonly cancelHooks: Array<(run: AutomationRunRow, row: StepRunRow) => void> = [];
   /** Running script processes, by `<run>/<step>`. */
   private readonly scripts = new Map<string, AbortController>();
+  /** Child runs this engine cancelled because their parent run ended: the parent ignores their end. */
+  private readonly parentEnded = new Set<string>();
+  /** Executor work still going (child starts, agent creation, script processes). */
+  private readonly background = new Set<Promise<unknown>>();
 
   constructor(private readonly host: EngineHost) {
     this.register('wait', (ctx) => this.startWait(ctx));
@@ -148,6 +156,14 @@ export class AutomationEngine {
       }
     });
     this.onTick(() => this.agentTimeouts());
+    this.register('automation', (ctx) => this.subAutomation(ctx));
+    this.onRunFinished((run) => this.childFinished(run));
+    this.onCancelStep((_run, row) => {
+      const child = row.child_run_id ? getRun(this.db, row.child_run_id) : undefined;
+      if (child?.status !== 'running') return;
+      this.parentEnded.add(child.id);
+      void this.cancelRun(child.id, PARENT_ENDED).catch((e) => this.host.onError(e, `cancelling child run ${child.id}`));
+    });
   }
 
   private get db() {
@@ -170,14 +186,75 @@ export class AutomationEngine {
     this.cancelHooks.push(fn);
   }
 
-  /** The definition a run started with (its version), cached. */
+  /** The definition a run started with (its version), cached while the run is going. */
   definitionOf(run: AutomationRunRow): AutomationDefinition {
-    let def = this.defs.get(run.id);
-    if (!def) {
-      def = getVersion(this.db, run.automation_id, run.version)?.definition ?? getAutomation(this.db, run.automation_id)!.definition;
-      this.defs.set(run.id, def);
-    }
+    const cached = this.defs.get(run.id);
+    if (cached) return cached;
+    const def = getVersion(this.db, run.automation_id, run.version)?.definition ?? getAutomation(this.db, run.automation_id)!.definition;
+    if (run.status === 'running') this.defs.set(run.id, def);
     return def;
+  }
+
+  /** Background work that tests and shutdown wait for. */
+  private track<T>(p: Promise<T>): void {
+    const q = p.catch((e) => this.host.onError(e, 'automation background work')).finally(() => this.background.delete(q));
+    this.background.add(q);
+  }
+
+  /** Resolves once no executor work is left (work it starts meanwhile included). */
+  async settled(): Promise<void> {
+    while (this.background.size) await Promise.allSettled([...this.background]);
+  }
+
+  /** Whether executor work is still going. */
+  get busy(): boolean {
+    return this.background.size > 0;
+  }
+
+  /** How many runs this one is nested under (0 for a run nobody started as a step). */
+  depthOf(run: AutomationRunRow): number {
+    let depth = 0;
+    for (let r = run; r.parent_run_id; depth++) {
+      const up = getRun(this.db, r.parent_run_id);
+      if (!up) break;
+      r = up;
+    }
+    return depth;
+  }
+
+  /** Run another automation (spec §4.4): a child run, linked before it starts, which this step waits for. */
+  private async subAutomation({ run, def, step, attempt }: StepContext): Promise<void> {
+    if (step.kind !== 'automation') return;
+    const target = findAutomation(this.db, run.project_id, step.automation);
+    if (!target) return this.resolveStep(run.id, step.id, { status: 'failed', error: `Unknown automation: ${step.automation}` });
+    if (this.depthOf(run) >= MAX_SUB_DEPTH) {
+      return this.resolveStep(run.id, step.id, { status: 'failed', error: `Sub-automations nest at most ${MAX_SUB_DEPTH} deep`, retryable: false });
+    }
+    const scope = templateScope({ db: this.db, dataDir: this.host.dataDir, run, def });
+    const inputs: Record<string, InputValue> = {};
+    for (const [key, template] of Object.entries(step.inputs)) {
+      const value = renderText(template, scope);
+      if (value !== '') inputs[key] = value; // an empty value leaves the child's default
+    }
+    const childId = newId();
+    this.stepChanged(run, { step_id: step.id, attempt, status: 'running', child_run_id: childId });
+    await this.startRun(target.id, { runId: childId, trigger: 'parent', test: run.test, inputs, by: run.by, parent: { runId: run.id, stepId: step.id } });
+  }
+
+  /** A child run ended: its parent step follows it, unless the parent is the one that ended it. */
+  private childFinished(child: AutomationRunRow): void {
+    if (!child.parent_run_id || !child.parent_step_id) return;
+    if (this.parentEnded.delete(child.id)) return;
+    const row = getStepRun(this.db, child.parent_run_id, child.parent_step_id);
+    if (row?.child_run_id !== child.id) return;
+    const def = this.definitionOf(child);
+    if (child.status === 'succeeded') {
+      const out = def.output_step ? getStepRun(this.db, child.id, def.output_step) : undefined;
+      const outputs: Outputs = out?.status === 'succeeded' ? { ...out.outputs, run_id: child.id } : { run_id: child.id, status: child.status };
+      this.resolveStep(child.parent_run_id, child.parent_step_id, { status: 'succeeded', route: null, outputs, summary: child.summary ?? `${def.title} finished` });
+    } else {
+      this.resolveStep(child.parent_run_id, child.parent_step_id, { status: 'failed', error: `Sub-automation "${def.title}" ${child.status}: ${child.reason ?? child.summary ?? 'no reason'}` });
+    }
   }
 
   private append(run: AutomationRunRow, e: Omit<EventInput, 'project_id' | 'agent_id'> & { agent_id?: string | null }): void {
@@ -196,13 +273,13 @@ export class AutomationEngine {
     const a = getAutomation(this.db, automationId);
     if (!a || a.deleted_at) throw new NotFoundError(`Unknown automation: ${automationId}`);
     if (getProject(this.db, a.project_id)?.archived_at) throw new ConflictError(`Project ${a.project_id} is archived`);
-    const runId = newId();
+    const runId = opts.runId ?? newId();
     let inputs: Record<string, InputValue>;
     let failure: string | null = null;
     try {
       inputs = await prepareRunFolder({ dataDir: this.host.dataDir, runId, specs: a.definition.inputs, inputs: opts.inputs, guard: this.host.guard });
     } catch (e) {
-      if (opts.trigger !== 'schedule' || !(e instanceof ValidationError)) throw e;
+      if ((opts.trigger !== 'schedule' && opts.trigger !== 'parent') || !(e instanceof ValidationError)) throw e;
       inputs = opts.inputs;
       failure = e.message;
     }
@@ -315,7 +392,7 @@ export class AutomationEngine {
     try {
       ensureStepDir(this.host.dataDir, run.id, step.id);
       const pending = executor(ctx);
-      if (pending instanceof Promise) pending.catch(fail);
+      if (pending instanceof Promise) this.track(pending.catch(fail));
     } catch (e) {
       fail(e);
     }
@@ -636,7 +713,7 @@ export class AutomationEngine {
   private tellDesk({ run, def, step }: StepContext): void {
     if (step.kind !== 'tell_desk') return;
     const scope = templateScope({ db: this.db, dataDir: this.host.dataDir, run, def });
-    const files = matchUpstream({ dataDir: this.host.dataDir, run, def, stepId: step.id, globs: step.attach });
+    const files = matchUpstream({ db: this.db, dataDir: this.host.dataDir, run, def, stepId: step.id, globs: step.attach });
     const text = [renderText(step.text, scope), '', `(Run ${run.id} of automation "${def.title}".${files.length ? ` Files: ${files.join(', ')}` : ''})`].join('\n');
     this.host.deliverToDesk(run.project_id, `automation "${def.title}"`, text);
     this.resolveStep(run.id, step.id, { status: 'succeeded', route: null, outputs: {}, summary: 'Told Desk' });
@@ -645,7 +722,7 @@ export class AutomationEngine {
   private ask({ run, def, step, attempt }: StepContext): void {
     if (step.kind !== 'ask') return;
     const scope = templateScope({ db: this.db, dataDir: this.host.dataDir, run, def });
-    const files = matchUpstream({ dataDir: this.host.dataDir, run, def, stepId: step.id, globs: step.show });
+    const files = matchUpstream({ db: this.db, dataDir: this.host.dataDir, run, def, stepId: step.id, globs: step.show });
     const expires = step.expires_after_hours ? new Date(this.host.now().getTime() + step.expires_after_hours * 3_600_000).toISOString() : null;
     this.stepChanged(run, {
       step_id: step.id,

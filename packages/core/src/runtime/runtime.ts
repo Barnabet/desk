@@ -94,6 +94,7 @@ import { Automations } from '../automations/service';
 import type { StepResult } from '../automations/engine';
 import { runDir, stepDir } from '../automations/folders';
 import { ancestors } from '../automations/graph';
+import { descendantRunDirs } from '../automations/scope';
 import { findAutomation, getAutomation, getRun, lastSucceededRun, stepAgentOf, stepRuns } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
 import { locateScript } from '../tools/skills';
@@ -1371,8 +1372,12 @@ export class Runtime {
     return true;
   }
 
-  whenIdle(): Promise<void> {
-    return this.scheduler.whenIdle();
+  /** Resolves when no agent job is running or queued and no automation step work is left in the background. */
+  async whenIdle(): Promise<void> {
+    do {
+      await this.engine.settled();
+      await this.scheduler.whenIdle();
+    } while (this.engine.busy);
   }
 
   /**
@@ -1873,10 +1878,11 @@ export class Runtime {
     const own = agent.workspace_path ? [agent.workspace_path] : [];
     // A step agent reads its whole run (earlier steps' folders, inputs) and the previous succeeded run of its automation.
     if (agent.role === 'step' && agent.automation_run_id) {
-      own.push(runDir(this.o.dataDir, agent.automation_run_id));
-      const link = stepAgentOf(this.o.store.db, agent.id);
-      const prev = link ? lastSucceededRun(this.o.store.db, link.run.automation_id) : undefined;
-      if (prev && prev.id !== agent.automation_run_id) own.push(runDir(this.o.dataDir, prev.id));
+      const db = this.o.store.db;
+      own.push(runDir(this.o.dataDir, agent.automation_run_id), ...descendantRunDirs(db, this.o.dataDir, agent.automation_run_id));
+      const link = stepAgentOf(db, agent.id);
+      const prev = link ? lastSucceededRun(db, link.run.automation_id) : undefined;
+      if (prev && prev.id !== agent.automation_run_id) own.push(runDir(this.o.dataDir, prev.id), ...descendantRunDirs(db, this.o.dataDir, prev.id));
     }
     return [...own, ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
   }

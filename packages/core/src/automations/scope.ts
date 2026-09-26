@@ -6,7 +6,7 @@ import { isWithin } from '../tools/sandbox';
 import type { ExprScope } from './expr';
 import { runDir, stepDir } from './folders';
 import { ancestors } from './graph';
-import { lastSucceededRun, stepRuns, type AutomationRunRow } from './queries';
+import { childRuns, getRun, getVersion, lastSucceededRun, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
 import { localDate, systemTimezone } from './schedule';
 import type { TemplateScope } from './template';
 
@@ -21,13 +21,13 @@ export function templateScope(o: { db: Db; dataDir: string; run: AutomationRunRo
   const steps: TemplateScope['steps'] = {};
   for (const s of o.def.steps) {
     const r = rows.get(s.id);
-    steps[s.id] = { outputs: r?.outputs ?? {}, summary: r?.summary ?? null, route: r?.route ?? null, dir: stepDir(o.dataDir, o.run.id, s.id) };
+    steps[s.id] = { outputs: r?.outputs ?? {}, summary: r?.summary ?? null, route: r?.route ?? null, dir: stepResultDir(o.db, o.dataDir, o.run.id, r, s.id) };
   }
   const prev = lastSucceededRun(o.db, o.run.automation_id);
   const previous =
     prev && prev.id !== o.run.id
       ? {
-          steps: Object.fromEntries(stepRuns(o.db, prev.id).map((r) => [r.step_id, { outputs: r.outputs, dir: stepDir(o.dataDir, prev.id, r.step_id) }])),
+          steps: Object.fromEntries(stepRuns(o.db, prev.id).map((r) => [r.step_id, { outputs: r.outputs, dir: stepResultDir(o.db, o.dataDir, prev.id, r, r.step_id) }])),
         }
       : null;
   return {
@@ -50,19 +50,47 @@ export function exprScope(db: Db, run: AutomationRunRow, def: AutomationDefiniti
 }
 
 /** Files matching `globs` in the folders of `stepId`'s ancestors (regular files, no symlinks, never outside a folder). */
-export function matchUpstream(o: { dataDir: string; run: AutomationRunRow; def: AutomationDefinition; stepId: string; globs: string[] }): string[] {
+/**
+ * A step's result folder: its own step folder, or for a sub-automation step, the child run's output step folder
+ * (followed down when that step is itself a sub-automation), or the child run folder when there is no output step.
+ */
+export function stepResultDir(db: Db, dataDir: string, runId: string, row: Pick<StepRunRow, 'step_id' | 'child_run_id'> | undefined, stepId: string): string {
+  if (!row?.child_run_id) return stepDir(dataDir, runId, stepId);
+  const child = getRun(db, row.child_run_id);
+  const def = child ? getVersion(db, child.automation_id, child.version)?.definition : undefined;
+  if (!child || !def?.output_step) return runDir(dataDir, row.child_run_id);
+  const out = stepRuns(db, child.id).find((r) => r.step_id === def.output_step);
+  return stepResultDir(db, dataDir, child.id, out, def.output_step);
+}
+
+/** The folders of every run started under `runId` (sub-automations, nested). */
+export function descendantRunDirs(db: Db, dataDir: string, runId: string): string[] {
+  const out: string[] = [];
+  const queue = [runId];
+  while (queue.length) {
+    for (const c of childRuns(db, queue.shift()!)) {
+      out.push(runDir(dataDir, c.id));
+      queue.push(c.id);
+    }
+  }
+  return out;
+}
+
+export function matchUpstream(o: { db: Db; dataDir: string; run: AutomationRunRow; def: AutomationDefinition; stepId: string; globs: string[] }): string[] {
   const safe = o.globs.filter((g) => !g.startsWith('/') && !g.split(/[\\/]/).includes('..'));
   if (!safe.length) return [];
+  const rows = new Map(stepRuns(o.db, o.run.id).map((r) => [r.step_id, r]));
+  const up = ancestors(o.def, o.stepId);
   const out: string[] = [];
-  for (const id of o.def.steps.map((s) => s.id).filter((id) => ancestors(o.def, o.stepId).has(id))) {
-    const dir = stepDir(o.dataDir, o.run.id, id);
+  for (const id of o.def.steps.map((s) => s.id).filter((id) => up.has(id))) {
+    const dir = stepResultDir(o.db, o.dataDir, o.run.id, rows.get(id), id);
     let real: string;
     try {
       real = realpathSync(dir);
     } catch {
       continue;
     }
-    for (const f of fg.sync(safe, { cwd: real, onlyFiles: true, followSymbolicLinks: false, absolute: true, dot: false, ignore: ['.desk/**'] })) {
+    for (const f of fg.sync(safe, { cwd: real, onlyFiles: true, followSymbolicLinks: false, absolute: true, dot: false, ignore: ['.desk/**', 'steps/*/.desk/**'] })) {
       if (isWithin(f, real)) out.push(f);
     }
   }

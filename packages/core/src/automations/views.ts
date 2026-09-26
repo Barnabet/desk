@@ -29,14 +29,20 @@ import {
 import { nextDue } from './schedule';
 
 /** A step as the user sees it: an agent step whose agent waits on an approval shows `waiting`. */
+/**
+ * A step as the user sees it: an agent step whose agent waits on an approval, or a sub-automation step whose child
+ * run waits on the user, shows `waiting`.
+ */
 export function effectiveStepStatus(db: Db, row: StepRunRow): StepStatus {
-  if (row.status === 'running' && row.agent_id && pendingApprovalsFor(db, row.agent_id).length > 0) return 'waiting';
-  return row.status;
+  if (row.status !== 'running') return row.status;
+  if (row.agent_id && pendingApprovalsFor(db, row.agent_id).length > 0) return 'waiting';
+  const child = row.child_run_id ? getRun(db, row.child_run_id) : undefined;
+  return child && effectiveRunStatus(db, child) === 'waiting' ? 'waiting' : 'running';
 }
 
-/** Whether the step waits on the user (not on a timer): a question, a script gate, or an agent's approval. */
+/** Whether the step waits on the user (not on a timer): a question, a script gate, an agent's approval, or a child's wait. */
 function waitsOnUser(db: Db, row: StepRunRow): boolean {
-  return effectiveStepStatus(db, row) === 'waiting' && (row.question !== null || row.gate !== null || row.agent_id !== null);
+  return effectiveStepStatus(db, row) === 'waiting' && (row.question !== null || row.gate !== null || row.agent_id !== null || row.child_run_id !== null);
 }
 
 /** A running run is `waiting` while a step waits on the user and none is effectively running (spec §2.2). */
@@ -56,6 +62,9 @@ export function waitingOn(db: Db, run: AutomationRunRow): string | null {
     const title = def?.steps.find((s) => s.id === row.step_id)?.title ?? row.step_id;
     if (row.question) return `Ask me: ${title}`;
     if (row.gate) return `Approval: ${row.gate.subject}`;
+    const child = row.child_run_id ? getRun(db, row.child_run_id) : undefined;
+    const inner = child ? waitingOn(db, child) : null;
+    if (inner) return `${title} › ${inner}`;
     const ap = row.agent_id ? pendingApprovalsFor(db, row.agent_id)[0] : undefined;
     if (ap) return `Approval: ${title} wants to run ${ap.tool}`;
   }
