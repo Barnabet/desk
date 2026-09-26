@@ -1,8 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { agentTitle, messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
-import { clip } from '@desk/protocol';
+import { messageById, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
-import { ago, answeringLabel, clock, duration, href, plural, waitHop, waitLabel, type LaneGeometry, type LineGeometry, type MessageLink } from '@desk/ui-core';
+import { ago, answeringLabel, clock, duration, href, linkText, plural, waitHop, waitLabel, type LaneGeometry, type LineGeometry, type MessageLink } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 
 type StationG = LineGeometry['stations'][number];
@@ -31,18 +30,6 @@ function laneStatus(l: LaneGeometry, reviewRounds: number, wait: string | null, 
 const shortModel = (m: string) => m.replace(/^claude-/, '');
 
 const LINK_COLOR: Record<MessageLink['kind'], string> = { question: 'var(--wait)', answer: 'var(--wait)', note: 'var(--text-min)' };
-
-/** A link's accessible name and tooltip: one message says who wrote what to whom; a burst says how many, between whom, when. */
-function linkText(m: MessagesState, k: MessageLink): { name: string; title: string } {
-  const a = agentTitle(m, k.from);
-  const b = agentTitle(m, k.to);
-  if (k.count === 1) {
-    const kind = messageById(m, k.ids[0]!)?.kind ?? k.kind;
-    return { name: `${a} → ${b}, ${kind}, ${clock(k.firstTs)}`, title: `${a} → ${b} · ${kind} · ${clock(k.firstTs)}: ${clip(k.text, 160)}` };
-  }
-  const when = clock(k.firstTs) === clock(k.lastTs) ? clock(k.firstTs) : `${clock(k.firstTs)}–${clock(k.lastTs)}`;
-  return { name: `${k.count} messages between ${a} and ${b}, ${when}`, title: `${k.count} messages between ${a} and ${b} · ${when} · latest: ${clip(k.text, 120)}` };
-}
 
 /** Below Desk's line when the lanes are folded away: room for the stops, the "now" line and nothing else. */
 const DESK_ONLY_BELOW = 30;

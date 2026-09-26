@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { emptyTimeline, foldMessages, reduceTimeline, type ThreadView } from '@desk/client';
 import type { AgentMessageKind, StoredEvent } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
-import { LANE_COLOR, lineGeometry } from './line-geometry';
+import { clock } from './format';
+import { LANE_COLOR, lineGeometry, linkText } from './line-geometry';
 
 const at = (min: number) => new Date(Date.UTC(2026, 8, 24, 10, min)).toISOString();
 const thread = (id: string, status: ThreadView['status'], activity: string | null = null) => ({ id, status, activity }) as ThreadView;
@@ -226,6 +227,24 @@ describe('lineGeometry: rows', () => {
         msg('b', 'd', 'blocker', at(25)),
       ]);
       expect(g.links.map((l) => [l.kind, l.text])).toEqual([['note', 'blocker from b']]);
+    });
+
+    it('names a link for who wrote what to whom, and a burst for how many, between whom and when', () => {
+      const agents = [
+        ev(90, 'agent.created', { role: 'desk', model: 'm', title: 'Desk', brief: null, workspace_path: '/w', parent_id: null }, { agent: 'd', ts: at(0) }),
+        ev(91, 'agent.created', { role: 'thread', model: 'm', title: 'Emails', brief: 'b', workspace_path: '/w', parent_id: 'd' }, { agent: 'b', ts: at(1) }),
+      ];
+      const one = [...agents, msg('d', 'b', 'revision', at(20), { text: 'Shorter subject lines, please.' })];
+      const m1 = foldMessages(one);
+      const [link] = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now: Date.parse(at(60)), width: 1440, messages: m1 }).links;
+      // One message says its own kind (a revision), not the link's (a note).
+      expect(linkText(m1, link!)).toEqual({ name: `Desk → Emails, revision, ${clock(at(20))}`, title: `Desk → Emails · revision · ${clock(at(20))}: Shorter subject lines, please.` });
+      const burst = [...agents, msg('d', 'b', 'note', sec(40, 55)), msg('b', 'd', 'update', sec(41, 0)), msg('d', 'b', 'note', sec(41, 5), { text: 'x'.repeat(200) })];
+      const m3 = foldMessages(burst);
+      const [merged] = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now: Date.parse(at(60)), width: 1440, messages: m3 }).links;
+      const when = `${clock(sec(40, 55))}–${clock(sec(41, 5))}`;
+      expect(linkText(m3, merged!).name).toBe(`3 messages between Desk and Emails, ${when}`);
+      expect(linkText(m3, merged!).title).toBe(`3 messages between Desk and Emails · ${when} · latest: ${'x'.repeat(119)}…`);
     });
 
     it('merges a burst between the same pair into one link with a count, marked live while fresh', () => {

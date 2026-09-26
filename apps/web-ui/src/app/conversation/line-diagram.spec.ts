@@ -37,18 +37,19 @@ const project = (approvals: unknown[] = []) =>
     sources: [],
     lastSeq: 7,
   }) as unknown as ProjectState;
-const messages = foldMessages([
+const messagesEvents = [
   ev(1, 'agent.created', { role: 'desk', model: 'm', title: 'Desk', brief: null, workspace_path: '/w/d', parent_id: null }, { agent: 'd', ts: at(180) }),
   ev(3, 'agent.created', { role: 'thread', model: 'm', title: 'Auth API', brief: 'Own auth', workspace_path: '/w/a', parent_id: 'd' }, { agent: 'a', ts: at(20) }),
   ev(4, 'agent.created', { role: 'thread', model: 'm', title: 'Frontend', brief: 'Own the page', workspace_path: '/w/f', parent_id: 'd' }, { agent: 'f', ts: at(15) }),
   ev(5, 'message.agent', { from_agent_id: 'a', from_label: 'thread "Auth API" (a)', kind: 'question', text: 'Which token format?', tracked: true }, { agent: 'f', ts: at(4) }),
-]);
+];
+const messages = foldMessages(messagesEvents);
 const geometry = (now = NOW, t = timeline()) => lineGeometry({ timeline: t, threads: project().threads, now, width: 1200 });
 
 const TEMPLATE = `<section deskLineDiagram [g]="g" [project]="project" [messages]="messages" [attention]="attention" [now]="now" (station)="station($event)" (pair)="pair($event)"></section>`;
 
-async function show(o: { g?: ReturnType<typeof geometry>; project?: ProjectState } = {}) {
-  const props = { g: o.g ?? geometry(), project: o.project ?? project(), messages, attention: [] as AttentionItem[], now: NOW, station: vi.fn(), pair: vi.fn() };
+async function show(o: { g?: ReturnType<typeof geometry>; project?: ProjectState; messages?: typeof messages } = {}) {
+  const props = { g: o.g ?? geometry(), project: o.project ?? project(), messages: o.messages ?? messages, attention: [] as AttentionItem[], now: NOW, station: vi.fn(), pair: vi.fn() };
   const view = await render(TEMPLATE, { imports: [LineDiagram], componentProperties: props, providers: new FakeDeskBridge().providers });
   // rerender's detectChanges skips afterRender hooks; the tick it schedules runs them (the scroll pinning).
   const rerender = async (next: Partial<typeof props>) => {
@@ -67,7 +68,8 @@ describe('LineDiagram', () => {
     const diagram = screen.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' });
     expect(diagram.className).toBe('line-diagram');
     expect(diagram.style.height).toBe(`${geometry().height}px`);
-    expect(diagram.querySelectorAll('svg.line-svg > g')).toHaveLength(2);
+    // A group per lane, and the message links' group (empty here).
+    expect(diagram.querySelectorAll('svg.line-svg > g')).toHaveLength(3);
     expect(screen.getByRole('button', { name: `${clock(at(180))}, Relaunch onboarding` }).className).toBe('line-station line-station-brief');
     expect(diagram.querySelector('.line-station-label')!.textContent).toBe(`${clock(at(180))} Your brief · Relaunch onboarding`);
     expect(diagram.querySelector('.line-now')!.textContent).toBe(`now ${clock(NOW)}`);
@@ -81,6 +83,25 @@ describe('LineDiagram', () => {
     ]);
     expect(label('Frontend').getAttribute('href')).toBe('#/p/p/threads/f');
     expect(diagram.querySelector('.line-legend')!.textContent).toBe('Deskrunningdonewaitingneeds youquestionfallback');
+  });
+
+  it('draws a message as a link from its sender to its recipient, with a pulse travelling down it while it is fresh', async () => {
+    const sent = foldMessages([
+      ...[1, 3, 4].map((id) => messagesEvents.find((e) => e.id === id)!),
+      ev(8, 'message.agent', { from_agent_id: 'f', from_label: 'thread "Frontend" (f)', kind: 'update', text: 'Page is up.' }, { agent: 'a', ts: new Date(NOW - 2000).toISOString() }),
+    ]);
+    const g = lineGeometry({ timeline: timeline(), threads: project().threads, now: NOW, width: 1200, messages: sent });
+    const link = g.links[0]!;
+    const { pair } = await show({ g, messages: sent });
+    const button = screen.getByRole('button', { name: `Frontend → Auth API, update, ${clock(NOW - 2000)}` });
+    expect(button.className).toBe('line-link line-link-note live');
+    expect(button.style.height).toBe(`${Math.abs(link.y2 - link.y1)}px`);
+    const pulse = button.querySelector<HTMLElement>('.line-link-pulse')!;
+    // Frontend's lane is below Auth API's: the pulse starts at the bottom and travels up.
+    expect(pulse.style.top).toBe('100%');
+    expect(pulse.style.getPropertyValue('--dy')).toBe(`${link.y2 - link.y1}px`);
+    fireEvent.click(button);
+    expect(pair).toHaveBeenCalledWith(['f', 'a']);
   });
 
   it('jumps the chat to a station', async () => {

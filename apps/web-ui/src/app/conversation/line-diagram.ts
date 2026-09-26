@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, afterRenderEffect, computed, input, output, signal, viewChild } from '@angular/core';
 import { messageById, type MessagesState, type ProjectState } from '@desk/client';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
-import { ago, answeringLabel, clock, duration, href, waitHop, waitLabel, type LaneGeometry, type LineGeometry } from '@desk/ui-core';
+import { ago, answeringLabel, clock, duration, href, linkText, waitHop, waitLabel, type LaneGeometry, type LineGeometry, type MessageLink } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/answering-badge';
 
 /** A station on Desk's trunk, positioned. */
@@ -32,6 +32,11 @@ const shortModel = (m: string) => m.replace(/^claude-/, '');
 
 /** The hump a rate-limit detour draws over its lane (a halo, then the lane's colour). */
 const detourPath = (x: number, y: number) => `M${x - 16} ${y} C${x - 8} ${y} ${x - 8} ${y - 12} ${x} ${y - 12} C${x + 8} ${y - 12} ${x + 8} ${y} ${x + 16} ${y}`;
+
+const LINK_COLOR: Record<MessageLink['kind'], string> = { question: 'var(--wait)', answer: 'var(--wait)', note: 'var(--text-min)' };
+
+/** A message link as drawn: the geometry's link with its name, tooltip, colour and the two agents it lights. */
+type LinkView = MessageLink & { key: string; name: string; title: string; color: string; dir: number; opacity: number; pair: readonly string[] };
 
 /** A tracked question on its asker's lane; its state is the fold's. */
 type QuestionMark = { key: string; from: string; to: string | null; state: string; x: number; y: number; aria: string; title: string };
@@ -80,6 +85,18 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
             </g>
           }
           <path [attr.d]="'M' + (geo.trunkStart - 6) + ' ' + geo.trunkY + ' H' + geo.nowX" stroke="var(--ink)" stroke-width="6" stroke-linecap="round" />
+          <g class="line-fold">
+            <!-- A message crosses the lanes between its two ends over a halo, and lands on a dot; a burst both ways has two.
+                 Notes stay light so the lanes read first; questions and answers are drawn full strength. -->
+            @for (k of links(); track k.key) {
+              <g [attr.opacity]="k.opacity">
+                <path [attr.d]="'M' + k.x + ' ' + (k.y1 + k.dir * 8) + ' V' + (k.y2 - k.dir * 8)" stroke="var(--ground)" stroke-width="6" />
+                <path [attr.d]="'M' + k.x + ' ' + k.y1 + ' V' + k.y2" [attr.stroke]="k.color" [attr.stroke-width]="k.kind === 'note' ? 1.5 : 2" stroke-linecap="round" [attr.stroke-dasharray]="k.kind === 'answer' ? '3 3' : null" />
+                <circle [attr.cx]="k.x" [attr.cy]="k.y2" r="4" [attr.fill]="k.color" stroke="var(--ground)" stroke-width="1.5" />
+                <circle [attr.cx]="k.x" [attr.cy]="k.y1" [attr.r]="k.both ? 4 : 2.5" [attr.fill]="k.color" [attr.stroke]="k.both ? 'var(--ground)' : null" [attr.stroke-width]="k.both ? 1.5 : null" />
+              </g>
+            }
+          </g>
         </svg>
 
         @for (t of geo.ticks; track t.t) {
@@ -125,6 +142,26 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
           }
         }
 
+        @for (k of links(); track k.key) {
+          <!-- A round trip already shows as a dot at each end; a longer burst says how long. -->
+          <button
+            type="button"
+            class="line-link"
+            [class]="'line-link-' + k.kind"
+            [class.live]="k.live"
+            [style.left.px]="k.x"
+            [style.top.px]="k.y1 < k.y2 ? k.y1 : k.y2"
+            [style.height.px]="k.y2 > k.y1 ? k.y2 - k.y1 : k.y1 - k.y2"
+            [attr.aria-label]="k.name"
+            [title]="k.title"
+            (click)="pair.emit([k.from, k.to])"
+            (mouseenter)="lit.set(k.pair)"
+            (mouseleave)="lit.set([])"
+            (focus)="lit.set(k.pair)"
+            (blur)="lit.set([])"
+          >@if (k.count > 2) {<span class="line-link-count">{{ k.count }}</span>}@if (k.live) {<span class="line-link-pulse" aria-hidden="true" [style.top]="k.y1 < k.y2 ? '0px' : '100%'" [style.--dy]="k.y2 - k.y1 + 'px'"></span>}</button>
+        }
+
         @for (q of questionMarks(); track q.key) {
           <button
             type="button"
@@ -135,10 +172,10 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
             [attr.aria-label]="q.aria"
             [title]="q.title"
             (click)="openQuestion(q)"
-            (mouseenter)="lit.set(q.to)"
-            (mouseleave)="lit.set(null)"
-            (focus)="lit.set(q.to)"
-            (blur)="lit.set(null)"
+            (mouseenter)="lit.set(q.to ? [q.to] : [])"
+            (mouseleave)="lit.set([])"
+            (focus)="lit.set(q.to ? [q.to] : [])"
+            (blur)="lit.set([])"
           ></button>
         }
 
@@ -175,7 +212,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
           @if (l.inlineLabel; as inline) {
             <a
               class="line-lane-title"
-              [class.lit]="lit() === l.lane.threadId"
+              [class.lit]="lit().includes(l.lane.threadId)"
               [style.left.px]="inline.x"
               [style.top.px]="l.y - 20"
               [style.max-width.px]="inline.width"
@@ -190,13 +227,13 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
       </div>
     </div>
 
-    <div class="line-label" [class.lit]="lit() !== null && lit() === desk?.id" [style.top.px]="geo.trunkY - 15">
+    <div class="line-label" [class.lit]="!!desk && lit().includes(desk.id)" [style.top.px]="geo.trunkY - 15">
       <span class="line-label-title"><span class="line-swatch line-swatch-desk"></span>Desk</span>
       <span class="line-label-sub" [class]="'status-text-' + (desk?.status ?? 'idle')">{{ deskSub() }}</span>
     </div>
     @for (r of rowLabels(); track r.id) {
       <!-- An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3). -->
-      <a class="line-label" [class.lit]="lit() === r.id" [style.top.px]="r.y - 15" [href]="r.href">
+      <a class="line-label" [class.lit]="lit().includes(r.id)" [style.top.px]="r.y - 15" [href]="r.href">
         <span class="line-label-title"><span class="line-swatch" [style.background]="r.color"></span>{{ r.title }}</span>
         <span class="line-label-sub" [class]="'status-text-' + r.tone">@if (r.answering; as answering) {<ng-container>{{ r.tone }} · </ng-container><span deskAnsweringBadge [label]="answering"></span>} @else {<ng-container>{{ r.text }}</ng-container>}</span>
       </a>
@@ -210,6 +247,9 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
       <span><span class="line-legend-dot"></span>needs you</span>
       @if (hasQuestions()) {
         <span><span class="line-legend-q"></span>question</span>
+      }
+      @if (g().links.length) {
+        <span><svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 1.5 V10" stroke="var(--text-min)" stroke-width="2" stroke-linecap="round" /><circle cx="9" cy="10.5" r="3" fill="var(--text-min)" /></svg>message</span>
       }
       <span><svg width="18" height="10" viewBox="0 0 18 10"><path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="var(--run)" stroke-width="2" stroke-linecap="round" /></svg>fallback</span>
     </div>
@@ -228,8 +268,8 @@ export class LineDiagram {
   /** Opens the pair sheet of two agents: a question mark's asker and its recipient (design spec §8 item 8). */
   readonly pair = output<readonly [string, string]>();
 
-  /** The counterpart of the question mark under the pointer or focus: its label lights up. */
-  protected readonly lit = signal<string | null>(null);
+  /** The agents of the question mark or message link under the pointer or focus: their labels light up. */
+  protected readonly lit = signal<readonly string[]>([]);
   protected readonly clock = clock;
   protected readonly shortModel = shortModel;
   protected readonly detour = detourPath;
@@ -261,6 +301,20 @@ export class LineDiagram {
           };
         }),
     );
+  });
+
+  /** Messages between agents, with their names and colours (60c8a7b). */
+  protected readonly links = computed((): LinkView[] => {
+    const m = this.messages();
+    return this.g().links.map((k) => ({
+      ...k,
+      ...linkText(m, k),
+      key: `link-${k.ids[0]}`,
+      color: LINK_COLOR[k.kind],
+      dir: Math.sign(k.y2 - k.y1),
+      opacity: k.kind === 'note' ? 0.55 : 1,
+      pair: [k.from, k.to],
+    }));
   });
 
   protected readonly signals = computed(() => {

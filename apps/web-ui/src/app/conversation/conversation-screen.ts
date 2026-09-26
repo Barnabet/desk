@@ -187,7 +187,7 @@ export class ConversationScreen {
   private readonly answeringRuns = computed(() => this.messages().answering);
   // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
   private readonly answeringIds = computed(() => new Set(Object.keys(this.answeringRuns())));
-  protected readonly geometry = computed(() => lineGeometry({ timeline: this.timeline(), threads: this.threads() ?? [], now: this.now(), width: this.width(), answering: this.answeringIds() }));
+  protected readonly geometry = computed(() => lineGeometry({ timeline: this.timeline(), threads: this.threads() ?? [], now: this.now(), width: this.width(), answering: this.answeringIds(), messages: this.messages() }));
   protected readonly start = computed(() => Math.max(0, this.items().length - this.shown()));
   protected readonly shownItems = computed(() => {
     const start = this.start();

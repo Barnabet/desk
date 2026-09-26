@@ -23190,7 +23190,167 @@ Run the two specs again: PASS. Commit (`feat(web-ui): paste and drop files into 
 
 - [ ] **Step 2: Message links on the line diagram (master 60c8a7b)**
 
-Port the React case "draws messages between agents as links that name both sides, light up both labels and open the pair sheet" into `conversation-screen.spec.ts`, then draw `g.links` in `LineDiagram` as React does (the SVG under a `.line-fold` group, a `button.line-link` per link with `linkText`'s name and title), light a list of labels, and add the legend's "message". Commit (`feat(web-ui): messages between agents as links on the line diagram`).
+`@desk/ui-core`'s `line-geometry.ts` gains `linkText` (the React `LineDiagram.tsx`'s local function, which now imports it), with a case in the `message links` block of `line-geometry.test.ts` (which imports `clock` from `./format` and `linkText`):
+
+```ts
+    it('names a link for who wrote what to whom, and a burst for how many, between whom and when', () => {
+      const agents = [
+        ev(90, 'agent.created', { role: 'desk', model: 'm', title: 'Desk', brief: null, workspace_path: '/w', parent_id: null }, { agent: 'd', ts: at(0) }),
+        ev(91, 'agent.created', { role: 'thread', model: 'm', title: 'Emails', brief: 'b', workspace_path: '/w', parent_id: 'd' }, { agent: 'b', ts: at(1) }),
+      ];
+      const one = [...agents, msg('d', 'b', 'revision', at(20), { text: 'Shorter subject lines, please.' })];
+      const m1 = foldMessages(one);
+      const [link] = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now: Date.parse(at(60)), width: 1440, messages: m1 }).links;
+      // One message says its own kind (a revision), not the link's (a note).
+      expect(linkText(m1, link!)).toEqual({ name: `Desk → Emails, revision, ${clock(at(20))}`, title: `Desk → Emails · revision · ${clock(at(20))}: Shorter subject lines, please.` });
+      const burst = [...agents, msg('d', 'b', 'note', sec(40, 55)), msg('b', 'd', 'update', sec(41, 0)), msg('d', 'b', 'note', sec(41, 5), { text: 'x'.repeat(200) })];
+      const m3 = foldMessages(burst);
+      const [merged] = lineGeometry({ timeline: timeline(), threads: [thread('a', 'done'), thread('b', 'running')], now: Date.parse(at(60)), width: 1440, messages: m3 }).links;
+      const when = `${clock(sec(40, 55))}–${clock(sec(41, 5))}`;
+      expect(linkText(m3, merged!).name).toBe(`3 messages between Desk and Emails, ${when}`);
+      expect(linkText(m3, merged!).title).toBe(`3 messages between Desk and Emails · ${when} · latest: ${'x'.repeat(119)}…`);
+    });
+```
+
+Port the React case into `conversation-screen.spec.ts`'s `messages in the conversation` block, unchanged but for the dialog, found with `findByRole` (W0c's `Sheet` moves into `document.body` after its first render):
+
+```ts
+  it('draws messages between agents as links that name both sides, light up both labels and open the pair sheet', async () => {
+    const noted = minutesAgo(10);
+    const bridge = await show([
+      ...team(),
+      msg(5, 'd', 'a', 'note', 'Use the new schema.', noted),
+      msg(6, 'a', 'f', 'question', 'Which token format?', minutesAgo(6), { tracked: true }),
+      msg(7, 'f', 'a', 'answer', 'JWT, RS256.', minutesAgo(4), { reply_to: 6 }),
+      // What the diagram shows otherwise (a rejoin) is no link.
+      msg(8, 'a', 'd', 'completed', 'Auth API ready.', minutesAgo(3)),
+    ]);
+    const note = await screen.findByRole('button', { name: `Desk → Auth API, note, ${clock(noted)}` });
+    expect(note.getAttribute('title')).toContain('Use the new schema.');
+    expect(document.querySelectorAll('.line-link')).toHaveLength(3);
+    expect(document.querySelector('.line-link-question')).toBeTruthy();
+    expect(document.querySelector('.line-link-answer')).toBeTruthy();
+    expect(document.querySelector('.line-legend')!.textContent).toContain('message');
+
+    const label = (title: string) => [...document.querySelectorAll('.line-label')].find((el) => el.querySelector('.line-label-title')?.textContent === title)!;
+    fireEvent.mouseEnter(note);
+    expect(label('Desk').classList.contains('lit')).toBe(true);
+    expect(label('Auth API').classList.contains('lit')).toBe(true);
+    expect(label('Frontend').classList.contains('lit')).toBe(false);
+    fireEvent.mouseLeave(note);
+    expect(label('Desk').classList.contains('lit')).toBe(false);
+    fireEvent.click(note);
+    expect(await screen.findByRole('dialog', { name: 'Auth API ⇄ Desk' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    // A burst between one pair is one link with a count; a message sent just now travels.
+    const now = new Date(Date.now() - 1000).toISOString();
+    bridge.emit('desk:events', [msg(9, 'd', 'f', 'note', 'Heads up.', now), msg(10, 'f', 'd', 'update', 'On it.', now)]);
+    const trip = await screen.findByRole('button', { name: `2 messages between Desk and Frontend, ${clock(now)}` });
+    // A round trip shows its two ends, not a count; a longer burst counts.
+    expect(trip.textContent).toBe('');
+    expect(trip.className).toContain('live');
+    bridge.emit('desk:event', msg(11, 'd', 'f', 'revision', 'One more thing.', now));
+    await waitFor(() => expect(screen.getByRole('button', { name: `3 messages between Desk and Frontend, ${clock(now)}` }).textContent).toBe('3'));
+  });
+```
+
+And a `line-diagram.spec.ts` case for what the screen case leaves out: a link's height, its pulse (`top` and the `--dy` custom property) and the pair it opens. The fixture's message events become `messagesEvents`, and `show()` takes `messages`. The first case now counts three groups under `svg.line-svg` (a group per lane, and the links' group).
+
+```ts
+  it('draws a message as a link from its sender to its recipient, with a pulse travelling down it while it is fresh', async () => {
+    const sent = foldMessages([
+      ...[1, 3, 4].map((id) => messagesEvents.find((e) => e.id === id)!),
+      ev(8, 'message.agent', { from_agent_id: 'f', from_label: 'thread "Frontend" (f)', kind: 'update', text: 'Page is up.' }, { agent: 'a', ts: new Date(NOW - 2000).toISOString() }),
+    ]);
+    const g = lineGeometry({ timeline: timeline(), threads: project().threads, now: NOW, width: 1200, messages: sent });
+    const link = g.links[0]!;
+    const { pair } = await show({ g, messages: sent });
+    const button = screen.getByRole('button', { name: `Frontend → Auth API, update, ${clock(NOW - 2000)}` });
+    expect(button.className).toBe('line-link line-link-note live');
+    expect(button.style.height).toBe(`${Math.abs(link.y2 - link.y1)}px`);
+    const pulse = button.querySelector<HTMLElement>('.line-link-pulse')!;
+    // Frontend's lane is below Auth API's: the pulse starts at the bottom and travels up.
+    expect(pulse.style.top).toBe('100%');
+    expect(pulse.style.getPropertyValue('--dy')).toBe(`${link.y2 - link.y1}px`);
+    fireEvent.click(button);
+    expect(pair).toHaveBeenCalledWith(['f', 'a']);
+  });
+```
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/conversation)` and watch both fail.
+
+`ConversationScreen` passes the message fold to `lineGeometry` (`messages: this.messages()`), which then returns `links`. In `LineDiagram` each link is a `LinkView` computed in TS (its `linkText`, colour, direction, opacity and the pair it lights), drawn in the SVG after Desk's line:
+
+```html
+          <g class="line-fold">
+            <!-- A message crosses the lanes between its two ends over a halo, and lands on a dot; a burst both ways has two.
+                 Notes stay light so the lanes read first; questions and answers are drawn full strength. -->
+            @for (k of links(); track k.key) {
+              <g [attr.opacity]="k.opacity">
+                <path [attr.d]="'M' + k.x + ' ' + (k.y1 + k.dir * 8) + ' V' + (k.y2 - k.dir * 8)" stroke="var(--ground)" stroke-width="6" />
+                <path [attr.d]="'M' + k.x + ' ' + k.y1 + ' V' + k.y2" [attr.stroke]="k.color" [attr.stroke-width]="k.kind === 'note' ? 1.5 : 2" stroke-linecap="round" [attr.stroke-dasharray]="k.kind === 'answer' ? '3 3' : null" />
+                <circle [attr.cx]="k.x" [attr.cy]="k.y2" r="4" [attr.fill]="k.color" stroke="var(--ground)" stroke-width="1.5" />
+                <circle [attr.cx]="k.x" [attr.cy]="k.y1" [attr.r]="k.both ? 4 : 2.5" [attr.fill]="k.color" [attr.stroke]="k.both ? 'var(--ground)' : null" [attr.stroke-width]="k.both ? 1.5 : null" />
+              </g>
+            }
+          </g>
+```
+
+and as a button over it, before the question marks:
+
+```html
+        @for (k of links(); track k.key) {
+          <!-- A round trip already shows as a dot at each end; a longer burst says how long. -->
+          <button
+            type="button"
+            class="line-link"
+            [class]="'line-link-' + k.kind"
+            [class.live]="k.live"
+            [style.left.px]="k.x"
+            [style.top.px]="k.y1 < k.y2 ? k.y1 : k.y2"
+            [style.height.px]="k.y2 > k.y1 ? k.y2 - k.y1 : k.y1 - k.y2"
+            [attr.aria-label]="k.name"
+            [title]="k.title"
+            (click)="pair.emit([k.from, k.to])"
+            (mouseenter)="lit.set(k.pair)"
+            (mouseleave)="lit.set([])"
+            (focus)="lit.set(k.pair)"
+            (blur)="lit.set([])"
+          >@if (k.count > 2) {<span class="line-link-count">{{ k.count }}</span>}@if (k.live) {<span class="line-link-pulse" aria-hidden="true" [style.top]="k.y1 < k.y2 ? '0px' : '100%'" [style.--dy]="k.y2 - k.y1 + 'px'"></span>}</button>
+        }
+```
+
+```ts
+const LINK_COLOR: Record<MessageLink['kind'], string> = { question: 'var(--wait)', answer: 'var(--wait)', note: 'var(--text-min)' };
+
+/** A message link as drawn: the geometry's link with its name, tooltip, colour and the two agents it lights. */
+type LinkView = MessageLink & { key: string; name: string; title: string; color: string; dir: number; opacity: number; pair: readonly string[] };
+
+  /** Messages between agents, with their names and colours (60c8a7b). */
+  protected readonly links = computed((): LinkView[] => {
+    const m = this.messages();
+    return this.g().links.map((k) => ({
+      ...k,
+      ...linkText(m, k),
+      key: `link-${k.ids[0]}`,
+      color: LINK_COLOR[k.kind],
+      dir: Math.sign(k.y2 - k.y1),
+      opacity: k.kind === 'note' ? 0.55 : 1,
+      pair: [k.from, k.to],
+    }));
+  });
+```
+
+The lit labels become a list (`lit = signal<readonly string[]>([])`): a question mark lights its recipient (`lit.set(q.to ? [q.to] : [])`), a link both its ends; the labels test `lit().includes(id)` (Desk's: `!!desk && lit().includes(desk.id)`). The legend gains "message" when there are links:
+
+```html
+      @if (g().links.length) {
+        <span><svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 1.5 V10" stroke="var(--text-min)" stroke-width="2" stroke-linecap="round" /><circle cx="9" cy="10.5" r="3" fill="var(--text-min)" /></svg>message</span>
+      }
+```
+
+Run the specs again: PASS. Commit (`feat(web-ui): messages between agents as links on the line diagram`) with `packages/ui-core/src/line-geometry.ts`, `line-geometry.test.ts`, `apps/desktop/src/renderer/conversation/LineDiagram.tsx`, `line-diagram.ts`, `conversation-screen.ts`, their specs and this plan.
 
 - [ ] **Step 3: `ProjectFrame`, the folded conversation line, and the `at` target (master 6221a36)**
 

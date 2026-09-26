@@ -1,5 +1,6 @@
-import type { Lane, LaneMark, MessagesState, Station, ThreadView, TimelineState } from '@desk/client';
-import type { AgentStatus } from '@desk/protocol';
+import { agentTitle, messageById, type Lane, type LaneMark, type MessagesState, type Station, type ThreadView, type TimelineState } from '@desk/client';
+import { clip, type AgentStatus } from '@desk/protocol';
+import { clock } from './format';
 
 export const LANE_COLOR: Record<AgentStatus, string> = {
   running: 'var(--run)',
@@ -59,6 +60,18 @@ export type MessageLink = {
   /** The latest message was sent moments ago. */
   live: boolean;
 };
+
+/** A link's accessible name and tooltip: one message says who wrote what to whom; a burst says how many, between whom, when. */
+export function linkText(m: MessagesState, k: MessageLink): { name: string; title: string } {
+  const a = agentTitle(m, k.from);
+  const b = agentTitle(m, k.to);
+  if (k.count === 1) {
+    const kind = messageById(m, k.ids[0]!)?.kind ?? k.kind;
+    return { name: `${a} → ${b}, ${kind}, ${clock(k.firstTs)}`, title: `${a} → ${b} · ${kind} · ${clock(k.firstTs)}: ${clip(k.text, 160)}` };
+  }
+  const when = clock(k.firstTs) === clock(k.lastTs) ? clock(k.firstTs) : `${clock(k.firstTs)}–${clock(k.lastTs)}`;
+  return { name: `${k.count} messages between ${a} and ${b}, ${when}`, title: `${k.count} messages between ${a} and ${b} · ${when} · latest: ${clip(k.text, 120)}` };
+}
 
 export type LaneGeometry = {
   lane: Lane;
