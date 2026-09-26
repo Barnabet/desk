@@ -11,8 +11,8 @@ import {
   Injectable,
   Injector,
   input,
+  linkedSignal,
   PendingTasks,
-  signal,
   TemplateRef,
   untracked,
   ViewEncapsulation,
@@ -26,7 +26,8 @@ const WHOLE_BODY = 'Reload to continue. Your projects and threads are safe; they
 
 /**
  * Catches a render error so one broken screen never blanks the page. Its content is a single `<ng-template>`, rendered while
- * healthy; give it the screen's key so navigating elsewhere starts clean. "Try again" renders it afresh, "Reload Desk" reloads.
+ * healthy; give it the screen's key so navigating elsewhere, or back, starts clean. "Try again" renders it afresh, "Reload
+ * Desk" reloads.
  */
 @Component({
   selector: 'div[deskErrorBoundary]',
@@ -60,12 +61,9 @@ export class ErrorBoundary {
   readonly scope = input<'screen' | 'whole'>('screen');
   readonly resetKey = input('');
   protected readonly content = contentChild.required(TemplateRef, { descendants: false });
-  /** The failure and the screen key it happened under: a new key (the next screen) starts clean. */
-  private readonly failure = signal<{ key: string; error: Error } | null>(null);
-  protected readonly error = computed(() => {
-    const f = this.failure();
-    return f && f.key === this.resetKey() ? f.error : null;
-  });
+  /** The failure, dropped whenever the key changes, as the desktop's `<ErrorBoundary key=…>` remounts on a new key. */
+  private readonly failure = linkedSignal<string, Error | null>({ source: this.resetKey, computation: () => null });
+  protected readonly error = this.failure.asReadonly();
   protected readonly whole = computed(() => this.scope() === 'whole');
   protected readonly screenBody = SCREEN_BODY;
   protected readonly wholeBody = WHOLE_BODY;
@@ -87,7 +85,7 @@ export class ErrorBoundary {
   }
 
   fail(error: unknown): void {
-    this.failure.set({ key: untracked(this.resetKey), error: error instanceof Error ? error : new Error(String(error)) });
+    this.failure.set(error instanceof Error ? error : new Error(String(error)));
     // A render error reaches the ErrorHandler before the zoneless scheduler has finished its tick, and it schedules nothing
     // then: ask for the fallback's render once that tick is over, and keep the app unstable until it is asked for.
     const done = this.pendingTasks.add();
@@ -106,7 +104,7 @@ export class ErrorBoundary {
   }
 }
 
-/** The boundaries on the page, outermost first. */
+/** The boundaries on the page, in the order they registered (a nested boundary registers after the one around it). */
 @Injectable({ providedIn: 'root' })
 export class ErrorBoundaries {
   private readonly stack: ErrorBoundary[] = [];
@@ -119,7 +117,10 @@ export class ErrorBoundaries {
     };
   }
 
-  /** Hands the error to the innermost boundary that is not already showing one; false when none took it. */
+  /**
+   * Hands the error to the last registered boundary that is not already showing one (the innermost, where they nest); false
+   * when none took it. The ErrorHandler is not told where an error came from, so one from outside the screen lands there too.
+   */
   report(error: unknown): boolean {
     for (let i = this.stack.length - 1; i >= 0; i--) {
       const boundary = this.stack[i]!;

@@ -1,13 +1,16 @@
+import { TestBed } from '@angular/core/testing';
 import { render, screen, waitFor } from '@testing-library/angular';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { AttentionItem } from '@desk/protocol';
 import { App } from './app';
-import { provideErrorBoundaries } from './components/error-boundary';
+import { ErrorBoundaries, provideErrorBoundaries } from './components/error-boundary';
 import { FakeDeskBridge } from './testing/fake-bridge';
 
 const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
 const go = (hash: string) => history.replaceState(null, '', hash);
+/** The element the screen boundary renders: the screen's host while healthy. */
+const screenHost = () => document.querySelector('main.screen > [deskErrorBoundary] > *');
 
 async function renderApp(bridge = new FakeDeskBridge()) {
   const view = await render(App, { providers: [...bridge.providers, ...provideErrorBoundaries()] });
@@ -28,6 +31,8 @@ describe('App', () => {
   it('shows only how to sign in while this browser has no session', async () => {
     const bridge = new FakeDeskBridge();
     bridge.signOut();
+    // Not onboarded either, so only the signed-out guard keeps this deep link from being sent to #/onboarding.
+    localStorage.removeItem('desk.onboarded');
     go('#/map');
     await renderApp(bridge);
     expect(screen.getByRole('heading', { name: 'Open Desk from your terminal' })).toBeTruthy();
@@ -59,6 +64,37 @@ describe('App', () => {
       'main.screen',
       'div.toaster',
     ]);
+  });
+
+  it('keeps the screen while the route stays on it, and mounts a fresh one for another screen key', async () => {
+    go('#/p/p1/threads');
+    const { bridge, view } = await renderApp();
+    const first = screenHost();
+    expect(first).not.toBeNull();
+    bridge.emit('desk:navigate', '#/p/p1/threads/t1');
+    await view.fixture.whenStable();
+    expect(window.location.hash).toBe('#/p/p1/threads/t1');
+    expect(screenHost()).toBe(first);
+    bridge.emit('desk:navigate', '#/p/p2/threads');
+    await view.fixture.whenStable();
+    expect(screenHost()).not.toBeNull();
+    expect(screenHost()).not.toBe(first);
+  });
+
+  it('renders a crashed screen again when the viewer comes back to it', async () => {
+    go('#/p/p1/threads');
+    const { bridge, view } = await renderApp();
+    // What DeskErrorHandler does with the screen's render error, minus its console.error: the screen's boundary takes it.
+    TestBed.inject(ErrorBoundaries).report(new Error('boom'));
+    await view.fixture.whenStable();
+    expect(screen.getByText('This screen hit an error')).toBeTruthy();
+    bridge.emit('desk:navigate', '#/p/p2/threads');
+    await view.fixture.whenStable();
+    expect(screen.queryByText('This screen hit an error')).toBeNull();
+    bridge.emit('desk:navigate', '#/p/p1/threads');
+    await view.fixture.whenStable();
+    expect(screen.queryByText('This screen hit an error')).toBeNull();
+    expect(screenHost()).not.toBeNull();
   });
 
   it('follows desk:global and desk:navigate', async () => {

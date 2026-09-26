@@ -80,4 +80,18 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('Registry')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  it('renders a crashed screen again when the key comes back to it, as a remounted React boundary would', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    broken = true;
+    const fixture = await mount('screen');
+    expect(screen.getByRole('alert')).toBeTruthy();
+    broken = false;
+    fixture.componentInstance.key.set('project/p/threads');
+    await fixture.whenStable();
+    fixture.componentInstance.key.set('system');
+    await fixture.whenStable();
+    expect(screen.getByText('Registry')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });
