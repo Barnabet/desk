@@ -7791,7 +7791,7 @@ Expected: no output.
 
 **Produces (shared names beyond the contract; the contract's names are used as they are):**
 
-- `scripts/ng.mjs` exports `NODE_RANGE`, `supported(version)`, `pickNode({ execPath, version, nvmDir, platform? })`, `defaultNvmDir(env?, platform?)`, `binOf(cwd, pkg, bin)`, `isMain(url, argv1?)`; `--ngc` runs `ngc`, `--which` prints the Node it would use. `scripts/web-dev.mjs` backs the root `web` script and exports `webDevCommands(root, args?)`, `runTogether(commands, { log? }?)` (`{ done: Promise<number>; stop() }`) and `stopChild(child, platform?, run?)`.
+- `scripts/ng.mjs` exports `NODE_RANGE`, `supported(version)`, `pickNode({ execPath, version, nvmDir, platform? })`, `defaultNvmDir(env?, platform?)`, `binOf(cwd, pkg, bin)`, `isMain(url, argv1?)`; `--ngc` runs `ngc`, `--which` prints the Node it would use. `scripts/web-dev.mjs` backs the root `web` script and exports `webDevCommands(root, args?)` (only the build is `tree: true`), `runTogether(commands, { log?, platform?, run? }?)` (`{ done: Promise<number>; stop() }`) and `stopChild(child, tree?, platform?, run?)`.
 - `apps/web-ui/src/app/app.config.ts`: `appConfig` (zoneless, and from W0c.11 the `ErrorHandler`). `main.ts` bootstraps `App` with it; `app.config.spec.ts` checks that it is zoneless.
 - `apps/web-ui/src/app/app.ts`: `App` (`desk-root`): the signed-out page, onboarding without the shell, or the shell around `screenFor(route)`. Later sections add their app-wide pieces to its template: the folder browser (W0d.7) and the command palette (W3b.3).
 - `core/desk-bridge.ts`: `DeskCallError` (`new DeskCallError(ipcError)` or `new DeskCallError(code, message, status?)`; fields `code`, `message`, `status`); `DeskBridge` with `signedOut: Signal<boolean>`, `pushStatus: Signal<PushStatus>`, `folderRequest: Signal<FolderRequest | null>`, `call`, `onPush<T>(channel, cb)`, `onReconnect(cb)`, `answerFolder(path | null)`, `setNotifyPermission(permission)`, `signOut()`; types `DeskBridgeApi`, `PushStatus` (`'idle' | 'connecting' | 'live' | 'reconnecting'`), `FolderRequest` (`{ purpose }`), `FolderPurpose`; `notificationPermission()` (exported by W0c.15 for `WebNotifications`).
@@ -13889,11 +13889,11 @@ git commit -m "feat(web-ui): browser notifications for desk:notify while the tab
 
 **Interfaces:**
 - Consumes: `scripts/ng.mjs` (W0c.1) and its `isMain(url)`; the web-ui `watch` configuration (W0c.2, `ng build --watch --configuration development`); `desk web [--port <n>] [--no-open] [--dev]` (W0b.13), whose `--dev` serves `apps/web-ui/dist/browser` and reloads the page through `/__dev/reload.js` after each rebuild (W0b.9).
-- Produces: the root script `web` (`node scripts/web-dev.mjs`); `scripts/web-dev.mjs` exports `webDevCommands(root, args?)` (the two commands: `{ name, args, cwd, stdio }`), `runTogether(commands, { log? }?)` (`{ done: Promise<number>; stop(): void }`: when one process exits the others are stopped with `stopChild`, and `done` resolves with the first exit code, or 0 after `stop()`) and `stopChild(child, platform?, run?)` (SIGTERM; on Windows `taskkill /pid <pid> /T /F`, run through `run`, which defaults to `spawnSync`).
+- Produces: the root script `web` (`node scripts/web-dev.mjs`); `scripts/web-dev.mjs` exports `webDevCommands(root, args?)` (the two commands: `{ name, args, cwd, stdio, tree? }`, where only the build has `tree: true`), `runTogether(commands, { log?, platform?, run? }?)` (`{ done: Promise<number>; stop(): void }`: when one process exits the others are stopped with `stopChild(child, command.tree, platform, run)`, and `done` resolves with the first exit code, or 0 after `stop()`) and `stopChild(child, tree?, platform?, run?)` (SIGTERM; on Windows a `tree` child gets `taskkill /pid <pid> /T /F`, run through `run`, which defaults to `spawnSync`, with SIGTERM as the fallback when it returns an `error`).
 
 Spec §9: `pnpm web` runs `ng build --watch` for `apps/web-ui` and `desk web --dev`. Both run under Node without a shell, so it works on Windows too: the build through `scripts/ng.mjs` (which picks a Node Angular accepts), `desk web` through the repo's `tsx` loader like `pnpm desk`. Extra arguments go to `desk web` (`pnpm web --port 7500 --no-open`). The build's stdin is ignored, so Enter in the terminal reaches `desk web`, which prints a new login link. Until the first build lands, `desk web` answers `/` with its 503 page naming the build command; the reload script then loads the app.
 
-**Deviation (review fix):** three fixes. (1) The entry guard is W0c.1's `isMain`, imported from `ng.mjs`: the plan's copy of `ng.mjs`'s old guard exited 0 without running anything when called through a symlinked folder. (2) On Windows `child.kill()` ends only that process, at once, so `ng.mjs`'s signal forwarding never runs and Windows does not end the Angular CLI child with its parent: when desk web stopped on its own (port taken, a crash), `pnpm web` exited and `ng build --watch` kept running. `runTogether` now stops each child with `stopChild`, which runs `taskkill /pid <pid> /T /F` on win32 (the whole tree) and sends SIGTERM elsewhere; a spec case checks the choice with a fake `run`, without running taskkill (6 tests). (3) The dev-loop smoke (Step 5, and W3b.8 Step 6, updated the same way) first edited `main.ts` as soon as the first "Application bundle generation complete" appeared, which Angular logs before it sets up its watcher, so the edit could land unseen and the rebuild count stay at 1; it now also waits for the first "Output location" (logged once the watcher exists) and one more second. Its `pgrep -f 'ng.mjs build --watch'` matched only the `ng.mjs` wrapper, so an orphaned Angular watcher would still print "build stopped"; `'build --watch --configuration development'` matches the wrapper and the Angular CLI child.
+**Deviation (review fix):** three fixes. (1) The entry guard is W0c.1's `isMain`, imported from `ng.mjs`: the plan's copy of `ng.mjs`'s old guard exited 0 without running anything when called through a symlinked folder. (2) On Windows `child.kill()` ends only that process, at once, so `ng.mjs`'s signal forwarding never runs and Windows does not end the Angular CLI child with its parent: when desk web stopped on its own (port taken, a crash), `pnpm web` exited and `ng build --watch` kept running. `runTogether` now stops each child with `stopChild`, which on win32 runs `taskkill /pid <pid> /T /F` (the whole tree) for the build only, the one command marked `tree: true`, and sends SIGTERM otherwise (and when taskkill cannot run, so `done` cannot hang). desk web is never tree-killed: on Windows a deskd it started (Start Desk, Restart: `spawnDev`, spawned `detached`) is still its child by `ParentProcessId`, so `/T /F` on desk web would force-kill deskd, its agents' commands and its services, skipping deskd's graceful shutdown; deskd is stopped only through `daemon.stop`. Spec cases check the choice with a fake `run` without running taskkill, the fallback, and that `runTogether` passes each command's `tree` (8 tests). (3) The dev-loop smoke (Step 5, and W3b.8 Step 6, updated the same way) first edited `main.ts` as soon as the first "Application bundle generation complete" appeared, which Angular logs before it sets up its watcher, so the edit could land unseen and the rebuild count stay at 1; it now also waits for the first "Output location" (logged once the watcher exists) and one more second. Its `pgrep -f 'ng.mjs build --watch'` matched only the `ng.mjs` wrapper, so an orphaned Angular watcher would still print "build stopped"; `'build --watch --configuration development'` matches the wrapper and the Angular CLI child.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -13906,11 +13906,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
-type Command = { name: string; args: string[]; cwd: string; stdio?: unknown };
+type Command = { name: string; args: string[]; cwd: string; stdio?: unknown; tree?: boolean };
+type Run = (file: string, args: string[], options: unknown) => { error?: Error } | undefined;
 type WebDev = {
   webDevCommands(root: string, args?: string[]): Command[];
-  runTogether(commands: Command[], o?: { log?(line: string): void }): { done: Promise<number>; stop(): void };
-  stopChild(child: { pid?: number; kill(signal: string): void }, platform?: string, run?: (...args: unknown[]) => unknown): void;
+  runTogether(commands: Command[], o?: { log?(line: string): void; platform?: string; run?: Run }): { done: Promise<number>; stop(): void };
+  stopChild(child: { pid?: number; kill(signal: string): void }, tree?: boolean, platform?: string, run?: Run): void;
 };
 
 const url = new URL('./web-dev.mjs', import.meta.url).href;
@@ -13933,6 +13934,7 @@ describe('pnpm web', () => {
       args: [join('/repo', 'scripts', 'ng.mjs'), 'build', '--watch', '--configuration', 'development'],
       cwd: join('/repo', 'apps', 'web-ui'),
       stdio: ['ignore', 'inherit', 'inherit'],
+      tree: true,
     });
     expect(web).toMatchObject({
       name: 'desk web --dev',
@@ -13940,6 +13942,8 @@ describe('pnpm web', () => {
       cwd: '/repo',
       stdio: 'inherit',
     });
+    // Only the build's children stop with it: a deskd that desk web started outlives desk web.
+    expect(web?.tree).toBeUndefined();
   });
 
   it('stops the other process when one exits, and exits with its code', async () => {
@@ -13957,19 +13961,51 @@ describe('pnpm web', () => {
     expect(lines).toEqual([]);
   });
 
-  it('stops a child with SIGTERM, and on Windows its whole tree with taskkill', () => {
+  it('stops a child with SIGTERM, and on Windows a tree child with everything it started through taskkill', () => {
     const calls: unknown[][] = [];
-    const run = (...args: unknown[]) => calls.push(args);
+    const run: Run = (...args) => {
+      calls.push(args);
+      return {};
+    };
     const child = { pid: 4242, kill: vi.fn() };
-    dev.stopChild(child, 'win32', run);
+    dev.stopChild(child, true, 'win32', run);
     expect(calls).toEqual([['taskkill', ['/pid', '4242', '/T', '/F'], { stdio: 'ignore', windowsHide: true }]]);
     expect(child.kill).not.toHaveBeenCalled();
-    dev.stopChild(child, 'darwin', run);
-    dev.stopChild(child, 'linux', run);
+    // Not a tree (desk web): on Windows too only the child itself, so a deskd it started lives on.
+    dev.stopChild(child, false, 'win32', run);
+    dev.stopChild(child, undefined, 'win32', run);
+    dev.stopChild(child, true, 'darwin', run);
+    dev.stopChild(child, false, 'linux', run);
     // A child that never started has no tree to end.
-    dev.stopChild({ kill: child.kill }, 'win32', run);
-    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGTERM'], ['SIGTERM']]);
+    dev.stopChild({ kill: child.kill }, true, 'win32', run);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGTERM'], ['SIGTERM'], ['SIGTERM'], ['SIGTERM']]);
     expect(calls).toHaveLength(1);
+  });
+
+  it('falls back to kill() when taskkill cannot run', () => {
+    const child = { pid: 4242, kill: vi.fn() };
+    dev.stopChild(child, true, 'win32', () => ({ error: new Error('spawnSync taskkill ENOENT') }));
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+  });
+
+  it('on Windows stops only the tree command with taskkill, and the other with kill()', async () => {
+    const pids: number[] = [];
+    // A fake taskkill that ends the process it is given (these children start nothing).
+    const run: Run = (_file, args) => {
+      const pid = Number(args[1]);
+      pids.push(pid);
+      process.kill(pid, 'SIGTERM');
+      return {};
+    };
+    const wait = 'setTimeout(() => {}, 60000)';
+    // desk web stops on its own: the build, a tree, goes through taskkill.
+    const buildLeft = dev.runTogether([{ ...node(wait, 'build'), tree: true }, node('process.exit(3)', 'server')], { log: () => {}, platform: 'win32', run });
+    expect(await buildLeft.done).toBe(3);
+    expect(pids).toHaveLength(1);
+    // The build stops on its own: desk web is not a tree, so taskkill never runs.
+    const serverLeft = dev.runTogether([{ ...node('process.exit(3)', 'build'), tree: true }, node(wait, 'server')], { log: () => {}, platform: 'win32', run });
+    expect(await serverLeft.done).toBe(3);
+    expect(pids).toHaveLength(1);
   });
 
   it('starts only as the script Node runs, also through a symlinked folder', () => {
@@ -14005,7 +14041,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './ng.mjs';
 
-/** The two processes `pnpm web` runs, as arguments to this Node (no shell, so Windows works too). */
+/**
+ * The two processes `pnpm web` runs, as arguments to this Node (no shell, so Windows works too). `tree` marks the one
+ * whose own children stop with it (`stopChild`).
+ */
 export function webDevCommands(root, args = []) {
   return [
     {
@@ -14014,8 +14053,11 @@ export function webDevCommands(root, args = []) {
       cwd: join(root, 'apps', 'web-ui'),
       // Enter belongs to desk web (a new login link), not to the build.
       stdio: ['ignore', 'inherit', 'inherit'],
+      // ng.mjs runs the Angular CLI as its child.
+      tree: true,
     },
     {
+      // No tree: a deskd that desk web started (Start Desk, Restart) is its child, and must outlive it.
       name: 'desk web --dev',
       args: ['--import', 'tsx', join(root, 'apps', 'cli', 'src', 'main.ts'), 'web', '--dev', ...args],
       cwd: root,
@@ -14025,18 +14067,24 @@ export function webDevCommands(root, args = []) {
 }
 
 /**
- * Stops a child and whatever it started. Elsewhere that is SIGTERM, which ng.mjs passes on to the Angular CLI. On Windows
- * kill() ends only the child, at once, so ng.mjs could not pass anything on and `ng build --watch` would keep running:
- * `taskkill /T /F` ends the whole tree. `run` is spawnSync (a spec passes its own).
+ * Stops a child with SIGTERM, which ng.mjs passes on to the Angular CLI. On Windows kill() ends only the child, at once,
+ * so ng.mjs could not pass anything on and `ng build --watch` would keep running: there a `tree` child is ended with
+ * everything it started by `taskkill /T /F` (or kill() when taskkill cannot run). Only the build is a tree: on Windows a
+ * deskd that desk web started is still desk web's child (`detached` only gives it its own console), and deskd is
+ * stopped only through `daemon.stop`, never with desk web. `run` is spawnSync (a spec passes its own).
  */
-export function stopChild(child, platform = process.platform, run = spawnSync) {
-  if (platform === 'win32' && child.pid !== undefined) run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-  else child.kill('SIGTERM');
+export function stopChild(child, tree = false, platform = process.platform, run = spawnSync) {
+  if (platform === 'win32' && tree && child.pid !== undefined) {
+    const result = run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    if (!result?.error) return;
+  }
+  child.kill('SIGTERM');
 }
 
 /**
- * Runs the commands with this Node until one exits, then stops the others (`stopChild`). `done` resolves once all have
- * exited: with the first exit code (1 for a signal or a spawn error), or with 0 after `stop()`.
+ * Runs the commands with this Node until one exits, then stops the others (`stopChild`, with each command's `tree`;
+ * `platform` and `run` go to it, for specs). `done` resolves once all have exited: with the first exit code (1 for a
+ * signal or a spawn error), or with 0 after `stop()`.
  */
 export function runTogether(commands, o = {}) {
   const log = o.log ?? ((line) => console.error(line));
@@ -14044,7 +14092,7 @@ export function runTogether(commands, o = {}) {
   let first = null;
   const running = commands.map((c) => ({ c, child: spawn(process.execPath, c.args, { cwd: c.cwd, stdio: c.stdio ?? 'inherit', env: process.env }) }));
   const stopAll = () => {
-    for (const { child } of running) if (child.exitCode === null && child.signalCode === null) stopChild(child);
+    for (const { c, child } of running) if (child.exitCode === null && child.signalCode === null) stopChild(child, c.tree, o.platform, o.run);
   };
   const exits = running.map(
     ({ c, child }) =>
@@ -14098,7 +14146,7 @@ after:
 - [ ] **Step 4: Run it again**
 
 Run: `pnpm vitest run scripts/web-dev.test.ts scripts/ng.test.ts --maxWorkers=2`
-Expected: PASS (6 tests in `web-dev.test.ts`, and `ng.test.ts`'s 8 unchanged).
+Expected: PASS (8 tests in `web-dev.test.ts`, and `ng.test.ts`'s 8 unchanged).
 
 - [ ] **Step 5: Smoke the dev loop**
 
