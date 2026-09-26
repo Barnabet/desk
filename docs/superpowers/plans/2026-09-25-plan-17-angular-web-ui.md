@@ -234,8 +234,8 @@ The plan has 105 tasks in 11 sections, one commit per task. The sections follow 
 | W1c | Attention: flight strips, the rack, the inspector, `AttentionScreen`; the W1 e2e | 5 | W0; W1c.4 after W1b; W1c.5 (the W1 exit) after W1a too |
 | W2a | Threads: `SkillBadge`, `FileViewer`, the thread tabs, route view, transcript, roster, detail, `ThreadsScreen`; the W2 threads e2e | 8 | W0, W1b; W2a.7 after W1c.4 |
 | W2b | Library, Memory, `PolicyEditor`, `SettingsScreen`; the W2 knowledge e2e | 6 | W0, W2a.1; W2b.6 (the W2 exit) after W2a.7 |
-| W3a | Skills and the catalog: data, runtime line, catalog view, review sheet, list and map, panel, the three sheets, `SkillsScreen`; the catalog e2e | 11 | W0, W1a.1, W2a.1 |
-| W3b | `ModelsEditor`, `SystemScreen`, `CommandPalette` and ⌘K; `NotYet` goes; the parity guard; the W3 e2e; docs (W3b.8 is the plan exit) | 8 | W3b.1–2 after W0 and W2a.2; W3b.3 also after W3a.2; W3b.4–8 after W3a.11 |
+| W3a | Skills and the catalog: data, built-in skills data, runtime line, catalog view, review sheet, list and map, panel, the three sheets, the built-in group and panel, `SkillsScreen`; the catalog and built-ins e2e | 13 | W0, W1a.1, W2a.1 |
+| W3b | `ModelsEditor`, `SystemScreen`, `CommandPalette` and ⌘K; `NotYet` goes; the parity guard; the W3 e2e; docs (W3b.8 is the plan exit) | 8 | W3b.1–2 after W0 and W2a.2; W3b.3 also after W3a.2 and W3a.2b; W3b.4–8 after W3a.11 |
 
 ## Decisions recorded while planning
 
@@ -326,9 +326,13 @@ The plan has 105 tasks in 11 sections, one commit per task. The sections follow 
   - Web-ui commands run through `scripts/ng.mjs`. Otherwise prefix `PATH=$HOME/.nvm/versions/node/v22.23.3/bin:$PATH`: shells spawned by the Claude app inherit Node 22.21.0.
 - **Rebasing:**
   - Rebase onto `master` as other work lands.
-  - `~/desk` holds another session's uncommitted catalog work. When it lands:
-    - It touches `CLAUDE.md`, `package.json`, `apps/cli/src/commands.ts` and `docs/desktop.md`, so re-check the anchors of W0a.6, W0b.6, W0b.13, W0b.14, W0c.2, W0c.16, W0d.8, W0d.9 and W3b.7.
-    - It also changes the React catalog (`skills/catalog/CatalogView.tsx`, `skills/catalog/data.ts`, `e2e/catalog.e2e.test.ts`) and `packages/protocol/src/catalog.ts`. W3a.2, W3a.4 and W3a.10 must port the version that landed.
+  - Master's catalog work landed and was merged into `web-ui` (8883229, "Merge origin/master into web-ui", master 79b8f54): a merge rather than a rebase, so the W0a moves were resolved once. What it brought, and where each piece is ported:
+    - Built-in skills (master's Plan 18: a `builtin` skill scope, `/v1/builtin-skills`, six `builtins.*` operations). The contract and the bff carry them since the merge; the web screens port them in W3a.2b, W3a.7, W3a.8b, W3a.9, W3a.10 and W3b.3.
+    - The catalog: 18 third-party entries in five bays, a `files` category with no bay, and `WritableSkillScope` for installs. W3a.2 has it (0cdc815); W3a.4 and W3a.10 port the rest.
+    - Dark mode: every color is a token in `@desk/ui-styles`' `tokens.css`, with a dark value under `prefers-color-scheme: dark`. `tokens.test.ts` scans the web UI too (c16b4df), so a port writes `var(--run)` and its siblings, never a hex color. The desktop's Appearance setting has no web counterpart: a browser follows the system (W3b.2).
+    - `UsageTab`'s `tokens` scales to M and B (0745c68).
+    - Not ported yet, for a follow-up after W3 (the landed W1b and W2a screens are the pre-merge React's): the conversation keeps Desk's line and Threads unfolds every lane (`ProjectFrame.tsx`, master 6221a36); messages between agents are links on the line diagram (60c8a7b; `@desk/ui-core`'s `lineGeometry` already returns the links); paste or drop files into the chat (68a8fb6); and the conversation's `at` route (in `@desk/ui-core`'s router since the merge).
+    - A later merge of master re-checks the tasks still to run (W3a.2b onward, and W3b) against the React sources, as this one did.
   - If the W0a extraction conflicts, redo it mechanically: the `git mv` tables and the scripted import rewrites.
 - **Phases:**
   - W0 lands before W1, and each phase ships something usable:
@@ -527,12 +531,14 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `apps/web-ui/e2e/knowledge.e2e.test.ts` | W2b.5 |
 | `src/app/skills/data.ts` + spec | W3a.1 |
 | `src/app/skills/catalog/data.ts` + spec, `src/app/testing/catalog.ts` | W3a.2 |
+| `src/app/skills/builtins/data.ts` + spec, `src/app/testing/builtins.ts` | W3a.2b |
 | `src/app/skills/catalog/runtime-line.ts` + spec | W3a.3 |
 | `src/app/skills/catalog/catalog-view.ts` + spec | W3a.4 |
 | `src/app/skills/catalog/review-sheet.ts` + spec | W3a.5 |
 | `src/app/skills/{skill-list,skills-map-view}.ts` + specs | W3a.6 |
 | `src/app/skills/skill-panel.ts` + spec | W3a.7 |
 | `src/app/skills/{skill-editor,ask-desk,import-sheet}.ts` + specs | W3a.8 |
+| `src/app/skills/builtins/{builtin-group,builtin-panel}.ts`, `skills/builtins/builtins.spec.ts` | W3a.8b |
 | `src/app/skills/skills-screen.ts` + spec, `skills/catalog/catalog.spec.ts` | W3a.9 |
 | `apps/web-ui/e2e/catalog.e2e.test.ts` | W3a.10 |
 | `src/app/system/models-editor.ts` + spec | W3b.1 |
@@ -31175,7 +31181,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 
 ## Section W3a · skills and the catalog
 
-**Goal:** the web Skills and Catalog screens reach parity with the desktop's. This section ports `apps/desktop/src/renderer/skills/` (`SkillsScreen` with its private `ImportSheet`, `SkillsMapView`, `SkillList`, `SkillPanel` with `Compare`, `SkillEditor`, `AskDesk`, and the `data.ts` hooks) and `apps/desktop/src/renderer/skills/catalog/` (`CatalogView` with `LayoutSwitch`, `ReviewSheet`, `RuntimeLine`, and the `data.ts` helpers and hook). History, compare and restore live in the panel; import goes through `app.pickFolder`, which on the web is W0d.5's folder browser (hidden folders shown from the start, for `~/.claude/skills`). `#/skills[/<key>]` and `#/skills/catalog[/<id>]` then show the screen, and a new web e2e file installs a skill from a fake catalog (the web twin of `apps/desktop/e2e/catalog.e2e.test.ts`) and carries the skills steps of the Electron `knowledge.e2e.test.ts` (refine by hand, restore v1), plus an import through the real folder browser. Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §3 (`app.pickFolder`), §5 (components, SVG parts from shared geometry), §6 (the Skills and Catalog rows), §7 (W3 e2e: "install a catalog skill with a fake catalog").
+**Goal:** the web Skills and Catalog screens reach parity with the desktop's. This section ports `apps/desktop/src/renderer/skills/` (`SkillsScreen` with its private `ImportSheet`, `SkillsMapView`, `SkillList`, `SkillPanel` with `Compare`, `SkillEditor`, `AskDesk`, and the `data.ts` hooks) and `apps/desktop/src/renderer/skills/catalog/` (`CatalogView` with `LayoutSwitch`, `ReviewSheet`, `RuntimeLine`, and the `data.ts` helpers and hook), and master's `apps/desktop/src/renderer/skills/builtins/` (Plan 18: `BuiltinGroup` with `BuiltinSwitch` and `BuiltinRuntime`, `BuiltinPanel` with its private `DuplicateSheet`, and the `data.ts` helpers and hook): Desk's own skills above the user's, each with its environment, an on/off switch and Duplicate. History, compare and restore live in the panel; import goes through `app.pickFolder`, which on the web is W0d.5's folder browser (hidden folders shown from the start, for `~/.claude/skills`). `#/skills[/<key>]` and `#/skills/catalog[/<id>]` then show the screen, and a new web e2e file installs skills from the shipped catalog with two local stand-ins (the web twin of `apps/desktop/e2e/catalog.e2e.test.ts`), turns a built-in skill off and duplicates one (the twin of `builtins.e2e.test.ts`), and carries the skills steps of the Electron `knowledge.e2e.test.ts` (refine by hand, restore v1), plus an import through the real folder browser. Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §3 (`app.pickFolder`), §5 (components, SVG parts from shared geometry), §6 (the Skills and Catalog rows), §7 (W3 e2e: "install a catalog skill with a fake catalog").
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Angular commands go through `scripts/ng.mjs` (it picks a Node that satisfies `^22.22.3`); while iterating run only the named specs: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: no parallel test runs, and only Tasks W3a.10 and W3a.11 start Chromium (never together with another Chromium or Electron run).
 
@@ -31187,22 +31193,24 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 |---|---|---|
 | W3a.1 | `skills/data.ts`: `scopeArg`, `whoLabel`, `injectSkills` (React `useSkills`) | `skills/data.spec.ts` (new: the React module has no test) |
 | W3a.2 | `skills/catalog/data.ts`: `BAYS`, `installRef`, `fromCatalog`, `catalogIndex`, `runtimeWords`, `runtimePackages`, `sourceLabel`, `actionFor`, `injectCatalog` (React `useCatalog`); `testing/catalog.ts` fixtures | `skills/catalog/data.spec.ts` (`catalog/data.test.ts` ported, plus the helpers and the hook) |
+| W3a.2b | `skills/builtins/data.ts`: `builtinKey`, `parseBuiltinKey`, `runtimeLabel`, `injectBuiltins` (React `useBuiltins`); `testing/builtins.ts` | `skills/builtins/data.spec.ts` (`builtins/data.test.ts` ported, plus the hook) |
 | W3a.3 | `RuntimeLine` | `runtime-line.spec.ts` (new) |
 | W3a.4 | `CatalogView`, `LayoutSwitch`, `injectCatalogLayout` | `catalog-view.spec.ts` (new) |
 | W3a.5 | `ReviewSheet` | `review-sheet.spec.ts` (new) |
 | W3a.6 | `SkillList`, `SkillsMapView` | `skill-list.spec.ts`, `skills-map-view.spec.ts` (new) |
 | W3a.7 | `SkillPanel` and `Compare` (history, compare, restore, delete) | `skill-panel.spec.ts` (new) |
 | W3a.8 | `SkillEditor`, `AskDesk`, `ImportSheet` | `skill-editor.spec.ts`, `ask-desk.spec.ts`, `import-sheet.spec.ts` (new) |
+| W3a.8b | `BuiltinSwitch`, `BuiltinRuntime`, `BuiltinGroup`, `BuiltinPanel` | `builtins/builtins.spec.ts` (`Builtins.test.tsx` ported case for case) |
 | W3a.9 | `SkillsScreen`; `#/skills` and `#/skills/catalog` show it | `skills-screen.spec.ts` (`SkillsScreen.test.tsx` ported case for case, plus the routes), `catalog/catalog.spec.ts` (`Catalog.test.tsx` ported case for case); `screen-for.spec.ts` updated |
-| W3a.10 | the skills and catalog e2e on a fake catalog; `startWebE2E` takes deskd options | `apps/web-ui/e2e/catalog.e2e.test.ts` (2 tests) |
+| W3a.10 | the skills, catalog and built-ins e2e on the shipped catalog with local stand-ins; `startWebE2E` takes deskd options | `apps/web-ui/e2e/catalog.e2e.test.ts` (3 tests) |
 | W3a.11 | verify | `pnpm typecheck`, root Vitest, every web-ui spec, `pnpm test:web-e2e` |
 
 **Consumes (exact names; the contract's are used as they are):**
 
 - `@desk/ui-core` (W0a.3): `router.ts` (`href`, `Route`), `skill-keys.ts` (`SkillRef`, `skillKey(r)`, `parseSkillKey(key)`), `skills-map.ts` (`layoutSkillsMap({ nodes, projects, width, height })`, `MapTone`, `SkillTerritory`, `UsageMarker`), `skills-diff.ts` (`diffLines`, `withContext`, `diffFiles`, `FileChange`), `format.ts` (`bytes`, `since`), `files.ts` (`fileToBase64`, `textToBase64`, `MAX_UPLOAD`).
 - `@desk/bff/contract`: `runtimeKey(scope, projectId, name)`, `GlobalState` (`runtimes: { progress: Record<string, { step; done?; total? }>; seq }`), `initialGlobalState()` (specs).
-- `@desk/protocol`: `SkillName`, `AgentStatus`, `CatalogCategory`, `CatalogEntry`, `CatalogInstall`, `CatalogItem`, `CatalogReview`, `ReviewWarningKind`, `ProjectSummary`; in the e2e `CatalogEntry`, `CatalogFile`. `@desk/client`: `buildSkillGraph`, `SkillNode`, `SkillSummary`, `SkillDetail`, `SkillHistoryEntry`; in the e2e `DeskClient` (`projects.create`, `skills.save`, `skills.get`, `skills.list`, `catalog.list`).
-- W0c: `DeskBridge` (`call` with the literal operations `skills.list`, `skills.get`, `skills.history`, `skills.version`, `skills.file`, `skills.save`, `skills.remove`, `skills.restore`, `skills.import`, `skills.runtimeRetry`, `catalog.list`, `catalog.prepare`, `catalog.file`, `catalog.install`, `projects.send`, `app.pickFolder`, so W3b's parity guard sees every operation the React skills screens call), `DeskCallError` (`status`); `RouteService` (`route`, `navigate(to)`, `replace(to)`); `GlobalStore` (`state`, `set`); `NowService` (`now`); `ToastService` (`toast(t)`, `error(err)`, `list`), `describeError`; `Button` (`button[deskButton]`: `variant`, `size`, `pending`, `disabled`), `Field` (`div[deskField]`: `id`, `label`, `hint`, `error`; the control is projected), `EmptyState` (`div[deskEmptyState]`: `title`, `body`), `Sheet` (`div[deskSheet]`: `title`, `width`, output `close`, projected `.sheet-footer`; it moves itself into `document.body` after its first render), `ConfirmDialog` (`div[deskConfirmDialog]`: `title`, `confirmLabel`, `danger`; outputs `confirm`, `cancel`), `SafeMarkdown` (`div[deskSafeMarkdown]`: `text`), `ExternalLink` (`span[deskExternalLink]`: `href`, projected label); `FakeDeskBridge` (`providers`, `calls`, `handle`), `FakeHandlers`, `provideGlobal(state)`; `screen-for.ts` (`screenFor`) with the lines `      return notYet('Skills');` and `      return notYet('The skill catalog');`, and `screen-for.spec.ts` with the catalog assertion (W0c.11).
+- `@desk/protocol`: `SkillName`, `AgentStatus`, `CatalogCategory`, `CatalogEntry`, `CatalogInstall`, `CatalogItem`, `CatalogReview`, `ReviewWarningKind`, `ProjectSummary`, `WritableSkillScope`, `BuiltinSkillInfo` (master's Plan 18); in the e2e `CatalogEntry`, `CatalogFile`. `@desk/client`: `buildSkillGraph`, `SkillNode`, `SkillSummary`, `SkillDetail`, `SkillHistoryEntry`; in the e2e `DeskClient` (`projects.create`, `skills.save`, `skills.get`, `skills.list`, `catalog.list`, `catalog.runtimes`, `builtins.list`).
+- W0c: `DeskBridge` (`call` with the literal operations `skills.list`, `skills.get`, `skills.history`, `skills.version`, `skills.file`, `skills.save`, `skills.remove`, `skills.restore`, `skills.import`, `skills.runtimeRetry`, `catalog.list`, `catalog.prepare`, `catalog.file`, `catalog.install`, `builtins.list`, `builtins.get`, `builtins.file`, `builtins.setEnabled`, `builtins.duplicate`, `builtins.retry`, `projects.send`, `app.pickFolder`, so W3b's parity guard sees every operation the React skills screens call), `DeskCallError` (`status`); `RouteService` (`route`, `navigate(to)`, `replace(to)`); `GlobalStore` (`state`, `set`); `NowService` (`now`); `ToastService` (`toast(t)`, `error(err)`, `list`), `describeError`; `Button` (`button[deskButton]`: `variant`, `size`, `pending`, `disabled`), `Field` (`div[deskField]`: `id`, `label`, `hint`, `error`; the control is projected), `EmptyState` (`div[deskEmptyState]`: `title`, `body`), `Sheet` (`div[deskSheet]`: `title`, `width`, output `close`, projected `.sheet-footer`; it moves itself into `document.body` after its first render), `ConfirmDialog` (`div[deskConfirmDialog]`: `title`, `confirmLabel`, `danger`; outputs `confirm`, `cancel`), `SafeMarkdown` (`div[deskSafeMarkdown]`: `text`), `ExternalLink` (`span[deskExternalLink]`: `href`, projected label); `FakeDeskBridge` (`providers`, `calls`, `handle`), `FakeHandlers`, `provideGlobal(state)`; `screen-for.ts` (`screenFor`) with the lines `      return notYet('Skills');` and `      return notYet('The skill catalog');`, and `screen-for.spec.ts` with the catalog assertion (W0c.11).
 - W0c.12: `projectTone(p): Tone` (`map/project-summary.ts`; `Tone` is `'running' | 'waiting' | 'idle'`, the skills map's `MapTone`).
 - W0d.5 (e2e only): the folder browser that answers `app.pickFolder` over every screen (dialog "Choose a skill folder" for `skill-import`, hidden folders shown, folder buttons, the "Folder" box, "Choose this folder").
 - W0d.9: `startWebE2E`, `WebE2E` (`home`, `client()`, `signIn()`, `shot()`, `close()`), `SignedIn` (`context`, `page`, `problems`).
@@ -31214,6 +31222,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 - `apps/web-ui/src/app/skills/data.ts`: `scopeArg(r: SkillRef): { projectId?: string }`, `whoLabel(origin: string | null, titles: Map<string, string>): string`, `SkillsState` (`{ status: Signal<'loading' | 'ready' | 'error'>; error: Signal<string | null>; nodes: Signal<SkillNode[]>; refresh(): Promise<void> }`), `injectSkills(): SkillsState` (field initializer only).
 - `apps/web-ui/src/app/skills/catalog/data.ts`: `BAYS`, `installRef(id, install)`, `fromCatalog(install)`, `catalogIndex(items): Map<string, { item: CatalogItem; install: CatalogInstall }>`, `runtimeWords(e)`, `runtimePackages(e)`, `sourceLabel(e)`, `actionFor(install)`, `CatalogState` (`{ status; error; items: Signal<CatalogItem[]>; refresh(): Promise<void> }`), `injectCatalog(): CatalogState` (field initializer only).
 - `apps/web-ui/src/app/testing/catalog.ts`: `catalogItems(installs?)`, `install(o?)`, `reviewOf(item, o?)` (the renderer's `test/catalog.ts`, for specs).
+- `apps/web-ui/src/app/skills/builtins/data.ts`: `builtinKey(name)`, `parseBuiltinKey(key): string | null`, `runtimeLabel(b, progress?)`, `BuiltinsState` (`{ status; error; items: Signal<BuiltinSkillInfo[]>; refresh(): Promise<void> }`), `injectBuiltins(): BuiltinsState` (field initializer only). `apps/web-ui/src/app/testing/builtins.ts`: `builtin(name, over?)` (the renderer's `test/builtins.ts`, for specs).
 - `apps/web-ui/src/app/skills/catalog/runtime-line.ts`: `RuntimeLine` — `div[deskRuntimeLine]` (`display: contents`), inputs `entry: Pick<CatalogEntry, 'id' | 'runtime'>`, `install: CatalogInstall` (both required), output `retried` (React's `onRetried`).
 - `apps/web-ui/src/app/skills/catalog/catalog-view.ts`: `Layout` (`'cards' | 'list'`), `injectCatalogLayout(): { layout: Signal<Layout>; set(next: Layout): void }` (localStorage `desk.catalogLayout`), `LayoutSwitch` — `div[deskLayoutSwitch]` (host `class="segmented" role="group" aria-label="Layout"`), input `layout`, output `changed: Layout`; `CatalogView` — `div[deskCatalogView]` (host class `catalog`), inputs `items`, `layout`, `projectNames: Map<string, string>`, output `review: string` (React's `onReview`).
 - `apps/web-ui/src/app/skills/catalog/review-sheet.ts`: `ReviewSheet` — `div[deskReviewSheet]` (`display: contents`), inputs `id` (required), `item?: CatalogItem`, `projects: Array<{ id; name }>` (required), outputs `changed`, `close`.
@@ -31223,9 +31232,11 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 - `apps/web-ui/src/app/skills/skill-editor.ts`: `SkillEditor` — `div[deskSkillEditor]` (`display: contents`), inputs `skill?: { ref: SkillRef; detail: SkillDetail }`, `projects` (required), `defaultProjectId?`, outputs `saved: SkillRef`, `close`.
 - `apps/web-ui/src/app/skills/ask-desk.ts`: `AskDesk` — `div[deskAskDesk]` (`display: contents`), inputs `skillName?`, `projects` (required), `defaultProjectId?`, output `close`.
 - `apps/web-ui/src/app/skills/import-sheet.ts`: `ImportSheet` (React's private `ImportSheet` in `SkillsScreen.tsx`) — `div[deskImportSheet]` (`display: contents`), inputs `path`, `projects` (required), outputs `done: SkillRef`, `close`.
+- `apps/web-ui/src/app/skills/builtins/builtin-group.ts`: `BuiltinSwitch` — `button[deskBuiltinSwitch]` (host `role="switch"`, class `switch`), inputs `item`, `label`, output `changed`; `BuiltinRuntime` — `span[deskBuiltinRuntime]` (host class `runtime-line <state>`), input `item`; `BuiltinGroup` — `section[deskBuiltinGroup]` (host class `builtin-group`, `aria-label="Built into Desk"`), inputs `items`, `selected: string | null`, `collapsible` (default `false`; localStorage `desk.builtinsOpen`), outputs `selectSkill: string`, `changed`.
+- `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`: `BuiltinPanel` — `article[deskBuiltinPanel]` (host `class="card skill-panel"`, `aria-label="Built-in skill <name>"`), inputs `item: BuiltinSkillInfo`, `projects` (both required), outputs `duplicated: SkillRef`, `changed`, `close`.
 - `apps/web-ui/src/app/skills/skills-screen.ts`: `SkillsScreen` — `div[deskSkillsScreen]` (host class `skills`, plus ` with-panel` while a skill is open), inputs `skill?: string`, `catalog: boolean` (default `false`), `review?: string`. `screenFor({ name: 'skills', skill })` → `{ component: SkillsScreen, inputs: { skill, catalog: false, review: undefined } }`; `screenFor({ name: 'catalog', review })` → `{ component: SkillsScreen, inputs: { skill: undefined, catalog: true, review } }` (every key present, so `NgComponentOutlet` never keeps a stale input when `#/skills` and `#/skills/catalog` share the screen).
 - `apps/web-ui/e2e/harness.ts`: `WebE2EDaemonOptions` (`Pick<DaemonOptions, 'catalog' | 'runtimes'>`) and `startWebE2E(o?: { script?: Script; daemon?: WebE2EDaemonOptions })`, spread into `startDaemon`.
-- `apps/web-ui/e2e/catalog.e2e.test.ts` (its own `go`, `openAt`, `hashOf`, `uvStub`, `builtinSkill`, `fakeCatalog`).
+- `apps/web-ui/e2e/catalog.e2e.test.ts` (its own `go`, `openAt`, `hashOf`, `uvStub`, `builtinSkill`, `offlineCatalog`, `titleOf`).
 
 **Files:**
 
@@ -31235,6 +31246,9 @@ apps/web-ui/src/app/skills/data.spec.ts                     new
 apps/web-ui/src/app/skills/catalog/data.ts                  new
 apps/web-ui/src/app/skills/catalog/data.spec.ts             new (ported from catalog/data.test.ts, plus more)
 apps/web-ui/src/app/testing/catalog.ts                      new (ported from renderer/test/catalog.ts)
+apps/web-ui/src/app/skills/builtins/data.ts                 new
+apps/web-ui/src/app/skills/builtins/data.spec.ts            new (ported from builtins/data.test.ts, plus the hook)
+apps/web-ui/src/app/testing/builtins.ts                     new (ported from renderer/test/builtins.ts)
 apps/web-ui/src/app/skills/catalog/runtime-line.ts          new
 apps/web-ui/src/app/skills/catalog/runtime-line.spec.ts     new
 apps/web-ui/src/app/skills/catalog/catalog-view.ts          new
@@ -31253,6 +31267,9 @@ apps/web-ui/src/app/skills/ask-desk.ts                      new
 apps/web-ui/src/app/skills/ask-desk.spec.ts                 new
 apps/web-ui/src/app/skills/import-sheet.ts                  new
 apps/web-ui/src/app/skills/import-sheet.spec.ts             new
+apps/web-ui/src/app/skills/builtins/builtin-group.ts        new
+apps/web-ui/src/app/skills/builtins/builtin-panel.ts        new
+apps/web-ui/src/app/skills/builtins/builtins.spec.ts        new (ported from builtins/Builtins.test.tsx)
 apps/web-ui/src/app/skills/skills-screen.ts                 new
 apps/web-ui/src/app/skills/skills-screen.spec.ts            new (ported from SkillsScreen.test.tsx)
 apps/web-ui/src/app/skills/catalog/catalog.spec.ts          new (ported from catalog/Catalog.test.tsx)
@@ -31267,7 +31284,7 @@ apps/web-ui/e2e/catalog.e2e.test.ts                         new
 - **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** Each attribute selector sits on the React component's root element: `SkillsScreen` on `div.skills`, `SkillList` on `div.skill-list`, `SkillPanel` on `article.card.skill-panel`, `CatalogView` on `div.catalog`, `LayoutSwitch` on its `div.segmented`, `Compare` on `div.skill-compare`. Components whose React root is a `Sheet` (a portal) or that switch roots are `display: contents` hosts: `SkillEditor`, `AskDesk`, `ImportSheet`, `ReviewSheet` (their `Sheet` moves into `document.body`, leaving an empty host that makes no grid or flex item in `.skills` or `.skill-panel`), `RuntimeLine` (nothing, a `p.runtime-line` or a `div.runtime-line`) and `SkillsMapView` (its React root is `MapCanvas`, whose `.map-canvas` is `position: absolute; inset: 0` against `.skills-body.map`). `skills.css` has two child selectors, `.skills-legend > span` and `.review-files > *`, and both see the same children as on the desktop. `CatalogView`'s React `Card`, `Row` and `Action` are inlined in its template (the action once, as an `ng-template` both layouts use), over one view model per entry computed in TS.
 - **Callbacks** become outputs: `onSelect` → `selectSkill` (a plain `select` output would also catch the native `select` event), `onReview` → `review`, `onEdit` → `edit`, `onAskDesk` → `askDesk`, `onChanged` → `changed`, `onClose` → `close`, `onSaved` → `saved`, `onDone` → `done`, `onRetried` → `retried`, `LayoutSwitch`'s `onChange` → `changed`.
-- **Hooks.** `useSkills`, `useCatalog` and `useCatalogLayout` become `injectSkills()`, `injectCatalog()` and `injectCatalogLayout()`, called in field initializers; their React effects are `effect`s with `onCleanup` (the focus listener, the 30 s and 3 s timers). `useCatalog`'s refetch keyed on `runtimes.seq` reads the sequence through its own `computed`, so a `desk:global` push that leaves it unchanged lists nothing. `SkillsScreen`'s `useView` is a private signal over localStorage `desk.skillsView`.
+- **Hooks.** `useSkills`, `useCatalog` and `useCatalogLayout` become `injectSkills()`, `injectCatalog()` and `injectCatalogLayout()`, called in field initializers; their React effects are `effect`s with `onCleanup` (the focus listener, the 30 s and 3 s timers). `useCatalog`'s refetch keyed on `runtimes.seq` reads the sequence through its own `computed`, so a `desk:global` push that leaves it unchanged lists nothing. `useBuiltins` becomes `injectBuiltins()` the same way (focus, 30 s, and 2 s while one is being set up). Refreshes overlap, so each of the three hooks numbers its calls and only the latest answer lands (the review of W3a.1 and W3a.2; React keeps the race). `SkillsScreen`'s `useView` is a private signal over localStorage `desk.skillsView`.
 - **State.** `useState` is `signal`. State React seeds from props once (`useState(props.x)`) is seeded in `ngOnInit` (`SkillEditor`, `AskDesk`), so a new `projects` array from an overview push never resets what the user picked. `SkillPanel` resets its tab and open file when the skill changes (React's second effect) through `linkedSignal`s keyed on `skillKey(skill)`; its fetch `effect` reads that key, `version` and a reload counter (React's dependencies) and drops a late answer through `onCleanup`. `Compare` keeps its first `from`/`to` versions as React's `useState` does (`linkedSignal`s that return their previous value).
 - **Selects and text.** Options that come from `@for` carry `[selected]` (W0d.1's rule); text boxes bind `[value]` and `(input)`. Compared lines stay on one template line, a JSX `{' '}` is `&ngsp;`, and a literal `@` is `&#64;`. The diff `<pre>` is written on a single line: Angular keeps whitespace inside `<pre>`.
 - **Specs.** Ported cases keep their queries and visible text. `fireEvent.change` on a text box becomes `fireEvent.input`; selects and the file input keep `fireEvent.change`. Dialogs are found with `findByRole` (W0c's `Sheet` moves itself into `document.body` after its first render), so the React `getAllByRole('button', { name: 'Restore' }).at(-1)` becomes the "Restore" button inside the "Restore v1?" dialog (the same for Delete). The React `globalStore.set(...)` is `provideGlobal(state)` at render and `TestBed.inject(GlobalStore).set(...)` afterwards. Where React asserted a hash change right after an awaited bridge call, the port waits for it (`waitFor`), since the number of microtasks between the call and the navigation differs. The React tests' `Routed` wrapper becomes a small host component that reads `RouteService.route` and binds `skill`, `catalog` and `review` as `screenFor` would. `app.pickFolder` is scripted with a `FakeDeskBridge` handler, as React's `installBridge` does; the real folder browser is driven in the e2e. No source or spec contains the words W0c's `security.spec.ts` forbids.
@@ -31295,7 +31312,7 @@ Create `apps/web-ui/src/app/skills/data.spec.ts`:
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
 import { GlobalStore } from '../core/global.store';
@@ -31317,8 +31334,15 @@ async function setup(handlers: FakeHandlers, overview: ProjectSummary[]) {
   const bridge = new FakeDeskBridge(handlers);
   const view = await render(Probe, { providers: [...bridge.providers, provideGlobal(state(overview))] });
   const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list').map((c) => c.input);
-  return { bridge, lists, skills: view.fixture.componentInstance.skills };
+  return { bridge, lists, fixture: view.fixture, skills: view.fixture.componentInstance.skills };
 }
+
+/** Lets every pending bridge answer land (a macrotask runs after all queued microtasks). */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('scopeArg and whoLabel', () => {
   it('names the project only for project skills', () => {
@@ -31326,12 +31350,13 @@ describe('scopeArg and whoLabel', () => {
     expect(scopeArg({ scope: 'project', projectId: 'p1', name: 'brand-voice' })).toEqual({ projectId: 'p1' });
   });
 
-  it('says who made a version: you, a thread, Desk, or the catalog with its commit', () => {
+  it('says who made a version: you, a thread, Desk, a built-in skill, or the catalog with its commit', () => {
     const titles = new Map([['t1', 'Welcome emails']]);
     expect(whoLabel(null, titles)).toBe('Unknown');
     expect(whoLabel('user', titles)).toBe('You');
     expect(whoLabel('agent:t1', titles)).toBe('Welcome emails');
     expect(whoLabel('agent:d9', titles)).toBe('Desk');
+    expect(whoLabel('builtin:word-documents', titles)).toBe('Built into Desk');
     expect(whoLabel(`catalog:word-documents@${'a'.repeat(40)}`, titles)).toBe('Catalog · aaaaaaa');
     expect(whoLabel('catalog:word-documents@builtin-0123456789ab', titles)).toBe('Catalog');
     expect(whoLabel('import', titles)).toBe('import');
@@ -31341,11 +31366,21 @@ describe('scopeArg and whoLabel', () => {
 describe('injectSkills', () => {
   it('joins global and per-project lists with the threads using them', async () => {
     const t1 = { id: 't1', title: 'Welcome emails', status: 'running', skills: ['brand-voice', 'email-sequence'] };
+    // The global list is held until the loading state is checked: render's whenStable could otherwise see it answered.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     const { skills, lists } = await setup(
-      { 'skills.list': ({ projectId }: { projectId?: string }) => (projectId === 'p1' ? [sk('brand-voice', 'project', 3), sk('email-sequence', 'global')] : [sk('brand-voice', 'global'), sk('email-sequence', 'global')]) },
+      {
+        'skills.list': async ({ projectId }: { projectId?: string }) => {
+          if (projectId === 'p1') return [sk('brand-voice', 'project', 3), sk('email-sequence', 'global')];
+          await gate;
+          return [sk('brand-voice', 'global'), sk('email-sequence', 'global')];
+        },
+      },
       [summary('p1', 'Onboarding', [t1])],
     );
     expect(skills.status()).toBe('loading');
+    release();
     await vi.waitFor(() => expect(skills.status()).toBe('ready'));
     expect(lists()).toEqual([{}, { projectId: 'p1' }]);
     expect(skills.nodes().map((n) => [n.key, n.version, n.shadows, n.shadowedIn, n.usedBy.map((u) => u.threadId)])).toEqual([
@@ -31371,6 +31406,64 @@ describe('injectSkills', () => {
     TestBed.inject(GlobalStore).set(state([summary('p1', 'Onboarding'), summary('p2', 'Tax')]));
     await vi.waitFor(() => expect(skills.nodes().map((n) => n.key)).toEqual(['project:p2:receipts']));
     expect(lists()).toEqual([{}, { projectId: 'p1' }, {}, { projectId: 'p1' }, { projectId: 'p2' }]);
+  });
+
+  it('sends no list when an overview push leaves the projects as they were, and still follows what the threads use', async () => {
+    const t1 = { id: 't1', title: 'Welcome emails', status: 'running', skills: ['brand-voice'] };
+    const { skills, lists, fixture } = await setup({ 'skills.list': ({ projectId }: { projectId?: string }) => (projectId ? [] : [sk('brand-voice', 'global'), sk('email-sequence', 'global')]) }, [
+      summary('p1', 'Onboarding', [t1]),
+    ]);
+    await vi.waitFor(() => expect(skills.status()).toBe('ready'));
+    const used = () => skills.nodes().map((n) => [n.key, n.usedBy.map((u) => u.threadId)]);
+    expect(used()).toEqual([
+      ['global:brand-voice', ['t1']],
+      ['global:email-sequence', []],
+    ]);
+    expect(lists()).toEqual([{}, { projectId: 'p1' }]);
+    TestBed.inject(GlobalStore).set(state([summary('p1', 'Onboarding', [{ ...t1, skills: ['email-sequence'] }])]));
+    await fixture.whenStable();
+    await settle();
+    expect(used()).toEqual([
+      ['global:brand-voice', []],
+      ['global:email-sequence', ['t1']],
+    ]);
+    expect(lists()).toEqual([{}, { projectId: 'p1' }]);
+  });
+
+  it('keeps the newest lists when an older refresh answers last', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const { skills, lists } = await setup(
+      {
+        'skills.list': async () => {
+          if (++calls > 1) return [sk('new-skill', 'global')];
+          await gate;
+          return [sk('old-skill', 'global')];
+        },
+      },
+      [],
+    );
+    window.dispatchEvent(new Event('focus'));
+    await vi.waitFor(() => expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']));
+    release();
+    await gate;
+    await settle();
+    expect(lists()).toEqual([{}, {}]);
+    expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']);
+  });
+
+  it('lists nothing more once its component is gone: no focus listener, no 30 s timer', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { skills, lists, fixture } = await setup({ 'skills.list': () => [sk('brand-voice', 'global')] }, []);
+    await vi.waitFor(() => expect(skills.status()).toBe('ready'));
+    vi.advanceTimersByTime(30_000);
+    await vi.waitFor(() => expect(lists()).toHaveLength(2));
+    fixture.destroy();
+    window.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(lists()).toHaveLength(2);
   });
 
   it('lists again when the window gets focus, and keeps the last lists when that fails', async () => {
@@ -31422,11 +31515,15 @@ import { GlobalStore } from '../core/global.store';
 /** The IPC scope argument: project skills name their project; global ones don't. */
 export const scopeArg = (r: SkillRef): { projectId?: string } => (r.scope === 'project' && r.projectId ? { projectId: r.projectId } : {});
 
-/** `user` → you, `agent:<id>` → the agent's title when known, `catalog:<id>@<commit>` → the catalog with its commit. */
+/**
+ * `user` → you, `agent:<id>` → the agent's title when known, `builtin:<name>` → Desk itself (a copy of a built-in skill),
+ * `catalog:<id>@<commit>` → the catalog with its commit.
+ */
 export function whoLabel(origin: string | null, titles: Map<string, string>): string {
   if (!origin) return 'Unknown';
   if (origin === 'user') return 'You';
   if (origin.startsWith('agent:')) return titles.get(origin.slice(6)) ?? 'Desk';
+  if (origin.startsWith('builtin:')) return 'Built into Desk';
   if (origin.startsWith('catalog:')) {
     const marker = origin.slice(origin.lastIndexOf('@') + 1);
     return /^[0-9a-f]{40}$/.test(marker) ? `Catalog · ${marker.slice(0, 7)}` : 'Catalog';
@@ -31456,8 +31553,12 @@ export function injectSkills(): SkillsState {
   const projectIds = computed(() => overview().map((p) => p.project.id).join(','));
   const lists = signal<Lists | null>(null);
   const error = signal<string | null>(null);
+  // Refreshes overlap (focus, the timer, a new project); only the latest one's answer lands, so a slow earlier answer
+  // never overwrites a newer list.
+  let latest = 0;
 
   const refresh = async (): Promise<void> => {
+    const run = ++latest;
     const joined = untracked(projectIds);
     const ids = joined ? joined.split(',') : [];
     try {
@@ -31465,10 +31566,11 @@ export function injectSkills(): SkillsState {
         bridge.call('skills.list', {}),
         ...ids.map((id) => bridge.call('skills.list', { projectId: id }).catch((): SkillSummary[] => [])),
       ]);
+      if (run !== latest) return;
       lists.set({ global: all ?? [], projects: new Map(ids.map((id, i) => [id, perProject[i] ?? []])) });
       error.set(null);
     } catch (err) {
-      error.set(describeError(err).message);
+      if (run === latest) error.set(describeError(err).message);
     }
   };
 
@@ -31503,12 +31605,17 @@ export function injectSkills(): SkillsState {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/data.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (9 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
 **Deviation:** the plan first kept React's `Record<string, SkillSummary[]>` for the per-project lists (`Object.fromEntries`, read with `l.projects[p.project.id]`). Lookups keyed by strings from outside the UI use a `Map` or `Object.hasOwn` (W2a.1's prototype-lookup sweep), so `Lists.projects` is a `Map` built with `new Map(...)` and read with `get`; a project id named after an `Object.prototype` member can no longer hand `buildSkillGraph` a function for its skills. Behaviour is otherwise React's.
+
+**After the review and the merge of master (commits 0cdc815, 48d6ec0, 61baa04):** the code above is the file as it stands.
+- `whoLabel` names a `builtin:<name>` origin (a copy of one of Desk's built-in skills, from master's Plan 18) "Built into Desk", as the React `whoLabel` now does; the whoLabel case checks it.
+- Refreshes overlap (focus, the 30 s timer, a new project), so each takes a number from a counter bumped per call and only the latest one sets the lists or the error: a slow earlier answer never puts back an older list. React's `useSkills` has the same race; the port fixes it rather than copying it.
+- The spec gained four cases: the first case holds the global list behind a gate until it has checked `loading` (as W3a.2's does, instead of relying on a `Promise.all` outlasting render's `whenStable`); an overview push that leaves the project ids unchanged sends no list while `usedBy` follows the threads; the newest list wins when an older refresh answers last; and once the component is destroyed neither focus nor the 30 s timer lists. 9 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -31621,6 +31728,7 @@ import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
+import { CatalogCategory } from '@desk/protocol';
 import { GlobalStore } from '../../core/global.store';
 import { catalogItems, install } from '../../testing/catalog';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../../testing/fake-bridge';
@@ -31689,6 +31797,9 @@ describe('the catalog helpers', () => {
     expect(installRef('pre-mortem', { scope: 'project', project_id: 'p2' })).toEqual({ scope: 'project', projectId: 'p2', name: 'pre-mortem' });
     expect(installRef('pre-mortem', { scope: 'global', project_id: null })).toEqual({ scope: 'global', name: 'pre-mortem' });
     expect(BAYS.map((b) => b.category)).toEqual(['research', 'documents', 'writing', 'planning', 'code']);
+    // Files & media has no bay: its skills are built into Desk (only a stale entry could still name it).
+    expect(CatalogCategory.options.filter((c) => !BAYS.some((b) => b.category === c))).toEqual(['files']);
+    expect(BAYS.find((b) => b.category === 'documents')?.blurb).toBe('Conversion to Markdown, data analysis, Excel automation, HTML slides.');
   });
 });
 
@@ -31715,6 +31826,27 @@ describe('injectCatalog', () => {
     expect(lists()).toBe(2);
     window.dispatchEvent(new Event('focus'));
     await vi.waitFor(() => expect(lists()).toBe(3));
+  });
+
+  it('keeps the newest catalog when an older refresh answers last', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const { catalog, lists } = await setup({
+      'catalog.list': async () => {
+        if (++calls > 1) return catalogItems({ 'pre-mortem': [install()] });
+        await gate;
+        return catalogItems();
+      },
+    });
+    window.dispatchEvent(new Event('focus'));
+    await vi.waitFor(() => expect(catalog.status()).toBe('ready'));
+    expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1);
+    release();
+    await gate;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lists()).toBe(2);
+    expect(catalog.items().find((i) => i.id === 'pre-mortem')?.installs).toHaveLength(1);
   });
 
   it('polls every 3 s while a runtime is being set up, and stops once it is ready', async () => {
@@ -31761,22 +31893,23 @@ Create `apps/web-ui/src/app/skills/catalog/data.ts`:
 
 ```ts
 import { DestroyRef, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
-import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem } from '@desk/protocol';
+import type { CatalogCategory, CatalogEntry, CatalogInstall, CatalogItem, WritableSkillScope } from '@desk/protocol';
 import { skillKey, type SkillRef } from '@desk/ui-core';
 import { describeError } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
 import { GlobalStore } from '../../core/global.store';
 
+/** The catalog's bays, in order. `files` has none: Desk's file-type skills are built in now, not catalog entries. */
 export const BAYS: Array<{ category: CatalogCategory; title: string; blurb: string }> = [
   { category: 'research', title: 'Research', blurb: 'Find sources, check facts, read the web.' },
-  { category: 'documents', title: 'Documents & data', blurb: 'Word, PDF, Excel, slides and datasets.' },
+  { category: 'documents', title: 'Documents & data', blurb: 'Conversion to Markdown, data analysis, Excel automation, HTML slides.' },
   { category: 'writing', title: 'Writing & diagrams', blurb: 'Clearer prose, rendered diagrams.' },
   { category: 'planning', title: 'Planning', blurb: 'Meetings, risks and decisions.' },
   { category: 'code', title: 'Code', blurb: 'Debugging, review and testing.' },
 ];
 
-/** The skill a catalog install became. */
-export const installRef = (id: string, i: Pick<CatalogInstall, 'scope' | 'project_id'>): SkillRef =>
+/** The skill a catalog install became (installs are global or in a project, never built in). */
+export const installRef = (id: string, i: { scope: WritableSkillScope; project_id: string | null }): SkillRef =>
   i.scope === 'global' ? { scope: 'global', name: id } : { scope: 'project', projectId: i.project_id!, name: id };
 
 /** Installs that really came from the catalog (not another skill that happens to share the name). */
@@ -31843,13 +31976,19 @@ export function injectCatalog(): CatalogState {
   const global = inject(GlobalStore);
   const items = signal<CatalogItem[] | null>(null);
   const error = signal<string | null>(null);
+  // Refreshes overlap (a runtime change, focus, the 3 s poll); only the latest one's answer lands, so a slow earlier
+  // answer never puts back an older catalog.
+  let latest = 0;
 
   const refresh = async (): Promise<void> => {
+    const run = ++latest;
     try {
-      items.set(await bridge.call('catalog.list', {}));
+      const next = await bridge.call('catalog.list', {});
+      if (run !== latest) return;
+      items.set(next);
       error.set(null);
     } catch (err) {
-      error.set(describeError(err).message);
+      if (run === latest) error.set(describeError(err).message);
     }
   };
 
@@ -31879,20 +32018,282 @@ export function injectCatalog(): CatalogState {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/catalog/data.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0 (`testing/catalog.ts` type-checks with the app, as `testing/fake-bridge.ts` does).
 
-**Deviation (spec):** the first `injectCatalog` case first expected `loading` right after `render`, with a handler that answered at once. `render` waits for `whenStable`, and a refresh that makes one bridge call settles within it, so the case saw `ready` (W3a.1's case passes only because its refresh awaits a `Promise.all` of several calls). The first answer is now held behind a gate the case opens after checking `loading`; later lists pass straight through. The code above has it; `data.ts` is the plan's. 6 tests, stable over three runs.
+**Deviation (spec):** the first `injectCatalog` case first expected `loading` right after `render`, with a handler that answered at once. `render` waits for `whenStable`, and a refresh that makes one bridge call settles within it, so the case saw `ready` (W3a.1's case passed only because its refresh awaits a `Promise.all` of several calls; it has the same gate now). The first answer is now held behind a gate the case opens after checking `loading`; later lists pass straight through. The code above has it; `data.ts` is the plan's. 6 tests, stable over three runs.
 
-**Master (checked 2026-09-26, origin/master 79b8f54):** the other session's catalog work has landed there and is not on `web-ui`. For this task's files it changes `BAYS`' `documents` blurb to "Conversion to Markdown, data analysis, Excel automation, HTML slides." and adds a `files` category to `CatalogCategory` (no bay for it; the Electron e2e expects no "Files & media" region and 18 cards), and `CatalogInstall.scope` becomes `WritableSkillScope`. Port those after the rebase; W3a.4 and W3a.10 port the `CatalogView.tsx` comment and the e2e's offline catalog (an `excel-automation` stand-in).
+**Master, merged into `web-ui` (8883229) and ported (0cdc815):** `BAYS`' `documents` blurb is master's ("Conversion to Markdown, data analysis, Excel automation, HTML slides."); `CatalogCategory` gained `files`, which has no bay (Desk's file-type skills are built in now; the Electron e2e expects no "Files & media" region and 18 cards), and `CatalogInstall.scope` is now `WritableSkillScope`, which `installRef` takes. The spec checks the blurb and that `files` is the only category without a bay. `testing/catalog.ts` still matches the renderer's `test/catalog.ts`. W3a.4 and W3a.10 port the rest (the `CatalogView.tsx` comment, the e2e's offline catalog with an `excel-automation` stand-in).
+
+**After the review (48d6ec0):** `injectCatalog` drops the answer of a refresh that is no longer the latest (a counter bumped per call), as W3a.1 does; the spec's "keeps the newest catalog" case holds the first answer until a newer one has landed. 7 tests.
 
 - [ ] **Step 5: Commit**
 
 ```sh
 git add apps/web-ui/src/app/skills/catalog/data.ts apps/web-ui/src/app/skills/catalog/data.spec.ts apps/web-ui/src/app/testing/catalog.ts
 git commit -m "feat(web-ui): catalog data: bays, install refs, runtime words, actions, and the catalog listed again on runtime changes" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task W3a.2b: `skills/builtins/data.ts`, Desk's built-in skills, and their fixture
+
+Added after the merge of master (8883229), which brought Plan 18's built-in skills: Desk's first-party file-type skills and web research ship with the app, read-only, each with a switch and an environment set up on first use. A port of `renderer/skills/builtins/data.ts`: the selection key a built-in gets on the skills screen (`builtin:<name>`, next to `global:` and `project:` keys), the words for its environment, and `injectBuiltins()` (React's `useBuiltins`: lists on start, on window focus, every 30 s, and every 2 s while one is being set up). Like `injectSkills` and `injectCatalog` after their review, only the latest refresh's answer lands. `builtins/data.test.ts` is ported; the hook's cases are new. The code below was written and run (6 tests, three times) on the merged tree before it went into the plan; the task commits it.
+
+**Files:**
+- Create: `apps/web-ui/src/app/skills/builtins/data.ts`, `apps/web-ui/src/app/testing/builtins.ts`
+- Test: `apps/web-ui/src/app/skills/builtins/data.spec.ts` (ported from `apps/desktop/src/renderer/skills/builtins/data.test.ts`, plus the hook)
+
+**Interfaces:**
+- Consumes: `BuiltinSkillInfo` (`@desk/protocol`); `DeskBridge` (`call('builtins.list', {})`), `describeError`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal` (W0c); `initialGlobalState` (`@desk/bff/contract`, spec).
+- Produces: `builtinKey(name: string): string`, `parseBuiltinKey(key: string): string | null`, `runtimeLabel(b: BuiltinSkillInfo, progress?: { step: string } | null): string`, `BuiltinsState`, `injectBuiltins(): BuiltinsState`; `builtin(name, over?)` (`testing/builtins.ts`).
+
+- [ ] **Step 1: Write the fixture and the failing spec**
+
+Create `apps/web-ui/src/app/testing/builtins.ts` (the renderer's `test/builtins.ts`, unchanged but for its comment):
+
+```ts
+import type { BuiltinSkillInfo } from '@desk/protocol';
+
+/** A built-in skill for specs; `over` replaces any field (renderer/test/builtins.ts). */
+export function builtin(name: string, over: Partial<BuiltinSkillInfo> = {}): BuiltinSkillInfo {
+  const title = name.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+  return {
+    name,
+    title,
+    summary: `${title}: read, create and convert.`,
+    caveats: [],
+    description: `Use for ${name}.`,
+    scripts: 4,
+    enabled: true,
+    broken: null,
+    shadowed_by: null,
+    runtime: { state: 'none', reason: null },
+    ...over,
+  };
+}
+```
+
+Create `apps/web-ui/src/app/skills/builtins/data.spec.ts`:
+
+```ts
+import { Component } from '@angular/core';
+import { render } from '@testing-library/angular';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { initialGlobalState } from '@desk/bff/contract';
+import type { BuiltinSkillInfo } from '@desk/protocol';
+import { builtin } from '../../testing/builtins';
+import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../../testing/fake-bridge';
+import { builtinKey, injectBuiltins, parseBuiltinKey, runtimeLabel } from './data';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** A component that only holds injectBuiltins(), as SkillsScreen does. */
+@Component({ selector: 'desk-builtins-probe', template: '' })
+class Probe {
+  readonly builtins = injectBuiltins();
+}
+
+async function setup(handlers: FakeHandlers) {
+  const bridge = new FakeDeskBridge(handlers);
+  const view = await render(Probe, { providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' } })] });
+  const lists = () => bridge.calls.filter((c) => c.channel === 'builtins.list').length;
+  return { fixture: view.fixture, builtins: view.fixture.componentInstance.builtins, lists };
+}
+
+/** Lets every pending bridge answer land (a macrotask runs after all queued microtasks). */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const b = (state: BuiltinSkillInfo['runtime']['state'], reason: string | null = null) => builtin('pdf-toolkit', { title: 'PDF toolkit', runtime: { state, reason } });
+
+describe('built-in skill helpers (builtins/data.test.ts)', () => {
+  it('round-trips keys', () => {
+    expect(parseBuiltinKey(builtinKey('pdf-toolkit'))).toBe('pdf-toolkit');
+    expect(parseBuiltinKey('global:pdf-toolkit')).toBeNull();
+    expect(parseBuiltinKey('builtin:')).toBeNull();
+  });
+
+  it('words the environment state', () => {
+    expect(runtimeLabel(b('none'))).toBe('Set up on first use');
+    expect(runtimeLabel(b('preparing'), { step: 'Installing 6 Python packages' })).toBe('Setting up… Installing 6 Python packages');
+    expect(runtimeLabel(b('preparing'))).toBe('Setting up…');
+    expect(runtimeLabel(b('ready'))).toBe('Ready');
+    expect(runtimeLabel(b('failed', 'no network'))).toBe('Setup failed: no network');
+  });
+});
+
+describe('injectBuiltins', () => {
+  it('loads the built-ins, lists again on focus, and keeps them when a list fails', async () => {
+    // Held until the loading state is checked: render's whenStable would otherwise see a one-call refresh answered.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let fail = false;
+    const { builtins, lists } = await setup({
+      'builtins.list': async () => {
+        await gate;
+        if (fail) throw { code: 'internal', message: 'deskd is not answering' };
+        return [builtin('pdf-toolkit'), builtin('images')];
+      },
+    });
+    expect(builtins.status()).toBe('loading');
+    release();
+    await vi.waitFor(() => expect(builtins.status()).toBe('ready'));
+    expect(builtins.items().map((i) => i.name)).toEqual(['pdf-toolkit', 'images']);
+    fail = true;
+    window.dispatchEvent(new Event('focus'));
+    await vi.waitFor(() => expect(builtins.error()).toBe('deskd is not answering'));
+    expect(lists()).toBe(2);
+    expect(builtins.status()).toBe('ready');
+    expect(builtins.items()).toHaveLength(2);
+  });
+
+  it('polls every 2 s while one is being set up, then every 30 s', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let state: 'preparing' | 'ready' = 'preparing';
+    const { fixture, builtins, lists } = await setup({ 'builtins.list': () => [b(state)] });
+    await vi.waitFor(() => expect(builtins.items()[0]?.runtime.state).toBe('preparing'));
+    await fixture.whenStable();
+    await settle();
+    const first = lists();
+    vi.advanceTimersByTime(2_000);
+    expect(lists()).toBe(first + 1);
+    state = 'ready';
+    vi.advanceTimersByTime(2_000);
+    await vi.waitFor(() => expect(builtins.items()[0]?.runtime.state).toBe('ready'));
+    await fixture.whenStable();
+    await settle();
+    const settled = lists();
+    vi.advanceTimersByTime(20_000);
+    expect(lists()).toBe(settled);
+    vi.advanceTimersByTime(10_000);
+    expect(lists()).toBe(settled + 1);
+  });
+
+  it('keeps the newest list when an older refresh answers last', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const { builtins } = await setup({
+      'builtins.list': async () => {
+        if (++calls > 1) return [builtin('pdf-toolkit', { enabled: false })];
+        await gate;
+        return [builtin('pdf-toolkit')];
+      },
+    });
+    window.dispatchEvent(new Event('focus'));
+    await vi.waitFor(() => expect(builtins.items()[0]?.enabled).toBe(false));
+    release();
+    await gate;
+    await settle();
+    expect(builtins.items()[0]?.enabled).toBe(false);
+  });
+
+  it("is an error until a list arrives", async () => {
+    const { builtins } = await setup({ 'builtins.list': () => Promise.reject({ code: 'internal', message: 'deskd is not answering' }) });
+    await vi.waitFor(() => expect(builtins.status()).toBe('error'));
+    expect(builtins.items()).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins/data.spec.ts)`
+Expected: FAIL. The test build stops with `Could not resolve "./data"`.
+
+- [ ] **Step 3: Write `skills/builtins/data.ts`**
+
+Create `apps/web-ui/src/app/skills/builtins/data.ts`:
+
+```ts
+import { computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
+import type { BuiltinSkillInfo } from '@desk/protocol';
+import { describeError } from '../../components/toast';
+import { DeskBridge } from '../../core/desk-bridge';
+
+/** The skills screen's selection key for a built-in skill (user skills use `global:` and `project:` keys). */
+export const builtinKey = (name: string) => `builtin:${name}`;
+export const parseBuiltinKey = (key: string): string | null => (key.startsWith('builtin:') && key.length > 8 ? key.slice(8) : null);
+
+/** The environment line of a built-in skill card. */
+export function runtimeLabel(b: BuiltinSkillInfo, progress?: { step: string } | null): string {
+  switch (b.runtime.state) {
+    case 'none':
+      return 'Set up on first use';
+    case 'preparing':
+      return `Setting up…${progress ? ` ${progress.step}` : ''}`;
+    case 'ready':
+      return 'Ready';
+    default:
+      return `Setup failed${b.runtime.reason ? `: ${b.runtime.reason}` : ''}`;
+  }
+}
+
+/** What `injectBuiltins` gives a screen (the React `useBuiltins` result). */
+export type BuiltinsState = {
+  status: Signal<'loading' | 'ready' | 'error'>;
+  error: Signal<string | null>;
+  items: Signal<BuiltinSkillInfo[]>;
+  refresh(): Promise<void>;
+};
+
+/**
+ * Desk's built-in skills (renderer/skills/builtins/data.ts `useBuiltins`): listed on start, on window focus, every 30 s,
+ * and every 2 s while one is being set up. Call it in a field initializer.
+ */
+export function injectBuiltins(): BuiltinsState {
+  const bridge = inject(DeskBridge);
+  const items = signal<BuiltinSkillInfo[] | null>(null);
+  const error = signal<string | null>(null);
+  // Refreshes overlap (focus, the timers); only the latest one's answer lands, as in injectSkills and injectCatalog.
+  let latest = 0;
+
+  const refresh = async (): Promise<void> => {
+    const run = ++latest;
+    try {
+      const next = await bridge.call('builtins.list', {});
+      if (run !== latest) return;
+      items.set(next);
+      error.set(null);
+    } catch (err) {
+      if (run === latest) error.set(describeError(err).message);
+    }
+  };
+
+  const preparing = computed(() => (items() ?? []).some((b) => b.runtime.state === 'preparing'));
+  // React's effect on [refresh, preparing]: it lists at start and again whenever the poll changes speed.
+  effect((onCleanup) => {
+    const fast = preparing();
+    untracked(() => void refresh());
+    const onFocus = () => void refresh();
+    window.addEventListener('focus', onFocus);
+    const timer = setInterval(() => void refresh(), fast ? 2_000 : 30_000);
+    onCleanup(() => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(timer);
+    });
+  });
+
+  const status = computed<'loading' | 'ready' | 'error'>(() => (error() && !items() ? 'error' : items() ? 'ready' : 'loading'));
+  return { status, error: error.asReadonly(), items: computed(() => items() ?? []), refresh };
+}
+```
+
+- [ ] **Step 4: Run it**
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins/data.spec.ts)`
+Expected: PASS (6 tests).
+
+Run: `pnpm --filter @desk/web-ui typecheck`
+Expected: exit 0.
+
+- [ ] **Step 5: Commit**
+
+```sh
+git add apps/web-ui/src/app/skills/builtins/data.ts apps/web-ui/src/app/skills/builtins/data.spec.ts apps/web-ui/src/app/testing/builtins.ts
+git commit -m "feat(web-ui): built-in skills data: keys, environment words, and the list polled while one is set up" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task W3a.3: `RuntimeLine`, an installed catalog skill's environment
@@ -32088,7 +32489,7 @@ git commit -m "feat(web-ui): RuntimeLine: a catalog skill's environment ready, s
 
 ### Task W3a.4: `CatalogView`, `LayoutSwitch` and `injectCatalogLayout`
 
-A port of `CatalogView.tsx`: the entries in five bays (a bay without entries is left out), each as a card (title and summary opening the review, source, licence and script chips, what Desk sets up, the global install's `RuntimeLine`, where else it is installed, and the action) or a compact row; the action is "✓ Installed" (a link to the skill), "Name taken" (a chip that says why), or a button (Install, Update, "Modified · review") that opens the review. `LayoutSwitch` is the Cards / Compact switch, and `injectCatalogLayout()` remembers the choice per viewer (localStorage `desk.catalogLayout`, as the desktop). The React file has no test of its own (its coverage is `Catalog.test.tsx`, ported in W3a.9); the spec below pins the cards, the rows, the actions and the switch.
+A port of `CatalogView.tsx`: the entries in bays, one per category (`BAYS`: five; master's `files` category has none, its skills being built in now; a bay without entries is left out), each as a card (title and summary opening the review, source, licence and script chips, what Desk sets up, the global install's `RuntimeLine`, where else it is installed, and the action) or a compact row; the action is "✓ Installed" (a link to the skill), "Name taken" (a chip that says why), or a button (Install, Update, "Modified · review") that opens the review. `LayoutSwitch` is the Cards / Compact switch, and `injectCatalogLayout()` remembers the choice per viewer (localStorage `desk.catalogLayout`, as the desktop). The React file has no test of its own (its coverage is `Catalog.test.tsx`, ported in W3a.9); the spec below pins the cards, the rows, the actions and the switch.
 
 **Files:**
 - Create: `apps/web-ui/src/app/skills/catalog/catalog-view.ts`
@@ -32322,7 +32723,7 @@ function entryView(item: CatalogItem, projectNames: Map<string, string>): EntryV
   };
 }
 
-/** The catalog in five bays: cards (or a list) with source, licence, scripts, runtime and an action per entry (CatalogView.tsx). */
+/** The catalog in bays (one per category): cards (or a list) with source, licence, scripts, runtime and an action per entry (CatalogView.tsx). */
 @Component({
   selector: 'div[deskCatalogView]',
   imports: [NgTemplateOutlet, RuntimeLine],
@@ -32892,6 +33293,8 @@ Ports of `SkillList.tsx` (global skills, then each project's own, sorted by name
 - Consumes: `SkillNode` (`@desk/client`); `AgentStatus` (`@desk/protocol`); `href`, `layoutSkillsMap`, `MapTone`, `SkillTerritory`, `UsageMarker` (`@desk/ui-core`); `MapCanvas`, `CanvasSize`, `DEFAULT_CANVAS_SIZE` (W1a.1).
 - Produces: `SkillList` — `div[deskSkillList]` (host class `skill-list`): `nodes = input.required<SkillNode[]>()`, `projectNames = input.required<Map<string, string>>()`, `catalogKeys = input<ReadonlySet<string>>()`, `selected = input<string | null>(null)`, `selectSkill = output<string>()`. `SkillsMapView` — `div[deskSkillsMapView]` (`display: contents`): `nodes`, `projects = input.required<Array<{ id: string; name: string; tone: MapTone }>>()`, `catalogKeys`, `selected`, `selectSkill`.
 
+**Master (merged in 8883229):** `SkillsMapView.tsx`'s dark mode moved its colors into tokens (`var(--run-pastel)`, `var(--orbit)`, `var(--wait)`, …); the code and the spec below use them, and `@desk/ui-styles`' `tokens.test.ts` fails on a hex color in the web UI. `SkillList.tsx` did not change.
+
 - [ ] **Step 1: Write the failing specs**
 
 Create `apps/web-ui/src/app/skills/skill-list.spec.ts`:
@@ -33019,7 +33422,7 @@ describe('SkillsMapView', () => {
     expect([svg.getAttribute('width'), svg.getAttribute('height')]).toEqual(['1000', '700']);
     expect(svg.querySelectorAll('circle')).toHaveLength(4);
     expect(svg.querySelectorAll('path[stroke-dasharray="5 5"]')).toHaveLength(1);
-    expect(svg.querySelectorAll('path[stroke="#2F5BD3"]')).toHaveLength(2);
+    expect(svg.querySelectorAll('path[stroke="var(--run)"]')).toHaveLength(2);
     expect([...map.querySelectorAll('.skills-territory-label')].map((l) => l.textContent)).toEqual(['Onboarding', 'Tax', 'Notes · no project skills']);
     expect((map.querySelector('.skills-territory-label') as HTMLElement).style.color).not.toBe('');
     expect(map.querySelector('.skills-global-label')?.textContent).toBe('GLOBAL');
@@ -33118,14 +33521,14 @@ import { href, layoutSkillsMap, type MapTone, type SkillTerritory, type UsageMar
 import { MapCanvas, DEFAULT_CANVAS_SIZE, type CanvasSize } from '../map/map-canvas';
 
 const TERRITORY: Record<MapTone, { fill: string; stroke: string; text: string }> = {
-  running: { fill: '#E3E8F5', stroke: '#C9D3EC', text: '#1F45A8' },
-  waiting: { fill: '#F3E6CF', stroke: '#E6D3AF', text: '#7A4500' },
-  idle: { fill: '#E6E1D7', stroke: '#D6CFC1', text: '#4A4740' },
+  running: { fill: 'var(--run-pastel)', stroke: 'var(--run-ring)', text: 'var(--run-text)' },
+  waiting: { fill: 'var(--wait-pastel)', stroke: 'var(--wait-ring)', text: 'var(--wait-text)' },
+  idle: { fill: 'var(--idle-pastel)', stroke: 'var(--rule)', text: 'var(--text-min)' },
 };
 const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: number }>> = {
-  running: { stroke: '#2F5BD3', width: 2.5 },
-  waiting: { stroke: '#A15C00', width: 2, dash: '4 4' },
-  queued: { stroke: '#A15C00', width: 2, dash: '4 4' },
+  running: { stroke: 'var(--run)', width: 2.5 },
+  waiting: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
+  queued: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
 };
 
 /**
@@ -33142,13 +33545,13 @@ const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: 
     <div deskMapCanvas label="Skill map" (resized)="size.set($event)">
       <svg class="skills-svg" [attr.width]="size().width" [attr.height]="size().height" aria-hidden="true">
         @if (layout().globalRadius) {
-          <circle [attr.cx]="layout().center.x" [attr.cy]="layout().center.y" [attr.r]="layout().globalRadius" fill="none" stroke="#D3CCBE" stroke-dasharray="3 6"></circle>
+          <circle [attr.cx]="layout().center.x" [attr.cy]="layout().center.y" [attr.r]="layout().globalRadius" fill="none" stroke="var(--orbit)" stroke-dasharray="3 6"></circle>
         }
         @for (t of layout().territories; track t.projectId) {
           <circle [attr.cx]="t.x" [attr.cy]="t.y" [attr.r]="t.r" [attr.fill]="tone(t).fill" [attr.stroke]="tone(t).stroke"></circle>
         }
         @for (s of layout().shadows; track s.toKey) {
-          <path [attr.d]="s.d" fill="none" stroke="#A15C00" stroke-width="1.5" stroke-dasharray="5 5"></path>
+          <path [attr.d]="s.d" fill="none" stroke="var(--wait)" stroke-width="1.5" stroke-dasharray="5 5"></path>
         }
         @for (l of lines(); track l.id) {
           <path [attr.d]="l.d" [attr.stroke]="l.stroke" [attr.stroke-width]="l.width" [attr.stroke-dasharray]="l.dash"></path>
@@ -33190,7 +33593,7 @@ export class SkillsMapView {
   protected readonly lines = computed(() =>
     this.layout().markers.flatMap((m) =>
       m.to.map((p, i) => {
-        const line = LINE[m.status] ?? { stroke: '#8A857B', width: 2 };
+        const line = LINE[m.status] ?? { stroke: 'var(--muted)', width: 2 };
         return { id: `${m.threadId}-${i}`, d: `M${m.x} ${m.y} L ${p.x} ${p.y}`, stroke: line.stroke, width: line.width, dash: line.dash ?? null };
       }),
     ),
@@ -33252,15 +33655,17 @@ git commit -m "feat(web-ui): the skill list and the skill map: global ring, proj
 
 ### Task W3a.7: `SkillPanel` and `Compare`: one skill in full, its history, compare and restore
 
-A port of `SkillPanel.tsx`: the skill's name and scope, its description, where it came from when the catalog installed it (source, licence, the update or the "edited" chip, and its `RuntimeLine`), a broken SKILL.md, and four tabs: Overview (the shadowing notes, the current version's author and change note, the version buttons, and the threads using it now), Instructions (`SafeMarkdown`), Files (each opens in `FileViewer` through `skills.file`) and History (each version's author and note, Restore after a confirm, and `Compare` between any two versions: the instruction lines with three lines of context, and the files added, removed or resized). Edit and "Refine with Desk" are the screen's (`edit`, `askDesk`); Delete asks first, then `close`. The React file has no test of its own (its coverage is `SkillsScreen.test.tsx` and `Catalog.test.tsx`, ported in W3a.9); the spec below pins the tabs, the catalog block, the failure, the comparison and the actions.
+A port of `SkillPanel.tsx`: the skill's name and scope, its description, where it came from when the catalog installed it (source, licence, the update or the "edited" chip, and its `RuntimeLine`), the "Customised from the built-in skill" note with a link to the built-in when a version came from one (master's Plan 18: a duplicated built-in's history has a `builtin:<name>@<digest>` origin), a broken SKILL.md, and four tabs: Overview (the shadowing notes, the current version's author and change note, the version buttons, and the threads using it now), Instructions (`SafeMarkdown`), Files (each opens in `FileViewer` through `skills.file`) and History (each version's author and note, Restore after a confirm, and `Compare` between any two versions: the instruction lines with three lines of context, and the files added, removed or resized). Edit and "Refine with Desk" are the screen's (`edit`, `askDesk`); Delete asks first, then `close`. The React file has no test of its own (its coverage is `SkillsScreen.test.tsx` and `Catalog.test.tsx`, ported in W3a.9); the spec below pins the tabs, the catalog block, the failure, the comparison and the actions.
 
 **Files:**
 - Create: `apps/web-ui/src/app/skills/skill-panel.ts`
 - Test: `apps/web-ui/src/app/skills/skill-panel.spec.ts`
 
 **Interfaces:**
-- Consumes: `SkillDetail`, `SkillHistoryEntry`, `SkillNode` (`@desk/client`); `CatalogInstall`, `CatalogItem` (`@desk/protocol`); `bytes`, `diffFiles`, `diffLines`, `FileChange`, `href`, `since`, `skillKey`, `SkillRef`, `withContext` (`@desk/ui-core`); `initialGlobalState` (`@desk/bff/contract`, spec); `DeskBridge`, `NowService`, `RouteService`, `ToastService`, `describeError`, `Button`, `ConfirmDialog`, `EmptyState`, `SafeMarkdown`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal` (W0c); `FileViewer` (W2a.1); `scopeArg`, `whoLabel` (W3a.1); `runtimeWords`, `sourceLabel`, `catalogItems`, `install` (W3a.2); `RuntimeLine` (W3a.3).
+- Consumes: `SkillDetail`, `SkillHistoryEntry`, `SkillNode` (`@desk/client`); `CatalogInstall`, `CatalogItem` (`@desk/protocol`); `bytes`, `diffFiles`, `diffLines`, `FileChange`, `href`, `since`, `skillKey`, `SkillRef`, `withContext` (`@desk/ui-core`); `initialGlobalState` (`@desk/bff/contract`, spec); `DeskBridge`, `NowService`, `RouteService`, `ToastService`, `describeError`, `Button`, `ConfirmDialog`, `EmptyState`, `SafeMarkdown`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal` (W0c); `FileViewer` (W2a.1); `scopeArg`, `whoLabel` (W3a.1); `builtinKey` (W3a.2b); `runtimeWords`, `sourceLabel`, `catalogItems`, `install` (W3a.2); `RuntimeLine` (W3a.3).
 - Produces: `Compare` — `div[deskCompare]` (host class `skill-compare`): `skill = input.required<SkillRef>()`, `history = input.required<SkillHistoryEntry[]>()`. `SkillPanel` — `article[deskSkillPanel]`: `skill = input.required<SkillRef>()`, `node = input<SkillNode>()`, `catalog = input<{ item: CatalogItem; install: CatalogInstall }>()`, `projectNames`, `threadTitles` (`input.required<Map<string, string>>()`), `version = input.required<number>()`, outputs `edit: SkillDetail`, `askDesk`, `changed`, `close`.
+
+**Master (merged in 8883229):** `SkillPanel.tsx` gained the `fromBuiltin` note (above, after the catalog block) and imports `builtinKey` from `builtins/data`, which W3a.2b ports; `whoLabel` names the origin "Built into Desk" (W3a.1). The spec's last case is new; the React note has no test of its own besides `SkillsScreen.test.tsx`'s built-in case (W3a.9).
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -33438,6 +33843,16 @@ describe('SkillPanel', () => {
     expect(bridge.calls.find((c) => c.channel === 'skills.remove')?.input).toEqual({ name: 'email-sequence' });
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Restored v1 as a new version.', 'Deleted email-sequence.']);
   });
+  it('says when the skill is a copy of a built-in one, with a link to the built-in', async () => {
+    const { panel } = await setup({
+      skill: { scope: 'global', name: 'pdf-toolkit' },
+      handlers: { 'skills.history': () => [{ version: 1, description: 'd', current: true, change_note: 'Duplicated from the built-in skill', origin: 'builtin:pdf-toolkit@0123456789ab', ts: at() }] },
+    });
+    expect(await within(panel).findByText(/Customised from the built-in skill/)).toBeTruthy();
+    expect(panel.querySelector('.shadow-note')?.textContent).toBe('Customised from the built-in skill pdf-toolkit. Agents use this copy instead; delete it to bring the built-in back.');
+    expect(within(panel).getByRole('link', { name: 'pdf-toolkit' }).getAttribute('href')).toBe('#/skills/builtin%3Apdf-toolkit');
+    expect(panel.querySelector('.skill-change strong')?.textContent).toBe('Built into Desk · v1 · just now');
+  });
 });
 ```
 
@@ -33465,6 +33880,7 @@ import { DeskBridge } from '../core/desk-bridge';
 import { NowService } from '../core/now.service';
 import { RouteService } from '../core/route.service';
 import { runtimeWords, sourceLabel } from './catalog/data';
+import { builtinKey } from './builtins/data';
 import { RuntimeLine } from './catalog/runtime-line';
 import { scopeArg, whoLabel } from './data';
 
@@ -33595,6 +34011,9 @@ export class Compare {
           </div>
           <div deskRuntimeLine [entry]="c.item" [install]="c.install" (retried)="changed.emit()"></div>
         </div>
+      }
+      @if (fromBuiltin(); as b) {
+        <p class="shadow-note">Customised from the built-in skill <a [href]="builtinHref(b)">{{ b }}</a>. Agents use this copy instead; delete it to bring the built-in back.</p>
       }
       @if (d.error) {
         <p class="field-error" role="alert">SKILL.md has a problem, so agents can't use this skill until it's fixed: {{ d.error }}</p>
@@ -33733,6 +34152,8 @@ export class SkillPanel {
   private readonly reload = signal(0);
 
   protected readonly current = computed(() => this.history().find((h) => h.current));
+  /** The built-in skill this one was duplicated from, if any (a `builtin:<name>@<digest>` origin). */
+  protected readonly fromBuiltin = computed(() => this.history().find((h) => h.origin?.startsWith('builtin:'))?.origin?.slice(8).split('@')[0]);
   protected readonly newestFirst = computed(() => this.history().slice().reverse());
   protected readonly scopeLabel = computed(() => {
     const s = this.skill();
@@ -33783,6 +34204,10 @@ export class SkillPanel {
 
   protected who(origin: string | null): string {
     return whoLabel(origin, this.threadTitles());
+  }
+
+  protected builtinHref(name: string): string {
+    return href({ name: 'skills', skill: builtinKey(name) });
   }
 
   protected threadHref(u: Use): string {
@@ -33845,7 +34270,7 @@ export class SkillPanel {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-panel.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -34489,9 +34914,545 @@ git add apps/web-ui/src/app/skills/skill-editor.ts apps/web-ui/src/app/skills/sk
 git commit -m "feat(web-ui): the skill editor, Ask Desk for a skill, and importing a skill folder" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
+### Task W3a.8b: `BuiltinGroup` and `BuiltinPanel`, Desk's own skills on the skills screen
+
+Added after the merge of master (8883229). Ports of `builtins/BuiltinGroup.tsx` and `builtins/BuiltinPanel.tsx`. `BuiltinSwitch` turns a built-in skill off or on (`builtins.setEnabled`, then `changed`; a failure is a toast). `BuiltinRuntime` is its environment line ("Set up on first use", "Setting up…" with the live step from `desk:global`'s `runtimes.progress` under `runtimeKey('builtin', null, name)`, "Ready", "Setup failed: …", or "Damaged: reinstall Desk" for a tree that no longer matches `builtins.json`). `BuiltinGroup` is the "Built into Desk" section above the user's skills: a card per built-in (title, the "Built in" chip, "Shadowed by your … skill", the environment, the switch unless damaged), selected and off states, and, on the map (`collapsible`), a Hide/Show fold remembered in localStorage `desk.builtinsOpen`. `BuiltinPanel` shows one built-in: its switch, summary, environment with Retry when setup failed (`builtins.retry`), the off, shadowed and damaged notes, Overview (description, caveats, script count), Instructions and Files (read-only, through `builtins.get` and `builtins.file`), and **Duplicate to my skills**: a sheet choosing My skills or one project, then `builtins.duplicate` and `duplicated` with the new copy's `SkillRef`. React's private `DuplicateSheet` is inlined in the panel's template (its target starts at My skills each time it opens, as React mounts a fresh sheet). `Builtins.test.tsx` is ported case for case. The code below was written and run (4 tests, three times, with the whole web-ui suite and `tokens.test.ts`) on the merged tree before it went into the plan; the task commits it.
+
+**Files:**
+- Create: `apps/web-ui/src/app/skills/builtins/builtin-group.ts`, `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`
+- Test: `apps/web-ui/src/app/skills/builtins/builtins.spec.ts` (ported from `apps/desktop/src/renderer/skills/builtins/Builtins.test.tsx`)
+
+**Interfaces:**
+- Consumes: `BuiltinSkillInfo` (`@desk/protocol`); `SkillDetail` (`@desk/client`); `bytes`, `href`, `SkillRef` (`@desk/ui-core`); `runtimeKey`, `initialGlobalState` (`@desk/bff/contract`); `DeskBridge` (`call` with `builtins.setEnabled`, `builtins.get`, `builtins.file`, `builtins.retry`, `builtins.duplicate`), `GlobalStore`, `ToastService`, `describeError`, `Button`, `EmptyState`, `Field`, `SafeMarkdown`, `Sheet`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal` (W0c); `FileViewer` (W2a.1); `builtinKey`, `runtimeLabel`, `builtin` (W3a.2b).
+- Produces: `BuiltinSwitch`, `BuiltinRuntime`, `BuiltinGroup` (`builtin-group.ts`), `BuiltinPanel` (`builtin-panel.ts`), as in the section's Produces.
+
+- [ ] **Step 1: Write the failing spec**
+
+Create `apps/web-ui/src/app/skills/builtins/builtins.spec.ts`:
+
+```ts
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { initialGlobalState } from '@desk/bff/contract';
+import type { BuiltinSkillInfo } from '@desk/protocol';
+import { builtin } from '../../testing/builtins';
+import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../../testing/fake-bridge';
+import { BuiltinGroup } from './builtin-group';
+import { BuiltinPanel } from './builtin-panel';
+
+beforeEach(() => {
+  localStorage.clear();
+});
+
+const pdf = builtin('pdf-toolkit', { title: 'PDF toolkit', caveats: ['Scanned pages are shown as images.'] });
+const detail = {
+  name: 'pdf-toolkit',
+  scope: 'builtin',
+  description: 'Read and write PDFs.',
+  instructions: '# PDF toolkit\n\nRun scripts/pdf_read.py.',
+  frontmatter: {},
+  version: 1,
+  dir: '/app/pdf-toolkit',
+  files: [
+    { path: 'SKILL.md', size: 40 },
+    { path: 'scripts/pdf_read.py', size: 12 },
+  ],
+};
+
+async function group(o: { items: BuiltinSkillInfo[]; selected?: string | null; collapsible?: boolean; handlers?: FakeHandlers; progress?: Record<string, { step: string }> }) {
+  const bridge = new FakeDeskBridge(o.handlers ?? {});
+  const outputs = { selectSkill: vi.fn(), changed: vi.fn() };
+  const view = await render(BuiltinGroup, {
+    inputs: { items: o.items, selected: o.selected ?? null, collapsible: o.collapsible ?? false },
+    on: outputs,
+    providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), runtimes: { progress: o.progress ?? {}, seq: 0 } })],
+    // The host must be the <section> its selector names, or getByRole('region') finds nothing.
+    configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true }),
+  });
+  return { bridge, view, outputs };
+}
+
+async function panel(item: BuiltinSkillInfo, handlers: FakeHandlers = {}, projects: Array<{ id: string; name: string }> = []) {
+  const bridge = new FakeDeskBridge({ 'builtins.get': () => detail, ...handlers });
+  const outputs = { duplicated: vi.fn(), changed: vi.fn(), close: vi.fn() };
+  const view = await render(BuiltinPanel, {
+    inputs: { item, projects },
+    on: outputs,
+    providers: [...bridge.providers, provideGlobal(initialGlobalState())],
+    configureTestBed: (testBed) => testBed.configureTestingModule({ inferTagName: true }),
+  });
+  return { bridge, view, outputs };
+}
+
+describe('Built into Desk (Builtins.test.tsx)', () => {
+  it('shows each built-in with its environment and switch, and folds away on the map', async () => {
+    const items = [pdf, builtin('images', { title: 'Images and fonts', broken: 'images does not match' }), builtin('archives', { enabled: false, runtime: { state: 'failed', reason: 'no network' } })];
+    const { bridge, view, outputs } = await group({
+      items,
+      selected: 'builtin:pdf-toolkit',
+      handlers: { 'builtins.setEnabled': ({ name, enabled }: { name: string; enabled: boolean }) => builtin(name, { enabled }) },
+    });
+    const region = screen.getByRole('region', { name: 'Built into Desk' });
+    expect(region.textContent).toContain('· 3 · 1 off');
+    expect(within(region).getByText('Set up on first use')).toBeTruthy();
+    expect(within(region).getByText('Damaged: reinstall Desk')).toBeTruthy();
+    expect(within(region).getByText('Setup failed: no network')).toBeTruthy();
+    expect(within(region).queryByRole('switch', { name: 'Images and fonts' })).toBeNull();
+    expect(within(region).getByRole('switch', { name: 'Archives' }).getAttribute('aria-checked')).toBe('false');
+    expect(region.querySelectorAll('.builtin-card.selected')).toHaveLength(1);
+    expect([...region.querySelectorAll('.builtin-card')].map((c) => c.classList.contains('off'))).toEqual([false, true, true]);
+    fireEvent.click(within(region).getByRole('switch', { name: 'PDF toolkit' }));
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalled());
+    expect(bridge.calls.find((c) => c.channel === 'builtins.setEnabled')?.input).toEqual({ name: 'pdf-toolkit', enabled: false });
+    fireEvent.click(within(region).getByRole('button', { name: 'Open Archives' }));
+    expect(outputs.selectSkill).toHaveBeenCalledWith('builtin:archives');
+
+    await view.rerender({ inputs: { selected: null, collapsible: true }, partialUpdate: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    await waitFor(() => expect(screen.queryByRole('switch')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Show' }).getAttribute('aria-expanded')).toBe('false');
+    expect(localStorage.getItem('desk.builtinsOpen')).toBe('false');
+  });
+
+  it('shows live setup progress', async () => {
+    await group({ items: [{ ...pdf, runtime: { state: 'preparing', reason: null } }], progress: { 'builtin:pdf-toolkit': { step: 'Installing 6 Python packages' } } });
+    expect(screen.getByText('Setting up… Installing 6 Python packages')).toBeTruthy();
+  });
+
+  it('reads instructions and files, retries a failed setup, and duplicates into a project', async () => {
+    const { bridge, outputs } = await panel(
+      { ...pdf, runtime: { state: 'failed', reason: 'no network' } },
+      {
+        'builtins.file': () => new TextEncoder().encode('print("pdf")'),
+        'builtins.retry': () => ({ state: 'preparing', reason: null }),
+        'builtins.duplicate': () => ({ dir: '/data/projects/p1/skills/pdf-toolkit', created: true, version: 1 }),
+      },
+      [{ id: 'p1', name: 'Tax' }],
+    );
+    const article = screen.getByRole('article', { name: 'Built-in skill pdf-toolkit' });
+    expect(await within(article).findByText('Read and write PDFs.')).toBeTruthy();
+    expect(article.textContent).toContain('Scanned pages are shown as images.');
+    expect(within(article).queryByRole('button', { name: 'Edit' })).toBeNull();
+    fireEvent.click(within(article).getByRole('tab', { name: 'Files · 2' }));
+    fireEvent.click(await within(article).findByRole('button', { name: /scripts\/pdf_read\.py/ }));
+    expect(await within(article).findByText('print("pdf")')).toBeTruthy();
+    fireEvent.click(within(article).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalled());
+    expect(bridge.calls.find((c) => c.channel === 'builtins.retry')?.input).toEqual({ name: 'pdf-toolkit' });
+
+    fireEvent.click(within(article).getByRole('button', { name: 'Duplicate to my skills' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' });
+    fireEvent.change(within(sheet).getByLabelText('Where'), { target: { value: 'p1' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(outputs.duplicated).toHaveBeenCalledWith({ scope: 'project', projectId: 'p1', name: 'pdf-toolkit' }));
+    expect(bridge.calls.find((c) => c.channel === 'builtins.duplicate')?.input).toEqual({ name: 'pdf-toolkit', projectId: 'p1' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('says when your own skill shadows it, and when it is damaged', async () => {
+    const { view } = await panel({ ...pdf, shadowed_by: 'global' });
+    expect(screen.getByRole('link', { name: 'pdf-toolkit' }).getAttribute('href')).toBe('#/skills/global%3Apdf-toolkit');
+    await view.rerender({ inputs: { item: { ...pdf, broken: 'pdf-toolkit does not match' } }, partialUpdate: true });
+    expect(screen.getByRole('alert').textContent).toContain('Reinstall Desk');
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins/builtins.spec.ts)`
+Expected: FAIL. The test build stops with `Could not resolve "./builtin-group"`.
+
+- [ ] **Step 3: Write the switch, the environment line and the group**
+
+Create `apps/web-ui/src/app/skills/builtins/builtin-group.ts`:
+
+```ts
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
+import { runtimeKey } from '@desk/bff/contract';
+import type { BuiltinSkillInfo } from '@desk/protocol';
+import { ToastService } from '../../components/toast';
+import { DeskBridge } from '../../core/desk-bridge';
+import { GlobalStore } from '../../core/global.store';
+import { builtinKey, runtimeLabel } from './data';
+
+const OPEN_KEY = 'desk.builtinsOpen';
+
+/** The on/off switch of a built-in skill; `label` names the skill for screen readers (BuiltinGroup.tsx `BuiltinSwitch`). */
+@Component({
+  selector: 'button[deskBuiltinSwitch]',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  host: {
+    type: 'button',
+    role: 'switch',
+    class: 'switch',
+    '[attr.aria-checked]': 'item().enabled',
+    '[attr.aria-label]': 'label()',
+    '[attr.title]': "item().enabled ? 'On: agents can use it' : 'Off: agents never see it'",
+    '[disabled]': 'pending()',
+    '(click)': 'toggle()',
+  },
+  template: `<span class="switch-knob" aria-hidden="true"></span>`,
+})
+export class BuiltinSwitch {
+  readonly item = input.required<BuiltinSkillInfo>();
+  readonly label = input.required<string>();
+  readonly changed = output<void>();
+  private readonly bridge = inject(DeskBridge);
+  private readonly toasts = inject(ToastService);
+  protected readonly pending = signal(false);
+
+  protected async toggle(): Promise<void> {
+    const item = this.item();
+    this.pending.set(true);
+    try {
+      await this.bridge.call('builtins.setEnabled', { name: item.name, enabled: !item.enabled });
+      this.changed.emit();
+    } catch (err) {
+      this.toasts.error(err);
+    } finally {
+      this.pending.set(false);
+    }
+  }
+}
+
+/** A built-in skill's environment line, with live progress while it is being set up (BuiltinGroup.tsx `BuiltinRuntime`). */
+@Component({
+  selector: 'span[deskBuiltinRuntime]',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  host: { '[class]': "'runtime-line ' + (item().broken ? 'failed' : item().runtime.state)" },
+  template: `<span class="runtime-dot" aria-hidden="true"></span>{{ text() }}`,
+})
+export class BuiltinRuntime {
+  readonly item = input.required<BuiltinSkillInfo>();
+  private readonly global = inject(GlobalStore);
+  protected readonly text = computed(() => {
+    const item = this.item();
+    if (item.broken) return 'Damaged: reinstall Desk';
+    return runtimeLabel(item, this.global.state().runtimes.progress[runtimeKey('builtin', null, item.name)]);
+  });
+}
+
+/**
+ * Desk's own skills, above the user's: a card each with its environment and an on/off switch. `collapsible` (the map
+ * view) folds the cards into one line until opened (BuiltinGroup.tsx).
+ */
+@Component({
+  selector: 'section[deskBuiltinGroup]',
+  imports: [BuiltinRuntime, BuiltinSwitch],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  host: { class: 'builtin-group', 'aria-label': 'Built into Desk' },
+  template: `
+    <header class="builtin-head">
+      <h2>Built into Desk</h2>
+      <span class="muted small grow">Any file type: read, create, edit, convert — and see it; plus web research · {{ items().length }}{{ off() ? ' · ' + off() + ' off' : '' }}</span>
+      @if (collapsible()) {
+        <button type="button" class="builtin-fold" [attr.aria-expanded]="shown()" (click)="flip()">{{ shown() ? 'Hide' : 'Show' }}</button>
+      }
+    </header>
+    @if (shown()) {
+      <ul class="builtin-cards">
+        @for (b of items(); track b.name) {
+          <li class="card builtin-card" [class.selected]="selected() === key(b.name)" [class.off]="!b.enabled || !!b.broken">
+            <button type="button" class="builtin-open" [attr.aria-label]="'Open ' + b.title" (click)="selectSkill.emit(key(b.name))">
+              <span class="builtin-title">{{ b.title }}</span>
+              <span class="builtin-meta"><span class="chip chip-idle">Built in</span>@if (b.shadowed_by) {<span class="chip chip-wait">Shadowed by your {{ b.shadowed_by }} skill</span>}</span>
+              <span deskBuiltinRuntime [item]="b"></span>
+            </button>
+            @if (!b.broken) {
+              <button deskBuiltinSwitch [item]="b" [label]="b.title" (changed)="changed.emit()"></button>
+            }
+          </li>
+        }
+      </ul>
+    }
+  `,
+})
+export class BuiltinGroup {
+  readonly items = input.required<BuiltinSkillInfo[]>();
+  readonly selected = input.required<string | null>();
+  readonly collapsible = input(false, { transform: booleanAttribute });
+  /** A card was opened (React's `onSelect`). */
+  readonly selectSkill = output<string>();
+  readonly changed = output<void>();
+  protected readonly key = builtinKey;
+  private readonly open = signal(readOpen());
+  protected readonly shown = computed(() => !this.collapsible() || this.open());
+  protected readonly off = computed(() => this.items().filter((b) => !b.enabled).length);
+
+  protected flip(): void {
+    const next = !this.open();
+    this.open.set(next);
+    try {
+      localStorage.setItem(OPEN_KEY, String(next));
+    } catch {
+      // A convenience only.
+    }
+  }
+}
+
+function readOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+```
+
+- [ ] **Step 4: Write the panel**
+
+Create `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`:
+
+```ts
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal } from '@angular/core';
+import type { SkillDetail } from '@desk/client';
+import type { BuiltinSkillInfo } from '@desk/protocol';
+import { bytes, href, type SkillRef } from '@desk/ui-core';
+import { Button } from '../../components/button';
+import { EmptyState } from '../../components/empty-state';
+import { Field } from '../../components/field';
+import { FileViewer } from '../../components/file-viewer';
+import { SafeMarkdown } from '../../components/safe-markdown';
+import { Sheet } from '../../components/sheet';
+import { describeError, ToastService } from '../../components/toast';
+import { DeskBridge } from '../../core/desk-bridge';
+import { BuiltinRuntime, BuiltinSwitch } from './builtin-group';
+
+type Tab = 'overview' | 'instructions' | 'files';
+const TABS: Tab[] = ['overview', 'instructions', 'files'];
+type OpenFile = { path: string; data: Uint8Array };
+
+/**
+ * One of Desk's built-in skills: read-only instructions and files, its environment, the switch, and Duplicate, whose
+ * sheet is React's private `DuplicateSheet` inlined (BuiltinPanel.tsx).
+ */
+@Component({
+  selector: 'article[deskBuiltinPanel]',
+  imports: [BuiltinRuntime, BuiltinSwitch, Button, EmptyState, Field, FileViewer, SafeMarkdown, Sheet],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  host: { class: 'card skill-panel', '[attr.aria-label]': "'Built-in skill ' + item().name" },
+  template: `
+    <div class="skill-panel-head">
+      <h2 class="mono">{{ item().name }}</h2>
+      <span class="skill-scope builtin">Built in</span>
+      @if (!item().broken) {
+        <button deskBuiltinSwitch [item]="item()" [label]="item().title + ' on'" (changed)="changed.emit()"></button>
+      }
+      <button type="button" class="icon-btn" aria-label="Close" (click)="close.emit()">✕</button>
+    </div>
+    <p class="skill-desc">{{ item().summary }}</p>
+    @if (item().broken; as broken) {
+      <p class="field-error" role="alert">This copy of Desk is damaged ({{ broken }}), so agents can't use it. Reinstall Desk to repair it.</p>
+    } @else {
+      <div class="builtin-runtime">
+        <span deskBuiltinRuntime [item]="item()"></span>
+        @if (item().runtime.state === 'failed') {
+          <button deskButton size="sm" [pending]="retrying()" (click)="retry()">Retry</button>
+        }
+      </div>
+    }
+    @if (!item().enabled) {
+      <p class="shadow-note">Turned off: agents never see it. Turn it back on with the switch.</p>
+    }
+    @if (item().shadowed_by === 'global') {
+      <p class="shadow-note">Shadowed by your skill <a [href]="shadowHref()">{{ item().name }}</a>: agents use yours. Delete it to bring the built-in back.</p>
+    }
+    @if (error(); as err) {
+      <div deskEmptyState title="Couldn't load this skill" [body]="err"></div>
+    } @else if (detail(); as d) {
+      <div class="tabs" role="tablist" aria-label="Skill">
+        @for (t of tabs; track t) {
+          <button type="button" role="tab" [attr.aria-selected]="tab() === t" (click)="tab.set(t)">{{ t === 'overview' ? 'Overview' : t === 'instructions' ? 'Instructions' : 'Files · ' + d.files.length }}</button>
+        }
+      </div>
+      <div class="skill-tab" role="tabpanel">
+        @switch (tab()) {
+          @case ('overview') {
+            <p class="small">{{ d.description }}</p>
+            @if (item().caveats.length) {
+              <div>
+                <span class="label">Good to know</span>
+                <ul class="builtin-caveats">
+                  @for (c of item().caveats; track c) {
+                    <li class="small">{{ c }}</li>
+                  }
+                </ul>
+              </div>
+            }
+            <p class="muted small">{{ item().scripts }} scripts. Desk sets up their Python environment the first time an agent uses the skill, and updates it with Desk.</p>
+          }
+          @case ('instructions') {
+            <div deskSafeMarkdown [text]="d.instructions"></div>
+          }
+          @default {
+            <div class="skill-files">
+              <ul class="files-list">
+                @for (f of d.files; track f.path) {
+                  <li>
+                    <button type="button" class="files-entry" [class.current]="file()?.path === f.path" (click)="openFile(f.path)">
+                      <span class="grow mono">{{ f.path }}</span>
+                      <span class="muted small">{{ bytes(f.size) }}</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+              @if (file(); as f) {
+                <div deskFileViewer [path]="f.path" [data]="f.data"></div>
+              } @else {
+                <p class="muted small">Pick a file to view it.</p>
+              }
+            </div>
+          }
+        }
+      </div>
+    } @else {
+      <p class="muted">Loading…</p>
+    }
+    <div class="skill-actions">
+      <button deskButton variant="primary" (click)="openDuplicate()">Duplicate to my skills</button>
+      <span class="grow"></span>
+    </div>
+    @if (duplicating()) {
+      <div deskSheet [title]="'Duplicate ' + item().name" (close)="duplicating.set(false)">
+        <p class="small">Your copy is an ordinary skill you can edit. Agents use it instead of the built-in until you delete it; its scripts keep using the built-in's Python environment.</p>
+        <div deskField id="duplicate-scope" label="Where">
+          <select id="duplicate-scope" class="select" (change)="target.set(val($event))">
+            <option value="global" [selected]="target() === 'global'">My skills (every project)</option>
+            @for (p of projects(); track p.id) {
+              <option [value]="p.id" [selected]="target() === p.id">{{ p.name }} only</option>
+            }
+          </select>
+        </div>
+        <div class="sheet-footer">
+          <button deskButton (click)="duplicating.set(false)">Cancel</button>
+          <button deskButton variant="primary" [pending]="pending()" (click)="duplicate()">Duplicate</button>
+        </div>
+      </div>
+    }
+  `,
+})
+export class BuiltinPanel {
+  readonly item = input.required<BuiltinSkillInfo>();
+  readonly projects = input.required<Array<{ id: string; name: string }>>();
+  /** The copy Duplicate made (React's `onDuplicated`). */
+  readonly duplicated = output<SkillRef>();
+  readonly changed = output<void>();
+  readonly close = output<void>();
+
+  private readonly bridge = inject(DeskBridge);
+  private readonly toasts = inject(ToastService);
+  protected readonly tabs = TABS;
+  protected readonly bytes = bytes;
+
+  private readonly name = computed(() => this.item().name);
+  /** Back to Overview, with no file open, whenever another built-in opens (React's effect on the name). */
+  protected readonly tab = linkedSignal<string, Tab>({ source: this.name, computation: () => 'overview' });
+  protected readonly file = linkedSignal<string, OpenFile | null>({ source: this.name, computation: () => null });
+  protected readonly detail = signal<SkillDetail | null>(null);
+  protected readonly error = signal<string | null>(null);
+  protected readonly retrying = signal(false);
+  protected readonly duplicating = signal(false);
+  protected readonly target = signal('global');
+  protected readonly pending = signal(false);
+  protected readonly shadowHref = computed(() => href({ name: 'skills', skill: `global:${this.name()}` }));
+
+  constructor() {
+    // React's effect on [item.name]; a late answer for another built-in is dropped.
+    effect((onCleanup) => {
+      const name = this.name();
+      let live = true;
+      onCleanup(() => (live = false));
+      this.error.set(null);
+      this.bridge
+        .call('builtins.get', { name })
+        .then((d) => {
+          if (live) this.detail.set(d);
+        })
+        .catch((err: unknown) => {
+          if (live) this.error.set(describeError(err).message);
+        });
+    });
+  }
+
+  protected val(e: Event): string {
+    return (e.target as HTMLSelectElement).value;
+  }
+
+  protected async openFile(path: string): Promise<void> {
+    try {
+      const data = await this.bridge.call('builtins.file', { name: this.name(), path });
+      this.file.set({ path, data });
+    } catch (err) {
+      this.toasts.error(err);
+    }
+  }
+
+  protected async retry(): Promise<void> {
+    const name = this.name();
+    this.retrying.set(true);
+    try {
+      await this.bridge.call('builtins.retry', { name });
+      this.toasts.toast({ tone: 'info', message: `Setting up ${name} again.` });
+      this.changed.emit();
+    } catch (err) {
+      this.toasts.error(err);
+    } finally {
+      this.retrying.set(false);
+    }
+  }
+
+  /** React mounts a fresh DuplicateSheet each time, so the target starts at My skills again. */
+  protected openDuplicate(): void {
+    this.target.set('global');
+    this.duplicating.set(true);
+  }
+
+  protected async duplicate(): Promise<void> {
+    const name = this.name();
+    const target = this.target();
+    const projectId = target === 'global' ? undefined : target;
+    this.pending.set(true);
+    try {
+      await this.bridge.call('builtins.duplicate', { name, ...(projectId ? { projectId } : {}) });
+      this.toasts.toast({ tone: 'info', message: `Duplicated ${name}. Your copy is used instead of the built-in.` });
+      this.duplicating.set(false);
+      this.duplicated.emit(projectId ? { scope: 'project', projectId, name } : { scope: 'global', name });
+    } catch (err) {
+      this.toasts.error(err);
+    } finally {
+      this.pending.set(false);
+    }
+  }
+}
+```
+
+- [ ] **Step 5: Run it**
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/builtins)`
+Expected: PASS (10 tests: these 4 and W3a.2b's 6).
+
+Run: `pnpm --filter @desk/web-ui typecheck`
+Expected: exit 0.
+
+Run: `pnpm exec vitest run packages/ui-styles`
+Expected: PASS: `tokens.test.ts` finds no color literal in the new files.
+
+- [ ] **Step 6: Commit**
+
+```sh
+git add apps/web-ui/src/app/skills/builtins/builtin-group.ts apps/web-ui/src/app/skills/builtins/builtin-panel.ts apps/web-ui/src/app/skills/builtins/builtins.spec.ts
+git commit -m "feat(web-ui): Built into Desk: each built-in skill with its environment and switch, and a panel to read and duplicate it" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
 ### Task W3a.9: `SkillsScreen`, and `#/skills` and `#/skills/catalog` show it
 
-A port of `SkillsScreen.tsx`: the heading and blurb for the map or the catalog; the View switch (Map, List, Catalog; Map and List remembered in localStorage `desk.skillsView`), the Show filter chips with their counts (All, In use now, Shadowed) or, on the catalog, `LayoutSwitch`; the body (loading, a failure, "No skills yet", `SkillsMapView`, `SkillList`, or `CatalogView`); the legend under the map; and the actions (Import from ~/.claude/skills through `app.pickFolder`, New skill, Ask Desk). The selected skill lives in the route (`#/skills/<key>`, replaced, not pushed) and opens `SkillPanel`; the catalog's review lives in the route too (`#/skills/catalog/<id>`) and opens `ReviewSheet`. The editor, Ask Desk and the import sheet open over it. Every change (a save, a restore, an install) lists the skills and the catalog again and bumps the panel's version. `SkillsScreen.test.tsx` and `Catalog.test.tsx` are ported case for case; the route cases are new, and W0c's `screen-for.spec.ts` stops expecting `NotYet` for the catalog.
+A port of `SkillsScreen.tsx`: the heading and blurb for the map or the catalog; the View switch (Map, List, Catalog; Map and List remembered in localStorage `desk.skillsView`), the Show filter chips with their counts (All, In use now, Shadowed) or, on the catalog, `LayoutSwitch`; the body (loading, a failure, "No skills of your own yet", `SkillsMapView`, `SkillList`, or `CatalogView`), with W3a.8b's "Built into Desk" group above the user's skills (in its own `builtin-strip`, foldable, over the map; above the list or the empty state otherwise); the legend under the map; and the actions (Import from ~/.claude/skills through `app.pickFolder`, New skill, Ask Desk). The selected skill lives in the route (`#/skills/<key>`, replaced, not pushed) and opens `SkillPanel`, or `BuiltinPanel` for a `builtin:<name>` key (Duplicate then opens the new copy); the catalog's review lives in the route too (`#/skills/catalog/<id>`) and opens `ReviewSheet`. The editor, Ask Desk and the import sheet open over it. Every change (a save, a restore, an install, a duplicate) lists the skills, the catalog and the built-ins again and bumps the panel's version. `SkillsScreen.test.tsx` and `Catalog.test.tsx` are ported case for case; the route cases are new, and W0c's `screen-for.spec.ts` stops expecting `NotYet` for the catalog.
 
 **Files:**
 - Create: `apps/web-ui/src/app/skills/skills-screen.ts`
@@ -34499,8 +35460,10 @@ A port of `SkillsScreen.tsx`: the heading and blurb for the map or the catalog; 
 - Test: `apps/web-ui/src/app/skills/skills-screen.spec.ts` (ported from `apps/desktop/src/renderer/skills/SkillsScreen.test.tsx`), `apps/web-ui/src/app/skills/catalog/catalog.spec.ts` (ported from `apps/desktop/src/renderer/skills/catalog/Catalog.test.tsx`)
 
 **Interfaces:**
-- Consumes: `SkillDetail` (`@desk/client`); `parseSkillKey`, `skillKey`, `SkillRef` (`@desk/ui-core`); `initialGlobalState` (`@desk/bff/contract`, specs); `ProjectSummary`, `CatalogItem` (`@desk/protocol`, specs); `DeskBridge`, `RouteService`, `GlobalStore`, `ToastService`, `Button`, `EmptyState`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal`, `screenFor` (W0c); `projectTone` (W0c.12); `injectSkills` (W3a.1); `catalogIndex`, `injectCatalog`, `catalogItems`, `install`, `reviewOf` (W3a.2); `CatalogView`, `LayoutSwitch`, `injectCatalogLayout` (W3a.4); `ReviewSheet` (W3a.5); `SkillList`, `SkillsMapView` (W3a.6); `SkillPanel` (W3a.7); `SkillEditor`, `AskDesk`, `ImportSheet` (W3a.8).
+- Consumes: `SkillDetail` (`@desk/client`); `parseSkillKey`, `skillKey`, `SkillRef` (`@desk/ui-core`); `initialGlobalState` (`@desk/bff/contract`, specs); `ProjectSummary`, `CatalogItem` (`@desk/protocol`, specs); `DeskBridge`, `RouteService`, `GlobalStore`, `ToastService`, `Button`, `EmptyState`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal`, `screenFor` (W0c); `projectTone` (W0c.12); `injectSkills` (W3a.1); `catalogIndex`, `injectCatalog`, `catalogItems`, `install`, `reviewOf` (W3a.2); `CatalogView`, `LayoutSwitch`, `injectCatalogLayout` (W3a.4); `ReviewSheet` (W3a.5); `SkillList`, `SkillsMapView` (W3a.6); `SkillPanel` (W3a.7); `SkillEditor`, `AskDesk`, `ImportSheet` (W3a.8); `injectBuiltins`, `parseBuiltinKey`, `builtin` (W3a.2b, the last in the spec); `BuiltinGroup`, `BuiltinPanel` (W3a.8b).
 - Produces: `SkillsScreen` — `div[deskSkillsScreen]`, `skill = input<string>()`, `catalog = input(false, { transform: booleanAttribute })`, `review = input<string>()`; `screenFor({ name: 'skills', skill })` → `{ component: SkillsScreen, inputs: { skill, catalog: false, review: undefined } }`, `screenFor({ name: 'catalog', review })` → `{ component: SkillsScreen, inputs: { skill: undefined, catalog: true, review } }`.
+
+**Master (merged in 8883229):** `SkillsScreen.tsx` gained the built-in group and panel (`useBuiltins`, `parseBuiltinKey`, `builtin-strip` over the map, "No skills of your own yet", the panel for a `builtin:` key, and `changed` listing the built-ins again), and `SkillsScreen.test.tsx` two cases, ported last in the spec above the route case. The React file builds the group with a helper called three times; the template repeats the `@if` three times instead (with `collapsible` only over the map). Where a case has no `builtins.list` handler, both fake bridges answer `unknown_channel`: `injectBuiltins` reports the error and the group stays hidden, as it does with no built-ins. `Catalog.test.tsx` did not change.
 
 - [ ] **Step 1: Write the failing specs**
 
@@ -34514,6 +35477,7 @@ import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
 import { RouteService } from '../core/route.service';
 import { screenFor } from '../screen-for';
+import { builtin } from '../testing/builtins';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
 import { SkillsScreen } from './skills-screen';
 
@@ -34661,6 +35625,36 @@ describe('SkillsScreen', () => {
     fireEvent.click(within(imp).getByRole('button', { name: 'Import' }));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'skills.import')?.input).toEqual({ path: '/Users/me/.claude/skills/pdf' }));
     await waitFor(() => expect(window.location.hash).toBe('#/skills/global%3Apdf'));
+  });
+
+  it("shows Desk's built-in skills above your own, and duplicates one into your skills", async () => {
+    let copied = false;
+    const bridge = await setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit', shadowed_by: copied ? 'global' : null }), builtin('images')],
+      'builtins.get': () => ({ ...detail(1, '# PDF'), name: 'pdf-toolkit', scope: 'builtin' }),
+      'builtins.duplicate': () => ((copied = true), { dir: '/s/pdf-toolkit', created: true, version: 1 }),
+      'skills.history': () => [{ version: 1, description: 'd', current: true, change_note: 'Duplicated from the built-in skill', origin: 'builtin:pdf-toolkit@0123456789ab', ts: new Date().toISOString() }],
+    });
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    expect(screen.getByRole('group', { name: 'Skill map' })).toBeTruthy();
+    fireEvent.click(within(group).getByRole('button', { name: 'Open PDF toolkit' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/builtin%3Apdf-toolkit'));
+    const panel = await screen.findByRole('article', { name: 'Built-in skill pdf-toolkit' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Duplicate to my skills' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' })).getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/skills/global%3Apdf-toolkit'));
+    expect(bridge.calls.find((c) => c.channel === 'builtins.duplicate')?.input).toEqual({ name: 'pdf-toolkit' });
+    const copy = await screen.findByRole('article', { name: 'Skill pdf-toolkit' });
+    expect(await within(copy).findByText(/Customised from the built-in skill/)).toBeTruthy();
+    expect(within(copy).getByRole('link', { name: 'pdf-toolkit' }).getAttribute('href')).toBe('#/skills/builtin%3Apdf-toolkit');
+    expect(copy.textContent).toContain('Built into Desk · v1');
+    await waitFor(() => expect(within(group).getByText('Shadowed by your global skill')).toBeTruthy());
+  });
+
+  it('shows the built-ins even with no skills of your own', async () => {
+    await setup({ 'skills.list': () => [], 'builtins.list': () => [builtin('images')] });
+    expect(await screen.findByRole('region', { name: 'Built into Desk' })).toBeTruthy();
+    expect(screen.getByText('No skills of your own yet')).toBeTruthy();
   });
 
   it('is what #/skills and #/skills/catalog show, with the skill or the review the route names', () => {
@@ -34874,6 +35868,9 @@ import { GlobalStore } from '../core/global.store';
 import { RouteService } from '../core/route.service';
 import { projectTone } from '../map/project-summary';
 import { AskDesk } from './ask-desk';
+import { BuiltinGroup } from './builtins/builtin-group';
+import { BuiltinPanel } from './builtins/builtin-panel';
+import { injectBuiltins, parseBuiltinKey } from './builtins/data';
 import { CatalogView, injectCatalogLayout, LayoutSwitch } from './catalog/catalog-view';
 import { catalogIndex, injectCatalog } from './catalog/data';
 import { ReviewSheet } from './catalog/review-sheet';
@@ -34903,15 +35900,15 @@ function storedView(): View {
 }
 
 /**
- * Every skill Desk and its threads can use: a map (or list) with global, project and shadowed skills, and what's in use
- * now; and the catalog of pinned skills to install, each reviewed first (SkillsScreen.tsx).
+ * Every skill Desk and its threads can use: Desk's built-in skills, a map (or list) with global, project and shadowed
+ * skills, and what's in use now; and the catalog of pinned skills to install, each reviewed first (SkillsScreen.tsx).
  */
 @Component({
   selector: 'div[deskSkillsScreen]',
-  imports: [AskDesk, Button, CatalogView, EmptyState, ImportSheet, LayoutSwitch, ReviewSheet, SkillEditor, SkillList, SkillPanel, SkillsMapView],
+  imports: [AskDesk, BuiltinGroup, BuiltinPanel, Button, CatalogView, EmptyState, ImportSheet, LayoutSwitch, ReviewSheet, SkillEditor, SkillList, SkillPanel, SkillsMapView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { class: 'skills', '[class.with-panel]': '!!ref()' },
+  host: { class: 'skills', '[class.with-panel]': '!!ref() || !!builtin()' },
   template: `
     <div class="skills-main">
       <div class="skills-head">
@@ -34956,13 +35953,26 @@ function storedView(): View {
           }
           @default {
             @if (!data.nodes().length) {
-              <div class="skills-body"><div deskEmptyState title="No skills yet" [body]="emptyBody"></div></div>
+              <div class="skills-body">
+                @if (builtins.items().length) {
+                  <section deskBuiltinGroup [items]="builtins.items()" [selected]="skill() ?? null" (selectSkill)="toggle($event)" (changed)="refreshBuiltins()"></section>
+                }
+                <div deskEmptyState title="No skills of your own yet" [body]="emptyBody"></div>
+              </div>
             } @else if (view() === 'map') {
+              <div class="builtin-strip">
+                @if (builtins.items().length) {
+                  <section deskBuiltinGroup [items]="builtins.items()" [selected]="skill() ?? null" collapsible (selectSkill)="toggle($event)" (changed)="refreshBuiltins()"></section>
+                }
+              </div>
               <div class="skills-body map">
                 <div deskSkillsMapView [nodes]="shown()" [projects]="projects()" [catalogKeys]="catalogKeys()" [selected]="skill() ?? null" (selectSkill)="toggle($event)"></div>
               </div>
             } @else {
               <div class="skills-body">
+                @if (builtins.items().length) {
+                  <section deskBuiltinGroup [items]="builtins.items()" [selected]="skill() ?? null" (selectSkill)="toggle($event)" (changed)="refreshBuiltins()"></section>
+                }
                 <div deskSkillList [nodes]="shown()" [projectNames]="projectNames()" [catalogKeys]="catalogKeys()" [selected]="skill() ?? null" (selectSkill)="toggle($event)"></div>
               </div>
             }
@@ -35003,6 +36013,9 @@ function storedView(): View {
         (close)="select(null)"
       ></article>
     }
+    @if (builtin(); as b) {
+      <article deskBuiltinPanel [item]="b" [projects]="projects()" (duplicated)="onDuplicated($event)" (changed)="refreshBuiltins()" (close)="select(null)"></article>
+    }
     @if (reviewId(); as id) {
       <div deskReviewSheet [id]="id" [item]="reviewItem()" [projects]="projects()" (changed)="changed()" (close)="closeReview()"></div>
     }
@@ -35030,6 +36043,7 @@ export class SkillsScreen {
   private readonly routes = inject(RouteService);
   private readonly toasts = inject(ToastService);
   protected readonly data = injectSkills();
+  protected readonly builtins = injectBuiltins();
   protected readonly cat = injectCatalog();
   protected readonly layout = injectCatalogLayout();
   protected readonly filters = FILTERS;
@@ -35060,6 +36074,12 @@ export class SkillsScreen {
   protected readonly ref = computed(() => {
     const key = this.skill();
     return !this.catalog() && key ? parseSkillKey(key) : null;
+  });
+  /** The open built-in skill, from a `builtin:<name>` key (React's `builtinName` and `builtin`). */
+  protected readonly builtin = computed(() => {
+    const key = this.skill();
+    const name = !this.catalog() && key ? parseBuiltinKey(key) : null;
+    return name ? this.builtins.items().find((b) => b.name === name) : undefined;
   });
   protected readonly node = computed(() => {
     const key = this.skill();
@@ -35107,11 +36127,22 @@ export class SkillsScreen {
     this.routes.replace({ name: 'catalog' });
   }
 
-  /** Something changed: list skills and the catalog again, and have the panel fetch its skill again. */
+  /** Something changed: list skills, the catalog and the built-ins again, and have the panel fetch its skill again. */
   protected changed(): void {
     this.version.update((v) => v + 1);
     void this.data.refresh();
     void this.cat.refresh();
+    void this.builtins.refresh();
+  }
+
+  protected refreshBuiltins(): void {
+    void this.builtins.refresh();
+  }
+
+  /** A built-in was duplicated: list everything again and open the copy. */
+  protected onDuplicated(r: SkillRef): void {
+    this.changed();
+    this.select(skillKey(r));
   }
 
   protected askAbout(r: SkillRef): void {
@@ -35174,7 +36205,7 @@ After:
 - [ ] **Step 5: Run the specs**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skills-screen.spec.ts --include src/app/skills/catalog/catalog.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 5 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line.
+Expected: PASS: the 7 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line.
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
 Expected: PASS, unchanged: no `app.spec.ts` case renders `#/skills` or `#/skills/catalog` (W0c.14's cases open the map, onboarding, two projects' threads, System and the tray; W3b.3's shortcut case opens the map).
@@ -35189,9 +36220,9 @@ git add apps/web-ui/src/app/skills/skills-screen.ts apps/web-ui/src/app/skills/s
 git commit -m "feat(web-ui): the Skills screen: map, list and catalog, the panel, the sheets; #/skills and #/skills/catalog show it" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-### Task W3a.10: the skills and catalog e2e on a fake catalog
+### Task W3a.10: the skills, catalog and built-ins e2e, on the shipped catalog with local stand-ins
 
-The web twin of `apps/desktop/e2e/catalog.e2e.test.ts`, on a catalog of its own instead of the shipped one: two first-party ("builtin") skills written to a temporary folder, with the digests deskd checks computed in the test, so nothing is downloaded and the test does not depend on what `catalog.json` pins today. The uv stand-in is the Electron test's, so the Python runtime is set up offline in about a second. The first test browses the catalog, reviews an entry (the source, the licence text, a script), installs it for every project, watches its runtime become ready, opens the skill on the map with its catalog origin and history, then installs the second entry into a project from a deep link. The second test carries the skills steps of the Electron `knowledge.e2e.test.ts` (refine by hand, compare, restore v1) and imports a folder from `~/.claude/skills` through the real folder browser. The Electron test's last step (`#/system` shows the runtime's size) belongs to W3b's System screen; here the client checks the runtime instead.
+The web twin of `apps/desktop/e2e/catalog.e2e.test.ts` and `builtins.e2e.test.ts`, as they stand after the merge of master (8883229). The catalog is the shipped one (`packages/core/src/catalog/catalog.json`, read from the repo), except that two entries come from local stand-ins written to a temporary folder, with the digests deskd checks computed in the test, so nothing is downloaded: Excel automation (a Python script and its runtime, as the Electron test's `offlineCatalog` does) and Summarize meeting (instructions only, for the project install). That folder is also deskd's built-in root (`catalog.builtinRoot`), so Desk's own skills are copied into it from `catalog/skills`, as in the Electron test. The uv stand-in is the Electron test's, so the Python runtime is set up offline in about a second. The first test browses the catalog (the five bays, no "Files & media" region, 18 cards), reviews Excel automation (the source, the licence text, a script), installs it for every project, watches its runtime become ready, opens the skill on the map with its catalog origin and history, then installs Summarize meeting into a project from a deep link. The second test carries the skills steps of the Electron `knowledge.e2e.test.ts` (refine by hand, compare, restore v1) and imports a folder from `~/.claude/skills` through the real folder browser. The third lists the built-in skills, turns PDF toolkit off, and duplicates Images into the user's skills (W3a.8b and W3a.9). The Electron catalog test's last step (`#/system` shows the runtime's size) belongs to W3b's System screen; here the client checks the runtime instead. The file type-checks against `harness.ts` with Step 3's change (checked on the merged tree); it runs once W3a.2b–W3a.9 are in.
 
 `startWebE2E` gains an optional `daemon` field, spread into `startDaemon`, for the catalog and runtime options deskd already takes in tests.
 
@@ -35200,8 +36231,8 @@ The web twin of `apps/desktop/e2e/catalog.e2e.test.ts`, on a catalog of its own 
 - Create: `apps/web-ui/e2e/catalog.e2e.test.ts`
 
 **Interfaces:**
-- Consumes: `startWebE2E`, `WebE2E`, `SignedIn` (W0d.9: `home`, `client()`, `signIn()`, `shot()`, `close()`); `DaemonOptions` (`@desk/daemon`: `catalog?: { builtinRoot?; archiveBase?; fetch?; file?: CatalogFile }`, `runtimes?: { uv?; nodeExec?; registry? }`); `CatalogEntry`, `CatalogFile` (`@desk/protocol`); `DeskClient` (`projects.create`, `skills.save`, `skills.get`, `catalog.list`, `catalog.runtimes`); every visible name of W3a.3–W3a.9; W0d.5's folder browser (dialog "Choose a skill folder", hidden folders shown, folder buttons, the "Folder" box, "Choose this folder").
-- Produces: `WebE2EDaemonOptions = Pick<DaemonOptions, 'catalog' | 'runtimes'>` and `startWebE2E(o?: { script?: Script; daemon?: WebE2EDaemonOptions })` (`harness.ts`); `apps/web-ui/e2e/catalog.e2e.test.ts` with its own `go`, `openAt`, `hashOf`, `uvStub`, `builtinSkill` and `fakeCatalog`.
+- Consumes: `startWebE2E`, `WebE2E`, `SignedIn` (W0d.9: `home`, `client()`, `signIn()`, `shot()`, `close()`); `DaemonOptions` (`@desk/daemon`: `catalog?: { builtinRoot?; archiveBase?; fetch?; file?: CatalogFile }`, `runtimes?: { uv?; nodeExec?; registry? }`; `builtinRoot` is also the built-in skills' root); `CatalogEntry`, `CatalogFile` (`@desk/protocol`); `packages/core/src/catalog/catalog.json` and `catalog/skills` (read and copied from the repo); `DeskClient` (`projects.create`, `skills.save`, `skills.get`, `skills.list`, `catalog.list`, `catalog.runtimes`, `builtins.list`); every visible name of W3a.2b–W3a.9; W0d.5's folder browser (dialog "Choose a skill folder", hidden folders shown, folder buttons, the "Folder" box, "Choose this folder").
+- Produces: `WebE2EDaemonOptions = Pick<DaemonOptions, 'catalog' | 'runtimes'>` and `startWebE2E(o?: { script?: Script; daemon?: WebE2EDaemonOptions })` (`harness.ts`); `apps/web-ui/e2e/catalog.e2e.test.ts` with its own `go`, `openAt`, `hashOf`, `uvStub`, `builtinSkill`, `offlineCatalog` and `titleOf`.
 
 - [ ] **Step 1: Write the e2e**
 
@@ -35211,15 +36242,17 @@ Create `apps/web-ui/e2e/catalog.e2e.test.ts` (Vitest globals: see `vitest.web-e2
 
 ```ts
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Page } from 'playwright';
 import type { CatalogEntry, CatalogFile } from '@desk/protocol';
 import { startWebE2E, type SignedIn, type WebE2E } from './harness';
 
 let dir: string | undefined;
 let e2e: WebE2E;
+let catalog: CatalogFile;
 
 /** A uv stand-in that creates the venv layout instantly, so runtime setup finishes offline (as in apps/desktop/e2e/catalog.e2e.test.ts). */
 function uvStub(at: string): string {
@@ -35257,49 +36290,37 @@ function builtinSkill(root: string, id: string, files: Record<string, string>): 
 
 const MIT = 'MIT License\n\nCopyright (c) 2026 Desk tests\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software.\n';
 
-/** Two first-party skills in two bays: one with a Python script and its runtime, one with instructions only. */
-function fakeCatalog(root: string): CatalogFile {
-  const reader = builtinSkill(root, 'receipt-reader', {
-    'SKILL.md': '---\nname: receipt-reader\ndescription: Read the total and the date from a receipt saved as text.\n---\n\nRun python3 scripts/read_receipt.py with the file, and report the total.\n',
-    'scripts/read_receipt.py': '#!/usr/bin/env python3\n"""Reads the total from a receipt text file."""\nimport sys\n\nprint(open(sys.argv[1]).read().splitlines()[-1])\n',
+/**
+ * The shipped catalog (packages/core/src/catalog/catalog.json), except that two entries come from local stand-ins, so
+ * installing them downloads nothing (as the Electron catalog e2e does): Excel automation with a Python script and its
+ * runtime, and Summarize meeting with instructions only. `root` is deskd's built-in root too, so Desk's own skills are
+ * copied beside the stand-ins.
+ */
+function offlineCatalog(root: string): CatalogFile {
+  cpSync(fileURLToPath(new URL('../../../catalog/skills', import.meta.url)), root, { recursive: true });
+  const file = JSON.parse(readFileSync(fileURLToPath(new URL('../../../packages/core/src/catalog/catalog.json', import.meta.url)), 'utf8')) as CatalogFile;
+  const excel = builtinSkill(root, 'excel-automation', {
+    'SKILL.md': '---\nname: excel-automation\ndescription: Automate Excel workbooks.\n---\n\nRun scripts/excel_fill.py to fill a template.\n',
+    'scripts/excel_fill.py': '# Fill an Excel template from a CSV file.\nprint("filled")\n',
     LICENSE: MIT,
   });
-  const notes = builtinSkill(root, 'meeting-notes', {
-    'SKILL.md': '---\nname: meeting-notes\ndescription: Turn a meeting transcript into decisions and next steps.\n---\n\nList the decisions first, then who does what by when.\n',
+  const meeting = builtinSkill(root, 'summarize-meeting', {
+    'SKILL.md': '---\nname: summarize-meeting\ndescription: Turn a meeting transcript into decisions and next steps.\n---\n\nList the decisions first, then who does what by when.\n',
   });
-  const entry = (e: Omit<CatalogEntry, 'license' | 'homepage' | 'caveats'>): CatalogEntry => ({ license: 'MIT', homepage: `https://example.com/skills/${e.id}`, caveats: [], ...e });
-  return {
-    version: 1,
-    updated: '2026-09-24',
-    entries: [
-      entry({
-        id: 'receipt-reader',
-        title: 'Receipt reader',
-        category: 'documents',
-        summary: 'Read totals and dates from receipts.',
-        source: { type: 'builtin', path: 'receipt-reader' },
-        ...reader,
-        scripts: 1,
-        runtime: { python: { version: '3.12', packages: [] } },
-      }),
-      entry({
-        id: 'meeting-notes',
-        title: 'Meeting notes',
-        category: 'writing',
-        summary: 'Decisions and next steps from a transcript.',
-        source: { type: 'builtin', path: 'meeting-notes' },
-        ...notes,
-        scripts: 0,
-        runtime: {},
-      }),
-    ],
+  const standIns: Record<string, Partial<CatalogEntry>> = {
+    'excel-automation': { source: { type: 'builtin', path: 'excel-automation' }, ...excel, scripts: 1, runtime: { python: { version: '3.12', packages: [] } } },
+    'summarize-meeting': { source: { type: 'builtin', path: 'summarize-meeting' }, ...meeting, scripts: 0, runtime: {} },
   };
+  return { ...file, entries: file.entries.map((e) => ({ ...e, ...standIns[e.id] })) };
 }
+
+const titleOf = (id: string) => catalog.entries.find((e) => e.id === id)!.title;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'desk-web-catalog-'));
-  const builtinRoot = join(dir, 'builtin');
-  e2e = await startWebE2E({ daemon: { catalog: { builtinRoot, file: fakeCatalog(builtinRoot) }, runtimes: { uv: uvStub(dir) } } });
+  const builtinRoot = join(dir, 'skills');
+  catalog = offlineCatalog(builtinRoot);
+  e2e = await startWebE2E({ daemon: { catalog: { builtinRoot, file: catalog }, runtimes: { uv: uvStub(dir) } } });
 });
 
 afterAll(async () => {
@@ -35322,60 +36343,62 @@ async function openAt(hash: string): Promise<SignedIn> {
 const hashOf = (page: Page) => page.evaluate(() => window.location.hash);
 
 describe('skills and the catalog in the browser', () => {
-  it('browses a fake catalog, reviews an entry, installs it with its runtime, finds it on the map, and installs another into a project', async () => {
+  it('browses the catalog, reviews an entry, installs it with its runtime, finds it on the map, and installs another into a project', async () => {
     const client = e2e.client();
     const { project } = await client.projects.create({ name: 'Thesis', goal: 'Write the thesis' });
     const { context, page, problems } = await openAt('#/skills');
+    const excel = titleOf('excel-automation');
+    const meeting = titleOf('summarize-meeting');
 
     await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Catalog' }).click();
     await expect.poll(() => hashOf(page)).toBe('#/skills/catalog');
     await page.getByRole('heading', { name: 'Skill catalog' }).waitFor();
-    for (const bay of ['Documents & data', 'Writing & diagrams']) await page.getByRole('region', { name: bay }).waitFor();
-    expect(await page.getByRole('region', { name: 'Research' }).count()).toBe(0);
-    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(2);
-    const card = page.getByRole('listitem', { name: 'Receipt reader' });
+    for (const bay of ['Research', 'Documents & data', 'Writing & diagrams', 'Planning', 'Code']) await page.getByRole('region', { name: bay }).waitFor();
+    expect(await page.getByRole('region', { name: 'Files & media' }).count()).toBe(0);
+    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(18);
+    const card = page.getByRole('listitem', { name: excel });
     await expect.poll(() => card.textContent()).toContain('Python 3.12 · set up by Desk');
     await e2e.shot(page, 'catalog');
 
-    await card.getByRole('button', { name: 'Install Receipt reader' }).click();
-    await expect.poll(() => hashOf(page)).toBe('#/skills/catalog/receipt-reader');
-    const sheet = page.getByRole('dialog', { name: 'Install Receipt reader' });
+    await card.getByRole('button', { name: `Install ${excel}` }).click();
+    await expect.poll(() => hashOf(page)).toBe('#/skills/catalog/excel-automation');
+    const sheet = page.getByRole('dialog', { name: `Install ${excel}` });
     await sheet.getByText('Written by Desk and shipped with the app').waitFor();
     await sheet.getByRole('button', { name: 'Read it' }).click();
     await sheet.getByText(/Permission is hereby granted/).first().waitFor();
-    await sheet.getByRole('button', { name: /scripts\/read_receipt\.py/ }).click();
-    await sheet.getByText('Reads the total from a receipt text file.', { exact: false }).first().waitFor();
+    await sheet.getByRole('button', { name: /scripts\/excel_fill\.py/ }).click();
+    await sheet.getByText('Fill an Excel template from a CSV file.', { exact: false }).first().waitFor();
     await e2e.shot(page, 'catalog-review');
     await sheet.getByRole('button', { name: 'Install', exact: true }).click();
-    await sheet.getByText('receipt-reader is installed for every project.').waitFor();
+    await sheet.getByText('excel-automation is installed for every project.').waitFor();
     await sheet.getByRole('status').filter({ hasText: 'Ready · Python 3.12' }).waitFor({ timeout: 20_000 });
     await e2e.shot(page, 'catalog-installed');
     await sheet.getByRole('button', { name: 'Open skill' }).click();
 
-    await expect.poll(() => hashOf(page)).toBe('#/skills/global%3Areceipt-reader');
-    const panel = page.getByRole('article', { name: 'Skill receipt-reader' });
+    await expect.poll(() => hashOf(page)).toBe('#/skills/global%3Aexcel-automation');
+    const panel = page.getByRole('article', { name: 'Skill excel-automation' });
     await panel.getByText('From catalog').waitFor();
     await panel.getByText(/Ready · Python 3\.12/).first().waitFor();
-    await page.getByRole('group', { name: 'Skill map' }).getByRole('button', { name: /^receipt-reader, global, version 1, from the catalog/ }).waitFor();
+    await page.getByRole('group', { name: 'Skill map' }).getByRole('button', { name: /^excel-automation, global, version 1, from the catalog/ }).waitFor();
     await panel.getByRole('tab', { name: /^History/ }).click();
     await panel.getByText('Installed from the catalog (Desk)').first().waitFor();
     await e2e.shot(page, 'catalog-panel');
 
     // A deep link opens the review; this one goes into a project.
-    await go(page, '#/skills/catalog/meeting-notes');
-    const notes = page.getByRole('dialog', { name: 'Install Meeting notes' });
+    await go(page, '#/skills/catalog/summarize-meeting');
+    const notes = page.getByRole('dialog', { name: `Install ${meeting}` });
     await notes.getByText('Written by Desk and shipped with the app').waitFor();
     await notes.getByLabel('Install for').selectOption({ label: 'Thesis only' });
     await notes.getByRole('button', { name: 'Install', exact: true }).click();
-    await notes.getByText('meeting-notes is installed in Thesis.').waitFor();
+    await notes.getByText('summarize-meeting is installed in Thesis.').waitFor();
     await go(page, '#/skills/catalog');
     await notes.waitFor({ state: 'detached' });
-    await expect.poll(() => page.getByRole('listitem', { name: 'Meeting notes' }).textContent()).toContain('In Thesis');
+    await expect.poll(() => page.getByRole('listitem', { name: meeting }).textContent()).toContain('In Thesis');
 
     const items = await client.catalog.list();
-    expect(items.find((i) => i.id === 'receipt-reader')?.installs).toMatchObject([{ scope: 'global', state: 'installed', runtime: 'ready' }]);
-    expect(items.find((i) => i.id === 'meeting-notes')?.installs).toMatchObject([{ scope: 'project', project_id: project.id, state: 'installed', runtime: 'none' }]);
-    expect((await client.catalog.runtimes()).envs).toMatchObject([{ scope: 'global', name: 'receipt-reader', orphan: false }]);
+    expect(items.find((i) => i.id === 'excel-automation')?.installs).toMatchObject([{ scope: 'global', state: 'installed', runtime: 'ready' }]);
+    expect(items.find((i) => i.id === 'summarize-meeting')?.installs).toMatchObject([{ scope: 'project', project_id: project.id, state: 'installed', runtime: 'none' }]);
+    expect((await client.catalog.runtimes()).envs).toMatchObject([{ scope: 'global', name: 'excel-automation', orphan: false }]);
     expect(problems).toEqual([]);
     await context.close();
   });
@@ -35423,6 +36446,40 @@ describe('skills and the catalog in the browser', () => {
     await expect.poll(() => hashOf(page)).toBe('#/skills/global%3Aexpense-report');
     await page.getByRole('article', { name: 'Skill expense-report' }).waitFor();
     expect((await client.skills.get({}, 'expense-report')).description).toBe('Turn receipts into an expense report');
+    expect(problems).toEqual([]);
+    await context.close();
+  });
+
+  it("lists Desk's built-in skills, turns one off, and duplicates one into your skills (apps/desktop/e2e/builtins.e2e.test.ts)", async () => {
+    const client = e2e.client();
+    const { context, page, problems } = await openAt('#/skills');
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'List' }).click();
+
+    const group = page.getByRole('region', { name: 'Built into Desk' });
+    await group.waitFor();
+    expect(await group.getByRole('switch').count()).toBe((await client.builtins.list()).filter((b) => !b.broken).length);
+    await group.getByText('Set up on first use').first().waitFor();
+    await e2e.shot(page, 'builtins');
+
+    const pdf = (await client.builtins.list()).find((b) => b.name === 'pdf-toolkit')!;
+    await group.getByRole('switch', { name: pdf.title }).click();
+    await expect.poll(async () => (await client.builtins.list()).find((b) => b.name === 'pdf-toolkit')?.enabled).toBe(false);
+    await group.getByRole('switch', { name: pdf.title, checked: false }).waitFor();
+
+    const images = (await client.builtins.list()).find((b) => b.name === 'images')!;
+    await group.getByRole('button', { name: `Open ${images.title}` }).click();
+    await expect.poll(() => hashOf(page)).toBe('#/skills/builtin%3Aimages');
+    const panel = page.getByRole('article', { name: 'Built-in skill images' });
+    await panel.getByRole('tab', { name: 'Instructions' }).click();
+    await panel.getByRole('button', { name: 'Duplicate to my skills' }).click();
+    await page.getByRole('dialog', { name: 'Duplicate images' }).getByRole('button', { name: 'Duplicate' }).click();
+
+    await expect.poll(() => hashOf(page)).toBe('#/skills/global%3Aimages');
+    const copy = page.getByRole('article', { name: 'Skill images' });
+    await copy.getByText(/Customised from the built-in skill/).waitFor();
+    expect((await client.skills.list({})).map((s) => s.name)).toContain('images');
+    await group.getByRole('button', { name: `Open ${images.title}` }).getByText('Shadowed by your global skill').waitFor();
+    await e2e.shot(page, 'builtins-duplicate');
     expect(problems).toEqual([]);
     await context.close();
   });
@@ -35487,7 +36544,7 @@ Expected: exit 0.
 Nothing else may run Chromium or Electron meanwhile.
 
 Run: `pnpm --filter @desk/web-ui build && pnpm vitest run --config vitest.web-e2e.config.ts apps/web-ui/e2e/catalog.e2e.test.ts`
-Expected: PASS (2 tests). With `DESK_E2E_SHOTS=$(mktemp -d)`, `web-catalog.png`, `web-catalog-review.png`, `web-catalog-installed.png`, `web-catalog-panel.png`, `web-skills-history.png` and `web-skills-import-browser.png` show the catalog bays, the review sheet, the installed state with its runtime, the panel beside the map, the compare view and the folder browser, laid out as the desktop's.
+Expected: PASS (3 tests). With `DESK_E2E_SHOTS=$(mktemp -d)`, `web-catalog.png`, `web-catalog-review.png`, `web-catalog-installed.png`, `web-catalog-panel.png`, `web-skills-history.png`, `web-skills-import-browser.png`, `web-builtins.png` and `web-builtins-duplicate.png` show the catalog bays, the review sheet, the installed state with its runtime, the panel beside the map, the compare view, the folder browser, the Built into Desk group and the duplicated copy, laid out as the desktop's.
 
 Run: `pnpm vitest run --config vitest.web-e2e.config.ts apps/web-ui/e2e/smoke.e2e.test.ts`
 Expected: PASS (2 tests): without `daemon`, deskd starts as before.
@@ -35496,7 +36553,7 @@ Expected: PASS (2 tests): without `daemon`, deskd starts as before.
 
 ```sh
 git add apps/web-ui/e2e/harness.ts apps/web-ui/e2e/catalog.e2e.test.ts
-git commit -m "test(web): skills and catalog e2e: install from a fake catalog with its runtime, refine and restore, import through the folder browser" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "test(web): skills, catalog and built-ins e2e: install from the catalog with its runtime, refine and restore, import through the folder browser, turn off and duplicate a built-in" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task W3a.11: verify
@@ -35515,19 +36572,19 @@ Expected: exit 0: the root `tsc`, the desktop's, the web e2e's (`catalog.e2e.tes
 - [ ] **Step 2: The root suite**
 
 Run: `pnpm exec vitest run --maxWorkers=2`
-Expected: PASS. This section changes nothing the root suite runs (ui-core's `skill-keys.ts`, `skills-map.ts` and `skills-diff.ts`, the bff, deskd's catalog, the desktop's `SkillsScreen.test.tsx`, `Catalog.test.tsx` and `catalog/data.test.ts`); the run proves it. No `*.spec.ts` and no `apps/web-ui/e2e` file is picked up.
+Expected: PASS. This section changes nothing the root suite runs (ui-core's `skill-keys.ts`, `skills-map.ts` and `skills-diff.ts`, the bff, deskd's catalog, the desktop's `SkillsScreen.test.tsx`, `Catalog.test.tsx`, `catalog/data.test.ts`, `builtins/Builtins.test.tsx` and `builtins/data.test.ts`); the run proves it. No `*.spec.ts` and no `apps/web-ui/e2e` file is picked up.
 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (6), `skills/catalog/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (5), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (4 together), `skills/skill-panel.spec.ts` (6), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/skills-screen.spec.ts` (5), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (5), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (4 together), `skills/skill-panel.spec.ts` (7), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
 Nothing else may run Chromium or Electron meanwhile. `pnpm test:web-e2e` builds the UI, then runs every web e2e file one at a time.
 
 Run: `pnpm test:web-e2e`
-Expected: the production build succeeds; then every web e2e file passes, among them `apps/web-ui/e2e/smoke.e2e.test.ts` (2) and this section's `apps/web-ui/e2e/catalog.e2e.test.ts` (2), next to the earlier sections' files (and W3b's, if it has landed) with the counts their sections give.
+Expected: the production build succeeds; then every web e2e file passes, among them `apps/web-ui/e2e/smoke.e2e.test.ts` (2) and this section's `apps/web-ui/e2e/catalog.e2e.test.ts` (3), next to the earlier sections' files (and W3b's, if it has landed) with the counts their sections give.
 
 - [ ] **Step 5: The skills routes have their screen**
 
@@ -35536,8 +36593,8 @@ Expected: neither `notYet('Skills')` nor `notYet('The skill catalog')`. At most 
 
 - [ ] **Step 6: The desktop app is untouched, and nothing is left behind**
 
-Run: `git diff --stat "$(git log -1 --format=%H --grep='skills data: the skill graph with live usage')~1" HEAD -- apps/desktop`
-Expected: no output: nothing under `apps/desktop` changed since the parent of this section's first commit (W3a.1); the React skills and catalog screens and their tests are as they were.
+Run: `git diff --stat "$(git log -1 --format=%H --grep='^Merge origin/master into web-ui')" HEAD -- apps/desktop`
+Expected: no output: nothing under `apps/desktop` changed since the merge of master that came after W3a.2 (8883229, which brought master's React skills, catalog and built-in screens; the section's own commits never touch `apps/desktop`). If master is merged again before this task, the newest such merge is the base.
 
 Run: `git status --short`
 Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot folder is outside the repo).
@@ -35550,7 +36607,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Root commands use the repo's Node and TypeScript 7 (`pnpm vitest run <files> --maxWorkers=2`). Every Angular command goes through `scripts/ng.mjs` (W0c.1), which switches to a Node Angular 22 accepts; targeted web-ui runs are `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: targeted runs while iterating, never two Chromium or Electron runs at once; only Tasks W3b.6 and W3b.8 start Chromium.
 
-**Order.** W3b.1 and W3b.2 need only W0 (W0a–W0d) and W2a.2 (`tokens` in `threads/tabs/usage-tab.ts`), and W3b.3 also W3a.2 (its spec uses `testing/catalog.ts`), so they can run alongside W3a. W3b.4–W3b.8 run after every other section (W0a–W3a, W3a.11 included): W3b.4 imports every screen, the parity guard (W3b.5) needs every operation the web UI calls, and W3b.5's one-line change under `apps/desktop` must not land between W3a.1 and W3a.11 (W3a.11 Step 6 checks that nothing under `apps/desktop` changed during W3a).
+**Order.** W3b.1 and W3b.2 need only W0 (W0a–W0d) and W2a.2 (`tokens` in `threads/tabs/usage-tab.ts`), and W3b.3 also W3a.2 and W3a.2b (its spec uses `testing/catalog.ts` and `testing/builtins.ts`), so they can run alongside W3a. W3b.4–W3b.8 run after every other section (W0a–W3a, W3a.11 included): W3b.4 imports every screen, the parity guard (W3b.5) needs every operation the web UI calls, and W3b.5's one-line change under `apps/desktop` must not land between W3a.1 and W3a.11 (W3a.11 Step 6 checks that nothing under `apps/desktop` changed during W3a).
 
 **How the pieces land (one commit per task):**
 
@@ -35962,13 +37019,15 @@ git commit -m "feat(web-ui): the model registry editor (ModelsEditor)" -m "Co-Au
 **Files:**
 - Create: `apps/web-ui/src/app/system/system-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts` (the `system` line), `apps/web-ui/src/app/app.spec.ts` (W0c.14's `System is not in the web UI yet` expectation)
-- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus four web cases)
+- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added)
 
 **Interfaces:**
 - Consumes: `DeskBridge` (`call` with `daemon.status`, `daemon.start`, `daemon.restart`, `daemon.stop`, `usage`, `app.settings`, `app.updateSettings`, `config.get`, `config.patch`, `system.runtimes`, `system.runtimesCleanup`, `app.info`, `app.revealLogs`), `GlobalStore` (`state().overview`, `state().system.notices`), `WebNotifications` (`permission`, `request`), `ToastService`, `describeError`, `Button`, `ConfirmDialog`, `FakeDeskBridge`, `provideGlobal` (W0c); `EndpointPanel` (W0d.3); `ModelsEditor` (W3b.1); `tokens` (W2a.2); `bytes`, `clock`, `duration`, `href`, `plural` (`@desk/ui-core`); `ChannelOutput` (`@desk/bff/contract`); `RuntimesReport`, `UsageResponse` (`@desk/protocol`).
-- Produces: `SystemScreen` — `div[deskSystemScreen]`; `DaemonSection`, `UsageSection`, `NoticesSection`, `NotificationsSection`, `AboutSection` (selectors in the section's Produces); `screenFor({ name: 'system' })` → `{ component: SystemScreen, inputs: {} }`.
+- Produces: `SystemScreen` — `div[deskSystemScreen]`; `DaemonSection`, `UsageSection`, `NoticesSection`, `AppearanceSection` (`section[deskAppearanceSection]`), `NotificationsSection`, `AboutSection` (selectors in the section's Produces); `screenFor({ name: 'system' })` → `{ component: SystemScreen, inputs: {} }`.
 
 A port of `SystemScreen.tsx`. deskd's section polls `daemon.status` every 10 seconds and offers Start, or Restart and Stop (after "Stop deskd?"); there is no LaunchAgent button, because desk web does not offer `daemon.repair`. The Mode row says whether deskd is the Desk app's, run through its LaunchAgent, or this repository's; "Starts at login" says the same in its terms. The endpoint panel is W0d's. Notifications: "From the app" is desk web's `web-settings.json` switch; turning it on asks this browser for permission first, inside the click (browsers prompt only on a user gesture), and a hint says when the browser has not allowed or blocks Desk's notifications (with "Allow notifications" for the first). "From deskd when the app is closed" is deskd's own switch. Data shows the data directory, the skill environments with "Clean up unused (…)" when some are orphaned, and Reveal logs (desk web opens `<data>/logs` with the platform opener).
+
+**Master (merged in 8883229):** `SystemScreen.tsx` gained an Appearance section (System, Light, Dark over `app.settings`/`app.updateSettings`'s new `appearance`, which main maps to `nativeTheme`), and `SystemScreen.test.tsx` its case. A browser page cannot choose its color scheme that way, so desk web reports `appearance: 'system'` and refuses Light and Dark (`not_offered`, since the merge), and `AppearanceSection` below shows the choice disabled, with System on. `app.updateSettings` is still called, for notifications, so the parity guard (W3b.5) is unaffected. The tokens' dark values reach the web UI through `prefers-color-scheme`. `UsageTab`'s `tokens` (W2a.2) already scales to M and B (0745c68).
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -36006,8 +37065,8 @@ async function setup(extra: FakeHandlers = {}) {
     'config.endpoint': () => ({ configured: true, source: 'keychain', base_url: 'http://127.0.0.1:8317/v1' }),
     'config.get': () => ({ notifications: 'auto' }),
     'config.patch': (p: { notifications: string }) => p,
-    'app.settings': () => ({ notifications: true }),
-    'app.updateSettings': (p: { notifications: boolean }) => p,
+    'app.settings': () => ({ notifications: true, appearance: 'system' }),
+    'app.updateSettings': (p: { notifications?: boolean; appearance?: string }) => ({ notifications: true, appearance: 'system', ...p }),
     'app.info': () => ({ version: '1.0.0', platform: 'darwin', packaged: false, dataDir: '/Users/me/Library/Application Support/Desk' }),
     'app.revealLogs': () => ({ ok: true }),
     'models.list': () => [model('claude-opus-5-5'), model('claude-fable-5-1')],
@@ -36083,6 +37142,19 @@ describe('SystemScreen', () => {
     expect(requestPermission).toHaveBeenCalledTimes(1);
     expect(await within(n).findByText(/blocks notifications from Desk/)).toBeTruthy();
     expect(within(n).queryByRole('button', { name: 'Allow notifications' })).toBeNull();
+  });
+
+  it("shows the appearance as the system's: a browser follows it, and only the Desk app chooses", async () => {
+    const bridge = await setup();
+    const a = screen.getByRole('region', { name: 'Appearance' });
+    const choice = within(a).getByRole('group', { name: 'Appearance' });
+    expect(within(choice).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-pressed'), (b as HTMLButtonElement).disabled])).toEqual([
+      ['System', 'true', true],
+      ['Light', 'false', true],
+      ['Dark', 'false', true],
+    ]);
+    expect(a.textContent).toContain('The web UI follows your system');
+    expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings')).toEqual([]);
   });
 
   it('shows the model registry under its hint', async () => {
@@ -36581,10 +37653,32 @@ export class AboutSection {
   }
 }
 
-/** The machine room: deskd, the model endpoint and registry, usage, notices, notifications and data (SystemScreen.tsx). */
+/**
+ * The desktop's Appearance switch (System, Light, Dark; master's dark mode) maps to Electron's nativeTheme. A browser page
+ * follows the system's prefers-color-scheme instead, and desk web answers `app.settings` with `appearance: 'system'` and
+ * `not_offered` for Light or Dark. So the web shows the same choice with System on and all three disabled, and says why.
+ */
+@Component({
+  selector: 'section[deskAppearanceSection]',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  host: { class: 'card sys-section', 'aria-labelledby': 'sys-appearance' },
+  template: `
+    <h2 id="sys-appearance">Appearance</h2>
+    <div class="segmented" role="group" aria-label="Appearance">
+      <button type="button" aria-pressed="true" disabled>System</button>
+      <button type="button" aria-pressed="false" disabled>Light</button>
+      <button type="button" aria-pressed="false" disabled>Dark</button>
+    </div>
+    <p class="field-hint">The web UI follows your system's light or dark setting. Choosing one is only offered in the Desk app.</p>
+  `,
+})
+export class AppearanceSection {}
+
+/** The machine room: deskd, the model endpoint and registry, usage, notices, appearance, notifications and data (SystemScreen.tsx). */
 @Component({
   selector: 'div[deskSystemScreen]',
-  imports: [AboutSection, DaemonSection, EndpointPanel, ModelsEditor, NoticesSection, NotificationsSection, UsageSection],
+  imports: [AboutSection, AppearanceSection, DaemonSection, EndpointPanel, ModelsEditor, NoticesSection, NotificationsSection, UsageSection],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'page system' },
@@ -36596,6 +37690,7 @@ export class AboutSection {
         <h2 id="sys-endpoint">Model endpoint</h2>
         <div deskEndpointPanel></div>
       </section>
+      <section deskAppearanceSection></section>
       <section deskNotificationsSection></section>
       <section deskAboutSection></section>
     </div>
@@ -36614,7 +37709,7 @@ export class SystemScreen {}
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts)`
-Expected: PASS (8 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 5: Show it for `#/system`**
 
@@ -36653,7 +37748,7 @@ After:
 - [ ] **Step 6: Run the screen, the route table and the shell**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts --include src/app/screen-for.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 8 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
+Expected: PASS: the 9 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -36673,10 +37768,12 @@ git commit -m "feat(web-ui): the System screen: deskd without repair, endpoint, 
 - Test: `apps/web-ui/src/app/components/command-palette.spec.ts` (ported from `apps/desktop/src/renderer/components/CommandPalette.test.tsx`, plus closing), one new `app.spec.ts` case (⌘K and ⌘P in the shell)
 
 **Interfaces:**
-- Consumes: `DeskBridge` (`call` with `skills.list`, `library.list`, `catalog.list`, `memory.list`), `GlobalStore` (`state().overview`), `RouteService` (`navigate`), `FakeDeskBridge`, `provideGlobal` (W0c); `ProjectSwitcher`'s ⌘P / Ctrl-P (W0c.12, dialog "Switch project"); `catalogItems`, `install` (W3a.2, specs); `GROUP_ORDER`, `rankPalette`, `PaletteItem`, `href` (`@desk/ui-core`); `clip`, `ArtifactKind`, `CatalogItem` (`@desk/protocol`); `SkillSummary` (`@desk/client`).
+- Consumes: `DeskBridge` (`call` with `skills.list`, `library.list`, `catalog.list`, `builtins.list`, `builtins.setEnabled`, `memory.list`), `GlobalStore` (`state().overview`), `RouteService` (`navigate`), `ToastService`, `FakeDeskBridge`, `provideGlobal` (W0c); `ProjectSwitcher`'s ⌘P / Ctrl-P (W0c.12, dialog "Switch project"); `catalogItems`, `install` (W3a.2, specs); `builtin` (W3a.2b, spec); `GROUP_ORDER` (with master's `Built-in skills` group), `rankPalette`, `PaletteItem` (with master's optional `run`), `href` (`@desk/ui-core`); `clip`, `ArtifactKind`, `BuiltinSkillInfo`, `CatalogItem` (`@desk/protocol`); `SkillSummary` (`@desk/client`).
 - Produces: `PaletteToggle` (`open: Signal<boolean>`, `toggle()`, `close()`), `CommandPalette` — `div[deskCommandPalette]`; `App` renders `<div deskCommandPalette>` inside `.app`, after `main.screen` and before the toaster, while `PaletteToggle.open()`.
 
 A port of `CommandPalette.tsx`. The React component keeps `open` itself and returns `null` while closed. Angular has no component without a host element, so the open state and the ⌘K / Ctrl-K listener move to `PaletteToggle` (a root service that listens on `window` from its creation), and `App` renders the palette only while it is open: a closed palette adds no element to `.app`, as on the desktop, and each opening mounts a fresh palette that loads the skills, library titles and catalog once, focuses its box, and searches every project's memory (the first 8) 250 ms after the query reaches three characters. Arrow keys move, Enter opens, Escape closes, and so does a mousedown on the backdrop.
+
+**Master (merged in 8883229):** `CommandPalette.tsx` lists the built-in skills too (`builtins.list`), each as "Turn off …" or "Turn on …" in a `Built-in skills` group that runs `builtins.setEnabled` in place (`PaletteItem.run`, in `@desk/ui-core`'s `palette.ts` since the merge) and toasts; a damaged one is left out. `CommandPalette.test.tsx` gained that case; both are ported here.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -36688,6 +37785,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/ang
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
+import { builtin } from '../testing/builtins';
 import { catalogItems, install } from '../testing/catalog';
 import { FakeDeskBridge, provideGlobal } from '../testing/fake-bridge';
 import { CommandPalette, PaletteToggle } from './command-palette';
@@ -36723,6 +37821,8 @@ async function setup() {
       projectId ? [{ name: 'brand-voice', scope: 'project', description: 'House tone', dir: '', version: 1 }] : [{ name: 'email-sequence', scope: 'global', description: 'Sequences', dir: '', version: 2 }],
     'library.list': () => [{ id: 'a', project_id: 'p1', path: 'emails/welcome.md', title: 'Welcome email draft', kind: 'report', origin: 'user', description: '', created_at: 't' }],
     'catalog.list': () => catalogItems({ 'pre-mortem': [install()] }),
+    'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' }), builtin('images', { enabled: false }), builtin('archives', { broken: 'Damaged' })],
+    'builtins.setEnabled': ({ name, enabled }: { name: string; enabled: boolean }) => builtin(name, { enabled }),
     'memory.list': ({ q }: { q: string }) => (q.includes('email') ? [{ id: 'm1', project_id: 'p1', kind: 'decision', content: 'Send emails on Tuesdays', source: 'user', supersedes: null, superseded_by: null, created_at: 't' }] : []),
   });
   await render(PaletteHost, { providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), overview })] });
@@ -36763,6 +37863,18 @@ describe('CommandPalette', () => {
     fireEvent.input(screen.getByRole('combobox'), { target: { value: 'paper' } });
     fireEvent.click(await screen.findByText('Install Paper lookup'));
     expect(window.location.hash).toBe('#/skills/catalog/paper-lookup');
+  });
+
+  it('turns built-in skills off and on in place', async () => {
+    const bridge = await setup();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.input(await screen.findByRole('combobox'), { target: { value: 'turn' } });
+    await waitFor(() => expect(screen.getByText('Turn off PDF toolkit')).toBeTruthy());
+    expect(screen.getByText('Turn on Images')).toBeTruthy();
+    expect(screen.queryByText(/Archives/)).toBeNull();
+    fireEvent.click(screen.getByText('Turn off PDF toolkit'));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'builtins.setEnabled')?.input).toEqual({ name: 'pdf-toolkit', enabled: false }));
+    expect(window.location.hash).toBe('#/map');
   });
 
   it('takes the focus, says when nothing matches, and closes on Escape, on the backdrop and on ⌘K / Ctrl-K again', async () => {
@@ -36850,16 +37962,18 @@ import {
   type Signal,
 } from '@angular/core';
 import type { SkillSummary } from '@desk/client';
-import { clip, type ArtifactKind, type CatalogItem } from '@desk/protocol';
+import { clip, type ArtifactKind, type BuiltinSkillInfo, type CatalogItem } from '@desk/protocol';
 import { GROUP_ORDER, href, rankPalette, type PaletteItem } from '@desk/ui-core';
 import { DeskBridge } from '../core/desk-bridge';
 import { GlobalStore } from '../core/global.store';
 import { RouteService } from '../core/route.service';
+import { ToastService } from './toast';
 
 type Loaded = {
   skills: Array<{ key: string; name: string; scope: string; description: string; project: string | null }>;
   library: Array<{ projectId: string; project: string; path: string; title: string; kind: ArtifactKind }>;
   catalog: CatalogItem[];
+  builtins: BuiltinSkillInfo[];
 };
 const MAX_MEMORY_PROJECTS = 8;
 
@@ -36944,6 +38058,7 @@ export class CommandPalette {
   private readonly routes = inject(RouteService);
   private readonly toggle = inject(PaletteToggle);
   private readonly global = inject(GlobalStore).state;
+  private readonly toasts = inject(ToastService);
   private readonly host: HTMLElement = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly box = viewChild.required<ElementRef<HTMLInputElement>>('box');
   protected readonly listId = `palette-list-${++nextList}`;
@@ -36967,6 +38082,22 @@ export class CommandPalette {
       if (global?.state === 'installed' || global?.state === 'name_taken') continue;
       const verb = global?.state === 'update_available' ? 'Update' : 'Install';
       all.push({ id: `catalog:${c.id}`, group: 'Catalog', title: `${verb} ${c.title}`, detail: c.summary, keywords: `${c.id} ${c.category}`, route: href({ name: 'catalog', review: c.id }) });
+    }
+    // Turning a built-in skill off or on runs in place (`run`), as master's palette does; a damaged one is left out.
+    for (const b of loaded?.builtins ?? []) {
+      if (b.broken) continue;
+      all.push({
+        id: `builtin:${b.name}`,
+        group: 'Built-in skills',
+        title: `${b.enabled ? 'Turn off' : 'Turn on'} ${b.title}`,
+        detail: b.summary,
+        keywords: `${b.name} built-in skill ${b.enabled ? 'disable off' : 'enable on'}`,
+        route: href({ name: 'skills', skill: `builtin:${b.name}` }),
+        run: async () => {
+          await this.bridge.call('builtins.setEnabled', { name: b.name, enabled: !b.enabled });
+          this.toasts.toast({ tone: 'info', message: `${b.enabled ? 'Turned off' : 'Turned on'} ${b.title}.` });
+        },
+      });
     }
     for (const a of loaded?.library ?? [])
       all.push({ id: `lib:${a.projectId}:${a.path}`, group: 'Library', title: a.title, detail: `${a.project} · ${a.path}`, keywords: a.kind, route: href({ name: 'project', id: a.projectId, tab: 'library', file: a.path }) });
@@ -36992,14 +38123,15 @@ export class CommandPalette {
       Promise.all(projects.map((p) => this.bridge.call('skills.list', { projectId: p.id }).catch(() => [] as SkillSummary[]))),
       Promise.all(projects.map((p) => this.bridge.call('library.list', { projectId: p.id }).catch(() => []))),
       this.bridge.call('catalog.list', {}).catch(() => [] as CatalogItem[]),
-    ]).then(([global, perProject, libraries, catalog]) => {
+      this.bridge.call('builtins.list', {}).catch(() => [] as BuiltinSkillInfo[]),
+    ]).then(([global, perProject, libraries, catalog, builtins]) => {
       if (!live) return;
       const skills: Loaded['skills'] = global.map((s) => ({ key: `global:${s.name}`, name: s.name, scope: 'global', description: s.description, project: null }));
       perProject.forEach((list, i) => {
         for (const s of list) if (s.scope === 'project') skills.push({ key: `project:${projects[i]!.id}:${s.name}`, name: s.name, scope: 'project', description: s.description, project: projects[i]!.name });
       });
       const library = libraries.flatMap((list, i) => list.map((a) => ({ projectId: projects[i]!.id, project: projects[i]!.name, path: a.path, title: a.title, kind: a.kind })));
-      this.loaded.set({ skills, library, catalog });
+      this.loaded.set({ skills, library, catalog, builtins });
     });
     afterNextRender(() => this.box().nativeElement.focus());
     // Memory is searched on the server, in the first projects, once the query has three characters and rests for 250 ms.
@@ -37047,7 +38179,8 @@ export class CommandPalette {
   protected go(item: PaletteItem | undefined): void {
     if (!item) return;
     this.toggle.close();
-    this.routes.navigate(item.route);
+    if (item.run) void item.run().catch((err: unknown) => this.toasts.error(err));
+    else this.routes.navigate(item.route);
   }
 
   protected onKey(e: KeyboardEvent): void {
@@ -37136,7 +38269,7 @@ After (injecting it here starts the ⌘K listener with the app):
 - [ ] **Step 5: Run them**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/command-palette.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 3 palette cases, and `app.spec.ts` with its new shortcuts case (W0c.14's "shows the shell…" still sees exactly `header.titlebar`, `nav.subnav`, `main.screen`, `div.toaster` under `.app`: a closed palette adds nothing).
+Expected: PASS: the 4 palette cases, and `app.spec.ts` with its new shortcuts case (W0c.14's "shows the shell…" still sees exactly `header.titlebar`, `nav.subnav`, `main.screen`, `div.toaster` under `.app`: a closed palette adds nothing).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -37758,6 +38891,7 @@ The screens, their text and their look are the same: both UIs load `@desk/ui-sty
 | Links in agent text | The system browser, after a confirmation | A new tab, after the same confirmation (`http`, `https` and `mailto` only) |
 | Agent files | Previews from the daemon's bytes | The same, except SVG, which shows as text; images come from raster formats only; Save a copy downloads the file |
 | Notifications | macOS notifications from the app | Browser notifications (below) |
+| Appearance | System, Light or Dark (System → Appearance) | The browser follows the system's light or dark setting; System → Appearance says so |
 | System → deskd | Start, Restart, Stop, Repair LaunchAgent | Start, Restart, Stop |
 | Menu bar, window menus, launch at login | Yes | No |
 | Shortcuts | ⌘K, ⌘P, ⌘1 to ⌘4, ⌘N, and Attention's keys | ⌘K / Ctrl-K (palette), ⌘P / Ctrl-P (project switcher), and Attention's J/K, ⌘⏎, ⌘⌫ and E. ⌘1 to ⌘4 and ⌘N stay with the browser, which uses them for tabs and windows |
@@ -37811,7 +38945,7 @@ The end-to-end suite (`apps/web-ui/e2e`, on `startWebE2E` in `harness.ts`):
 | `smoke.e2e.test.ts` | Signing in with a one-time link, deskd, the endpoint test, onboarding with the folder browser, the map; a link used twice signs the browser out |
 | `flows.e2e.test.ts` | Brief → threads fork → Desk's question → approval in Attention → report; messages between threads on their lanes and in the pair sheet; the Threads screen, a thread on a git source (route, diff, files) |
 | `knowledge.e2e.test.ts` | Library upload and preview, memory, a source from the folder browser, settings and the policy, archive |
-| `catalog.e2e.test.ts` | A fake catalog: review, install with its runtime, the skill on the map; refine and restore a skill; import from `~/.claude/skills` through the folder browser |
+| `catalog.e2e.test.ts` | The shipped catalog with two local stand-ins: review, install with its runtime, the skill on the map, a project install; refine and restore a skill; import from `~/.claude/skills` through the folder browser; turn a built-in skill off and duplicate one |
 | `system.e2e.test.ts` | The model registry editor (a duplicate refused, a new model saved and reloaded, a draft discarded); deskd without Repair; the notification switches; ⌘K and ⌘P |
 
 Set `DESK_E2E_SHOTS=<dir>` to save screenshots (`web-<name>.png`).
