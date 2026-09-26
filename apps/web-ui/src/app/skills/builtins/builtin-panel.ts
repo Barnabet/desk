@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import type { SkillDetail } from '@desk/client';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { bytes, href, type SkillRef } from '@desk/ui-core';
@@ -10,6 +10,7 @@ import { SafeMarkdown } from '../../components/safe-markdown';
 import { Sheet } from '../../components/sheet';
 import { describeError, ToastService } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
+import { SkillsRefresh } from '../skills-refresh';
 import { BuiltinRuntime, BuiltinSwitch } from './builtin-group';
 
 type Tab = 'overview' | 'instructions' | 'files';
@@ -136,8 +137,12 @@ export class BuiltinPanel {
 
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about a call that lands after this panel closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
   protected readonly tabs = TABS;
   protected readonly bytes = bytes;
+  /** Set once the panel is gone (the route left this built-in while a call ran): its outputs then reach no one. */
+  private closed = false;
 
   private readonly name = computed(() => this.item().name);
   /** Back to Overview, with no file open, whenever another built-in opens (React's effect on the name). */
@@ -153,6 +158,7 @@ export class BuiltinPanel {
   protected readonly shadowHref = computed(() => href({ name: 'skills', skill: `global:${this.name()}` }));
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
     // React's effect on [item.name]; a late answer for another built-in is dropped. The call runs untracked, so a
     // signal the bridge reads (signedOut on a sign-in retry) never fetches the built-in again.
     effect((onCleanup) => {
@@ -200,9 +206,9 @@ export class BuiltinPanel {
     const done = this.mark(`${name}|retry`);
     try {
       await this.bridge.call('builtins.retry', { name });
-      // It did happen, so its toast and `changed` come even when another built-in opened meanwhile.
+      // It did happen, so its toast and `changed` come even when another built-in opened, or the panel closed, meanwhile.
       this.toasts.toast({ tone: 'info', message: `Setting up ${name} again.` });
-      this.changed.emit();
+      this.landed();
     } catch (err) {
       this.toasts.error(err);
     } finally {
@@ -224,18 +230,25 @@ export class BuiltinPanel {
     try {
       await this.bridge.call('builtins.duplicate', { name, ...(projectId ? { projectId } : {}) });
       this.toasts.toast({ tone: 'info', message: `Duplicated ${name}. Your copy is used instead of the built-in.` });
-      if (this.name() === name) {
+      if (!this.closed && this.name() === name) {
         this.duplicating.set(false);
         this.duplicated.emit(projectId ? { scope: 'project', projectId, name } : { scope: 'global', name });
       } else {
-        // Another built-in opened meanwhile: the lists change, but opening the copy would leave the one the user opened.
-        this.changed.emit();
+        // Another built-in opened, or the panel closed, meanwhile: the lists change, but opening the copy would leave
+        // where the user went.
+        this.landed();
       }
     } catch (err) {
       this.toasts.error(err);
     } finally {
       done();
     }
+  }
+
+  /** Something changed: `changed` while the panel is open, else the screen itself (never both). */
+  private landed(): void {
+    if (this.closed) this.screen?.changed();
+    else this.changed.emit();
   }
 
   /** Marks a call (`<name>|<what>`) as running; the returned function clears only that mark. */

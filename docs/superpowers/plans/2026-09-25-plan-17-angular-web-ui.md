@@ -544,6 +544,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/skills/{skill-editor,ask-desk,import-sheet}.ts` + specs | W3a.8 |
 | `src/app/skills/builtins/{builtin-group,builtin-panel}.ts`, `skills/builtins/builtins.spec.ts` | W3a.8b |
 | `src/app/skills/skills-screen.ts` + spec, `skills/catalog/catalog.spec.ts` | W3a.9 |
+| `src/app/skills/skills-refresh.ts`; `skills/{skill-panel,skills-screen}.ts`, `skills/builtins/builtin-panel.ts`, `skills/skills-screen.spec.ts` changed | W3a.9 (review fix: a panel's late change reaches the screen) |
 | `apps/web-ui/e2e/catalog.e2e.test.ts` | W3a.10 |
 | `src/app/system/models-editor.ts` + spec | W3b.1 |
 | `src/app/system/system-screen.ts` + spec | W3b.2 |
@@ -32029,6 +32030,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 - `apps/web-ui/src/app/skills/import-sheet.ts`: `ImportSheet` (React's private `ImportSheet` in `SkillsScreen.tsx`) — `div[deskImportSheet]` (`display: contents`), inputs `path`, `projects` (required), outputs `done: SkillRef`, `close`.
 - `apps/web-ui/src/app/skills/builtins/builtin-group.ts`: `BuiltinSwitch` — `button[deskBuiltinSwitch]` (host `role="switch"`, class `switch`), inputs `item`, `label`, output `changed`; `BuiltinRuntime` — `span[deskBuiltinRuntime]` (host class `runtime-line <state>`), input `item`; `BuiltinGroup` — `section[deskBuiltinGroup]` (host class `builtin-group`, `aria-label="Built into Desk"`), inputs `items`, `selected: string | null`, `collapsible` (default `false`; localStorage `desk.builtinsOpen`), outputs `selectSkill: string`, `changed`.
 - `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`: `BuiltinPanel` — `article[deskBuiltinPanel]` (host `class="card skill-panel"`, `aria-label="Built-in skill <name>"`), inputs `item: BuiltinSkillInfo`, `projects` (both required), outputs `duplicated: SkillRef`, `changed`, `close`.
+- `apps/web-ui/src/app/skills/skills-refresh.ts`: `SkillsRefresh` (abstract class, `changed(): void`), provided by `SkillsScreen` (`useExisting`) and injected optionally by `SkillPanel` and `BuiltinPanel`, which call it for a delete, restore, Retry or copy that lands after the panel closed (W3a.9's review fix).
 - `apps/web-ui/src/app/skills/skills-screen.ts`: `SkillsScreen` — `div[deskSkillsScreen]` (host class `skills`, plus ` with-panel` while a skill is open), inputs `skill?: string`, `catalog: boolean` (default `false`), `review?: string`. `screenFor({ name: 'skills', skill })` → `{ component: SkillsScreen, inputs: { skill, catalog: false, review: undefined } }`; `screenFor({ name: 'catalog', review })` → `{ component: SkillsScreen, inputs: { skill: undefined, catalog: true, review } }` (every key present, so `NgComponentOutlet` never keeps a stale input when `#/skills` and `#/skills/catalog` share the screen).
 - `apps/web-ui/e2e/harness.ts`: `WebE2EDaemonOptions` (`Pick<DaemonOptions, 'catalog' | 'runtimes'>`) and `startWebE2E(o?: { script?: Script; daemon?: WebE2EDaemonOptions })`, spread into `startDaemon`.
 - `apps/web-ui/e2e/catalog.e2e.test.ts` (its own `go`, `openAt`, `hashOf`, `uvStub`, `builtinSkill`, `offlineCatalog`, `titleOf`).
@@ -32066,6 +32068,7 @@ apps/web-ui/src/app/skills/builtins/builtin-group.ts        new
 apps/web-ui/src/app/skills/builtins/builtin-panel.ts        new
 apps/web-ui/src/app/skills/builtins/builtins.spec.ts        new (ported from builtins/Builtins.test.tsx)
 apps/web-ui/src/app/skills/skills-screen.ts                 new
+apps/web-ui/src/app/skills/skills-refresh.ts                new (W3a.9's review fix)
 apps/web-ui/src/app/skills/skills-screen.spec.ts            new (ported from SkillsScreen.test.tsx)
 apps/web-ui/src/app/skills/catalog/catalog.spec.ts          new (ported from catalog/Catalog.test.tsx)
 apps/web-ui/src/app/screen-for.ts                           modify (W0c.11)
@@ -34876,7 +34879,7 @@ Expected: FAIL. The test build stops with `Could not resolve "./skill-panel"`.
 Create `apps/web-ui/src/app/skills/skill-panel.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import type { SkillDetail, SkillHistoryEntry, SkillNode } from '@desk/client';
 import type { CatalogInstall, CatalogItem } from '@desk/protocol';
 import { bytes, diffFiles, diffLines, href, since, skillKey, withContext, type FileChange, type SkillRef } from '@desk/ui-core';
@@ -34893,6 +34896,7 @@ import { runtimeWords, sourceLabel } from './catalog/data';
 import { builtinKey } from './builtins/data';
 import { RuntimeLine } from './catalog/runtime-line';
 import { scopeArg, whoLabel } from './data';
+import { SkillsRefresh } from './skills-refresh';
 
 type Tab = 'overview' | 'instructions' | 'files' | 'history';
 const TABS: Tab[] = ['overview', 'instructions', 'files', 'history'];
@@ -35149,6 +35153,8 @@ export class SkillPanel {
   private readonly bridge = inject(DeskBridge);
   private readonly routes = inject(RouteService);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about an action that lands after this panel closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
   protected readonly now = inject(NowService).now;
   protected readonly tabs = TABS;
   protected readonly bytes = bytes;
@@ -35189,8 +35195,11 @@ export class SkillPanel {
     return c?.kind === 'restore' ? c.version : null;
   });
   protected readonly deleting = computed(() => this.confirming()?.kind === 'delete');
+  /** Set once the panel is gone (the route left the skill while an action ran): its outputs then reach no one. */
+  private closed = false;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
     // React's effect on [scope, projectId, name, version, reload]: the skill and its history; a late answer is dropped.
     effect((onCleanup) => {
       this.key();
@@ -35269,12 +35278,15 @@ export class SkillPanel {
     const skill = this.skill();
     const key = this.key();
     void this.act('delete', () => this.bridge.call('skills.remove', { ...scopeArg(skill), name: skill.name }), `Deleted ${skill.name}.`).then((ok) => {
-      // Closing now would close the skill the user opened since.
-      if (ok && this.key() === key) this.close.emit();
+      // Closing now would close the skill the user opened since, or leave wherever the user went once the panel closed.
+      if (ok && !this.closed && this.key() === key) this.close.emit();
     });
   }
 
-  /** Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload does not. */
+  /**
+   * Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload
+   * does not. Once the panel closed, the screen hears of it directly (`changed` would reach no one).
+   */
   private async act(what: string, fn: () => Promise<unknown>, done: string): Promise<boolean> {
     const key = this.key();
     const mark = `${key}|${what}`;
@@ -35283,7 +35295,8 @@ export class SkillPanel {
     try {
       await fn();
       this.toasts.toast({ tone: 'info', message: done });
-      this.changed.emit();
+      if (this.closed) this.screen?.changed();
+      else this.changed.emit();
       if (this.key() === key) this.reload.update((r) => r + 1);
       return true;
     } catch (err) {
@@ -35314,6 +35327,8 @@ Expected: exit 0.
 **Deviation (review fix):** the blocks above are the committed files. A file, delete or restore answer could land after another skill opened: `openFile` set the old skill's file on the new one (the Files tab then showed it), a delete closed the skill the user had opened since, and `busy` was one string for every skill, so the new skill's Delete or Restore showed the old action as pending. `openFile`, `remove` and `act` now capture `key()` before their `await` and drop what lands for another key: no `file`, no error toast for the old file, no `close`, no reload. `busy` holds `{ key, what }` and the template reads `busyHere()` (the action only while its skill is open); `act` clears only its own mark, so the old key's still clears and an action started on the new skill keeps its own. The old action's toast and `changed` still come, since it did happen and the list changed. Two cases hold a `skills.file` and a `skills.remove` answer, switch the skill, then release them: the old content is not shown ("Pick a file to view it."), the new skill's Delete is not busy, and `close` is not emitted (each failed without its fix; the second passes `on` again to `rerender`, which drops the output listeners it is not given). 10 tests.
 
 **Deviation (review fix, after W3a.8):** the blocks above are the committed files. Two more ways an action could cross skills. (1) `confirming` was a plain signal, so a Delete or Restore confirm left open survived another skill opening and then acted on that one; it is now `linkedSignal<string, Confirming | null>({ source: this.key, computation: () => null })`, like `tab` and `file`. (2) `busy` held one action: start one on A, another on B, go back to A, and A's still-running action lost its pending mark. `busy` is now a set of `<skill key>|<what>` marks: `act` adds its mark when it starts and deletes only that mark when it settles, and the template asks `busyHere('delete')` or `busyHere('restore-' + version)`, which checks the open skill's key. Two cases: a Delete confirm open when another skill opens is gone and removed nothing; and a held delete on email-sequence, then one on brand-voice, then back to email-sequence, shows both Delete buttons busy until they settle. Each failed first (the dialog stayed; A's `aria-busy` was null). A blank line now separates the file case from the one before it. 12 tests.
+
+**Deviation (review fix, after W3a.9):** the block above is the committed file. A delete or restore that lands after the panel closed (the route left the skill while it ran: Back to the catalog, a built-in opened) emitted `changed` (and, for a delete, `close`) from a destroyed component: Angular drops such an emit with NG0953, so the skills were not listed again until the next focus or 30 s poll, where React's closure still refreshes them. The panel now injects W3a.9's `SkillsRefresh` (optional, so the panel's own spec renders it alone) and notes when it is destroyed (`DestroyRef`): `act` emits `changed` while the panel is open and calls the screen's `changed()` once it closed, never both, and `remove` emits `close` only while the panel is open. The case is in W3a.9's spec (its tenth): a held `skills.remove`, the hash set to `#/skills/catalog`, the release, then one more global `skills.list` and no NG0953; it failed first (1 call, not 2). `RuntimeLine`'s `retried`, which the panel forwards, is left as it is. 12 tests here.
 
 - [ ] **Step 5: Commit**
 
@@ -36412,7 +36427,7 @@ function readOpen(): boolean {
 Create `apps/web-ui/src/app/skills/builtins/builtin-panel.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import type { SkillDetail } from '@desk/client';
 import type { BuiltinSkillInfo } from '@desk/protocol';
 import { bytes, href, type SkillRef } from '@desk/ui-core';
@@ -36424,6 +36439,7 @@ import { SafeMarkdown } from '../../components/safe-markdown';
 import { Sheet } from '../../components/sheet';
 import { describeError, ToastService } from '../../components/toast';
 import { DeskBridge } from '../../core/desk-bridge';
+import { SkillsRefresh } from '../skills-refresh';
 import { BuiltinRuntime, BuiltinSwitch } from './builtin-group';
 
 type Tab = 'overview' | 'instructions' | 'files';
@@ -36550,8 +36566,12 @@ export class BuiltinPanel {
 
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about a call that lands after this panel closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
   protected readonly tabs = TABS;
   protected readonly bytes = bytes;
+  /** Set once the panel is gone (the route left this built-in while a call ran): its outputs then reach no one. */
+  private closed = false;
 
   private readonly name = computed(() => this.item().name);
   /** Back to Overview, with no file open, whenever another built-in opens (React's effect on the name). */
@@ -36567,6 +36587,7 @@ export class BuiltinPanel {
   protected readonly shadowHref = computed(() => href({ name: 'skills', skill: `global:${this.name()}` }));
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
     // React's effect on [item.name]; a late answer for another built-in is dropped. The call runs untracked, so a
     // signal the bridge reads (signedOut on a sign-in retry) never fetches the built-in again.
     effect((onCleanup) => {
@@ -36614,9 +36635,9 @@ export class BuiltinPanel {
     const done = this.mark(`${name}|retry`);
     try {
       await this.bridge.call('builtins.retry', { name });
-      // It did happen, so its toast and `changed` come even when another built-in opened meanwhile.
+      // It did happen, so its toast and `changed` come even when another built-in opened, or the panel closed, meanwhile.
       this.toasts.toast({ tone: 'info', message: `Setting up ${name} again.` });
-      this.changed.emit();
+      this.landed();
     } catch (err) {
       this.toasts.error(err);
     } finally {
@@ -36638,18 +36659,25 @@ export class BuiltinPanel {
     try {
       await this.bridge.call('builtins.duplicate', { name, ...(projectId ? { projectId } : {}) });
       this.toasts.toast({ tone: 'info', message: `Duplicated ${name}. Your copy is used instead of the built-in.` });
-      if (this.name() === name) {
+      if (!this.closed && this.name() === name) {
         this.duplicating.set(false);
         this.duplicated.emit(projectId ? { scope: 'project', projectId, name } : { scope: 'global', name });
       } else {
-        // Another built-in opened meanwhile: the lists change, but opening the copy would leave the one the user opened.
-        this.changed.emit();
+        // Another built-in opened, or the panel closed, meanwhile: the lists change, but opening the copy would leave
+        // where the user went.
+        this.landed();
       }
     } catch (err) {
       this.toasts.error(err);
     } finally {
       done();
     }
+  }
+
+  /** Something changed: `changed` while the panel is open, else the screen itself (never both). */
+  private landed(): void {
+    if (this.closed) this.screen?.changed();
+    else this.changed.emit();
   }
 
   /** Marks a call (`<name>|<what>`) as running; the returned function clears only that mark. */
@@ -36683,7 +36711,9 @@ Expected: PASS: `tokens.test.ts` finds no color literal in the new files.
 - **Late answers after another built-in opens.** `openFile` captures the name before its `await` and drops a file (and its error toast) that lands for another built-in, as `SkillPanel` does. Case 6: the Files tab of the next built-in showed the old file.
 - **Pending marks per built-in.** The panel's `retrying` and `pending`, and `BuiltinSwitch`'s `pending`, were one flag, and the panel's switch and Retry are the same components whichever built-in it shows, so a running call marked the next built-in's buttons and lost its own mark on the way back. The panel keeps a set of `<name>|<what>` marks (`retry`, `duplicate`) that `busyHere(what)` reads for the open built-in, and the switch keeps a set of names; each call adds its mark and deletes only that one. Retry's toast and `changed` still come when another built-in opened meanwhile, since it did happen. Case 7: pdf-toolkit's held Retry and switch, then archives (neither busy), then pdf-toolkit again (both busy until released).
 - **The Duplicate sheet ignores close while its call runs.** Cancel is `[disabled]` while the copy is made, and both it and the `Sheet`'s `(close)` (Escape, the backdrop) go through `dismiss()`, which does nothing meanwhile, so `duplicated` still reaches the screen (W3a.8's review fix). Case 8: the sheet stayed open through Cancel, Escape and the backdrop, then closed with `duplicated`; against the first code Cancel was never disabled.
-- **The Duplicate sheet resets per built-in.** `duplicating` is `linkedSignal<string, boolean>({ source: this.name, computation: () => false })`, like `SkillPanel`'s `confirming` since W3a.7's second review fix, so an open sheet never duplicates the next built-in. A copy that lands after another built-in opened still toasts, and emits `changed` (the screen lists the skills, the catalog and the built-ins again: W3a.9 binds the panel's `changed` to its whole `changed()`, so the copy shows at once) instead of `duplicated`, which would open the copy and leave the built-in the user opened, as `SkillPanel`'s late delete keeps its `changed` and drops its `close`. Case 9: the sheet stayed open over archives, and the late copy emitted `duplicated`.
+- **The Duplicate sheet resets per built-in.** `duplicating` is `linkedSignal<string, boolean>({ source: this.name, computation: () => false })`, like `SkillPanel`'s `confirming` since W3a.7's second review fix, so an open sheet never duplicates the next built-in. A copy that lands after another built-in opened still toasts, and emits `changed` (the screen lists the skills, the catalog and the built-ins again: W3a.9 binds the panel's `changed` to its whole `changed()`, so the copy is listed right away rather than at the next focus or poll) instead of `duplicated`, which would open the copy and leave the built-in the user opened, as `SkillPanel`'s late delete keeps its `changed` and drops its `close`. Case 9: the sheet stayed open over archives, and the late copy emitted `duplicated`.
+
+**Deviation (review fix, after W3a.9):** the block above is the committed `builtin-panel.ts`. The panel is destroyed when the route leaves `builtin:<name>` while a Duplicate runs (Back to the catalog, or plain `#/skills`) and `SkillsScreen` stays; Angular then dropped the late `duplicated` or `changed` with NG0953, so the new user skill was not listed until the next focus or poll, where React's closure still refreshes the lists. The screen, not the panel's output, now hears it: the panel injects W3a.9's `SkillsRefresh` (`{ optional: true }`) and notes when it is destroyed (`DestroyRef`); `landed()` emits `changed` while the panel is open and calls the screen's `changed()` once it closed, never both. A copy that lands after the panel closed only lists again (nothing opens: the user went elsewhere), and Retry goes through `landed()` too. The case is W3a.9's ninth; it failed first (1 global `skills.list` call, not 2, and NG0953 in `console.warn`). `BuiltinSwitch`'s own `changed`, which the panel forwards, is left as it is. 9 tests here, as before.
 
 The spec failed first on `Could not resolve "./builtin-group"` and `"./builtin-panel"`. Nothing else departs from `BuiltinGroup.tsx` and `BuiltinPanel.tsx` (master bd87256, unchanged on `web-ui` since the merge but for their imports): the panel never offers Edit or anything that writes a built-in's files, and the switch only asks deskd (`builtins.setEnabled`). 9 tests.
 
@@ -36699,8 +36729,8 @@ git commit -m "feat(web-ui): Built into Desk: each built-in skill with its envir
 A port of `SkillsScreen.tsx`: the heading and blurb for the map or the catalog; the View switch (Map, List, Catalog; Map and List remembered in localStorage `desk.skillsView`), the Show filter chips with their counts (All, In use now, Shadowed) or, on the catalog, `LayoutSwitch`; the body (loading, a failure, "No skills of your own yet", `SkillsMapView`, `SkillList`, or `CatalogView`), with W3a.8b's "Built into Desk" group above the user's skills (in its own `builtin-strip`, foldable, over the map; above the list or the empty state otherwise); the legend under the map; and the actions (Import from ~/.claude/skills through `app.pickFolder`, New skill, Ask Desk). The selected skill lives in the route (`#/skills/<key>`, replaced, not pushed) and opens `SkillPanel`, or `BuiltinPanel` for a `builtin:<name>` key (Duplicate then opens the new copy); the catalog's review lives in the route too (`#/skills/catalog/<id>`) and opens `ReviewSheet`. The editor, Ask Desk and the import sheet open over it. Every change (a save, a restore, an install, a duplicate) lists the skills, the catalog and the built-ins again and bumps the panel's version. `SkillsScreen.test.tsx` and `Catalog.test.tsx` are ported case for case; the route cases are new, and W0c's `screen-for.spec.ts` stops expecting `NotYet` for the catalog.
 
 **Files:**
-- Create: `apps/web-ui/src/app/skills/skills-screen.ts`
-- Modify: `apps/web-ui/src/app/screen-for.ts`, `apps/web-ui/src/app/screen-for.spec.ts` (W0c.11)
+- Create: `apps/web-ui/src/app/skills/skills-screen.ts`, `apps/web-ui/src/app/skills/skills-refresh.ts` (the review fix)
+- Modify: `apps/web-ui/src/app/screen-for.ts`, `apps/web-ui/src/app/screen-for.spec.ts` (W0c.11); `apps/web-ui/src/app/skills/skill-panel.ts` (W3a.7) and `apps/web-ui/src/app/skills/builtins/builtin-panel.ts` (W3a.8b) for the review fix
 - Test: `apps/web-ui/src/app/skills/skills-screen.spec.ts` (ported from `apps/desktop/src/renderer/skills/SkillsScreen.test.tsx`), `apps/web-ui/src/app/skills/catalog/catalog.spec.ts` (ported from `apps/desktop/src/renderer/skills/catalog/Catalog.test.tsx`)
 
 **Interfaces:**
@@ -36716,7 +36746,7 @@ Create `apps/web-ui/src/app/skills/skills-screen.spec.ts`:
 ```ts
 import { Component, computed, inject } from '@angular/core';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
 import { RouteService } from '../core/route.service';
@@ -36729,6 +36759,22 @@ beforeEach(() => {
   window.location.hash = '#/skills';
   localStorage.clear();
 });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** Records Angular's NG0953 (an output emitted after its component was destroyed) from console.error and console.warn. */
+function watchConsole(): () => string[] {
+  const seen: string[] = [];
+  const keep = (...args: unknown[]) => {
+    const text = args.map(String).join(' ');
+    if (text.includes('NG0953')) seen.push(text);
+  };
+  vi.spyOn(console, 'error').mockImplementation(keep);
+  vi.spyOn(console, 'warn').mockImplementation(keep);
+  return () => seen;
+}
 
 const summary = (id: string, name: string, threads: unknown[]) =>
   ({ project: { id, name, goal: '', updated_at: 't' }, desk_status: 'idle', threads, latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 }) as unknown as ProjectSummary;
@@ -36922,6 +36968,49 @@ describe('SkillsScreen', () => {
     release();
     await waitFor(() => expect(lists()).toBe(before + 1));
     expect(window.location.hash).toBe('#/skills/builtin%3Aimages');
+  });
+
+  it('lists your skills again when a copy lands after the built-in panel closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' })],
+      'builtins.get': ({ name }: { name: string }) => ({ ...detail(1, '# Skill'), name, scope: 'builtin' }),
+      'builtins.duplicate': () => new Promise((resolve) => (release = () => resolve({ dir: '/s/pdf-toolkit', created: true, version: 1 }))),
+    });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Open PDF toolkit' }));
+    const panel = await screen.findByRole('article', { name: 'Built-in skill pdf-toolkit' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Duplicate to my skills' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' })).getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'builtins.duplicate')).toBe(true));
+    window.location.hash = '#/skills/catalog';
+    await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
+  });
+
+  it('lists your skills again when a delete lands after the skill panel closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({ 'skills.remove': () => new Promise((resolve) => (release = () => resolve({ ok: true }))) });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    window.location.hash = '#/skills/global%3Aemail-sequence';
+    const panel = await screen.findByRole('article', { name: 'Skill email-sequence' });
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete email-sequence?' })).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'skills.remove')).toBe(true));
+    window.location.hash = '#/skills/catalog';
+    await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
   });
 
   it('is what #/skills and #/skills/catalog show, with the skill or the review the route names', () => {
@@ -37121,10 +37210,24 @@ Expected: FAIL. The test build stops with `Could not resolve "./skills-screen"` 
 
 - [ ] **Step 3: Write `SkillsScreen`**
 
+Create `apps/web-ui/src/app/skills/skills-refresh.ts` (the review fix):
+
+```ts
+/**
+ * The skills screen, as its panels see it. A delete, restore or copy that lands after its panel closed (the route left
+ * the skill while the call ran) cannot emit `changed` any more, so the panel tells the screen through this instead, and
+ * the new or removed skill still shows (SkillsScreen provides it).
+ */
+export abstract class SkillsRefresh {
+  /** List the skills, the catalog and the built-ins again. */
+  abstract changed(): void;
+}
+```
+
 Create `apps/web-ui/src/app/skills/skills-screen.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, booleanAttribute, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, booleanAttribute, computed, forwardRef, inject, input, signal } from '@angular/core';
 import type { SkillDetail } from '@desk/client';
 import { parseSkillKey, skillKey, type SkillRef } from '@desk/ui-core';
 import { Button } from '../components/button';
@@ -37146,6 +37249,7 @@ import { ImportSheet } from './import-sheet';
 import { SkillEditor } from './skill-editor';
 import { SkillList } from './skill-list';
 import { SkillPanel } from './skill-panel';
+import { SkillsRefresh } from './skills-refresh';
 import { SkillsMapView } from './skills-map-view';
 
 type View = 'map' | 'list';
@@ -37176,6 +37280,8 @@ function storedView(): View {
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'skills', '[class.with-panel]': '!!ref() || !!builtin()' },
+  // A panel's late delete, restore or copy reaches the screen through this once the panel itself is gone.
+  providers: [{ provide: SkillsRefresh, useExisting: forwardRef(() => SkillsScreen) }],
   template: `
     <div class="skills-main">
       <div class="skills-head">
@@ -37297,7 +37403,7 @@ function storedView(): View {
     }
   `,
 })
-export class SkillsScreen {
+export class SkillsScreen implements SkillsRefresh {
   /** The open skill's key (`global:<name>` or `project:<id>:<name>`), from `#/skills/<key>`. */
   readonly skill = input<string>();
   /** True on `#/skills/catalog`. */
@@ -37324,6 +37430,8 @@ export class SkillsScreen {
   protected readonly ask = signal<{ name?: string; projectId?: string } | null>(null);
   protected readonly importPath = signal<string | null>(null);
   private readonly version = signal(0);
+  /** Set once the screen is gone: a panel's late `changed()` then does nothing. */
+  private gone = false;
 
   private readonly fromCatalog = computed(() => catalogIndex(this.cat.items()));
   protected readonly catalogKeys = computed(() => new Set(this.fromCatalog().keys()));
@@ -37394,12 +37502,18 @@ export class SkillsScreen {
     this.routes.replace({ name: 'catalog' });
   }
 
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.gone = true));
+  }
+
   /**
    * Something changed: list skills, the catalog and the built-ins again, and have the panel fetch its skill again. The
    * built-in panel's `changed` comes here too (React lists only the built-ins): a copy that lands after another built-in
-   * opened emits only `changed`, and the new user skill must show at once.
+   * opened emits only `changed`, and the new user skill must show without waiting for the next focus or poll. A panel
+   * that closed while its call ran calls this directly (`SkillsRefresh`); once the screen is gone it does nothing.
    */
-  protected changed(): void {
+  changed(): void {
+    if (this.gone) return;
     this.version.update((v) => v + 1);
     void this.data.refresh();
     void this.cat.refresh();
@@ -37476,7 +37590,7 @@ After:
 - [ ] **Step 5: Run the specs**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skills-screen.spec.ts --include src/app/skills/catalog/catalog.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 8 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line (13 tests).
+Expected: PASS: the 10 skills-screen cases, the 4 catalog cases, and `screen-for.spec.ts` with its updated catalog line (15 tests; 13 before the review fix below).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/app.spec.ts)`
 Expected: PASS, unchanged: no `app.spec.ts` case renders `#/skills` or `#/skills/catalog` (W0c.14's cases open the map, onboarding, two projects' threads, System and the tray; W3b.3's shortcut case opens the map).
@@ -37486,11 +37600,20 @@ Expected: exit 0.
 
 **Deviation (from the review of W3a.8b):** the blocks above are the committed files. `BuiltinPanel`'s `(changed)` is bound to the screen's whole `changed()` (the skills, the catalog and the built-ins listed again, and the panel's version bumped), not to `refreshBuiltins()` as React's `onChanged={() => void builtins.refresh()}` is. Since W3a.8b's review, a copy that lands after another built-in opened emits only `changed` (not `duplicated`, which would leave the built-in the user opened), so with the built-ins alone listed again the new user skill would not show until the next focus or 30 s poll. The panel's switch and Retry go through the same output, and list a little more than React does, which changes nothing they show. `BuiltinGroup`'s `(changed)` stays `refreshBuiltins()`, as in React: its switches change only the built-ins. A new case (8 in the skills-screen spec, above the route case) holds `builtins.duplicate`, opens Images, releases the copy and expects one more global `skills.list` call while `#/skills/builtin%3Aimages` stays open; it failed with the panel bound to `refreshBuiltins()` (1 call, not 2). `changed()`'s doc comment says why. The specs failed first on `TS2307: Cannot find module './skills-screen'` (and `'../skills-screen'`), the Angular compiler's form of the resolve error. Nothing else departs from `SkillsScreen.tsx`, `SkillsScreen.test.tsx` and `Catalog.test.tsx` as they are on `web-ui` since the merge of master (8883229), unchanged after it: `screen-for.ts` imports `SkillsScreen` just above `ThreadsScreen`, since its relative imports are not sorted. 8 + 4 cases, and `screen-for.spec.ts`'s one.
 
+**Deviation (review fix, after W3a.9):** the blocks above (and W3a.7's `skill-panel.ts`, W3a.8b's `builtin-panel.ts`) are the committed files. `BuiltinPanel` and `SkillPanel` are destroyed when the route leaves their skill while a call runs (a Duplicate, a delete or a restore; for example Back to the catalog, or `#/skills`), and `SkillsScreen` stays mounted; Angular drops their late `duplicated`, `changed` or `close` with NG0953, so the new or removed skill was not listed until the next focus or poll (React's closure still refreshes the lists). The screen now hears it directly: `skills/skills-refresh.ts` holds the abstract class `SkillsRefresh` (`changed(): void`), which the screen provides with `{ provide: SkillsRefresh, useExisting: forwardRef(() => SkillsScreen) }` and implements with its (now public) `changed()`; both panels inject it optionally and call it only once they are destroyed, emitting `changed` while open, never both. `changed()` does nothing once the screen itself is gone (a `DestroyRef` flag; the three lists' `singleFlight`s are stopped by their own `DestroyRef` as well). Two cases, above the route case: a held `builtins.duplicate` (the ninth) and a held `skills.remove` (the tenth), each released after the hash is set to `#/skills/catalog`, expect one more global `skills.list` call, the hash unchanged and no NG0953 in `console.error` or `console.warn` (`watchConsole`, with `vi.restoreAllMocks` after each case). Both failed first (1 call, not 2). 10 + 4 cases, and `screen-for.spec.ts`'s one.
+
 - [ ] **Step 6: Commit**
 
 ```sh
 git add apps/web-ui/src/app/skills/skills-screen.ts apps/web-ui/src/app/skills/skills-screen.spec.ts apps/web-ui/src/app/skills/catalog/catalog.spec.ts apps/web-ui/src/app/screen-for.ts apps/web-ui/src/app/screen-for.spec.ts
 git commit -m "feat(web-ui): the Skills screen: map, list and catalog, the panel, the sheets; #/skills and #/skills/catalog show it" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+The review fix is its own commit:
+
+```sh
+git add apps/web-ui/src/app/skills/skills-refresh.ts apps/web-ui/src/app/skills/skills-screen.ts apps/web-ui/src/app/skills/skills-screen.spec.ts apps/web-ui/src/app/skills/skill-panel.ts apps/web-ui/src/app/skills/builtins/builtin-panel.ts docs/superpowers/plans/2026-09-25-plan-17-angular-web-ui.md
+git commit -m "fix(web-ui): a built-in copy or skill action that lands after its panel closed still refreshes the skills screen" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task W3a.10: the skills, catalog and built-ins e2e, on the shipped catalog with local stand-ins
@@ -37850,7 +37973,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (10), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 

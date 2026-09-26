@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import type { SkillDetail, SkillHistoryEntry, SkillNode } from '@desk/client';
 import type { CatalogInstall, CatalogItem } from '@desk/protocol';
 import { bytes, diffFiles, diffLines, href, since, skillKey, withContext, type FileChange, type SkillRef } from '@desk/ui-core';
@@ -15,6 +15,7 @@ import { runtimeWords, sourceLabel } from './catalog/data';
 import { builtinKey } from './builtins/data';
 import { RuntimeLine } from './catalog/runtime-line';
 import { scopeArg, whoLabel } from './data';
+import { SkillsRefresh } from './skills-refresh';
 
 type Tab = 'overview' | 'instructions' | 'files' | 'history';
 const TABS: Tab[] = ['overview', 'instructions', 'files', 'history'];
@@ -271,6 +272,8 @@ export class SkillPanel {
   private readonly bridge = inject(DeskBridge);
   private readonly routes = inject(RouteService);
   private readonly toasts = inject(ToastService);
+  /** The skills screen, told directly about an action that lands after this panel closed. */
+  private readonly screen = inject(SkillsRefresh, { optional: true });
   protected readonly now = inject(NowService).now;
   protected readonly tabs = TABS;
   protected readonly bytes = bytes;
@@ -311,8 +314,11 @@ export class SkillPanel {
     return c?.kind === 'restore' ? c.version : null;
   });
   protected readonly deleting = computed(() => this.confirming()?.kind === 'delete');
+  /** Set once the panel is gone (the route left the skill while an action ran): its outputs then reach no one. */
+  private closed = false;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.closed = true));
     // React's effect on [scope, projectId, name, version, reload]: the skill and its history; a late answer is dropped.
     effect((onCleanup) => {
       this.key();
@@ -391,12 +397,15 @@ export class SkillPanel {
     const skill = this.skill();
     const key = this.key();
     void this.act('delete', () => this.bridge.call('skills.remove', { ...scopeArg(skill), name: skill.name }), `Deleted ${skill.name}.`).then((ok) => {
-      // Closing now would close the skill the user opened since.
-      if (ok && this.key() === key) this.close.emit();
+      // Closing now would close the skill the user opened since, or leave wherever the user went once the panel closed.
+      if (ok && !this.closed && this.key() === key) this.close.emit();
     });
   }
 
-  /** Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload does not. */
+  /**
+   * Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload
+   * does not. Once the panel closed, the screen hears of it directly (`changed` would reach no one).
+   */
   private async act(what: string, fn: () => Promise<unknown>, done: string): Promise<boolean> {
     const key = this.key();
     const mark = `${key}|${what}`;
@@ -405,7 +414,8 @@ export class SkillPanel {
     try {
       await fn();
       this.toasts.toast({ tone: 'info', message: done });
-      this.changed.emit();
+      if (this.closed) this.screen?.changed();
+      else this.changed.emit();
       if (this.key() === key) this.reload.update((r) => r + 1);
       return true;
     } catch (err) {

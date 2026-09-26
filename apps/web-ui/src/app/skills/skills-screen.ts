@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, booleanAttribute, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, booleanAttribute, computed, forwardRef, inject, input, signal } from '@angular/core';
 import type { SkillDetail } from '@desk/client';
 import { parseSkillKey, skillKey, type SkillRef } from '@desk/ui-core';
 import { Button } from '../components/button';
@@ -20,6 +20,7 @@ import { ImportSheet } from './import-sheet';
 import { SkillEditor } from './skill-editor';
 import { SkillList } from './skill-list';
 import { SkillPanel } from './skill-panel';
+import { SkillsRefresh } from './skills-refresh';
 import { SkillsMapView } from './skills-map-view';
 
 type View = 'map' | 'list';
@@ -50,6 +51,8 @@ function storedView(): View {
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'skills', '[class.with-panel]': '!!ref() || !!builtin()' },
+  // A panel's late delete, restore or copy reaches the screen through this once the panel itself is gone.
+  providers: [{ provide: SkillsRefresh, useExisting: forwardRef(() => SkillsScreen) }],
   template: `
     <div class="skills-main">
       <div class="skills-head">
@@ -171,7 +174,7 @@ function storedView(): View {
     }
   `,
 })
-export class SkillsScreen {
+export class SkillsScreen implements SkillsRefresh {
   /** The open skill's key (`global:<name>` or `project:<id>:<name>`), from `#/skills/<key>`. */
   readonly skill = input<string>();
   /** True on `#/skills/catalog`. */
@@ -198,6 +201,8 @@ export class SkillsScreen {
   protected readonly ask = signal<{ name?: string; projectId?: string } | null>(null);
   protected readonly importPath = signal<string | null>(null);
   private readonly version = signal(0);
+  /** Set once the screen is gone: a panel's late `changed()` then does nothing. */
+  private gone = false;
 
   private readonly fromCatalog = computed(() => catalogIndex(this.cat.items()));
   protected readonly catalogKeys = computed(() => new Set(this.fromCatalog().keys()));
@@ -268,12 +273,18 @@ export class SkillsScreen {
     this.routes.replace({ name: 'catalog' });
   }
 
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.gone = true));
+  }
+
   /**
    * Something changed: list skills, the catalog and the built-ins again, and have the panel fetch its skill again. The
    * built-in panel's `changed` comes here too (React lists only the built-ins): a copy that lands after another built-in
-   * opened emits only `changed`, and the new user skill must show at once.
+   * opened emits only `changed`, and the new user skill must show without waiting for the next focus or poll. A panel
+   * that closed while its call ran calls this directly (`SkillsRefresh`); once the screen is gone it does nothing.
    */
-  protected changed(): void {
+  changed(): void {
+    if (this.gone) return;
     this.version.update((v) => v + 1);
     void this.data.refresh();
     void this.cat.refresh();

@@ -1,6 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
 import { RouteService } from '../core/route.service';
@@ -13,6 +13,22 @@ beforeEach(() => {
   window.location.hash = '#/skills';
   localStorage.clear();
 });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** Records Angular's NG0953 (an output emitted after its component was destroyed) from console.error and console.warn. */
+function watchConsole(): () => string[] {
+  const seen: string[] = [];
+  const keep = (...args: unknown[]) => {
+    const text = args.map(String).join(' ');
+    if (text.includes('NG0953')) seen.push(text);
+  };
+  vi.spyOn(console, 'error').mockImplementation(keep);
+  vi.spyOn(console, 'warn').mockImplementation(keep);
+  return () => seen;
+}
 
 const summary = (id: string, name: string, threads: unknown[]) =>
   ({ project: { id, name, goal: '', updated_at: 't' }, desk_status: 'idle', threads, latest_report: null, plan_progress: { done: 0, total: 0 }, attention_count: 0 }) as unknown as ProjectSummary;
@@ -206,6 +222,49 @@ describe('SkillsScreen', () => {
     release();
     await waitFor(() => expect(lists()).toBe(before + 1));
     expect(window.location.hash).toBe('#/skills/builtin%3Aimages');
+  });
+
+  it('lists your skills again when a copy lands after the built-in panel closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({
+      'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' })],
+      'builtins.get': ({ name }: { name: string }) => ({ ...detail(1, '# Skill'), name, scope: 'builtin' }),
+      'builtins.duplicate': () => new Promise((resolve) => (release = () => resolve({ dir: '/s/pdf-toolkit', created: true, version: 1 }))),
+    });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    const group = await screen.findByRole('region', { name: 'Built into Desk' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Open PDF toolkit' }));
+    const panel = await screen.findByRole('article', { name: 'Built-in skill pdf-toolkit' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Duplicate to my skills' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Duplicate pdf-toolkit' })).getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'builtins.duplicate')).toBe(true));
+    window.location.hash = '#/skills/catalog';
+    await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
+  });
+
+  it('lists your skills again when a delete lands after the skill panel closed', async () => {
+    let release: () => void = () => {};
+    const bridge = await setup({ 'skills.remove': () => new Promise((resolve) => (release = () => resolve({ ok: true }))) });
+    const logged = watchConsole();
+    const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list' && !(c.input as { projectId?: string }).projectId).length;
+    window.location.hash = '#/skills/global%3Aemail-sequence';
+    const panel = await screen.findByRole('article', { name: 'Skill email-sequence' });
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete email-sequence?' })).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'skills.remove')).toBe(true));
+    window.location.hash = '#/skills/catalog';
+    await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
+    const before = lists();
+    release();
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(window.location.hash).toBe('#/skills/catalog');
+    expect(logged()).toEqual([]);
   });
 
   it('is what #/skills and #/skills/catalog show, with the skill or the review the route names', () => {
