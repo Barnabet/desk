@@ -38254,14 +38254,20 @@ describe('ModelsEditor', () => {
     let fail: (err: unknown) => void = () => {};
     const { reg } = await setup({ 'models.list': () => new Promise((_, reject) => (fail = reject)) });
     expect(within(reg).getByText('Loading…')).toBeTruthy();
+    // React renders a bare paragraph until the registry is loaded: the host adds no box and no class.
+    const host = reg.querySelector<HTMLElement>('[deskModelsEditor]')!;
+    expect([host.className, host.style.display]).toEqual(['', 'contents']);
     fail({ code: 'daemon_down', message: 'deskd is not running.' });
     expect(await within(reg).findByText('deskd is not running.')).toBeTruthy();
+    expect([host.className, host.style.display]).toEqual(['', 'contents']);
     expect(within(reg).queryByRole('button', { name: 'Add model' })).toBeNull();
   });
 
   it('discards a draft, and saves trimmed ids with a toast', async () => {
     const { bridge, reg } = await setup();
     const id = (await within(reg).findByLabelText('Model 2 id')) as HTMLInputElement;
+    const host = reg.querySelector<HTMLElement>('[deskModelsEditor]')!;
+    expect([host.className, host.style.display]).toEqual(['models-editor', '']);
     fireEvent.input(id, { target: { value: '  claude-fable-5-2 ' } });
     fireEvent.click(within(reg).getByRole('button', { name: 'Discard changes' }));
     expect(id.value).toBe('claude-fable-5-1');
@@ -38492,6 +38498,8 @@ Expected: exit 0.
 git add apps/web-ui/src/app/system/models-editor.ts apps/web-ui/src/app/system/models-editor.spec.ts
 git commit -m "feat(web-ui): the model registry editor (ModelsEditor)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
+
+**Deviation (spec):** the blocks above are the committed files. The component is the plan's first code, unchanged: `ModelsEditor.tsx` on `web-ui` is unchanged by the merge of master (8883229) and after it (its last change, 2cd45af's `vision` switch, came before and is in the blocks), and its two ported cases in `SystemScreen.test.tsx` (`modelProblems`, "edits the model registry") are the ones above, with `fireEvent.change` on the id box as `fireEvent.input`. The spec gained three assertions on the host, which the section's Produces names but no case checked: while "Loading…" and after the failure the host has no class and `display: contents`, and once loaded it reads `models-editor` with no inline display (a host that always carried the class failed the second case). Nothing refetches or pushes the registry, so nothing can reset a draft while it is edited: `models.list` runs once, in the constructor (a component's factory runs with no active consumer, so the call is untracked, as `injectModels` does), and the draft is a plain `signal`, not a `linkedSignal`. As in React, a save's answer replaces the draft (edits made while the save runs are dropped), Save is disabled while it runs (`Button`'s `pending`), and an answer that lands after the editor is gone only sets its own signals and toasts. `ModelInfo` carries no key or endpoint field: the editor reads and writes only the registry (id, family, limits, reasoning levels, vision), and deskd's `PUT /models` validates it again. Step 2 failed on `Could not resolve "./models-editor"`, with the Angular compiler's `TS2307` beside it.
 
 ### Task W3b.2: `SystemScreen`, the machine room; `#/system` shows it
 
