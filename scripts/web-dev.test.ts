@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
-type Command = { name: string; args: string[]; cwd: string; stdio?: unknown };
+type Command = { name: string; args: string[]; cwd: string; stdio?: unknown; tree?: boolean };
+type Run = (file: string, args: string[], options: unknown) => { error?: Error } | undefined;
 type WebDev = {
   webDevCommands(root: string, args?: string[]): Command[];
-  runTogether(commands: Command[], o?: { log?(line: string): void }): { done: Promise<number>; stop(): void };
-  stopChild(child: { pid?: number; kill(signal: string): void }, platform?: string, run?: (...args: unknown[]) => unknown): void;
+  runTogether(commands: Command[], o?: { log?(line: string): void; platform?: string; run?: Run }): { done: Promise<number>; stop(): void };
+  stopChild(child: { pid?: number; kill(signal: string): void }, tree?: boolean, platform?: string, run?: Run): void;
 };
 
 const url = new URL('./web-dev.mjs', import.meta.url).href;
@@ -31,6 +32,7 @@ describe('pnpm web', () => {
       args: [join('/repo', 'scripts', 'ng.mjs'), 'build', '--watch', '--configuration', 'development'],
       cwd: join('/repo', 'apps', 'web-ui'),
       stdio: ['ignore', 'inherit', 'inherit'],
+      tree: true,
     });
     expect(web).toMatchObject({
       name: 'desk web --dev',
@@ -38,6 +40,8 @@ describe('pnpm web', () => {
       cwd: '/repo',
       stdio: 'inherit',
     });
+    // Only the build's children stop with it: a deskd that desk web started outlives desk web.
+    expect(web?.tree).toBeUndefined();
   });
 
   it('stops the other process when one exits, and exits with its code', async () => {
@@ -55,19 +59,51 @@ describe('pnpm web', () => {
     expect(lines).toEqual([]);
   });
 
-  it('stops a child with SIGTERM, and on Windows its whole tree with taskkill', () => {
+  it('stops a child with SIGTERM, and on Windows a tree child with everything it started through taskkill', () => {
     const calls: unknown[][] = [];
-    const run = (...args: unknown[]) => calls.push(args);
+    const run: Run = (...args) => {
+      calls.push(args);
+      return {};
+    };
     const child = { pid: 4242, kill: vi.fn() };
-    dev.stopChild(child, 'win32', run);
+    dev.stopChild(child, true, 'win32', run);
     expect(calls).toEqual([['taskkill', ['/pid', '4242', '/T', '/F'], { stdio: 'ignore', windowsHide: true }]]);
     expect(child.kill).not.toHaveBeenCalled();
-    dev.stopChild(child, 'darwin', run);
-    dev.stopChild(child, 'linux', run);
+    // Not a tree (desk web): on Windows too only the child itself, so a deskd it started lives on.
+    dev.stopChild(child, false, 'win32', run);
+    dev.stopChild(child, undefined, 'win32', run);
+    dev.stopChild(child, true, 'darwin', run);
+    dev.stopChild(child, false, 'linux', run);
     // A child that never started has no tree to end.
-    dev.stopChild({ kill: child.kill }, 'win32', run);
-    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGTERM'], ['SIGTERM']]);
+    dev.stopChild({ kill: child.kill }, true, 'win32', run);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGTERM'], ['SIGTERM'], ['SIGTERM'], ['SIGTERM']]);
     expect(calls).toHaveLength(1);
+  });
+
+  it('falls back to kill() when taskkill cannot run', () => {
+    const child = { pid: 4242, kill: vi.fn() };
+    dev.stopChild(child, true, 'win32', () => ({ error: new Error('spawnSync taskkill ENOENT') }));
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+  });
+
+  it('on Windows stops only the tree command with taskkill, and the other with kill()', async () => {
+    const pids: number[] = [];
+    // A fake taskkill that ends the process it is given (these children start nothing).
+    const run: Run = (_file, args) => {
+      const pid = Number(args[1]);
+      pids.push(pid);
+      process.kill(pid, 'SIGTERM');
+      return {};
+    };
+    const wait = 'setTimeout(() => {}, 60000)';
+    // desk web stops on its own: the build, a tree, goes through taskkill.
+    const buildLeft = dev.runTogether([{ ...node(wait, 'build'), tree: true }, node('process.exit(3)', 'server')], { log: () => {}, platform: 'win32', run });
+    expect(await buildLeft.done).toBe(3);
+    expect(pids).toHaveLength(1);
+    // The build stops on its own: desk web is not a tree, so taskkill never runs.
+    const serverLeft = dev.runTogether([{ ...node('process.exit(3)', 'build'), tree: true }, node(wait, 'server')], { log: () => {}, platform: 'win32', run });
+    expect(await serverLeft.done).toBe(3);
+    expect(pids).toHaveLength(1);
   });
 
   it('starts only as the script Node runs, also through a symlinked folder', () => {

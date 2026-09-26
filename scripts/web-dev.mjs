@@ -7,7 +7,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './ng.mjs';
 
-/** The two processes `pnpm web` runs, as arguments to this Node (no shell, so Windows works too). */
+/**
+ * The two processes `pnpm web` runs, as arguments to this Node (no shell, so Windows works too). `tree` marks the one
+ * whose own children stop with it (`stopChild`).
+ */
 export function webDevCommands(root, args = []) {
   return [
     {
@@ -16,8 +19,11 @@ export function webDevCommands(root, args = []) {
       cwd: join(root, 'apps', 'web-ui'),
       // Enter belongs to desk web (a new login link), not to the build.
       stdio: ['ignore', 'inherit', 'inherit'],
+      // ng.mjs runs the Angular CLI as its child.
+      tree: true,
     },
     {
+      // No tree: a deskd that desk web started (Start Desk, Restart) is its child, and must outlive it.
       name: 'desk web --dev',
       args: ['--import', 'tsx', join(root, 'apps', 'cli', 'src', 'main.ts'), 'web', '--dev', ...args],
       cwd: root,
@@ -27,18 +33,24 @@ export function webDevCommands(root, args = []) {
 }
 
 /**
- * Stops a child and whatever it started. Elsewhere that is SIGTERM, which ng.mjs passes on to the Angular CLI. On Windows
- * kill() ends only the child, at once, so ng.mjs could not pass anything on and `ng build --watch` would keep running:
- * `taskkill /T /F` ends the whole tree. `run` is spawnSync (a spec passes its own).
+ * Stops a child with SIGTERM, which ng.mjs passes on to the Angular CLI. On Windows kill() ends only the child, at once,
+ * so ng.mjs could not pass anything on and `ng build --watch` would keep running: there a `tree` child is ended with
+ * everything it started by `taskkill /T /F` (or kill() when taskkill cannot run). Only the build is a tree: on Windows a
+ * deskd that desk web started is still desk web's child (`detached` only gives it its own console), and deskd is
+ * stopped only through `daemon.stop`, never with desk web. `run` is spawnSync (a spec passes its own).
  */
-export function stopChild(child, platform = process.platform, run = spawnSync) {
-  if (platform === 'win32' && child.pid !== undefined) run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-  else child.kill('SIGTERM');
+export function stopChild(child, tree = false, platform = process.platform, run = spawnSync) {
+  if (platform === 'win32' && tree && child.pid !== undefined) {
+    const result = run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    if (!result?.error) return;
+  }
+  child.kill('SIGTERM');
 }
 
 /**
- * Runs the commands with this Node until one exits, then stops the others (`stopChild`). `done` resolves once all have
- * exited: with the first exit code (1 for a signal or a spawn error), or with 0 after `stop()`.
+ * Runs the commands with this Node until one exits, then stops the others (`stopChild`, with each command's `tree`;
+ * `platform` and `run` go to it, for specs). `done` resolves once all have exited: with the first exit code (1 for a
+ * signal or a spawn error), or with 0 after `stop()`.
  */
 export function runTogether(commands, o = {}) {
   const log = o.log ?? ((line) => console.error(line));
@@ -46,7 +58,7 @@ export function runTogether(commands, o = {}) {
   let first = null;
   const running = commands.map((c) => ({ c, child: spawn(process.execPath, c.args, { cwd: c.cwd, stdio: c.stdio ?? 'inherit', env: process.env }) }));
   const stopAll = () => {
-    for (const { child } of running) if (child.exitCode === null && child.signalCode === null) stopChild(child);
+    for (const { c, child } of running) if (child.exitCode === null && child.signalCode === null) stopChild(child, c.tree, o.platform, o.run);
   };
   const exits = running.map(
     ({ c, child }) =>
