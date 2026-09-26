@@ -19326,6 +19326,8 @@ describe('ImageThumbs', () => {
     const view = await render(ImageThumbs, { inputs: { images: [image(1)] }, providers: bridge.providers });
     await waitFor(() => expect(screen.getByRole('img').getAttribute('src')?.length).toBe(big(1).length));
     for (const n of [2, 3, 3, 1]) {
+      // An empty list first destroys the Thumb, as React's unmount does, so the next one goes through the cache again.
+      await view.rerender({ inputs: { images: [] } });
       await view.rerender({ inputs: { images: [image(n)] } });
       await waitFor(() => expect(screen.getByRole('img').getAttribute('src')?.length).toBe(big(n).length));
     }
@@ -19348,6 +19350,8 @@ describe('ImageThumbs', () => {
 ```
 
 (The fourth case pins the large view, which the React file tests only through `ConversationScreen.test.tsx`; W1b.11 ports that case too.)
+
+**Deviation (review fix):** the bounded-cache case first went straight from one image to the next with `rerender`. Showing image 3 twice in a row keeps the same `@for` track key (`$index + ':' + sha256`), so Angular reused the `Thumb`, its `sha` computed compared equal and the load effect never ran: the second 3 never went through `loadAttachment`, and a cache that dropped image 3 right after loading it still passed. React's case unmounts before each render, so every one really reads the cache. The loop now rerenders with an empty list before each image, which destroys the `Thumb`, and keeps the expectation `['1', '2', '3', '1']` (4 tests).
 
 - [ ] **Step 2: Run it and watch it fail**
 
