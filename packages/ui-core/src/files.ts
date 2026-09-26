@@ -21,9 +21,17 @@ export async function fileToBase64(file: Blob): Promise<string> {
 
 export const textToBase64 = (text: string) => fileToBase64(new Blob([text]));
 
-const IMAGE: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
+/** A Map, not an object literal: a file named `x.constructor` or `x.__proto__` must not find Object.prototype's members. */
+const IMAGE = new Map([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
+  ['svg', 'image/svg+xml'],
+]);
 
 export const extOf = (path: string) => (/\.([^./]+)$/.exec(path)?.[1] ?? '').toLowerCase();
-export const imageMime = (path: string): string | null => IMAGE[extOf(path)] ?? null;
+export const imageMime = (path: string): string | null => IMAGE.get(extOf(path)) ?? null;
 export const isMarkdown = (path: string) => /^(md|markdown)$/.test(extOf(path));
 export const MAX_UPLOAD = 25 * 1024 * 1024;

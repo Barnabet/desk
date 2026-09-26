@@ -41,7 +41,8 @@ function threadTitles(calls: readonly ToolCallView[], m: MessagesState): Record<
     } catch {
       continue;
     }
-    if (typeof id === 'string' && m.agents[id]) titles[id] = agentTitle(m, id);
+    // Own keys only: a thread_id of 'constructor' or '__proto__' must not find Object.prototype's members.
+    if (typeof id === 'string' && Object.hasOwn(m.agents, id)) titles[id] = agentTitle(m, id);
   }
   return Object.keys(titles).length ? titles : undefined;
 }

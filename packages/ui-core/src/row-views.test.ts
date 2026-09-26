@@ -67,6 +67,8 @@ describe('rowViews', () => {
       toolCall(13, 'bash', 'not json'),
       ev(14, 'assistant.message', { run_id: 'r', content: 'Checked.', tool_calls: [] }, d),
       toolCall(15, 'read_file', '{"path":"a.md"}'),
+      toolCall(16, 'read_thread', '{"thread_id":"constructor"}'),
+      toolCall(17, 'read_thread', '{"thread_id":"__proto__"}'),
     ];
     const views = rowViews(chatOf(all), foldMessages(all));
     expect(views.get('tools:10')).toEqual({ titles: { a: 'Auth API', f: 'Frontend' } });
