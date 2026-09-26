@@ -192,7 +192,7 @@ Every item below must work against a real deskd. The checklist is the acceptance
   - a note field, then Approve once or Deny
 - Question: answer in place.
 - Needs-you, stalled and failed items: open or dismiss.
-- Keys: J/K, ⌘⏎, ⌘⌫, E. A 409 on resolve shows "Already decided by …".
+- Keys: J/K, ⌘⏎, ⌘⌫, E. ⌘⏎ approves even from the note; ⌘⌫ denies only outside a text box (in the note it deletes text); a held key decides once. A 409 on resolve shows "Already decided by …".
 
 **5. Skills.**
 - A map and a list view, with global, project and shadowed skills and what's in use.

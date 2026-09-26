@@ -144,7 +144,7 @@ The threat model is other web pages open in the user's browser (CSRF, DNS rebind
 - **Keyboard:**
   - ⌘K / Ctrl-K opens the command palette.
   - ⌘P / Ctrl-P opens the project switcher.
-  - J/K, ⌘⏎ and ⌘⌫ work in Attention, as in the desktop app.
+  - J/K, ⌘⏎ and ⌘⌫ work in Attention, as in the desktop app (Ctrl on other systems). ⌘⏎ approves even from the note; ⌘⌫ denies only when focus is not in a text box, since in the note it deletes to the line start (Ctrl+⌫ deletes a word). A held ⌘⏎ or ⌘⌫ decides once: repeats are ignored.
 - **Not ported:**
   - the tray popover, native menus and window management;
   - launch at login and LaunchAgent repair;

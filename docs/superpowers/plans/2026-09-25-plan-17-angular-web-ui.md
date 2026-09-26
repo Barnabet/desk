@@ -22928,7 +22928,7 @@ With deskd running and a project that has a thread or two (a running one, and id
   - A paused (GND) project shows Resume.
 - `AttentionScreen`:
   - the rack in J/K order, with the selection kept in `#/attention?item=…`;
-  - ⌘⏎ approves, ⌘⌫ denies and E opens;
+  - ⌘⏎ approves (from the note too), ⌘⌫ denies (only outside a text box) and E opens; a held key decides once;
   - a 409 shows the "Already decided by …" toast;
   - the legend includes GND, and an empty rack shows All clear.
 
@@ -22948,7 +22948,7 @@ Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §5 (Keyboard
   - the core services, the shell components and `FakeDeskBridge` (W0c);
   - `screenFor` (W0c.11).
 - W1c.4's e2e also drives the conversation screen, so it runs once W1b has landed. It does not need W1a's map.
-- Nothing in `apps/desktop` changes. The React attention files and `AttentionScreen.test.tsx` stay as they are.
+- Nothing in `apps/desktop` changes, except W1c.3's review fix: `AttentionScreen.tsx` gets the same key and pending-state fixes as the web screen, and `AttentionScreen.test.tsx` three cases for them.
 
 **How the pieces land (one commit per task):**
 
@@ -22956,7 +22956,7 @@ Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §5 (Keyboard
 |---|---|---|
 | W1c.1 | `FlightStrip` and `StripRack`: bays with counts; strips with codes, who, the gauge and the selection | `strip-rack.spec.ts` (new, 4 cases: the React files have no test of their own) |
 | W1c.2 | `Inspector` and `describeArgs`: approval, question, hand-off, stalled, failed, and paused (Resume) | `inspector.spec.ts` (new, 13 cases, for the same reason) |
-| W1c.3 | `AttentionScreen`: rack order, the selection in the route, J/K, ⌘⏎, ⌘⌫, E, the 409 toast, the legend, All clear | `attention-screen.spec.ts` (the 7 cases of `AttentionScreen.test.tsx`, ported one for one, plus ⌘⌫ and typing) |
+| W1c.3 | `AttentionScreen`: rack order, the selection in the route, J/K, ⌘⏎, ⌘⌫, E, the 409 toast, the legend, All clear | `attention-screen.spec.ts` (the 7 cases of `AttentionScreen.test.tsx`, ported one for one, plus ⌘⌫ and typing, and the review fix's 4 cases) |
 | W1c.4 | `#/attention` shows `AttentionScreen`; the W1 e2e | one more `attention-screen.spec.ts` case; `apps/web-ui/e2e/flows.e2e.test.ts` (2 scenarios) |
 | W1c.5 | verify (W1's exit check) | `pnpm typecheck`, root Vitest, every web-ui spec, `pnpm test:web-e2e` |
 
@@ -23909,13 +23909,16 @@ git commit -m "feat(web-ui): the attention Inspector: the approval's command and
 - **Selection:**
   - The selection follows `#/attention?item=…`. Without an item, the screen selects the last position it had (the first strip at first) and writes that item into the route with `replace`.
   - The note and the pending decision reset when the selection changes.
-- **Keyboard:** J and K move in rack order (not while typing in a text box); ⌘⏎ approves and ⌘⌫ denies (Ctrl on other systems, even from the note); E opens the item's thread (approvals, stalled and failed threads) or its conversation.
+- **Keyboard:** J and K move in rack order (not while typing in a text box); ⌘⏎ approves (Ctrl on other systems, even from the note) and ⌘⌫ denies (Ctrl on other systems, only when focus is not in a text box); a held ⌘⏎ or ⌘⌫ decides once (repeats are ignored); E opens the item's thread (approvals, stalled and failed threads) or its conversation.
 - **Actions:**
   - Approving or denying sends the note. A 409 lists the project's approvals and says who decided first.
+  - A request that finishes after the selection moved on leaves the new item's pending state alone.
   - Answering sends the text to Desk and marks the question answered.
   - Dismiss and Resume dismiss the item.
 
 The seven React cases are ported one for one. One case is added for ⌘⌫, for J typed into the note, and for a `keydown` without a key.
+
+**Deviation (review fix):** three fixes, in both apps (`apps/desktop`'s `AttentionScreen.tsx` too, for parity). (1) ⌘⌫ / Ctrl+⌫ first denied the approval even with focus in the note, where it deletes to the line start on macOS and a word on Windows and Linux, so editing the note lost the approval. It now denies only when focus is not in a text box (the `typing(e.target)` guard J and K use) and otherwise leaves the key to the note, without `preventDefault`; ⌘⏎ still approves from the note. (2) A held ⌘⏎ or ⌘⌫ auto-repeats, and once the selection moved a repeat decided the next approval unseen; both ignore `e.repeat`. (3) `resolve`, `answer` and `dismiss` cleared `busy` after their await even if the selection had moved on, clearing the next item's pending state; `settle(id)` clears it only while the request's item is still selected (React keeps the selected id in a ref). The approve case now presses ⌘⏎ in the note, the last case is renamed "denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box" (Ctrl+⌫ and ⌘⌫ in the note are not prevented and deny nothing; ⌘⌫ on `document.body` denies), and four cases are added before it: the "someone else" 409 fallback when `approvals.list` fails; K's direction and top stop, the `lastIndex` fallback when the selected item leaves `GlobalStore` (a3 takes a2's place) and E on an approval (`#/p/p/threads/t3`); held keys; and a late failure (its error toast, the next approval still `aria-busy`, a second ⌘⏎ sending nothing). `AttentionScreen.test.tsx` gets the approve change and the held-key, late-failure and ⌘⌫ cases (10 tests).
 
 **Files:**
 - Create: `apps/web-ui/src/app/attention/attention-screen.ts`
@@ -23927,7 +23930,7 @@ The seven React cases are ported one for one. One case is added for ⌘⌫, for 
   - `AttentionItem` from `@desk/protocol`;
   - from W0c: `DeskBridge` (`approvals.resolve`, `approvals.list`, `projects.send`, `attention.dismiss`), `DeskCallError`, `GlobalStore`, `NowService`, `RouteService`, `ToastService`, `EmptyState`;
   - `Inspector` (W1c.2) and `StripRack` (W1c.1);
-  - in the spec: `initialGlobalState`, `ProjectOverview`, `ev`, `StoredEvent`, `SESSION_RELEASE_DELAY`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal`.
+  - in the spec: `initialGlobalState`, `ProjectOverview`, `ev`, `StoredEvent`, `SESSION_RELEASE_DELAY`, `FakeDeskBridge`, `FakeHandlers`, `provideGlobal`, `GlobalStore` (to take an item out of the rack).
 - Produces: `AttentionScreen`, on `div[deskAttentionScreen]` (host class `attention`), with the input `itemId: string | undefined`.
 
 - [ ] **Step 1: Write the failing spec**
@@ -23944,6 +23947,7 @@ import type { ProjectOverview } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { AttentionItem, StoredEvent } from '@desk/protocol';
 import { ToastService } from '../components/toast';
+import { GlobalStore } from '../core/global.store';
 import { RouteService } from '../core/route.service';
 import { SESSION_RELEASE_DELAY } from '../core/session.service';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
@@ -23960,6 +23964,19 @@ const items: AttentionItem[] = [
   { id: 'approval:a1', kind: 'approval', project_id: 'p', project_name: 'Tax 2026', agent_id: 't', title: 'Signup checklist wants to run bash', detail: 'Policy rule {"tool":"bash"} → ask', created_at: recent, ref: { approval_id: 'a1', thread_id: 't' } },
   { id: 'question:7', kind: 'question', project_id: 'p', project_name: 'Tax 2026', agent_id: 'd', title: 'Data source or teammate first?', detail: '', created_at: recent, ref: { event_id: 7, options: ['Data source', 'Teammate'] } },
 ];
+
+/** Another approval, from thread `t<n>`, waiting `minutes`: it racks after a1 (4 minutes) when younger. */
+const approval = (n: number, minutes: number): AttentionItem => ({
+  id: `approval:a${n}`,
+  kind: 'approval',
+  project_id: 'p',
+  project_name: 'Tax 2026',
+  agent_id: `t${n}`,
+  title: `Thread ${n} wants to run bash`,
+  detail: 'Policy rule {"tool":"bash"} → ask',
+  created_at: new Date(Date.now() - minutes * 60_000).toISOString(),
+  ref: { approval_id: `a${n}`, thread_id: `t${n}` },
+});
 
 const overview = () =>
   ({
@@ -24033,8 +24050,10 @@ describe('AttentionScreen', () => {
   it('approves with ⌘⏎ and sends the note', async () => {
     const bridge = await setup({ 'approvals.resolve': () => ({ ok: true }) });
     const insp = await screen.findByRole('article', { name: /clearance request/ });
-    fireEvent.input(within(insp).getByLabelText('Note to the thread (optional)'), { target: { value: 'Use npm test' } });
-    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    const note = within(insp).getByLabelText('Note to the thread (optional)');
+    fireEvent.input(note, { target: { value: 'Use npm test' } });
+    // ⌘⏎ approves from the note too.
+    fireEvent.keyDown(note, { key: 'Enter', metaKey: true });
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'approved', note: 'Use npm test' }));
   });
 
@@ -24103,7 +24122,79 @@ describe('AttentionScreen', () => {
     expect(document.querySelector('.strip-legend')!.textContent).toContain('GNDPaused project');
   });
 
-  it('denies with ⌘⌫, and leaves J and K to a text box', async () => {
+  it('says someone else decided when the approvals cannot be listed after a 409', async () => {
+    await setup({
+      'approvals.resolve': () => {
+        throw { code: 'conflict', message: 'already resolved', status: 409 };
+      },
+      'approvals.list': () => {
+        throw { code: 'internal', message: 'deskd is busy', status: 500 };
+      },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /^Approve once/ }));
+    await waitFor(() => expect(toasts()).toContain('Already decided by someone else.'));
+    expect(toasts()).toEqual(['Already decided by someone else.']);
+  });
+
+  it('moves with K too, keeps the position when the selected item goes, and opens an approval\'s thread with E', async () => {
+    await setup({}, [...items, approval(2, 3), approval(3, 2)]);
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    // The rack is a1, a2, a3, then the question and the hand-off; K stops at the top.
+    fireEvent.keyDown(window, { key: 'k' });
+    expect(window.location.hash).toBe('#/attention?item=approval%3Aa1');
+    fireEvent.keyDown(window, { key: 'j' });
+    fireEvent.keyDown(window, { key: 'j' });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa3'));
+    fireEvent.keyDown(window, { key: 'k' });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa2'));
+    await screen.findByRole('article', { name: /clearance request/ });
+    // a2 is decided elsewhere and leaves the rack: the same position, now a3, is selected.
+    TestBed.inject(GlobalStore).set((g) => ({ ...g, attention: g.attention.filter((i) => i.id !== 'approval:a2') }));
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa3'));
+    await waitFor(() => expect(screen.getByRole('article', { name: /clearance request/ }).textContent).toContain('2 of 4'));
+    fireEvent.keyDown(window, { key: 'e' });
+    expect(window.location.hash).toBe('#/p/p/threads/t3');
+  });
+
+  it('ignores a held ⌘⏎ or ⌘⌫, which would decide the next approval unseen', async () => {
+    const bridge = await setup({ 'approvals.resolve': () => ({ ok: true }) });
+    await screen.findByRole('article', { name: /clearance request/ });
+    const resolves = () => bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input);
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true, repeat: true });
+    expect(resolves()).toEqual([]);
+    fireEvent.keyDown(document.body, { key: 'Backspace', ctrlKey: true, repeat: true });
+    expect(resolves()).toEqual([]);
+    fireEvent.keyDown(document.body, { key: 'Backspace', ctrlKey: true });
+    expect(resolves()).toEqual([{ id: 'a1', decision: 'denied' }]);
+  });
+
+  it('keeps the next approval pending when the one before it fails late', async () => {
+    let fail: (err: unknown) => void = () => {};
+    const bridge = await setup(
+      { 'approvals.resolve': (input: { id: string }) => new Promise((_, reject) => (input.id === 'a1' ? (fail = reject) : undefined)) },
+      [...items, approval(2, 2)],
+    );
+    const resolves = () => bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input);
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    await screen.findByRole('article', { name: /clearance request/ });
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(window, { key: 'j' });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa2'));
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    const approve = await screen.findByRole('button', { name: /^Approve once/ });
+    await waitFor(() => expect(approve.getAttribute('aria-busy')).toBe('true'));
+    // a1's request fails only now: the toast says so, and a2's approval is still on its way.
+    fail({ code: 'internal', message: 'deskd went away', status: 500 });
+    await waitFor(() => expect(toasts()).toContain('deskd went away'));
+    expect(approve.getAttribute('aria-busy')).toBe('true');
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    expect(resolves()).toEqual([
+      { id: 'a1', decision: 'approved' },
+      { id: 'a2', decision: 'approved' },
+    ]);
+  });
+
+  it('denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box', async () => {
     const bridge = await setup({ 'approvals.resolve': () => ({ ok: true }) });
     const insp = await screen.findByRole('article', { name: /clearance request/ });
     await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
@@ -24113,7 +24204,12 @@ describe('AttentionScreen', () => {
     window.dispatchEvent(new Event('keydown'));
     expect(window.location.hash).toBe('#/attention?item=approval%3Aa1');
     expect(screen.getByRole('article', { name: /clearance request/ })).toBe(insp);
-    fireEvent.keyDown(note, { key: 'Backspace', ctrlKey: true });
+    // In the note, Ctrl+⌫ deletes a word and ⌘⌫ the line: the note keeps the key (no preventDefault), and nothing is denied.
+    expect(fireEvent.keyDown(note, { key: 'Backspace', ctrlKey: true })).toBe(true);
+    expect(fireEvent.keyDown(note, { key: 'Backspace', metaKey: true })).toBe(true);
+    expect(bridge.calls.some((c) => c.channel === 'approvals.resolve')).toBe(false);
+    // Outside a text box, ⌘⌫ denies.
+    expect(fireEvent.keyDown(document.body, { key: 'Backspace', metaKey: true })).toBe(false);
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'denied' }));
   });
 });
@@ -24281,8 +24377,13 @@ export class AttentionScreen {
         const by = all?.find((x) => x.id === approvalId)?.resolved_by;
         this.toasts.toast({ tone: 'info', message: `Already decided by ${by ? (WHO[by] ?? by) : 'someone else'}.` });
       } else this.toasts.error(err);
-      this.busy.set(null);
+      this.settle(selected.id);
     }
+  }
+
+  /** Clears the pending state once `id`'s request is over, unless the selection has moved on (the next item's may be pending). */
+  private settle(id: string): void {
+    if (this.selected()?.id === id) this.busy.set(null);
   }
 
   protected async answer(text: string): Promise<void> {
@@ -24295,7 +24396,7 @@ export class AttentionScreen {
     } catch (err) {
       this.toasts.error(err);
     } finally {
-      this.busy.set(null);
+      this.settle(selected.id);
     }
   }
 
@@ -24307,7 +24408,7 @@ export class AttentionScreen {
       await this.bridge.call('attention.dismiss', { id: selected.id });
     } catch (err) {
       this.toasts.error(err);
-      this.busy.set(null);
+      this.settle(selected.id);
     }
   }
 
@@ -24322,12 +24423,15 @@ export class AttentionScreen {
     const flat = this.rack().flat;
     if (!flat.length) return;
     const mod = e.metaKey || e.ctrlKey;
+    // A held key repeats: once the selection moves, a repeat would decide the next approval unseen.
     if (mod && e.key === 'Enter') {
       e.preventDefault();
-      void this.resolve('approved');
+      if (!e.repeat) void this.resolve('approved');
     } else if (mod && e.key === 'Backspace') {
+      // In the note, ⌘⌫ and Ctrl+⌫ delete text (to the line start, or a word); they deny only outside a text box.
+      if (typing(e.target)) return;
       e.preventDefault();
-      void this.resolve('denied');
+      if (!e.repeat) void this.resolve('denied');
     } else if (!mod && !e.altKey && !typing(e.target)) {
       const k = e.key.toLowerCase();
       if (k === 'j' || k === 'k') {
@@ -24346,10 +24450,10 @@ export class AttentionScreen {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/attention/attention-screen.spec.ts)`
-Expected: PASS (8 tests).
+Expected: PASS (12 tests).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/attention/strip-rack.spec.ts --include src/app/attention/inspector.spec.ts --include src/app/attention/attention-screen.spec.ts)`
-Expected: PASS (3 files, 25 tests).
+Expected: PASS (3 files, 29 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -24410,7 +24514,7 @@ In `apps/web-ui/src/app/attention/attention-screen.spec.ts`, add the import afte
 import { screenFor } from '../screen-for';
 ```
 
-and add this case as the last one in `describe('AttentionScreen', …)`, after the case `'denies with ⌘⌫, and leaves J and K to a text box'`:
+and add this case as the last one in `describe('AttentionScreen', …)`, after the case `'denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box'`:
 
 ```ts
   it('is what #/attention shows, with the item the route names', () => {
@@ -24422,7 +24526,7 @@ and add this case as the last one in `describe('AttentionScreen', …)`, after t
 - [ ] **Step 3: Run it and watch it fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/attention/attention-screen.spec.ts)`
-Expected: FAIL, 1 of 9 tests: `expected { component: [class NotYet], inputs: { label: 'Attention' } } to deeply equal { component: [class AttentionScreen], … }`.
+Expected: FAIL, 1 of 13 tests: `expected { component: [class NotYet], inputs: { label: 'Attention' } } to deeply equal { component: [class AttentionScreen], … }`.
 
 - [ ] **Step 4: Show it for `#/attention`**
 
@@ -24449,7 +24553,7 @@ After:
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/attention/attention-screen.spec.ts --include src/app/screen-for.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 9 attention cases, `screen-for.spec.ts` as it was (it names no attention screen), and `app.spec.ts` as it was (none of its cases opens `#/attention`).
+Expected: PASS: the 13 attention cases, `screen-for.spec.ts` as it was (it names no attention screen), and `app.spec.ts` as it was (none of its cases opens `#/attention`).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -24720,7 +24824,7 @@ Expected: PASS. This section changes no file the root suite runs, so any failure
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, with `src/app/attention/strip-rack.spec.ts` (4), `src/app/attention/inspector.spec.ts` (10) and `src/app/attention/attention-screen.spec.ts` (9) among the files, and no file under `e2e/`.
+Expected: PASS, with `src/app/attention/strip-rack.spec.ts` (4), `src/app/attention/inspector.spec.ts` (13) and `src/app/attention/attention-screen.spec.ts` (13) among the files, and no file under `e2e/`.
 
 - [ ] **Step 4: The web e2e suite, with screenshots**
 
