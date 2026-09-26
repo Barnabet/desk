@@ -305,7 +305,7 @@ The plan has 108 tasks in 11 sections, one commit per task. The sections follow 
 **Later phases (W2, W3)**
 - **SVG is shown as text in `FileViewer`.** Image Blobs are raster-only.
 - **`SkillBadge` is ported in W2a**, because the threads are its only React users.
-- **`PaletteToggle`** (a root injectable) listens for ⌘K / Ctrl-K, and `App` renders `CommandPalette` only while the palette is open.
+- **`PaletteToggle`** (a root injectable) listens for ⌘K / Ctrl-K while `App` shows the shell (`setEnabled`; not while signed out or during onboarding, where the key stays the browser's), and `App` renders `CommandPalette` only while the palette is open.
 - **⌘N and ⌘1–⌘4 are not ported.** They are native menu accelerators (spec §5 does not port menus), and the browser uses them for windows and tabs.
 - **The parity guard rules** (W3b.5, `parity.spec.ts`):
   - Every operation the React renderer calls literally is called by the web UI, apart from `HOST_ONLY` = `app.openMain` and `daemon.repair`.
@@ -38093,8 +38093,8 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 | Task | What | Proof |
 |---|---|---|
 | W3b.1 | `ModelsEditor`, `toggleEffort`, `modelProblems` | `system/models-editor.spec.ts` (the `modelProblems` and "edits the model registry" cases of `SystemScreen.test.tsx`, plus `toggleEffort`, loading, failure, discard and save) |
-| W3b.2 | `SystemScreen` and its sections (no Repair on the web; the browser's notification permission); `#/system` shows it | `system/system-screen.spec.ts` (the other four cases of `SystemScreen.test.tsx`, plus five web cases, the fifth master's appearance case in its web form, two for a late status read and a failed switch, and two for overlapping clicks and the answered value (the review fix)); `app.spec.ts` updated |
-| W3b.3 | `CommandPalette` and `PaletteToggle` (⌘K / Ctrl-K); `App` renders the palette while it is open | `components/command-palette.spec.ts` (`CommandPalette.test.tsx` ported, plus closing); `app.spec.ts`: ⌘K and ⌘P in the shell |
+| W3b.2 | `SystemScreen` and its sections (no Repair on the web; the browser's notification permission); `#/system` shows it | `system/system-screen.spec.ts` (the other four cases of `SystemScreen.test.tsx`, plus five web cases, the fifth master's appearance case in its web form, two for a late status read and a failed switch, two for overlapping clicks and the answered value (the review fix), and one for a permission prompt nobody answers (the second review fix)); `app.spec.ts` updated |
+| W3b.3 | `CommandPalette` and `PaletteToggle` (⌘K / Ctrl-K); `App` renders the palette while it is open | `components/command-palette.spec.ts` (`CommandPalette.test.tsx` ported, plus closing, plus a memory search that outlives an unrelated push (the review fix)); `app.spec.ts`: ⌘K and ⌘P in the shell, and ⌘K left to the browser outside it (the review fix) |
 | W3b.4 | every route shows its real screen; `NotYet` deleted | `screen-for.spec.ts` (replaced) |
 | W3b.5 | the parity guard; the React `SystemScreen` names its daemon operations literally | `parity.spec.ts` (new); `SystemScreen.test.tsx` unchanged and passing |
 | W3b.6 | the W3 e2e: the model registry editor, deskd without Repair, notifications, ⌘K and ⌘P | `apps/web-ui/e2e/system.e2e.test.ts` (2 tests) |
@@ -38116,7 +38116,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 
 - `apps/web-ui/src/app/system/models-editor.ts`: `ModelsEditor` — `div[deskModelsEditor]` (host class `models-editor` once the registry is loaded; `display: contents` while it shows "Loading…" or its error, which React renders as the root `p`); `toggleEffort(m, level)`, `modelProblems(list)` (as exported by the React `ModelsEditor.tsx`).
 - `apps/web-ui/src/app/system/system-screen.ts`: `SystemScreen` — `div[deskSystemScreen]` (host class `page system`); its sections, each on the React section's root `section` (host `class="card sys-section"` and its `aria-labelledby`): `DaemonSection` — `section[deskDaemonSection]`, `UsageSection` — `section[deskUsageSection]`, `NoticesSection` — `section[deskNoticesSection]`, `AppearanceSection` — `section[deskAppearanceSection]` (master's dark mode, W3b.2), `NotificationsSection` — `section[deskNotificationsSection]`, `AboutSection` — `section[deskAboutSection]` (the React `RuntimesFacts` is inlined there: its root `div` sits inside `dl.sys-facts`, where `.sys-facts div` is a flex row, so a component host would add a second box). `screenFor({ name: 'system' })` → `{ component: SystemScreen, inputs: {} }`.
-- `apps/web-ui/src/app/components/command-palette.ts`: `PaletteToggle` (injectable, root: `open: Signal<boolean>`, `toggle()`, `close()`; it listens for ⌘K / Ctrl-K on `window` from its creation), `CommandPalette` — `div[deskCommandPalette]` (host class `palette-backdrop`), rendered by `App` only while `PaletteToggle.open()`, so a closed palette adds no element, as the React one returns `null`.
+- `apps/web-ui/src/app/components/command-palette.ts`: `PaletteToggle` (injectable, root: `open: Signal<boolean>`, `setEnabled(on)`, `toggle()`, `close()`; it listens for ⌘K / Ctrl-K on `window` from its creation, and acts on it only while enabled: `App` enables it while the shell shows, and disabling it also closes the palette), `CommandPalette` — `div[deskCommandPalette]` (host class `palette-backdrop`), rendered by `App` only while `PaletteToggle.open()`, so a closed palette adds no element, as the React one returns `null`.
 - `apps/web-ui/src/app/parity.spec.ts`: the parity guard (no exports).
 - `apps/web-ui/e2e/system.e2e.test.ts` (its own `go`, `openAt`, `hashOf`, `webSettings`).
 - `docs/web.md`.
@@ -38544,7 +38544,7 @@ git commit -m "feat(web-ui): the model registry editor (ModelsEditor)" -m "Co-Au
 **Files:**
 - Create: `apps/web-ui/src/app/system/system-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts` (the `system` line), `apps/web-ui/src/app/app.spec.ts` (W0c.14's `System is not in the web UI yet` expectation)
-- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added, two cases for the deviations below, and two for the review fix after them)
+- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added, two cases for the deviations below, two for the review fix after them, and one for the second review fix)
 
 **Interfaces:**
 - Consumes: `DeskBridge` (`call` with `daemon.status`, `daemon.start`, `daemon.restart`, `daemon.stop`, `usage`, `app.settings`, `app.updateSettings`, `config.get`, `config.patch`, `system.runtimes`, `system.runtimesCleanup`, `app.info`, `app.revealLogs`), `GlobalStore` (`state().overview`, `state().system.notices`), `WebNotifications` (`permission`, `request`), `ToastService`, `describeError`, `Button`, `ConfirmDialog`, `FakeDeskBridge`, `provideGlobal` (W0c); `EndpointPanel` (W0d.3); `ModelsEditor` (W3b.1); `tokens` (W2a.2); `bytes`, `clock`, `duration`, `href`, `plural` (`@desk/ui-core`); `ChannelOutput` (`@desk/bff/contract`); `RuntimesReport`, `UsageResponse` (`@desk/protocol`).
@@ -38680,13 +38680,14 @@ describe('SystemScreen', () => {
     await waitFor(() => expect(fromDeskd.checked).toBe(true));
   });
 
-  it('takes no second click on a notification switch while its permission or write is pending', async () => {
-    let grant: (p: NotificationPermission) => void = () => {};
-    const requestPermission = vi.fn(() => new Promise<NotificationPermission>((resolve) => (grant = resolve)));
+  it('takes no second click on a notification switch while its write is pending', async () => {
+    const requestPermission = vi.fn(async (): Promise<NotificationPermission> => 'granted');
     vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const updates: Array<() => void> = [];
     const patches: Array<() => void> = [];
     const bridge = await setup({
       'app.settings': () => ({ notifications: false }),
+      'app.updateSettings': (p: { notifications?: boolean }) => new Promise((resolve) => updates.push(() => resolve({ notifications: true, appearance: 'system', ...p }))),
       'config.patch': (p: { notifications: string }) => new Promise((resolve) => patches.push(() => resolve(p))),
     });
     const n = screen.getByRole('region', { name: 'Notifications' });
@@ -38694,14 +38695,15 @@ describe('SystemScreen', () => {
     const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
     await waitFor(() => expect(fromApp.disabled).toBe(false));
     await waitFor(() => expect(fromDeskd.disabled).toBe(false));
-    // On opens the browser's prompt; an Off click before it is answered would be overtaken by the On.
+    // On opens the browser's prompt and writes; an Off write sent before the On's answered could answer first and be undone.
     fireEvent.click(fromApp);
     expect(requestPermission).toHaveBeenCalledTimes(1);
     expect(fromApp.disabled).toBe(true);
     // jsdom still toggles a disabled box on a dispatched click, which a browser never delivers: the switch refuses it too.
     fireEvent.click(fromApp);
+    await waitFor(() => expect(updates.length).toBeGreaterThan(0));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    grant('granted');
+    for (const answer of updates.slice().reverse()) answer();
     await waitFor(() => expect(fromApp.disabled).toBe(false));
     expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings').map((c) => c.input)).toEqual([{ notifications: true }]);
     expect(fromApp.checked).toBe(true);
@@ -38715,6 +38717,22 @@ describe('SystemScreen', () => {
     await waitFor(() => expect(fromDeskd.disabled).toBe(false));
     expect(bridge.calls.filter((c) => c.channel === 'config.patch').map((c) => c.input)).toEqual([{ notifications: 'off' }]);
     expect(fromDeskd.checked).toBe(false);
+  });
+
+  it('saves app notifications without waiting on a permission prompt nobody answers', async () => {
+    // The browser's prompt stays open: the user never answers it.
+    const requestPermission = vi.fn(() => new Promise<NotificationPermission>(() => {}));
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const bridge = await setup({ 'app.settings': () => ({ notifications: false }) });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromApp = within(n).getByLabelText(/From the app/) as HTMLInputElement;
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    fireEvent.click(fromApp);
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings').map((c) => c.input)).toEqual([{ notifications: true }]));
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    expect(fromApp.checked).toBe(true);
+    expect(within(n).getByText(/has not allowed notifications from Desk yet/)).toBeTruthy();
   });
 
   it("says when desk web runs this repository's deskd", async () => {
@@ -39166,9 +39184,8 @@ export class NotificationsSection {
   protected readonly appOn = signal<boolean | null>(null);
   protected readonly daemon = signal<'auto' | 'off' | null>(null);
   /**
-   * Each switch takes no click while its permission prompt or write is pending (disabled, and its handler refuses a change
-   * that still arrives): a later click's answer could otherwise land first and be overwritten by the earlier one (an Off
-   * during the prompt, then the On it followed).
+   * Each switch takes no click while its write is pending (disabled, and its handler refuses a change that still arrives):
+   * a later click's answer could otherwise land first and be overwritten by the earlier one's.
    */
   protected readonly appPending = signal(false);
   protected readonly daemonPending = signal(false);
@@ -39191,11 +39208,12 @@ export class NotificationsSection {
       return;
     }
     const on = box.checked;
-    // Browsers prompt only inside a user gesture: ask before anything is awaited.
-    const asking = on && this.permission() !== 'granted' ? this.notifications.request() : null;
+    // Browsers prompt only inside a user gesture, so the prompt opens here, before anything is awaited. The switch saves
+    // without waiting on it: a prompt nobody answers must not hold the switch, and the hint below says the browser has not
+    // allowed Desk yet.
+    if (on && this.permission() !== 'granted') void this.notifications.request();
     this.appPending.set(true);
     try {
-      if (asking) await asking;
       this.appOn.set((await this.bridge.call('app.updateSettings', { notifications: on })).notifications);
     } catch (err) {
       this.toasts.error(err);
@@ -39365,7 +39383,7 @@ export class SystemScreen {}
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts)`
-Expected: PASS (13 tests: the plan's 9, the deviations' 2, and the review fix's 2).
+Expected: PASS (14 tests: the plan's 9, the deviations' 2, the review fix's 2, and the second review fix's 1).
 
 - [ ] **Step 5: Show it for `#/system`**
 
@@ -39404,7 +39422,7 @@ After:
 - [ ] **Step 6: Run the screen, the route table and the shell**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts --include src/app/screen-for.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 13 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
+Expected: PASS: the 14 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -39424,6 +39442,10 @@ git commit -m "feat(web-ui): the System screen: deskd without repair, endpoint, 
 - `appPending` and `daemonPending` join `[disabled]`, and each handler also refuses a change that arrives while its own is pending (jsdom still toggles a disabled checkbox on a dispatched click and fires `change`; a browser never delivers one). Before, "From the app" stayed enabled during the browser's prompt: On (the prompt opens), then Off (stores `false`), then answering the prompt sent the first click's `notifications: true`, so the box ended checked and `web-settings.json` held `true`, the opposite of the last click. deskd's switch could overlap the same way with two writes answered out of order. "takes no second click on a notification switch while its permission or write is pending" covers both switches; it failed on the committed code (`app.updateSettings` got `false`, then `true`), and its deskd half failed without its own fix.
 - "shows the value a notification write answered, even when it differs from the click": `config.patch` answers `auto` to an Off click, and the box shows it checked. It fails when the reset moves back into `catch` only (Angular does not rewrite `[checked]` for an unchanged signal).
 
+**Deviation (review fix, second):** "From the app" saves without waiting on the browser's permission prompt. The first review fix kept the switch pending (`appPending`) while it awaited `WebNotifications.request()` and only then called `app.updateSettings`; a prompt the user ignores never settles, so the box stayed checked and disabled with nothing saved and no hint, and an answer given after leaving the screen saved from a destroyed section. Now the click calls `void this.notifications.request()` without awaiting it (still synchronously, inside the user gesture), `appPending` covers only `app.updateSettings`, and the existing `permission() === 'default'` hint ("has not allowed notifications from Desk yet", with Allow notifications) covers an ignored prompt; a late answer only updates the root `WebNotifications` permission. The blocks above are the files as fixed.
+- "saves app notifications without waiting on a permission prompt nobody answers" (new): `requestPermission` never resolves; the setting is saved (`app.updateSettings` gets `{ notifications: true }`), the switch is enabled and checked again, and the hint shows. It failed on the first review fix's code (no `app.updateSettings` call).
+- "takes no second click on a notification switch while its write is pending" (renamed from "…while its permission or write is pending"): its app half held the permission prompt to keep the switch pending, a premise the fix removes (the switch no longer waits on the prompt, and with the prompt held and an instant write the case would pass without the guard's pending window being what it tests). It now holds `app.updateSettings` instead, as its deskd half holds `config.patch`, and answers the writes in reverse; with `appPending` removed from `[disabled]` and the handler, it fails (`expected false to be true`: the second click went through). Its deskd half and "shows the value a notification write answered…" are unchanged and pass.
+
 What the screen shows stays clear of secrets: `daemon.status` is `DaemonStatus` (running, version, pid, uptime, proxy, mode, versions, builds, agent), the endpoint panel shows `config.endpoint`'s base URL and source (it carries no key) and only sends a new key, typed into a password box, with `config.saveEndpoint`, Reveal logs asks desk web to open `<data>/logs` on this computer and shows nothing, and `app.info` is the version, platform and data directory. Step 2 failed on `Could not resolve "./system-screen"`, with the Angular compiler's `TS2307` beside it. `screen-for.ts` keeps the now unused `notYet` helper and `NotYet` import until W3b.4 deletes them (no `noUnusedLocals`).
 
 ### Task W3b.3: `CommandPalette` and ⌘K; the shell's shortcuts
@@ -39431,13 +39453,13 @@ What the screen shows stays clear of secrets: `daemon.status` is `DaemonStatus` 
 **Files:**
 - Create: `apps/web-ui/src/app/components/command-palette.ts`
 - Modify: `apps/web-ui/src/app/app.ts` (W0c.14), `apps/web-ui/src/app/app.spec.ts` (W0c.14)
-- Test: `apps/web-ui/src/app/components/command-palette.spec.ts` (ported from `apps/desktop/src/renderer/components/CommandPalette.test.tsx`, plus closing), one new `app.spec.ts` case (⌘K and ⌘P in the shell)
+- Test: `apps/web-ui/src/app/components/command-palette.spec.ts` (ported from `apps/desktop/src/renderer/components/CommandPalette.test.tsx`, plus closing, plus the review fix's memory-search case), one new `app.spec.ts` case (⌘K and ⌘P in the shell), and three for the review fix (⌘K outside the shell)
 
 **Interfaces:**
 - Consumes: `DeskBridge` (`call` with `skills.list`, `library.list`, `catalog.list`, `builtins.list`, `builtins.setEnabled`, `memory.list`), `GlobalStore` (`state().overview`), `RouteService` (`navigate`), `ToastService`, `FakeDeskBridge`, `provideGlobal` (W0c); `ProjectSwitcher`'s ⌘P / Ctrl-P (W0c.12, dialog "Switch project"); `catalogItems`, `install` (W3a.2, specs); `builtin` (W3a.2b, spec); `GROUP_ORDER` (with master's `Built-in skills` group), `rankPalette`, `PaletteItem` (with master's optional `run`), `href` (`@desk/ui-core`); `clip`, `ArtifactKind`, `BuiltinSkillInfo`, `CatalogItem` (`@desk/protocol`); `SkillSummary` (`@desk/client`).
-- Produces: `PaletteToggle` (`open: Signal<boolean>`, `toggle()`, `close()`), `CommandPalette` — `div[deskCommandPalette]`; `App` renders `<div deskCommandPalette>` inside `.app`, after `main.screen` and before the toaster, while `PaletteToggle.open()`.
+- Produces: `PaletteToggle` (`open: Signal<boolean>`, `setEnabled(on)`, `toggle()`, `close()`), `CommandPalette` — `div[deskCommandPalette]`; `App` renders `<div deskCommandPalette>` inside `.app`, after `main.screen` and before the toaster, while `PaletteToggle.open()`.
 
-A port of `CommandPalette.tsx`. The React component keeps `open` itself and returns `null` while closed. Angular has no component without a host element, so the open state and the ⌘K / Ctrl-K listener move to `PaletteToggle` (a root service that listens on `window` from its creation), and `App` renders the palette only while it is open: a closed palette adds no element to `.app`, as on the desktop, and each opening mounts a fresh palette that loads the skills, library titles and catalog once, focuses its box, and searches every project's memory (the first 8) 250 ms after the query reaches three characters. Arrow keys move, Enter opens, Escape closes, and so does a mousedown on the backdrop.
+A port of `CommandPalette.tsx`. The React component keeps `open` itself and returns `null` while closed. Angular has no component without a host element, so the open state and the ⌘K / Ctrl-K listener move to `PaletteToggle` (a root service that listens on `window` from its creation and acts only while `App` shows the shell, where React mounts `CommandPalette`), and `App` renders the palette only while it is open: a closed palette adds no element to `.app`, as on the desktop, and each opening mounts a fresh palette that loads the skills, library titles and catalog once, focuses its box, and searches every project's memory (the first 8) 250 ms after the query reaches three characters. Arrow keys move, Enter opens, Escape closes, and so does a mousedown on the backdrop.
 
 **Master (merged in 8883229):** `CommandPalette.tsx` lists the built-in skills too (`builtins.list`), each as "Turn off …" or "Turn on …" in a `Built-in skills` group that runs `builtins.setEnabled` in place (`PaletteItem.run`, in `@desk/ui-core`'s `palette.ts` since the merge) and toasts; a damaged one is left out. `CommandPalette.test.tsx` gained that case; both are ported here.
 
@@ -39447,16 +39469,18 @@ Create `apps/web-ui/src/app/components/command-palette.spec.ts`:
 
 ```ts
 import { Component, inject } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
+import { GlobalStore } from '../core/global.store';
 import { builtin } from '../testing/builtins';
 import { catalogItems, install } from '../testing/catalog';
 import { FakeDeskBridge, provideGlobal } from '../testing/fake-bridge';
 import { CommandPalette, PaletteToggle } from './command-palette';
 
-/** The palette as App renders it: only while ⌘K has it open. */
+/** The palette as App's shell renders it: ⌘K turned on, and the palette only while ⌘K has it open. */
 @Component({
   selector: 'desk-palette-host',
   imports: [CommandPalette],
@@ -39464,6 +39488,10 @@ import { CommandPalette, PaletteToggle } from './command-palette';
 })
 class PaletteHost {
   protected readonly palette = inject(PaletteToggle);
+
+  constructor() {
+    this.palette.setEnabled(true);
+  }
 }
 
 const overview = [
@@ -39543,6 +39571,24 @@ describe('CommandPalette', () => {
     expect(window.location.hash).toBe('#/map');
   });
 
+  it('keeps a pending memory search when a global push changes something else', async () => {
+    const bridge = await setup();
+    const answers: Array<() => void> = [];
+    bridge.handle('memory.list', () => new Promise((resolve) => answers.push(() => resolve([{ id: 'm1', project_id: 'p1', kind: 'decision', content: 'Send emails on Tuesdays', source: 'user', supersedes: null, superseded_by: null, created_at: 't' }]))));
+    const store = TestBed.inject(GlobalStore);
+    /** A desk:global push that changes the attention count, not the searched projects' ids or names. */
+    const push = () => store.set((s) => ({ ...s, overview: s.overview.map((p) => ({ ...p, attention_count: p.attention_count + 1 })) }));
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.input(await screen.findByRole('combobox'), { target: { value: 'email' } });
+    push();
+    await waitFor(() => expect(answers).toHaveLength(1));
+    push();
+    answers[0]!();
+    await waitFor(() => expect(screen.getByText('Send emails on Tuesdays')).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(bridge.calls.filter((c) => c.channel === 'memory.list')).toHaveLength(1);
+  });
+
   it('takes the focus, says when nothing matches, and closes on Escape, on the backdrop and on ⌘K / Ctrl-K again', async () => {
     await setup();
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
@@ -39583,7 +39629,40 @@ After:
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 ```
 
-and add this case as the last one in `describe('App', …)`:
+The app imports (the review fix), before:
+
+```ts
+import { App } from './app';
+import { ErrorBoundaries, provideErrorBoundaries } from './components/error-boundary';
+```
+
+After:
+
+```ts
+import { App } from './app';
+import { PaletteToggle } from './components/command-palette';
+import { ErrorBoundaries, provideErrorBoundaries } from './components/error-boundary';
+```
+
+After the `go` helper (the review fix), before:
+
+```ts
+const go = (hash: string) => history.replaceState(null, '', hash);
+```
+
+After:
+
+```ts
+const go = (hash: string) => history.replaceState(null, '', hash);
+/** Presses ⌘K on the window as a browser does (a cancelable keydown) and returns the event, to see whether it was prevented. */
+function pressCmdK(): KeyboardEvent {
+  const e = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+  window.dispatchEvent(e);
+  return e;
+}
+```
+
+and add these cases as the last ones in `describe('App', …)` (the first is the task's; the other three are the review fix's):
 
 ```ts
   it('opens the command palette with ⌘K and the project switcher with ⌘P, and adds no palette element while it is closed', async () => {
@@ -39599,6 +39678,41 @@ and add this case as the last one in `describe('App', …)`:
     expect(app.querySelector('.palette-backdrop')).toBeNull();
     fireEvent.keyDown(window, { key: 'p', metaKey: true });
     expect(await screen.findByRole('dialog', { name: 'Switch project' })).toBeTruthy();
+  });
+
+  it('leaves ⌘K to the browser during onboarding, and opens no palette once onboarding is done', async () => {
+    localStorage.removeItem('desk.onboarded');
+    go('#/onboarding');
+    const { bridge, view } = await renderApp();
+    expect(await screen.findByText('Welcome to Desk')).toBeTruthy();
+    expect(pressCmdK().defaultPrevented).toBe(false);
+    localStorage.setItem('desk.onboarded', '1');
+    bridge.emit('desk:navigate', '#/map');
+    expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+    await view.fixture.whenStable();
+    expect(screen.queryByRole('dialog', { name: 'Search Desk' })).toBeNull();
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+  });
+
+  it('leaves ⌘K to the browser while signed out', async () => {
+    const bridge = new FakeDeskBridge();
+    bridge.signOut();
+    go('#/map');
+    await renderApp(bridge);
+    expect(pressCmdK().defaultPrevented).toBe(false);
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+  });
+
+  it('closes an open palette when this browser signs out', async () => {
+    go('#/map');
+    const { bridge, view } = await renderApp();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Search Desk' });
+    bridge.signOut();
+    await view.fixture.whenStable();
+    expect(screen.getByRole('heading', { name: 'Open Desk from your terminal' })).toBeTruthy();
+    // Closed, not only hidden: signing in again shows no palette nobody asked for.
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
   });
 ```
 
@@ -39653,16 +39767,20 @@ const GO: PaletteItem[] = [
 ];
 
 /**
- * Whether the ⌘K palette is open. ⌘K / Ctrl-K toggles it from anywhere on the page (the desktop's CommandPalette keeps
- * this state itself); App renders `div[deskCommandPalette]` only while it is open, so a closed palette adds no element.
+ * Whether the ⌘K palette is open. While App shows the shell, ⌘K / Ctrl-K toggles it from anywhere on the page (the
+ * desktop's CommandPalette keeps this state itself, and only its Shell mounts it); App renders `div[deskCommandPalette]`
+ * only while it is open, so a closed palette adds no element.
  */
 @Injectable({ providedIn: 'root' })
 export class PaletteToggle {
   private readonly value = signal(false);
+  /** Off (the start) leaves ⌘K to the browser: while signed out and during onboarding, App shows no shell. */
+  private readonly enabled = signal(false);
   readonly open: Signal<boolean> = this.value.asReadonly();
 
   constructor() {
     const onKey = (e: KeyboardEvent) => {
+      if (!this.enabled()) return;
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         this.toggle();
@@ -39670,6 +39788,12 @@ export class PaletteToggle {
     };
     window.addEventListener('keydown', onKey);
     inject(DestroyRef).onDestroy(() => window.removeEventListener('keydown', onKey));
+  }
+
+  /** App turns ⌘K on while it shows the shell, and off when it does not, which also closes the palette. */
+  setEnabled(on: boolean): void {
+    this.enabled.set(on);
+    if (!on) this.value.set(false);
   }
 
   toggle(): void {
@@ -39733,6 +39857,10 @@ export class CommandPalette {
   private readonly loaded = signal<Loaded | null>(null);
   private readonly memory = signal<PaletteItem[]>([]);
   protected readonly searching = computed(() => this.query().trim().length >= 3);
+  /** The projects memory is searched in: a desk:global push that changes anything else leaves a pending search alone. */
+  private readonly memoryProjects = computed(() => this.global().overview.slice(0, MAX_MEMORY_PROJECTS).map((p) => ({ id: p.project.id, name: p.project.name })), {
+    equal: (a, b) => a.length === b.length && a.every((p, i) => p.id === b[i]!.id && p.name === b[i]!.name),
+  });
 
   private readonly items = computed(() => {
     const all: PaletteItem[] = [...GO];
@@ -39803,15 +39931,14 @@ export class CommandPalette {
     // Memory is searched on the server, in the first projects, once the query has three characters and rests for 250 ms.
     effect((onCleanup) => {
       const q = this.query().trim();
-      const overview = this.global().overview;
+      const searched = this.memoryProjects();
       if (q.length < 3) {
         this.memory.set([]);
         return;
       }
       let current = true;
       const timer = setTimeout(() => {
-        const searched = overview.slice(0, MAX_MEMORY_PROJECTS);
-        void Promise.all(searched.map((p) => this.bridge.call('memory.list', { projectId: p.project.id, q }).catch(() => []))).then((results) => {
+        void Promise.all(searched.map((p) => this.bridge.call('memory.list', { projectId: p.id, q }).catch(() => []))).then((results) => {
           if (!current) return;
           this.memory.set(
             results.flatMap((rows, i) =>
@@ -39819,8 +39946,8 @@ export class CommandPalette {
                 id: `memory:${m.id}`,
                 group: 'Memory' as const,
                 title: clip(m.content, 90),
-                detail: `${searched[i]!.project.name} · ${m.kind}`,
-                route: href({ name: 'project', id: searched[i]!.project.id, tab: 'memory', q }),
+                detail: `${searched[i]!.name} · ${m.kind}`,
+                route: href({ name: 'project', id: searched[i]!.id, tab: 'memory', q }),
               })),
             ),
           );
@@ -39874,7 +40001,7 @@ export class CommandPalette {
 
 - [ ] **Step 4: Render it from the shell**
 
-All three edits are in `apps/web-ui/src/app/app.ts` (W0c.14, with W0c.15's notifications and W0d.7's folder browser, which stay).
+Every edit below is in `apps/web-ui/src/app/app.ts` (W0c.14, with W0c.15's notifications and W0d.7's folder browser, which stay).
 
 The import, before:
 
@@ -39932,10 +40059,29 @@ After (injecting it here starts the ⌘K listener with the app):
   protected readonly palette = inject(PaletteToggle);
 ```
 
+The constructor (the review fix: ⌘K only in the shell), before:
+
+```ts
+    effect(() => {
+      const name = this.route().name;
+      if (this.bridge.signedOut()) return;
+```
+
+After:
+
+```ts
+    // ⌘K works only in the shell (React's listener lives in CommandPalette, which only its Shell mounts): not while signed
+    // out, and not during onboarding.
+    effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding'));
+    effect(() => {
+      const name = this.route().name;
+      if (this.bridge.signedOut()) return;
+```
+
 - [ ] **Step 5: Run them**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/command-palette.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 4 palette cases, and `app.spec.ts` with its new shortcuts case (W0c.14's "shows the shell…" still sees exactly `header.titlebar`, `nav.subnav`, `main.screen`, `div.toaster` under `.app`: a closed palette adds nothing).
+Expected: PASS: the 5 palette cases (the 4 ported and closing ones, and the review fix's memory-search case), and `app.spec.ts` with its new shortcuts case and the review fix's three ⌘K cases (W0c.14's "shows the shell…" still sees exactly `header.titlebar`, `nav.subnav`, `main.screen`, `div.toaster` under `.app`: a closed palette adds nothing).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -39945,6 +40091,11 @@ Expected: exit 0.
 - `App`'s `imports` array holds W1b.13's `NgTemplateOutlet` and `ProjectFrame`; `CommandPalette` joins it in the same place. The template anchor (`</main>` before `<div deskToaster></div>`) matched as written: W1b.13's project frame sits inside `main.screen`.
 
 The React sources were re-read on `web-ui` after the merge of master (8883229). `CommandPalette.tsx` and `CommandPalette.test.tsx` are as this task describes them (the built-in skills group is the only item master added), and the React `Shell` renders `<CommandPalette />` between `main.screen` and the toaster, as `App` does now. Its ⌘K listener does not skip text boxes, so `PaletteToggle` doesn't either: ⌘K / Ctrl-K toggles the palette while the composer or any box has focus, as on the desktop. ⌘P is `ProjectSwitcher`'s (`(window:keydown)`, W0c.12), which also skips Shift. The ranking is `@desk/ui-core`'s `rankPalette`, which returns matches in `GROUP_ORDER`, so the option index counted across groups is the index in `shown` that Enter opens. The palette looks nothing up by an item id or a project or skill name: each id is only a `track` key. Step 2 failed with `Could not resolve "./command-palette"`, with the Angular compiler's `TS2307` and `NG1010` (the host's `imports` refer to the missing class) beside it.
+
+**Deviation (review fix, after W3b.3):** ⌘K only works in the shell, and the palette's memory search survives unrelated pushes. The blocks above are the files as fixed.
+- ⌘K was live outside the shell. `PaletteToggle` listened from `App`'s start, while React's listener lives inside `CommandPalette`, which only its `Shell` mounts. So on the web, during onboarding or while signed out, ⌘K was `preventDefault`ed (the browser's own shortcut blocked), and the palette opened later, uninvited, when the shell appeared; an open palette also survived signing out and in. `PaletteToggle` now has a private `enabled` signal (off at the start) and `setEnabled(on)`; turning it off also closes the palette, and the key handler returns before `preventDefault` while it is off. `App`'s constructor adds `effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding'))`, the same two conditions its template uses to show the shell. Three `app.spec.ts` cases, each failing first (`expected true to be false`): "leaves ⌘K to the browser during onboarding, and opens no palette once onboarding is done", "leaves ⌘K to the browser while signed out" and "closes an open palette when this browser signs out". The palette spec's `PaletteHost` (the palette as `App`'s shell renders it) now calls `setEnabled(true)` in its constructor, as `App` does in the shell; its four cases are otherwise unchanged.
+- The memory search restarted on every `desk:global` push: its effect read the whole `global()` state, so a push reset the 250 ms timer and dropped answers already on their way. It now reads `memoryProjects`, a `computed` of the first 8 projects' ids and names with an `equal` that compares them, so a push that changes anything else leaves it alone. "keeps a pending memory search when a global push changes something else" (new) pushes an attention-count change during the rest and again while `memory.list` is answering; it failed first (the first answer was dropped and a second search sent).
+- Known gap, as on the desktop: turning a built-in skill off or on from the palette leaves an open Skills screen stale until its next poll. React's palette behaves the same (`builtins.setEnabled` is called in place and nothing tells the Skills screen), so it is not changed here.
 
 - [ ] **Step 6: Commit**
 
@@ -40769,12 +40920,12 @@ Expected: exit 0 (the specs, `parity.spec.ts`'s `ROUTES` table included: it name
 - [ ] **Step 2: The root suite**
 
 Run: `pnpm exec vitest run --maxWorkers=2`
-Expected: PASS, including `apps/desktop/src/renderer/system/SystemScreen.test.tsx` (6) and `CommandPalette.test.tsx` (2), unchanged. No `*.spec.ts` and no `apps/web-ui/e2e` file is collected.
+Expected: PASS, including `apps/desktop/src/renderer/system/SystemScreen.test.tsx` (7, with master's appearance case) and `CommandPalette.test.tsx` (3, with master's built-in skills case), unchanged. No `*.spec.ts` and no `apps/web-ui/e2e` file is collected.
 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's `system/models-editor.spec.ts` (5), `system/system-screen.spec.ts` (8), `components/command-palette.spec.ts` (3), `screen-for.spec.ts` (3), `parity.spec.ts` (7), and `app.spec.ts` with its System heading and shortcuts cases; W0c's `security.spec.ts` finds no forbidden word in the new files.
+Expected: PASS, including this section's `system/models-editor.spec.ts` (7), `system/system-screen.spec.ts` (14), `components/command-palette.spec.ts` (5), `screen-for.spec.ts` (3), `parity.spec.ts` (7), and `app.spec.ts` with its System heading, its shortcuts case and W3b.3's three ⌘K-outside-the-shell cases; W0c's `security.spec.ts` finds no forbidden word in the new files.
 
 - [ ] **Step 4: The invariants, by grep**
 

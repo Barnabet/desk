@@ -39,16 +39,20 @@ const GO: PaletteItem[] = [
 ];
 
 /**
- * Whether the ⌘K palette is open. ⌘K / Ctrl-K toggles it from anywhere on the page (the desktop's CommandPalette keeps
- * this state itself); App renders `div[deskCommandPalette]` only while it is open, so a closed palette adds no element.
+ * Whether the ⌘K palette is open. While App shows the shell, ⌘K / Ctrl-K toggles it from anywhere on the page (the
+ * desktop's CommandPalette keeps this state itself, and only its Shell mounts it); App renders `div[deskCommandPalette]`
+ * only while it is open, so a closed palette adds no element.
  */
 @Injectable({ providedIn: 'root' })
 export class PaletteToggle {
   private readonly value = signal(false);
+  /** Off (the start) leaves ⌘K to the browser: while signed out and during onboarding, App shows no shell. */
+  private readonly enabled = signal(false);
   readonly open: Signal<boolean> = this.value.asReadonly();
 
   constructor() {
     const onKey = (e: KeyboardEvent) => {
+      if (!this.enabled()) return;
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         this.toggle();
@@ -56,6 +60,12 @@ export class PaletteToggle {
     };
     window.addEventListener('keydown', onKey);
     inject(DestroyRef).onDestroy(() => window.removeEventListener('keydown', onKey));
+  }
+
+  /** App turns ⌘K on while it shows the shell, and off when it does not, which also closes the palette. */
+  setEnabled(on: boolean): void {
+    this.enabled.set(on);
+    if (!on) this.value.set(false);
   }
 
   toggle(): void {
@@ -119,6 +129,10 @@ export class CommandPalette {
   private readonly loaded = signal<Loaded | null>(null);
   private readonly memory = signal<PaletteItem[]>([]);
   protected readonly searching = computed(() => this.query().trim().length >= 3);
+  /** The projects memory is searched in: a desk:global push that changes anything else leaves a pending search alone. */
+  private readonly memoryProjects = computed(() => this.global().overview.slice(0, MAX_MEMORY_PROJECTS).map((p) => ({ id: p.project.id, name: p.project.name })), {
+    equal: (a, b) => a.length === b.length && a.every((p, i) => p.id === b[i]!.id && p.name === b[i]!.name),
+  });
 
   private readonly items = computed(() => {
     const all: PaletteItem[] = [...GO];
@@ -189,15 +203,14 @@ export class CommandPalette {
     // Memory is searched on the server, in the first projects, once the query has three characters and rests for 250 ms.
     effect((onCleanup) => {
       const q = this.query().trim();
-      const overview = this.global().overview;
+      const searched = this.memoryProjects();
       if (q.length < 3) {
         this.memory.set([]);
         return;
       }
       let current = true;
       const timer = setTimeout(() => {
-        const searched = overview.slice(0, MAX_MEMORY_PROJECTS);
-        void Promise.all(searched.map((p) => this.bridge.call('memory.list', { projectId: p.project.id, q }).catch(() => []))).then((results) => {
+        void Promise.all(searched.map((p) => this.bridge.call('memory.list', { projectId: p.id, q }).catch(() => []))).then((results) => {
           if (!current) return;
           this.memory.set(
             results.flatMap((rows, i) =>
@@ -205,8 +218,8 @@ export class CommandPalette {
                 id: `memory:${m.id}`,
                 group: 'Memory' as const,
                 title: clip(m.content, 90),
-                detail: `${searched[i]!.project.name} · ${m.kind}`,
-                route: href({ name: 'project', id: searched[i]!.project.id, tab: 'memory', q }),
+                detail: `${searched[i]!.name} · ${m.kind}`,
+                route: href({ name: 'project', id: searched[i]!.id, tab: 'memory', q }),
               })),
             ),
           );

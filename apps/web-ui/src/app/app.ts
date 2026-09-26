@@ -140,6 +140,9 @@ export class App {
       stopNavigate();
       stopDrops();
     });
+    // ⌘K works only in the shell (React's listener lives in CommandPalette, which only its Shell mounts): not while signed
+    // out, and not during onboarding.
+    effect(() => this.palette.setEnabled(!this.bridge.signedOut() && this.route().name !== 'onboarding'));
     effect(() => {
       const name = this.route().name;
       if (this.bridge.signedOut()) return;

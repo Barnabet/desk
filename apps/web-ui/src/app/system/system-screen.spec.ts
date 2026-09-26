@@ -119,13 +119,14 @@ describe('SystemScreen', () => {
     await waitFor(() => expect(fromDeskd.checked).toBe(true));
   });
 
-  it('takes no second click on a notification switch while its permission or write is pending', async () => {
-    let grant: (p: NotificationPermission) => void = () => {};
-    const requestPermission = vi.fn(() => new Promise<NotificationPermission>((resolve) => (grant = resolve)));
+  it('takes no second click on a notification switch while its write is pending', async () => {
+    const requestPermission = vi.fn(async (): Promise<NotificationPermission> => 'granted');
     vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const updates: Array<() => void> = [];
     const patches: Array<() => void> = [];
     const bridge = await setup({
       'app.settings': () => ({ notifications: false }),
+      'app.updateSettings': (p: { notifications?: boolean }) => new Promise((resolve) => updates.push(() => resolve({ notifications: true, appearance: 'system', ...p }))),
       'config.patch': (p: { notifications: string }) => new Promise((resolve) => patches.push(() => resolve(p))),
     });
     const n = screen.getByRole('region', { name: 'Notifications' });
@@ -133,14 +134,15 @@ describe('SystemScreen', () => {
     const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
     await waitFor(() => expect(fromApp.disabled).toBe(false));
     await waitFor(() => expect(fromDeskd.disabled).toBe(false));
-    // On opens the browser's prompt; an Off click before it is answered would be overtaken by the On.
+    // On opens the browser's prompt and writes; an Off write sent before the On's answered could answer first and be undone.
     fireEvent.click(fromApp);
     expect(requestPermission).toHaveBeenCalledTimes(1);
     expect(fromApp.disabled).toBe(true);
     // jsdom still toggles a disabled box on a dispatched click, which a browser never delivers: the switch refuses it too.
     fireEvent.click(fromApp);
+    await waitFor(() => expect(updates.length).toBeGreaterThan(0));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    grant('granted');
+    for (const answer of updates.slice().reverse()) answer();
     await waitFor(() => expect(fromApp.disabled).toBe(false));
     expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings').map((c) => c.input)).toEqual([{ notifications: true }]);
     expect(fromApp.checked).toBe(true);
@@ -154,6 +156,22 @@ describe('SystemScreen', () => {
     await waitFor(() => expect(fromDeskd.disabled).toBe(false));
     expect(bridge.calls.filter((c) => c.channel === 'config.patch').map((c) => c.input)).toEqual([{ notifications: 'off' }]);
     expect(fromDeskd.checked).toBe(false);
+  });
+
+  it('saves app notifications without waiting on a permission prompt nobody answers', async () => {
+    // The browser's prompt stays open: the user never answers it.
+    const requestPermission = vi.fn(() => new Promise<NotificationPermission>(() => {}));
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const bridge = await setup({ 'app.settings': () => ({ notifications: false }) });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromApp = within(n).getByLabelText(/From the app/) as HTMLInputElement;
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    fireEvent.click(fromApp);
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings').map((c) => c.input)).toEqual([{ notifications: true }]));
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    expect(fromApp.checked).toBe(true);
+    expect(within(n).getByText(/has not allowed notifications from Desk yet/)).toBeTruthy();
   });
 
   it("says when desk web runs this repository's deskd", async () => {

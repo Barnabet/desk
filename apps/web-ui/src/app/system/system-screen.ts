@@ -333,9 +333,8 @@ export class NotificationsSection {
   protected readonly appOn = signal<boolean | null>(null);
   protected readonly daemon = signal<'auto' | 'off' | null>(null);
   /**
-   * Each switch takes no click while its permission prompt or write is pending (disabled, and its handler refuses a change
-   * that still arrives): a later click's answer could otherwise land first and be overwritten by the earlier one (an Off
-   * during the prompt, then the On it followed).
+   * Each switch takes no click while its write is pending (disabled, and its handler refuses a change that still arrives):
+   * a later click's answer could otherwise land first and be overwritten by the earlier one's.
    */
   protected readonly appPending = signal(false);
   protected readonly daemonPending = signal(false);
@@ -358,11 +357,12 @@ export class NotificationsSection {
       return;
     }
     const on = box.checked;
-    // Browsers prompt only inside a user gesture: ask before anything is awaited.
-    const asking = on && this.permission() !== 'granted' ? this.notifications.request() : null;
+    // Browsers prompt only inside a user gesture, so the prompt opens here, before anything is awaited. The switch saves
+    // without waiting on it: a prompt nobody answers must not hold the switch, and the hint below says the browser has not
+    // allowed Desk yet.
+    if (on && this.permission() !== 'granted') void this.notifications.request();
     this.appPending.set(true);
     try {
-      if (asking) await asking;
       this.appOn.set((await this.bridge.call('app.updateSettings', { notifications: on })).notifications);
     } catch (err) {
       this.toasts.error(err);

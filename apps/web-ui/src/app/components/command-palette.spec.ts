@@ -1,14 +1,16 @@
 import { Component, inject } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
+import { GlobalStore } from '../core/global.store';
 import { builtin } from '../testing/builtins';
 import { catalogItems, install } from '../testing/catalog';
 import { FakeDeskBridge, provideGlobal } from '../testing/fake-bridge';
 import { CommandPalette, PaletteToggle } from './command-palette';
 
-/** The palette as App renders it: only while ⌘K has it open. */
+/** The palette as App's shell renders it: ⌘K turned on, and the palette only while ⌘K has it open. */
 @Component({
   selector: 'desk-palette-host',
   imports: [CommandPalette],
@@ -16,6 +18,10 @@ import { CommandPalette, PaletteToggle } from './command-palette';
 })
 class PaletteHost {
   protected readonly palette = inject(PaletteToggle);
+
+  constructor() {
+    this.palette.setEnabled(true);
+  }
 }
 
 const overview = [
@@ -93,6 +99,24 @@ describe('CommandPalette', () => {
     fireEvent.click(screen.getByText('Turn off PDF toolkit'));
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'builtins.setEnabled')?.input).toEqual({ name: 'pdf-toolkit', enabled: false }));
     expect(window.location.hash).toBe('#/map');
+  });
+
+  it('keeps a pending memory search when a global push changes something else', async () => {
+    const bridge = await setup();
+    const answers: Array<() => void> = [];
+    bridge.handle('memory.list', () => new Promise((resolve) => answers.push(() => resolve([{ id: 'm1', project_id: 'p1', kind: 'decision', content: 'Send emails on Tuesdays', source: 'user', supersedes: null, superseded_by: null, created_at: 't' }]))));
+    const store = TestBed.inject(GlobalStore);
+    /** A desk:global push that changes the attention count, not the searched projects' ids or names. */
+    const push = () => store.set((s) => ({ ...s, overview: s.overview.map((p) => ({ ...p, attention_count: p.attention_count + 1 })) }));
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.input(await screen.findByRole('combobox'), { target: { value: 'email' } });
+    push();
+    await waitFor(() => expect(answers).toHaveLength(1));
+    push();
+    answers[0]!();
+    await waitFor(() => expect(screen.getByText('Send emails on Tuesdays')).toBeTruthy());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(bridge.calls.filter((c) => c.channel === 'memory.list')).toHaveLength(1);
   });
 
   it('takes the focus, says when nothing matches, and closes on Escape, on the backdrop and on ⌘K / Ctrl-K again', async () => {

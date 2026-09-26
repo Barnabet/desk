@@ -5,12 +5,19 @@ import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import { ev } from '@desk/client/testing';
 import type { AttentionItem } from '@desk/protocol';
 import { App } from './app';
+import { PaletteToggle } from './components/command-palette';
 import { ErrorBoundaries, provideErrorBoundaries } from './components/error-boundary';
 import { LineDiagram } from './conversation/line-diagram';
 import { FakeDeskBridge } from './testing/fake-bridge';
 
 const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
 const go = (hash: string) => history.replaceState(null, '', hash);
+/** Presses ⌘K on the window as a browser does (a cancelable keydown) and returns the event, to see whether it was prevented. */
+function pressCmdK(): KeyboardEvent {
+  const e = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+  window.dispatchEvent(e);
+  return e;
+}
 /** The element the screen boundary renders: the screen's host while healthy (inside the project frame on conversation and threads). */
 const screenHost = () => document.querySelector('main.screen > [deskErrorBoundary] > *, main.screen .project-frame-body > [deskErrorBoundary] > *');
 /** A drag event as a browser sends it (jsdom has no DragEvent): `types` holds 'Files' when files are dragged. */
@@ -293,5 +300,40 @@ describe('App', () => {
     expect(app.querySelector('.palette-backdrop')).toBeNull();
     fireEvent.keyDown(window, { key: 'p', metaKey: true });
     expect(await screen.findByRole('dialog', { name: 'Switch project' })).toBeTruthy();
+  });
+
+  it('leaves ⌘K to the browser during onboarding, and opens no palette once onboarding is done', async () => {
+    localStorage.removeItem('desk.onboarded');
+    go('#/onboarding');
+    const { bridge, view } = await renderApp();
+    expect(await screen.findByText('Welcome to Desk')).toBeTruthy();
+    expect(pressCmdK().defaultPrevented).toBe(false);
+    localStorage.setItem('desk.onboarded', '1');
+    bridge.emit('desk:navigate', '#/map');
+    expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+    await view.fixture.whenStable();
+    expect(screen.queryByRole('dialog', { name: 'Search Desk' })).toBeNull();
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+  });
+
+  it('leaves ⌘K to the browser while signed out', async () => {
+    const bridge = new FakeDeskBridge();
+    bridge.signOut();
+    go('#/map');
+    await renderApp(bridge);
+    expect(pressCmdK().defaultPrevented).toBe(false);
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
+  });
+
+  it('closes an open palette when this browser signs out', async () => {
+    go('#/map');
+    const { bridge, view } = await renderApp();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Search Desk' });
+    bridge.signOut();
+    await view.fixture.whenStable();
+    expect(screen.getByRole('heading', { name: 'Open Desk from your terminal' })).toBeTruthy();
+    // Closed, not only hidden: signing in again shows no palette nobody asked for.
+    expect(TestBed.inject(PaletteToggle).open()).toBe(false);
   });
 });
