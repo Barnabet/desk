@@ -57,7 +57,7 @@ browser (Angular app)  ── http://127.0.0.1:7434 ──►  desk web (Node, H
 - Agent text reaches the page only through `SafeMarkdownComponent` (`div[deskSafeMarkdown]`) or plain interpolation.
 - `desk web` binds loopback only. The Host check (421) runs on every request and WebSocket upgrade, and the Origin check (403) runs on `/rpc` and every upgrade.
 - The code is cross-platform: no macOS-only tools, except in the launchd code paths, which are guarded by platform. Paths go through `node:path`, and the folder opener is chosen per platform.
-- The Electron app's behaviour does not change, and neither do its unit and e2e tests, except for the cases the review fixes below add. A moved test changes only in its import lines and the contract's two renames. Six review fixes reach the desktop on purpose, so both apps agree, each with its own cases (in the desktop's tests; the map fix's are in `packages/ui-styles/src/map.test.ts`): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); and the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`); and Settings shows "Couldn't load this project" when the first load fails, and keeps each control's pending state to its own write (W2b.4's note, `SettingsScreen.tsx`).
+- The Electron app's behaviour does not change, and neither do its unit and e2e tests, except for the cases the review fixes below add. A moved test changes only in its import lines and the contract's two renames. Six review fixes reach the desktop on purpose, so both apps agree, each with its own cases (in the desktop's tests; the map fix's are in `packages/ui-styles/src/map.test.ts`): Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`); dragging a map's background selects no text (W1a.1's note, the shared `map.css`); Attention's ⌘⌫ leaves the note alone, held keys decide once and a late failure keeps the next item pending (W1c.3's note, `AttentionScreen.tsx`); a nameless path saves as `file` and tool rows look thread titles up by their own keys (W2a.1's note, `FileViewer.tsx`, `ChatItems.tsx`); the Library lets go of a drag that leaves the window, counts only uploaded files and stays put after a late upload (W2b.1's note, `LibraryScreen.tsx`); and Settings shows "Couldn't load this project" when the first load fails, and keeps each control's pending state to its own write (W2b.4's note, `SettingsScreen.tsx`).
 - TypeScript is strict with `noUncheckedIndexedAccess`, including the Angular app (`ngc` with strict templates).
 - The machine is shared: at most 2 agents at once, and one Electron or Chromium run at a time.
 
@@ -410,7 +410,7 @@ All paths are relative to the repo root.
 
 ### `apps/desktop` (behaviour unchanged except six review fixes)
 
-Six review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit, cba3b17). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it. Attention's ⌘⌫ leaves the note alone, held keys decide once, and a late failure keeps the next item pending (W1c.3's note, 55af589). A nameless path saves as `file`, and tool rows never title a `thread_id` with a prototype member (W2a.1's note, d1c14db). The Library lets go of a drag that leaves the window, counts only uploaded files, and stays put after a late upload (W2b.1's note, 24d56ad). Settings says it couldn't load a project whose first load fails, and overlapping writes keep their own pending controls (W2b.4's note).
+Six review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit, cba3b17). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it. Attention's ⌘⌫ leaves the note alone, held keys decide once, and a late failure keeps the next item pending (W1c.3's note, 55af589). A nameless path saves as `file`, and tool rows never title a `thread_id` with a prototype member (W2a.1's note, d1c14db). The Library lets go of a drag that leaves the window, counts only uploaded files, and stays put after a late upload (W2b.1's note, 24d56ad). Settings says it couldn't load a project whose first load fails, and overlapping writes keep their own pending controls (W2b.4's note, 3f6a852).
 
 | Path | Change | Tasks |
 |---|---|---|
@@ -28945,7 +28945,7 @@ Note: W2a.1's review fix (`fix(desktop): a nameless path saves as 'file', …`, 
 | W2b.1 | `LibraryScreen`; `#/p/<id>/library[?file=]` shows it | `library-screen.spec.ts` (`LibraryScreen.test.tsx` ported case for case, plus drop and the 25 MB refusal, and the route) |
 | W2b.2 | `MemoryScreen` and `Entry`; `#/p/<id>/memory[?q=]` shows it | `memory-screen.spec.ts` (`MemoryScreen.test.tsx` ported case for case, plus the route's search and the route); `screen-for.spec.ts` updated |
 | W2b.3 | `PolicyEditor`, `sameRules` | `policy-editor.spec.ts` (new: `PolicyEditor.tsx` has no test of its own) |
-| W2b.4 | `SettingsScreen`; `#/p/<id>/settings` shows it | `settings-screen.spec.ts` (`SettingsScreen.test.tsx` ported case for case, plus a source kept as deskd has it and a refused folder, a source added through the folder browser, drafts kept across a same-value push, and the route) |
+| W2b.4 | `SettingsScreen`; `#/p/<id>/settings` shows it | `settings-screen.spec.ts` (11 tests: `SettingsScreen.test.tsx` ported case for case, plus a first load that fails or finds no project, each write's pending control kept to itself, a real settings change followed by the drafts, a source kept as deskd has it and a refused folder, a source added through the folder browser, drafts kept across a same-value push, and the route) |
 | W2b.5 | the W2 knowledge e2e | `apps/web-ui/e2e/knowledge.e2e.test.ts` (3 tests) |
 | W2b.6 | verify: the W2 exit check | `pnpm typecheck`, root Vitest, every web-ui spec, `pnpm test:web-e2e` (built UI check, smoke, flows with W2a's threads, knowledge) |
 
@@ -30886,6 +30886,8 @@ Spec §7 W2 asks for "library upload and preview, add a source" end to end ("thr
 
 **Deviation (e2e):** after "Close preview", the first draft counted the Preview region right after the hash moved and expected 0. The hash changes at once, while the preview goes only when the `hashchange` has reached `RouteService` and the screen has rendered, so the count raced the render (it saw 1 on the first run). The case now waits for the region to detach, a real condition; the code below has it. Nothing else changed: 3 tests, stable over four runs.
 
+**Deviation (review fix, after 196988e):** the settings case waited only for deskd's `review_rounds` after saving How Desk works, then added policy rule 10 at once. The policy draft follows the live settings, so a `project.updated` push landing after "Add rule" reset the draft and rule 10 vanished. The case now also waits until the section is clean (no "Discard changes", Save disabled), which is true only once the push has landed; the code below has it. The Electron `knowledge.e2e.test.ts` had the same race (its drafts reset when the settings change) and gets the same wait, a test-only change.
+
 - [ ] **Step 1: Write the e2e**
 
 The unit specs of W2b.1–W2b.4 already drove the behaviour; this file is written after them, so the shared machine builds the UI and runs Chromium only once for it.
@@ -31077,6 +31079,10 @@ describe('knowledge and settings in the browser', () => {
     await style.getByRole('button', { name: 'Save' }).click();
     await expect.poll(async () => (await client.projects.get(project.id)).project.settings.review_rounds).toBe(3);
     expect((await client.projects.get(project.id)).project.settings.thread_reasoning_effort).toBe('high');
+    // deskd has it; wait until the page does too. The policy draft follows the live settings, so a push that lands
+    // after "Add rule" would reset it. The section is clean (Save off, no Discard) only once the push has landed.
+    await expect.poll(() => style.getByRole('button', { name: 'Discard changes' }).count()).toBe(0);
+    await expect.poll(() => style.getByRole('button', { name: 'Save' }).isDisabled()).toBe(true);
 
     // The policy: one more rule, at the end.
     const policy = page.getByRole('region', { name: 'Policy' });
@@ -31143,7 +31149,7 @@ Expected: PASS. This section changes nothing the root suite runs (bff, ui-core w
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (12 after W2b.1's review fix), `knowledge/memory-screen.spec.ts` (6 after W2b.2's review fix), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (8); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (12 after W2b.1's review fix), `knowledge/memory-screen.spec.ts` (6 after W2b.2's review fix), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (11 after W2b.4's review fix); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
@@ -31160,7 +31166,7 @@ Expected: only W3's lines remain: `notYet('Skills')`, `notYet('The skill catalog
 - [ ] **Step 6: The desktop app is untouched, and nothing is left behind**
 
 Run: `git diff --stat "$(git log -1 --format=%H --grep='the Library screen: filters, upload by picker or drop')~1" HEAD -- apps/desktop`
-Expected: no output: nothing under `apps/desktop` changed since the parent of this section's first commit (W2b.1); the React knowledge and settings screens and their tests are as they were.
+Expected: only the desktop review fixes and the e2e wait: `renderer/knowledge/LibraryScreen.{tsx,test.tsx}` (W2b.1's note, 24d56ad), `renderer/settings/SettingsScreen.{tsx,test.tsx}` (W2b.4's note, 3f6a852) and `e2e/knowledge.e2e.test.ts` (W2b.5's review fix, the wait for the settings push). Nothing else under `apps/desktop` changed since the parent of this section's first commit (W2b.1).
 
 Run: `git status --short`
 Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot folder is outside the repo).
