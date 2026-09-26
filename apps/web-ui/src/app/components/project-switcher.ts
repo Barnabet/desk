@@ -118,6 +118,8 @@ export class ProjectSwitcher {
   protected onWindowKey(e: KeyboardEvent): void {
     if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
       e.preventDefault();
+      // As the React listener: the list is no longer one the pointer opened, so leaving it closes nothing.
+      this.byHover = false;
       if (this.open()) this.open.set(false);
       else this.show(false);
     }
@@ -182,6 +184,8 @@ export class ProjectSwitcher {
   }
 
   private show(byHover: boolean): void {
+    // A close armed by an earlier hover never closes the list it opens now.
+    clearTimeout(this.closeTimer);
     this.byHover = byHover;
     this.query.set('');
     this.active.set(0);

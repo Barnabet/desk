@@ -96,4 +96,27 @@ describe('TitleBar', () => {
     fireEvent.click(within(pop).getByRole('option', { name: /P1/ }));
     expect(window.location.hash).toBe('#/p/b/conversation');
   });
+
+  it('keeps a list that ⌘P opened when the pointer leaves, even after hovering had opened it', async () => {
+    const view = await renderBar({ name: 'map' }, initialGlobalState());
+    const trigger = screen.getByRole('button', { name: 'Switch project (⌘P)' });
+    const dialog = () => screen.queryByRole('dialog', { name: 'Switch project' });
+    const afterHoverClose = () => new Promise((r) => setTimeout(r, 300)).then(() => view.fixture.whenStable());
+    // Hovered open, closed with ⌘P, left, then ⌘P again: the leave arms no close.
+    fireEvent.mouseEnter(trigger);
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    expect(dialog()).toBeNull();
+    fireEvent.mouseLeave(trigger.parentElement!);
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    await afterHoverClose();
+    expect(dialog()).not.toBeNull();
+    // Hovered open and left (a close is armed), then ⌘P twice before it fires: the reopened list stays.
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    fireEvent.mouseEnter(trigger);
+    fireEvent.mouseLeave(trigger.parentElement!);
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    fireEvent.keyDown(window, { key: 'p', metaKey: true });
+    await afterHoverClose();
+    expect(dialog()).not.toBeNull();
+  });
 });
