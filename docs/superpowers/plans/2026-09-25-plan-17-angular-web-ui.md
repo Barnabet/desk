@@ -57,7 +57,7 @@ browser (Angular app)  ── http://127.0.0.1:7434 ──►  desk web (Node, H
 - Agent text reaches the page only through `SafeMarkdownComponent` (`div[deskSafeMarkdown]`) or plain interpolation.
 - `desk web` binds loopback only. The Host check (421) runs on every request and WebSocket upgrade, and the Origin check (403) runs on `/rpc` and every upgrade.
 - The code is cross-platform: no macOS-only tools, except in the launchd code paths, which are guarded by platform. Paths go through `node:path`, and the folder opener is chosen per platform.
-- The Electron app's behaviour does not change, and neither do its unit and e2e tests. A moved test changes only in its import lines and the contract's two renames.
+- The Electron app's behaviour does not change, and neither do its unit and e2e tests. A moved test changes only in its import lines and the contract's two renames. Two review fixes reach the desktop on purpose, so both apps agree: Escape closes only the topmost sheet (W0c.8's note, `Sheet.tsx`), and dragging a map's background selects no text (W1a.1's note, the shared `map.css`).
 - TypeScript is strict with `noUncheckedIndexedAccess`, including the Angular app (`ngc` with strict templates).
 - The machine is shared: at most 2 agents at once, and one Electron or Chromium run at a time.
 
@@ -70,6 +70,7 @@ Every task in W0c–W3b follows these rules. Each section's header repeats the o
   - `input()` / `input.required()` / `output()`; a React value-and-setter prop pair becomes an input plus an output (`value` and `changed`).
   - `@if` / `@for` / `@switch`.
   - The only decorators are `@Component` and `@Injectable`: host bindings and listeners go in `host`, never in `@HostBinding` or `@HostListener`.
+  - Angular writes a `[class]` value that holds several classes in sorted order, while React keeps the order written: `[class]="'plan-stop plan-' + tone"` renders `plan-done plan-stop`, and `[class]="on ? 'files-entry current' : 'files-entry'"` renders `current files-entry`. So when a React `className` mixes fixed and dynamic parts, the fixed classes go in `class` and only the dynamic ones in `[class]` or `[class.x]`: `class="plan-stop" [class]="'plan-' + tone"`, `class="files-entry" [class.current]="on"`, and in `host` `class: 'strip'` beside `'[class]'` and `'[class.selected]'`. Angular writes the static classes first, then the `[class]` value, then each `[class.x]` in the order written, so the element reads as React's does and a spec can compare `className` exactly. A `[class]` that switches between whole class lists (a host that stands for several React roots, `'page muted'` or `'conversation'`) is still written sorted; a spec compares such a host's `className` only when it holds one class.
 - **No wrapper element.** The attribute selector sits on the React component's root element (`section[deskStripRack]`, `header[deskTitleBar]`), so the shared CSS's flex layouts and structural selectors (`>`, `:last-child`) apply unchanged. Two cases need more:
   - A React component that renders a fragment gets a `display: contents` host (`host: { style: 'display: contents' }`).
   - A component that switches its root element keeps one host and binds its class (`'[class]': '…'`).
@@ -388,6 +389,7 @@ All paths are relative to the repo root.
 | `packages/ui-styles/package.json`, `src/index.css`, `src/index.test.ts` | new | W0a.4 |
 | `packages/ui-styles/src/tokens.css`, `tokens.test.ts` | moved from `apps/desktop/src/renderer/theme/` | W0a.4 |
 | `packages/ui-styles/src/{attention,conversation,knowledge,map,settings,skills,system,threads}.css` | moved from `apps/desktop/src/renderer/<area>/<area>.css` | W0a.4 |
+| `packages/ui-styles/src/map.css`; `src/map.test.ts` | modify (`.map-canvas` selects no text on a drag, in both apps); new | W1a.1 (review fix) |
 
 ### `packages/core`, `apps/daemon`, `apps/cli`
 
@@ -399,7 +401,9 @@ All paths are relative to the repo root.
 | `apps/cli/package.json`, `apps/cli/src/commands.ts` | modify (`desk web`) | W0b.13 |
 | `apps/cli/src/web.test.ts` | new | W0b.13 |
 
-### `apps/desktop` (behaviour unchanged)
+### `apps/desktop` (behaviour unchanged except the topmost-sheet Escape rule)
+
+Two review fixes change what the desktop does, so that both apps agree. Escape closes only the topmost sheet (W0c.8's note, from W0d's review; its own `fix(desktop)` commit). Dragging a map's background no longer selects its labels, through the shared `packages/ui-styles/src/map.css` (W1a.1's note), so no file here changes for it.
 
 | Path | Change | Tasks |
 |---|---|---|
@@ -422,6 +426,7 @@ All paths are relative to the repo root.
 | `apps/desktop/src/renderer/system/SystemScreen.tsx` | modify (imports; CSS import; literal daemon operations) | W0a.1, W0a.4, W3b.5 |
 | `apps/desktop/src/renderer/styles.test.ts` | new | W0a.4 |
 | `apps/desktop/src/renderer/theme/tokens.{css,test.ts}`, the eight `renderer/<area>/<area>.css` | moved away | W0a.4 |
+| `apps/desktop/src/renderer/components/Sheet.tsx`; `components/Sheet.test.tsx` | modify (Escape closes only the topmost sheet); new | W0c.8 (review fix, from W0d's review) |
 
 ### `apps/web-server` (`@desk/web-server`, all new)
 
@@ -17273,7 +17278,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are gitignored by W0c).
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Angular commands go through `scripts/ng.mjs` (it picks a Node that satisfies `^22.22.3`); while iterating run only the named spec: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: no parallel test runs, no Electron or Chromium in this section.
 
-**Runs after W0 (W0a–W0d).** It needs `@desk/ui-core` (`layoutMap`, `activityOf`, `href`, `ago`, `clock`, `plural`, `waitsOnYou`; W0a.3), the global stylesheets with `map.css` (W0a.4, loaded globally by W0c.2), the Angular core services and test double (W0c), `map/project-summary.ts` (W0c.12) and the `MapScreen` shell with its spec, which `screenFor` shows for `#/map` (W0d.6, W0d.7). Nothing in `apps/desktop` changes: the React map keeps its files and tests.
+**Runs after W0 (W0a–W0d).** It needs `@desk/ui-core` (`layoutMap`, `activityOf`, `href`, `ago`, `clock`, `plural`, `waitsOnYou`; W0a.3), the global stylesheets with `map.css` (W0a.4, loaded globally by W0c.2), the Angular core services and test double (W0c), `map/project-summary.ts` (W0c.12) and the `MapScreen` shell with its spec, which `screenFor` shows for `#/map` (W0d.6, W0d.7). Nothing in `apps/desktop` changes: the React map keeps its files and tests. W1a.1's review fix changes the shared `map.css`, so the desktop's map stops selecting text on a drag too.
 
 **How the pieces land (one commit per task):**
 
@@ -17296,7 +17301,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are gitignored by W0c).
 
 **Produces (shared names beyond the contract):**
 
-- `apps/web-ui/src/app/map/map-canvas.ts`: `MapCanvas` — `div[deskMapCanvas]` (host class `map-canvas`, `role="group"`), `label = input.required<string>()`, `resized = output<CanvasSize>()` (emitted only when the measured size differs from the last one, starting from `DEFAULT_CANVAS_SIZE`); the content is projected into `.map-layer`. `CanvasSize` (`{ width: number; height: number }`), `DEFAULT_CANVAS_SIZE` (`{ width: 1000, height: 700 }`). W3's `SkillsMapView` (which reuses `map.css` and the React `MapCanvas`) can use them as they are.
+- `apps/web-ui/src/app/map/map-canvas.ts`: `MapCanvas` — `div[deskMapCanvas]` (host class `map-canvas`, `role="group"`), `label = input.required<string>()`, `resized = output<CanvasSize>()` (emitted with the first measurement, always, then whenever the measured size changes; W1a.1's review fix); the content is projected into `.map-layer`. `CanvasSize` (`{ width: number; height: number }`), `DEFAULT_CANVAS_SIZE` (`{ width: 1000, height: 700 }`). W3's `SkillsMapView` (which reuses `map.css` and the React `MapCanvas`) can use them as they are.
 - `apps/web-ui/src/app/map/orbit-map.ts`: `OrbitMap` — `div[deskOrbitMap]` (a `display: contents` host, see the note in W1a.2), inputs `layout: MapLayout`, `projects: ProjectSummary[]`, `attention: AttentionItem[]`, `selected: string | null`, `width: number`, `height: number`, `sunLabel: [string, string]`, `sunAria: string`, `now: number`, output `pick: string` (React's `onSelect`; not `select`, because an output named after a native DOM event also receives that event, the rule W1c and W2a follow).
 - `apps/web-ui/src/app/map/project-list.ts`: `ProjectList` — `div[deskProjectList]` (host class `project-list`), `projects = input.required<ProjectSummary[]>()`.
 - `apps/web-ui/src/app/map/territory-inspector.ts`: `TerritoryInspector` — `article[deskTerritoryInspector]` (host `class="card territory"`, `role="region"`, `aria-label="Territory"`, `aria-live="polite"`), inputs `p: ProjectSummary`, `items: AttentionItem[]`, `now: number`.
@@ -17314,6 +17319,8 @@ apps/web-ui/src/app/map/territory-inspector.ts         new
 apps/web-ui/src/app/map/territory-inspector.spec.ts    new
 apps/web-ui/src/app/map/map-screen.ts                  modify (W0d.6)
 apps/web-ui/src/app/map/map-screen.spec.ts             modify (W0d.6)
+packages/ui-styles/src/map.css                         modify (W1a.1's review fix)
+packages/ui-styles/src/map.test.ts                     new (W1a.1's review fix)
 ```
 
 **Porting notes (decided here, so every task agrees):**
@@ -17327,15 +17334,21 @@ apps/web-ui/src/app/map/map-screen.spec.ts             modify (W0d.6)
 ---
 ### Task W1a.1: `MapCanvas`, the pannable, zoomable surface
 
-`MapCanvas.tsx` has no test of its own (its React coverage is `MapScreen.test.tsx`, which never pans or zooms); the spec below pins the behaviour the port keeps: the layer's transform, zoom around the centre clamped to 0.5–2.5, Reset only once the view moved, wheel pan, ⌘/pinch zoom at the pointer, drag from the background only, and the measured size (1000 × 700 where nothing has a size).
+`MapCanvas.tsx` has no test of its own (its React coverage is `MapScreen.test.tsx`, which never pans or zooms); the spec below pins the behaviour the port keeps: the layer's transform, zoom around the centre clamped to 0.5–2.5, Reset only once the view moved, wheel pan, ⌘/pinch zoom at the pointer, drag from the background only, and the measured size (1000 × 700 where nothing has a size), reported first and then on each change a `ResizeObserver` sees.
 
 **Files:**
 - Create: `apps/web-ui/src/app/map/map-canvas.ts`
 - Test: `apps/web-ui/src/app/map/map-canvas.spec.ts`
+- Review fix: `packages/ui-styles/src/map.css` (modify), `packages/ui-styles/src/map.test.ts` (new)
 
 **Interfaces:**
 - Consumes: nothing beyond `@angular/core`.
 - Produces: `MapCanvas` (`div[deskMapCanvas]`; `label = input.required<string>()`; `resized = output<CanvasSize>()`), `CanvasSize`, `DEFAULT_CANVAS_SIZE`.
+
+**Deviation (review fix):** three changes after W1a's review.
+1. `map-canvas.spec.ts` stubs `ResizeObserver`, which jsdom lacks (as `core/width.spec.ts` does). Before, `map-canvas.ts` returned before observing, and nothing covered the path that `MapScreen` and `SkillsMapView` rely on to follow the window. The case "follows its size with a ResizeObserver, reports only a change, and disconnects when destroyed" covers it (6 tests).
+2. `resized` now reports the first measurement, always, then each change. It first reported only a size that differed from `DEFAULT_CANVAS_SIZE`. `MapScreen`'s `canvasSize` outlives the canvas, so a new canvas at exactly that size left the orbit laid out at the old one. The case: at 1300 × 800, Map → List, the window resized until the canvas measures 1000 × 700 (or nothing, which falls back to it), then Map, and the orbit stayed 920 wide. React's `MapCanvas` held its size per instance. The zoom case now expects `[{ width: 1000, height: 700 }]` where jsdom has no size, and W1a.5's spec covers Map → List → Map.
+3. Dragging the background selected the map's labels, in the desktop app too. `.map-canvas` in `packages/ui-styles/src/map.css` now sets `user-select: none` (and `-webkit-user-select: none` for Safari). Nothing editable sits inside a canvas, and an editable element would stay selectable anyway (its `auto` is `contain`). The legend and the territory card sit outside the canvas. `packages/ui-styles/src/map.test.ts` checks that `.map-canvas` is the only rule in `map.css` that turns selection off. `pnpm test:e2e` and `pnpm test:web-e2e` pass with it.
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -17347,19 +17360,34 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapCanvas, type CanvasSize } from './map-canvas';
 
+/** jsdom has no ResizeObserver: a spec that needs one stubs this in. */
+class FakeObserver {
+  static last: FakeObserver | undefined;
+  target: Element | undefined;
+  readonly disconnect = vi.fn();
+  constructor(readonly callback: () => void) {
+    FakeObserver.last = this;
+  }
+  observe(el: Element): void {
+    this.target = el;
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  FakeObserver.last = undefined;
 });
 
 async function setup() {
   const sizes: CanvasSize[] = [];
-  await render(`<div deskMapCanvas label="Projects map" (resized)="sizes.push($event)"><button type="button">Inside</button></div>`, {
+  const view = await render(`<div deskMapCanvas label="Projects map" (resized)="sizes.push($event)"><button type="button">Inside</button></div>`, {
     imports: [MapCanvas],
     componentProperties: { sizes },
   });
   const canvas = screen.getByRole('group', { name: 'Projects map' });
   const layer = canvas.querySelector<HTMLElement>('.map-layer')!;
-  return { canvas, layer, sizes, user: userEvent.setup() };
+  return { canvas, layer, sizes, user: userEvent.setup(), view };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -17381,9 +17409,9 @@ describe('MapCanvas', () => {
   it('zooms around the centre from its buttons, between 0.5 and 2.5, and resets', async () => {
     const { layer, sizes, user } = await setup();
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
-    // jsdom lays nothing out: the canvas keeps 1000 × 700, so the centre is (500, 350), and reports no size.
+    // jsdom lays nothing out: the canvas keeps 1000 × 700, so the centre is (500, 350), and reports that size once.
     await waitFor(() => expect(layer.style.transform).toBe('translate(-100px, -70px) scale(1.2)'));
-    expect(sizes).toEqual([]);
+    expect(sizes).toEqual([{ width: 1000, height: 700 }]);
     for (let i = 0; i < 8; i++) await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await waitFor(() => expect(layer.style.transform).toMatch(/ scale\(2\.5\)$/));
     await user.click(screen.getByRole('button', { name: 'Reset' }));
@@ -17441,6 +17469,30 @@ describe('MapCanvas', () => {
     await waitFor(() => expect(layer.style.transform).toBe('translate(-130px, -80px) scale(1.2)'));
     expect(sizes).toHaveLength(1);
   });
+
+  it('follows its size with a ResizeObserver, reports only a change, and disconnects when destroyed', async () => {
+    vi.stubGlobal('ResizeObserver', FakeObserver);
+    const { canvas, layer, sizes, user, view } = await setup();
+    await view.fixture.whenStable();
+    const observer = FakeObserver.last!;
+    expect(observer.target).toBe(canvas);
+    expect(sizes).toEqual([{ width: 1000, height: 700 }]);
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1200 });
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 600 });
+    observer.callback();
+    expect(sizes).toEqual([
+      { width: 1000, height: 700 },
+      { width: 1200, height: 600 },
+    ]);
+    // The same size again reports nothing.
+    observer.callback();
+    expect(sizes).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => expect(layer.style.transform).toBe('translate(-120px, -60px) scale(1.2)'));
+    expect(observer.disconnect).not.toHaveBeenCalled();
+    view.fixture.destroy();
+    expect(observer.disconnect).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
@@ -17467,8 +17519,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 /**
  * A pannable, zoomable surface (drag the background, scroll to pan, pinch or ⌘-scroll to zoom), ported from
  * MapCanvas.tsx. The content is projected into the moving `.map-layer`. React handed the measured size to a render
- * prop; here the parent gets it from `resized`, emitted whenever it differs from the last size (the first one being
- * DEFAULT_CANVAS_SIZE). A browser zooms the whole page on a pinch or ⌘-scroll, so those wheel events are cancelled.
+ * prop; here the parent gets it from `resized`: the first measurement, always (so a parent that outlives the canvas,
+ * like MapScreen's Map/List switch, never keeps an earlier canvas's size), then each change. A browser zooms the whole
+ * page on a pinch or ⌘-scroll, so those wheel events are cancelled.
  */
 @Component({
   selector: 'div[deskMapCanvas]',
@@ -17499,7 +17552,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export class MapCanvas {
   /** The surface's accessible name. */
   readonly label = input.required<string>();
-  /** The measured size, each time it changes. */
+  /** The measured size: the first measurement, then each change. */
   readonly resized = output<CanvasSize>();
 
   private readonly host: HTMLElement = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
@@ -17519,16 +17572,18 @@ export class MapCanvas {
   constructor() {
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => {
-      const measure = () => {
-        const next = { width: this.host.clientWidth || DEFAULT_CANVAS_SIZE.width, height: this.host.clientHeight || DEFAULT_CANVAS_SIZE.height };
-        const current = this.size();
-        if (next.width === current.width && next.height === current.height) return;
+      const measure = (): CanvasSize => ({ width: this.host.clientWidth || DEFAULT_CANVAS_SIZE.width, height: this.host.clientHeight || DEFAULT_CANVAS_SIZE.height });
+      const report = (next: CanvasSize) => {
         this.size.set(next);
         this.resized.emit(next);
       };
-      measure();
+      report(measure());
       if (typeof ResizeObserver === 'undefined') return;
-      const ro = new ResizeObserver(measure);
+      const ro = new ResizeObserver(() => {
+        const next = measure();
+        const current = this.size();
+        if (next.width !== current.width || next.height !== current.height) report(next);
+      });
       ro.observe(this.host);
       destroyRef.onDestroy(() => ro.disconnect());
     });
@@ -17580,7 +17635,7 @@ export class MapCanvas {
 - [ ] **Step 4: Run the spec**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/map/map-canvas.spec.ts)`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -18112,6 +18167,8 @@ git commit -m "feat(web-ui): ProjectList, the map's list view" -m "Co-Authored-B
 - Consumes: `ago`, `clock`, `href`, `waitsOnYou` from `@desk/ui-core`; `AttentionItem`, `OverviewThread`, `PlanItem`, `ProjectSummary` from `@desk/protocol`; `projectSummaryLine`, `projectTone`, `Tone` (`./project-summary`, W0c.12); `DeskBridge` (`call('projects.plan', { id })`), `FakeDeskBridge`, `FakeHandlers` (W0c).
 - Produces: `TerritoryInspector` — `article[deskTerritoryInspector]` (host `class="card territory"`, `role="region"`, `aria-label="Territory"`, `aria-live="polite"`); inputs `p: ProjectSummary`, `items: AttentionItem[]` (the project's attention items), `now: number` (all required).
 
+**Deviation (review fix):** the thread line's status is `<span class="territory-thread-status" [class]="'status-text-' + t.status">`. The plan first bound `[class]="'territory-thread-status status-text-' + t.status"`. Angular writes a multi-class `[class]` value in sorted order, so the element read `status-text-waiting territory-thread-status`, and the spec's exact `className` check failed. The fixed class now sits in `class` and only the dynamic one in `[class]`, the rule the port conventions now state (Component shape). The chip, waypoint and status-dot bindings keep one string, as committed. Their fixed class is a prefix of the dynamic one, so it sorts first.
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `apps/web-ui/src/app/map/territory-inspector.spec.ts`:
@@ -18367,7 +18424,7 @@ type PlanKey = { id: string; done: number; total: number };
           <a class="territory-thread" [href]="t.href">
             <span [class]="'status-dot status-dot-' + t.status" aria-hidden="true"></span>
             <span class="grow">{{ t.title }}</span>
-            <span [class]="'territory-thread-status status-text-' + t.status">{{ t.line }}</span>
+            <span class="territory-thread-status" [class]="'status-text-' + t.status">{{ t.line }}</span>
           </a>
         }
       </div>
@@ -18482,11 +18539,13 @@ W0d.6 wrote `map-screen.ts` as a shell and ported "opens the new project sheet".
 
 **Files:**
 - Modify: `apps/web-ui/src/app/map/map-screen.ts` (W0d.6)
-- Test: `apps/web-ui/src/app/map/map-screen.spec.ts` (W0d.6; ports the remaining cases of `apps/desktop/src/renderer/map/MapScreen.test.tsx`: "draws a territory per project and fills the inspector for the selected one", "switches to the list view and remembers it", "labels the amber disc \"Waiting\": only attention items wait on you", and `describe('projectSummaryLine')`; adds "opens in the list view when that was the last choice" and "lays the orbit map out in the measured canvas, leaving the inspector its column")
+- Test: `apps/web-ui/src/app/map/map-screen.spec.ts` (W0d.6; ports the remaining cases of `apps/desktop/src/renderer/map/MapScreen.test.tsx`: "draws a territory per project and fills the inspector for the selected one", "switches to the list view and remembers it", "labels the amber disc \"Waiting\": only attention items wait on you", and `describe('projectSummaryLine')`; adds "opens in the list view when that was the last choice", "lays the orbit map out in the measured canvas, leaving the inspector its column" and, from W1a's review, "lays the orbit map out at the size of the canvas that comes back after the list, not the last one")
 
 **Interfaces:**
 - Consumes: `MapCanvas`, `DEFAULT_CANVAS_SIZE`, `CanvasSize` (W1a.1); `OrbitMap` (W1a.2); `ProjectList` (W1a.3); `TerritoryInspector` (W1a.4); `activityOf`, `layoutMap`, `plural` from `@desk/ui-core`; `GlobalStore`, `RouteService`, `NowService`, `FakeDeskBridge`, `FakeHandlers` (W0c); `projectSummaryLine` (W0c.12, for the ported `describe`).
 - Produces: nothing new beyond W0d.6's `MapScreen` (`div[deskMapScreen]`, `newProject = input(false)`), which now renders the full map. `App` and `screen-for.ts` need no change (W0d.7 already shows it for `#/map`).
+
+**Deviation (review fix):** `canvasSize` outlived the `MapCanvas` it measured, and a new canvas reported its size only when it differed from `DEFAULT_CANVAS_SIZE`. So a canvas that came back after the list (or after the empty state) at exactly that size left the orbit laid out at the last size. W1a.1's `MapCanvas` now always reports its first measurement, so `map-screen.ts` is as below. The spec gains the case "lays the orbit map out at the size of the canvas that comes back after the list, not the last one": Map at 1300 × 800, List, the canvas now measuring 1000 × 700, Map, and the orbit is 620 wide. It fails with the old `MapCanvas` (11 tests).
 
 - [ ] **Step 1: Extend the spec**
 
@@ -18641,6 +18700,21 @@ After:
     expect(screen.getByRole('button', { name: 'deskd, running, model proxy unknown' })).toBeTruthy();
     expect(Array.from(document.querySelector('.orbit-sun-label')!.children, (c) => c.textContent)).toEqual(['1.0.0 · running', 'proxy unknown · 1 thread running']);
   });
+
+  it('lays the orbit map out at the size of the canvas that comes back after the list, not the last one', async () => {
+    const width = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(1300);
+    const height = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(800);
+    const { user } = await setup({ seeded: true });
+    await waitFor(() => expect(document.querySelector('svg.orbit-svg')?.getAttribute('width')).toBe('920'));
+    await user.click(screen.getByRole('button', { name: 'List' }));
+    await waitFor(() => expect(document.querySelector('.map-canvas')).toBeNull());
+    // The window shrank meanwhile, and the new canvas measures exactly DEFAULT_CANVAS_SIZE.
+    width.mockReturnValue(1000);
+    height.mockReturnValue(700);
+    await user.click(screen.getByRole('button', { name: 'Map' }));
+    await waitFor(() => expect(document.querySelector('svg.orbit-svg')?.getAttribute('width')).toBe('620'));
+    expect(document.querySelector('svg.orbit-svg')!.getAttribute('height')).toBe('700');
+  });
 });
 
 describe('projectSummaryLine', () => {
@@ -18659,7 +18733,7 @@ describe('projectSummaryLine', () => {
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/map/map-screen.spec.ts)`
-Expected: FAIL, 5 of 10: "draws a territory per project…" (`Unable to find an accessible element with the role "button" and name "Onboarding revamp: show details"`), "switches to the list view…" and "opens in the list view…" (no button named `Map` or `List`), "labels the amber disc…" (`TypeError`: `.map-legend` is null), "lays the orbit map out…" (`waitFor` times out: no `svg.orbit-svg`). W0d.6's four cases and `projectSummaryLine` (W0c.12's function) pass.
+Expected: FAIL, 6 of 11: "draws a territory per project…" (`Unable to find an accessible element with the role "button" and name "Onboarding revamp: show details"`), "switches to the list view…" and "opens in the list view…" (no button named `Map` or `List`), "labels the amber disc…" (`TypeError`: `.map-legend` is null), "lays the orbit map out in the measured canvas…" and "lays the orbit map out at the size of the canvas that comes back…" (`waitFor` times out: no `svg.orbit-svg`). W0d.6's four cases and `projectSummaryLine` (W0c.12's function) pass.
 
 - [ ] **Step 3: Extend `map-screen.ts`**
 
@@ -18879,10 +18953,10 @@ After:
 - [ ] **Step 4: Run the spec, then every map spec**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/map/map-screen.spec.ts)`
-Expected: PASS (10 tests).
+Expected: PASS (11 tests).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 'src/app/map/*.spec.ts' --include src/app/app.onboarding.spec.ts)`
-Expected: PASS (map-canvas 5, orbit-map 7, project-list 2, territory-inspector 9, map-screen 10, and W0d.7's 7 `app.onboarding.spec.ts` cases, which render `MapScreen` for `#/map` and `#/map?new=1`).
+Expected: PASS (map-canvas 6, orbit-map 7, project-list 2, territory-inspector 9, map-screen 11, and W0d.7's 7 `app.onboarding.spec.ts` cases, which render `MapScreen` for `#/map` and `#/map?new=1`).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -18906,21 +18980,26 @@ Expected: exit 0 (root `tsc`, the desktop's `tsc`, then `ngc -p apps/web-ui/tsco
 - [ ] **Step 2: Root Vitest**
 
 Run: `pnpm exec vitest run --maxWorkers=2`
-Expected: PASS. This section changes no file the root suite collects; the React map's `MapScreen.test.tsx` and `packages/ui-core/src/map-layout.test.ts` still pass unchanged.
+Expected: PASS. The root suite gains `packages/ui-styles/src/map.test.ts` (W1a.1's review fix); the React map's `MapScreen.test.tsx` and `packages/ui-core/src/map-layout.test.ts` still pass unchanged.
 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including the 33 map cases (`map-canvas` 5, `orbit-map` 7, `project-list` 2, `territory-inspector` 9, `map-screen` 10) and W0c's no-`innerHTML` scan (none of the map files uses `[innerHTML]` or `bypassSecurityTrust`).
+Expected: PASS, including the 35 map cases (`map-canvas` 6, `orbit-map` 7, `project-list` 2, `territory-inspector` 9, `map-screen` 11) and W0c's no-`innerHTML` scan (none of the map files uses `[innerHTML]` or `bypassSecurityTrust`).
 
 - [ ] **Step 4: The production build**
 
 Run: `pnpm --filter @desk/web-ui build`
 Expected: `Application bundle generation complete`; `grep -c 'onload' apps/web-ui/dist/browser/index.html` prints `0`.
 
-- [ ] **Step 5: Look at it once**
+- [ ] **Step 5: Both e2e suites (the shared `map.css` changed)**
 
-With deskd running and at least two projects (one with a running thread and an attention item), run `pnpm web` and open the login link it prints (Chromium or Safari). On `#/map`: the sun reads the version and `proxy …`; each project has a disc, an orbit, its moons and spokes; the project that needs you has a pin; pressing another Desk moves the inspector to it, whose plan waypoints load; dragging the background pans; ⌘-scroll or a pinch zooms the map, not the page; Reset appears and restores; List shows the cards and survives a reload; the window at the width of the Electron app's looks like its map. Stop `pnpm web` with Ctrl-C. No commit.
+W1a.1's review fix changes `packages/ui-styles/src/map.css`, which the Electron app loads too. Run `pnpm test:e2e`, then `pnpm test:web-e2e`, one at a time, each after checking that at least 30% of memory is free (`memory_pressure -Q | tail -1`).
+Expected: both pass (the Electron suite's packaged case skips without a packaged app), and no Electron or Chromium process is left running.
+
+- [ ] **Step 6: Look at it once**
+
+With deskd running and at least two projects (one with a running thread and an attention item), run `pnpm web` and open the login link it prints (Chromium or Safari). On `#/map`: the sun reads the version and `proxy …`; each project has a disc, an orbit, its moons and spokes; the project that needs you has a pin; pressing another Desk moves the inspector to it, whose plan waypoints load; dragging the background pans; ⌘-scroll or a pinch zooms the map, not the page; Reset appears and restores; dragging the background selects no text; List shows the cards and survives a reload; the window at the width of the Electron app's looks like its map. Stop `pnpm web` with Ctrl-C. No commit.
 
 ---
 
