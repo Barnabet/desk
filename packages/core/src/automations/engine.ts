@@ -1,3 +1,5 @@
+import { lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   RETRY_BACKOFF_MS,
   SUMMARY_MAX,
@@ -11,19 +13,26 @@ import {
   type StepKind,
   type StepStatus,
 } from '@desk/protocol';
-import type { EventInput } from '@desk/protocol';
+import type { EventInput, Grant, PolicyRule } from '@desk/protocol';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
+import { evaluatePolicy } from '../policy/evaluate';
+import type { SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { getProject } from '../state/queries';
+import { readAgentFile } from '../tools/agent-files';
+import { scrubbedEnv, withSkillEnv } from '../tools/bash';
 import type { SandboxGuard } from '../tools/sandbox';
+import { skillRunTool } from '../tools/skills';
 import { evalExpr, parseExpr, type Expr } from './expr';
-import { ensureStepDir, prepareRunFolder } from './folders';
+import { ensureStepDir, logFile, prepareRunFolder, runDir, stepDir } from './folders';
+import { activeGrantRules, addGrant, deriveGrant } from './grants';
 import { isSettled, readiness, TERMINAL_STEP, type StepState } from './graph';
 import { getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
 import { exprScope, matchUpstream, templateScope, timezoneOf } from './scope';
 import { nextClock } from './schedule';
-import { renderText } from './template';
+import { lastLine, parseStepOutput, runScript } from './script';
+import { renderArgs, renderText } from './template';
 
 export type StepResult =
   | { status: 'succeeded'; route: string | null; outputs: Outputs; summary: string }
@@ -42,6 +51,20 @@ export type EngineHost = {
   onError(err: unknown, context: string): void;
   /** Stores an `automation` message on Desk's stream (label `automation "<title>"`) and wakes Desk. */
   deliverToDesk(projectId: string, label: string, text: string): void;
+  script: ScriptHost;
+};
+
+export type ScriptHost = {
+  /** A usable skill of the project (project → global → built-in), or null (missing, turned off or broken). */
+  resolve(projectId: string, name: string): SkillSummary | null;
+  locate(skill: SkillSummary, script: string): string;
+  /** Builds a built-in's environment on first use and waits for it. */
+  prepare(projectId: string, skill: SkillSummary, signal: AbortSignal): Promise<void>;
+  env(projectId: string, skill: SkillSummary): { bins: string[]; vars: Record<string, string>; blocked: string | null };
+  sandboxEnabled(): Promise<boolean>;
+  policy(projectId: string): PolicyRule[];
+  /** Adds a grant the user remembered (reason `remembered`). */
+  remember(automationId: string, grant: Grant): void;
 };
 
 export type StartRunOptions = {
@@ -75,11 +98,15 @@ export class AutomationEngine {
   private readonly finishedHooks: Array<(run: AutomationRunRow) => void> = [];
   private readonly tickHooks: Array<(now: Date) => void | Promise<void>> = [];
   private readonly cancelHooks: Array<(run: AutomationRunRow, row: StepRunRow) => void> = [];
+  /** Running script processes, by `<run>/<step>`. */
+  private readonly scripts = new Map<string, AbortController>();
 
   constructor(private readonly host: EngineHost) {
     this.register('wait', (ctx) => this.startWait(ctx));
     this.register('tell_desk', (ctx) => this.tellDesk(ctx));
     this.register('ask', (ctx) => this.ask(ctx));
+    this.register('script', (ctx) => this.scriptStep(ctx, false));
+    this.onCancelStep((run, row) => this.scripts.get(`${run.id}/${row.step_id}`)?.abort());
   }
 
   private get db() {
@@ -355,9 +382,106 @@ export class AutomationEngine {
     await this.answerGate(run, row, a);
   }
 
-  /** Script gates are answered in Task 13. */
-  protected async answerGate(_run: AutomationRunRow, _row: StepRunRow, _a: { decision: 'approve' | 'reject'; note?: string; remember?: boolean }): Promise<void> {
-    throw new ConflictError('This step is not waiting for an answer');
+  /** The user's answer to a script step's gate: run it (optionally remembering a grant), or deny it. */
+  protected async answerGate(run: AutomationRunRow, row: StepRunRow, a: { decision: 'approve' | 'reject'; note?: string; remember?: boolean }): Promise<void> {
+    const gate = row.gate!;
+    if (a.decision === 'reject') {
+      this.resolveStep(run.id, row.step_id, { status: 'failed', error: `Denied by the user${a.note ? `: ${a.note}` : ''}`, retryable: false }, { answered_by: 'user', gate, ...(a.note ? { note: a.note } : {}) });
+      return;
+    }
+    const automation = getAutomation(this.db, run.automation_id)!;
+    if (a.remember) {
+      if (automation.grants_suspended) throw new ConflictError('Grants are suspended until you keep them; approve without remembering, or review the change first');
+      this.host.script.remember(automation.id, deriveGrant(gate.tool, { command: gate.subject }, automation.name));
+    }
+    this.stepChanged(run, { step_id: row.step_id, attempt: row.attempt, status: 'running', answered_by: 'user', gate, ...(a.note ? { note: a.note } : {}) });
+    const def = this.definitionOf(run);
+    await this.scriptStep({ run, def, step: def.steps.find((s) => s.id === row.step_id)!, attempt: row.attempt }, true);
+  }
+
+  /**
+   * A script step (spec §4.1): resolve the skill and file, render argv, pass the policy (grants first; `ask` waits for the
+   * user as a gate), then run it in the step folder and read DESK_OUTPUT.
+   */
+  private async scriptStep(ctx: StepContext, gateApproved: boolean): Promise<void> {
+    const { run, def, step, attempt } = ctx;
+    if (step.kind !== 'script') return;
+    const fail = (error: string, retryable = true) => this.resolveStep(run.id, step.id, { status: 'failed', error, retryable });
+    const skill = this.host.script.resolve(run.project_id, step.skill);
+    if (!skill) return fail(`Skill ${step.skill} is not available in this project (missing, turned off or broken)`, false);
+    let file: string;
+    try {
+      file = this.host.script.locate(skill, step.script);
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : String(e), false);
+    }
+    const scope = templateScope({ db: this.db, dataDir: this.host.dataDir, run, def });
+    const args = renderArgs(step.args, scope);
+    const stdin = step.stdin !== undefined ? renderText(step.stdin, scope) : undefined;
+    const sandboxEnabled = await this.host.script.sandboxEnabled();
+    if (!gateApproved) {
+      const automation = getAutomation(this.db, run.automation_id)!;
+      const rules = [...activeGrantRules(automation), ...this.host.script.policy(run.project_id)];
+      const d = evaluatePolicy(skillRunTool, { name: step.skill, script: step.script, args, timeout_s: 120 }, rules, { sandboxAvailable: sandboxEnabled });
+      if (d.action === 'deny') return fail(`Denied by policy. ${d.reason}`, false);
+      if (d.action === 'ask') {
+        const subject = [`${step.skill}/${step.script}`, ...args].join(' ');
+        this.stepChanged(run, { step_id: step.id, attempt, status: 'waiting', gate: { tool: 'skill_run', subject, reason: d.reason } });
+        return;
+      }
+    }
+    const key = `${run.id}/${step.id}`;
+    const controller = new AbortController();
+    this.scripts.set(key, controller);
+    try {
+      await this.host.script.prepare(run.project_id, skill, controller.signal);
+      const env = this.host.script.env(run.project_id, skill);
+      if (env.blocked) return fail(env.blocked);
+      const dir = stepDir(this.host.dataDir, run.id, step.id);
+      // The step folder is the script's: a retry may find a symlink planted by the last attempt. rm never follows one.
+      rmSync(join(dir, '.desk'), { recursive: true, force: true });
+      mkdirSync(join(dir, '.desk'));
+      const output = join(dir, '.desk', 'output.json');
+      const r = await runScript({
+        file,
+        args,
+        ...(stdin !== undefined ? { stdin } : {}),
+        stepDir: dir,
+        env: {
+          ...withSkillEnv(scrubbedEnv(dir), env),
+          SKILL_DIR: skill.dir,
+          SKILL_NAME: skill.name,
+          DESK_RUN_DIR: runDir(this.host.dataDir, run.id),
+          DESK_STEP_DIR: dir,
+          DESK_INPUTS: join(runDir(this.host.dataDir, run.id), 'inputs.json'),
+          DESK_OUTPUT: output,
+          ...(run.test ? { DESK_TEST: '1' } : {}),
+        },
+        sandbox: { enabled: sandboxEnabled, writable: [dir], guard: this.host.guard },
+        timeoutMs: (step.timeout_min ?? 10) * 60_000,
+        signal: controller.signal,
+        logFile: logFile(this.host.dataDir, run.id, step.id),
+      });
+      if (r.aborted) return; // cancelled (the cancel already ended the step) or the daemon is stopping
+      if (r.timedOut) return fail(`Timed out after ${step.timeout_min ?? 10} minutes`);
+      if (r.exitCode !== 0) return fail(`Exit code ${r.exitCode}: ${r.output.slice(-4000)}`);
+      if (!lstatSync(output, { throwIfNoEntry: false })) {
+        this.resolveStep(run.id, step.id, { status: 'succeeded', route: null, outputs: {}, summary: lastLine(r.output) ?? 'Done' });
+        return;
+      }
+      // Read as a file the script controls: regular, no symlink, not swapped, never a secret.
+      let raw: string;
+      try {
+        raw = (await readAgentFile(join(realpathSync(dir), '.desk', 'output.json'), this.host.guard)).toString('utf8');
+      } catch (e) {
+        return fail(`DESK_OUTPUT could not be read: ${e instanceof Error ? e.message : String(e)}`, false);
+      }
+      const parsed = parseStepOutput(raw, step.routes);
+      if (!parsed.ok) return fail(parsed.error, false);
+      this.resolveStep(run.id, step.id, { status: 'succeeded', route: parsed.route, outputs: parsed.outputs, summary: parsed.summary ?? lastLine(r.output) ?? 'Done' });
+    } finally {
+      this.scripts.delete(key);
+    }
   }
 
   /** Deadlines, waits, question expiries and retry backoffs; then the hooks (schedules, timeouts). */

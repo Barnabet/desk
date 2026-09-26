@@ -134,3 +134,8 @@ export function proposedGrants(db: Db, automationId: string, tools: (name: strin
   }
   return out;
 }
+
+/** The policy rules of an automation's grants, or none while they are suspended (spec §5.3). */
+export function activeGrantRules(a: { grants: Grant[]; grants_suspended: boolean }): PolicyRule[] {
+  return a.grants_suspended ? [] : grantRules(a.grants);
+}

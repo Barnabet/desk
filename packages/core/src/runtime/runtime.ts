@@ -87,6 +87,7 @@ import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler, type Job } from './scheduler';
 import { AutomationEngine } from '../automations/engine';
+import { addGrant } from '../automations/grants';
 import { Automations } from '../automations/service';
 import { findAutomation } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
@@ -243,6 +244,23 @@ export class Runtime {
       now: () => this.now(),
       onError: (err, ctx) => this.reportError(err, ctx),
       deliverToDesk: (projectId, label, text) => this.deliverToDesk(projectId, label, text),
+      script: {
+        resolve: (projectId, name) => {
+          const s = this.skills.resolve(name, projectId);
+          return s && !s.error ? s : null;
+        },
+        locate: (skill, script) => locateScript(skill, script, this.skills),
+        prepare: async (projectId, skill, signal) => {
+          await this.prepareSkillRuntimeFor(projectId, skill, signal);
+        },
+        env: (projectId, skill) => this.skillEnvFor(projectId, skill),
+        sandboxEnabled: () => this.sandboxAvailable(),
+        policy: (projectId) => getProject(this.o.store.db, projectId)?.settings.policy ?? [],
+        remember: (automationId, grant) => {
+          const a = this.automations.require(automationId);
+          this.automations.setGrants(a.id, addGrant(a.grants, grant), 'remembered');
+        },
+      },
     });
     this.services = {
       store: o.store,
@@ -795,6 +813,23 @@ export class Runtime {
   }
 
   /** See RuntimeServices.skillEnv. */
+  /** One skill's runtime PATH entries and variables in a project, and why it cannot run yet (`blocked`). */
+  skillEnvFor(projectId: string, only: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null } {
+    const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null, note: null as string | null };
+    const provider = this.o.skillEnv;
+    if (!provider) return out;
+    const t = this.runtimeTarget(only, projectId);
+    const e = provider.env(t.ref, t.builtin ? this.builtins!.runtimeSpec(only.name).digest : undefined);
+    if (e.state === 'preparing') {
+      out.blocked = t.builtin
+        ? `${only.name} is still setting up its Python environment (first use only). Try again in a minute.`
+        : `${only.name}'s runtime is still being set up. Try again in a minute.`;
+    } else if (e.state === 'failed') {
+      out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
+    }
+    return { ...out, bins: e.bins, vars: e.vars, note: e.note };
+  }
+
   skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null } {
     const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null, note: null as string | null };
     const provider = this.o.skillEnv;
@@ -804,17 +839,7 @@ export class Runtime {
       const t = this.runtimeTarget(s, agent.project_id);
       return { ...provider.env(t.ref, t.builtin ? this.builtins!.runtimeSpec(s.name).digest : undefined), builtin: t.builtin };
     };
-    if (only) {
-      const e = envOf(only);
-      if (e.state === 'preparing') {
-        out.blocked = e.builtin
-          ? `${only.name} is still setting up its Python environment (first use only). Try again in a minute.`
-          : `${only.name}'s runtime is still being set up. Try again in a minute.`;
-      } else if (e.state === 'failed') {
-        out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
-      }
-      return { ...out, bins: e.bins, vars: e.vars, note: e.note };
-    }
+    if (only) return this.skillEnvFor(agent.project_id, only);
     for (const name of agent.active_skills) {
       const skill = this.skills.resolve(name, agent.project_id);
       if (!skill) continue;
@@ -941,11 +966,11 @@ export class Runtime {
   }
 
   /** Before a skill run: starts a built-in's environment if needed and waits for it (up to the limit). */
-  async prepareSkillRuntime(agentId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
+  /** Before a skill run in a project: starts a built-in's environment if needed and waits for it (up to the limit). */
+  async prepareSkillRuntimeFor(projectId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
     const provider = this.o.skillEnv;
     if (!provider || !this.builtins) return { waitedMs: 0 };
-    const agent = this.requireAgent(agentId);
-    const t = this.runtimeTarget(skill, agent.project_id);
+    const t = this.runtimeTarget(skill, projectId);
     if (!t.builtin) return { waitedMs: 0 };
     const spec = this.builtins.runtimeSpec(skill.name);
     provider.ensure(t.ref, spec, this.builtins.updated);
@@ -953,6 +978,10 @@ export class Runtime {
     const start = Date.now();
     await provider.waitFor(t.ref, this.o.builtinRuntimeWaitMs ?? BUILTIN_RUNTIME_WAIT_MS, signal);
     return { waitedMs: Date.now() - start };
+  }
+
+  async prepareSkillRuntime(agentId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
+    return this.prepareSkillRuntimeFor(this.requireAgent(agentId).project_id, skill, signal);
   }
 
   /** Removes catalog copies of Desk's own skills that nobody edited, so the built-ins take over (spec §2.3). */
