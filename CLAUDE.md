@@ -18,6 +18,7 @@ pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.
 pnpm desktop      # the Electron app against the repo daemon (Vite HMR)
 pnpm web          # the web UI while you work on it: ng build --watch plus desk web --dev (reloads the page); extra args go to desk web
 pnpm test:e2e     # builds the app and runs the Playwright-for-Electron suite (opens windows; set DESK_E2E_SHOTS=<dir> for screenshots)
+pnpm test:web-e2e # builds the web UI, checks its index.html, and runs the Playwright/Chromium suite against an in-process deskd and desk web (headless; DESK_E2E_SHOTS=<dir> for screenshots)
 pnpm package:desktop   # unsigned (ad hoc) Desk.app → apps/desktop/release/*.dmg + .zip with the bundled deskd and pinned uv; enables e2e/packaged
 pnpm catalog:pin [ids]    # re-pin catalog.json entries: commit SHAs, digests, script counts, Node locks (lock_from)
 pnpm catalog:check [ids]  # install each catalog entry for real (uv on PATH or DESK_UV), build its runtime, run its smoke command sandboxed
@@ -93,6 +94,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - Use Vitest with the harness (`createHarness`, `newRuntime`, `seedThread`) and fake-model scripts. Route by system prompt, or by the number of assistant messages in the request, rather than by call order when agents run concurrently.
   - Sandbox tests skip when `sandbox-exec` is unavailable.
   - Live tests are `*.live.test.ts`.
+  - Web e2e tests are `apps/web-ui/e2e/*.e2e.test.ts` on `startWebE2E` (`apps/web-ui/e2e/harness.ts`). They use Vitest globals and never import `vitest`: `apps/web-ui` resolves its own copy (the Angular runner's).
   - Web UI specs are `apps/web-ui/src/**/*.spec.ts` (Vitest through `@angular/build:unit-test`, jsdom), written with `@testing-library/angular` and `FakeDeskBridge`; they need no daemon or fake model. A port of a React test keeps its cases, visible text and roles. Run one with `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`.
 - **Secrets.** The model API key comes from `DESK_OPENAI_*`, `~/.config/cliproxyapi.env`, or the macOS Keychain (written by `PUT /v1/config/model-endpoint` via `security -i` on stdin, never argv). It must never reach logs, events, `daemon.json`, `config.json`, API responses or tool environments; `scrubbedEnv` builds tool envs.
 - **Two UIs.** From Plan 17 on, a UI feature ships in the Electron renderer and in the web UI together. Put its logic in `@desk/ui-core`, its styles in `@desk/ui-styles` and any new operation in `@desk/bff/contract`, so the two UIs only differ in their components.
