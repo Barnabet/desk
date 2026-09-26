@@ -115,7 +115,7 @@ function Row({ item, projectNames, onReview }: { item: CatalogItem; projectNames
   );
 }
 
-/** The catalog in five bays: cards (or a list) with source, licence, scripts, runtime and an action per entry. */
+/** The catalog in bays (one per category): cards (or a list) with source, licence, scripts, runtime and an action per entry. */
 export function CatalogView({ items, layout, projectNames, onReview }: { items: CatalogItem[]; layout: Layout; projectNames: Map<string, string>; onReview(id: string): void }) {
   return (
     <div className="catalog">

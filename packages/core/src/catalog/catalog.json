@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-24",
+  "updated": "2026-09-26",
   "entries": [
     {
       "id": "paper-lookup",
@@ -361,6 +361,51 @@
       "scripts": 0
     },
     {
+      "id": "web-research",
+      "title": "Web research",
+      "category": "research",
+      "summary": "Search the web without API keys across many engines, read pages as clean Markdown, render JavaScript pages, crawl docs sites, use archives, and cite with verified quotes. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "web-research"
+      },
+      "digest": "sha256:cdf974f1d3f3c0cc3be348566e1268246a9ff98fb85fd47ab38e6fd8cf513f6a",
+      "files": 21,
+      "bytes": 604160,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "httpx[http2,brotli]==0.28.1",
+            "truststore==0.10.4",
+            "certifi==2026.7.22",
+            "trafilatura==2.2.0",
+            "selectolax==0.4.12",
+            "feedparser==6.0.14",
+            "playwright==1.63.0",
+            "pypdfium2==5.11.0",
+            "pillow==12.3.0",
+            "yt-dlp==2026.8.19"
+          ]
+        },
+        "extras": [
+          "browser"
+        ]
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Uses free public search engines without API keys, so results depend on their availability.",
+        "JavaScript pages and screenshots need Chrome or Edge, or a Chromium that Desk downloads once at install.",
+        "Pages behind logins, paywalls or anti-bot walls are never bypassed."
+      ],
+      "scripts": 15
+    },
+    {
       "id": "markitdown",
       "title": "MarkItDown",
       "category": "documents",
@@ -530,68 +575,425 @@
       "scripts": 4
     },
     {
+      "id": "file-inspector",
+      "title": "File inspector",
+      "category": "files",
+      "summary": "Identify any file by content and route it to the right skill, flag zip bombs and damage, survey huge folders, read text of any size and encoding, map and carve binaries, hash. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "file-inspector"
+      },
+      "digest": "sha256:fa1cc01dd3f6f95c266b1be01f7baaf9e46655d517a449fd853c1b74c0ac7ebd",
+      "files": 31,
+      "bytes": 704742,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "puremagic==2.2.0",
+            "charset-normalizer==3.5.1",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Files are identified by their content and routed to the skill that handles them; formats without a signature are reported as generic data or text."
+      ],
+      "scripts": 23
+    },
+    {
       "id": "word-documents",
       "title": "Word documents",
-      "category": "documents",
-      "summary": "Create, read and edit .docx files: write from Markdown, apply templates, replace text, insert and delete sections, set properties. Written by Desk.",
+      "category": "files",
+      "summary": "Read, create, edit, fill, compare, render and convert .docx/.odt/.rtf/.doc; 1,000-page files as a cached, searchable map; exact LibreOffice or built-in Typst renders. Written by Desk.",
       "license": "MIT",
       "homepage": "https://github.com/Barnabet/desk",
       "source": {
         "type": "builtin",
         "path": "word-documents"
       },
-      "digest": "sha256:5866ec3264fc4c54705d9b46647d9aefd0204292a8896a3f8d4b2c83a7274b01",
-      "files": 9,
-      "bytes": 25152,
+      "digest": "sha256:5ea80880ba445c93ccb72df627af3d413e58b20d8a14ce2fc366c53b50b17bc8",
+      "files": 30,
+      "bytes": 837781,
       "runtime": {
         "python": {
           "version": "3.12",
           "packages": [
-            "python-docx==1.2.0"
+            "python-docx==1.2.0",
+            "docxcompose==2.2.0",
+            "mammoth==1.12.2",
+            "pypandoc-binary==1.17",
+            "typst==0.15.0",
+            "pypdfium2==5.11.0",
+            "pillow==12.3.0",
+            "regex==2026.9.10"
           ]
         }
       },
       "smoke": [
-        "sh",
-        "-c",
-        "python3 scripts/docx_create.py --help >/dev/null && python3 scripts/docx_read.py --help >/dev/null && echo ok"
+        "python3",
+        "scripts/selftest.py"
       ],
-      "caveats": [],
-      "scripts": 5
+      "caveats": [
+        "Exact page layout uses LibreOffice when it is installed; otherwise Desk draws a close approximation with its built-in renderer.",
+        "Legacy .doc, .wpd and .pages files need LibreOffice.",
+        "Password-protected documents cannot be opened."
+      ],
+      "scripts": 22
     },
     {
       "id": "pdf-toolkit",
       "title": "PDF toolkit",
-      "category": "documents",
-      "summary": "Read, create and change PDFs: text and tables, merge, split, rotate, fill forms, encrypt, and write reports from Markdown. Written by Desk.",
+      "category": "files",
+      "summary": "Read, search, render, create, fill, stamp, split, compare, optimise and truly redact PDFs, with a map-first path and caching for 1000-page files. No OCR. Written by Desk.",
       "license": "MIT",
       "homepage": "https://github.com/Barnabet/desk",
       "source": {
         "type": "builtin",
         "path": "pdf-toolkit"
       },
-      "digest": "sha256:361b73e635d959e91e0a531346a282d365be016809cb6953ae2d4095dbeb6682",
-      "files": 10,
-      "bytes": 29362,
+      "digest": "sha256:24d1dd0f9e3e2b8c09508a094f6a2377616ac9cddc131c5615556a3a3fe0803b",
+      "files": 29,
+      "bytes": 674621,
       "runtime": {
         "python": {
           "version": "3.12",
           "packages": [
             "pypdf==6.19.0",
+            "pypdfium2==5.11.0",
             "pdfplumber==0.11.10",
-            "reportlab==5.0.1"
+            "pypandoc-binary==1.17",
+            "typst==0.15.0",
+            "pillow==12.3.0"
           ]
         }
       },
       "smoke": [
-        "sh",
-        "-c",
-        "python3 scripts/pdf_create.py --help >/dev/null && python3 scripts/pdf_text.py --help >/dev/null && echo ok"
+        "python3",
+        "scripts/selftest.py"
       ],
       "caveats": [
-        "No OCR: scanned PDFs without a text layer cannot be read."
+        "No OCR: scanned pages are rendered as images for the agent to look at.",
+        "Office inputs to pdf_create need LibreOffice."
       ],
-      "scripts": 7
+      "scripts": 20
+    },
+    {
+      "id": "spreadsheets",
+      "title": "Spreadsheets",
+      "category": "files",
+      "summary": "Read, query, create, edit, recalculate, render and convert Excel, LibreOffice and CSV files. Big workbooks are read as maps, searched and queried with SQL, and edited in place. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "spreadsheets"
+      },
+      "digest": "sha256:5afd5037fc9f1ae318bde65ef4cc94f68f9335cbe8e66df6623aa955108c0d68",
+      "files": 37,
+      "bytes": 1179979,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "openpyxl==3.1.5",
+            "python-calamine==0.8.2",
+            "duckdb==1.5.5",
+            "pillow==12.3.0",
+            "pypdfium2==5.11.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Exact print layout and .xls/.xlsb/.ods fidelity use LibreOffice when it is installed; otherwise Desk renders and converts with its own engine.",
+        "Cell edits to big workbooks are patched in place; structural edits (inserting rows or sheets) still rewrite the whole file and are slow."
+      ],
+      "scripts": 29
+    },
+    {
+      "id": "presentations",
+      "title": "Presentations",
+      "category": "files",
+      "summary": "Create, read, edit, render, lint and convert slide decks (.pptx; .ppt/.odp via LibreOffice): themed builds, big-deck maps and search, spec round trips, cached renders. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "presentations"
+      },
+      "digest": "sha256:9bdfc334fef272a7190e963fde1a07fbdc8f0691f7d7b035ef111fc21ab48774",
+      "files": 30,
+      "bytes": 711549,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "python-pptx==1.0.2",
+            "pillow==12.3.0",
+            "typst==0.15.0",
+            "pypdfium2==5.11.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Exact slide rendering uses LibreOffice when it is installed; otherwise Desk draws a close approximation.",
+        ".ppt, .odp and .key files need LibreOffice."
+      ],
+      "scripts": 23
+    },
+    {
+      "id": "images",
+      "title": "Images and fonts",
+      "category": "files",
+      "summary": "View, convert, edit, annotate, compose, compare and optimise images (HEIC, RAW, SVG, PSD, GIF) and fonts, with tile maps for huge images and paged listings for big folders. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "images"
+      },
+      "digest": "sha256:fe386decd2e444d7ffede459455bd2862f70aafd0c9f9d0b58817c7c1c7690d2",
+      "files": 25,
+      "bytes": 624889,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "pillow==12.3.0",
+            "pillow-heif==1.8.0",
+            "resvg-py==0.5.0",
+            "rawpy==0.25.1",
+            "fonttools==4.66.0",
+            "brotli==1.2.0",
+            "numpy==2.5.3",
+            "pyoxipng==9.1.1"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Huge PNG and TIFF files are decoded in full once, then read from a tile cache.",
+        "PSD files are read as their flattened composite."
+      ],
+      "scripts": 19
+    },
+    {
+      "id": "audio-video",
+      "title": "Audio and video",
+      "category": "files",
+      "summary": "Inspect, watch (contact sheets), hear (waveforms, LUFS), convert, edit, search and transcribe (Whisper) audio, video and subtitles; cached, paged and mapped for long media. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "audio-video"
+      },
+      "digest": "sha256:98375ba98b961b5e9373ba64225e853b7ef79d7d55678813d68796e4ee30436e",
+      "files": 25,
+      "bytes": 638630,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "av==18.1.0",
+            "imageio-ffmpeg==0.6.0",
+            "faster-whisper==1.2.1",
+            "numpy==2.5.3",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Needs macOS 14 or later on Apple silicon (the PyAV wheels require it).",
+        "Transcription downloads a Whisper model on first use (tiny 75 MB up to large-v3 3.1 GB).",
+        "ffmpeg comes from the imageio-ffmpeg wheel (a static GPL build), downloaded by uv on your machine."
+      ],
+      "scripts": 19
+    },
+    {
+      "id": "data-files",
+      "title": "Data files",
+      "category": "files",
+      "summary": "Read, query with SQL, profile, clean, convert, validate, diff and chart CSV, JSON, Parquet, XML, YAML, TOML, SQLite, Avro and SPSS/Stata/SAS files, big or compressed ones included. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "data-files"
+      },
+      "digest": "sha256:f58d122e196596b1fe68a1aad247658ac335d9c8cc6a075bf63d2b4026bda8b1",
+      "files": 24,
+      "bytes": 679038,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "duckdb==1.5.5",
+            "pyarrow==25.0.1",
+            "pandas==3.0.6",
+            "numpy==2.5.3",
+            "pyyaml==6.0.3",
+            "tomli-w==1.2.0",
+            "jsonschema==4.26.0",
+            "fastavro==1.12.2",
+            "cramjam==2.12.1",
+            "pyreadstat==1.3.6",
+            "matplotlib==3.11.2",
+            "pillow==12.3.0",
+            "lxml==6.1.3",
+            "charset-normalizer==3.5.1",
+            "ijson==3.5.1",
+            "pytz==2026.4"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Excel workbooks belong to the spreadsheets skill.",
+        "Compressed inputs are checked against size, ratio and dictionary limits before they are decoded."
+      ],
+      "scripts": 17
+    },
+    {
+      "id": "archives",
+      "title": "Archives",
+      "category": "files",
+      "summary": "List, check, extract, create, read and grep, test, repack and diff zip, tar.*, 7z, rar, iso and more, with bomb and zip-slip guards and cached maps for huge archives. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "archives"
+      },
+      "digest": "sha256:1eca8f51e122bcabbf624d78ce8a76abf558b0c859c1ba90356350ae18343e95",
+      "files": 24,
+      "bytes": 577474,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "py7zr==1.1.3",
+            "pyzipper==0.4.0",
+            "zstandard==0.25.0",
+            "rarfile==4.5",
+            "inflate64==1.0.4",
+            "pyppmd==1.3.1",
+            "psutil==7.2.2"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "RAR archives cannot be created, and some RAR variants need unrar or 7-Zip installed to be read.",
+        ".iso, .cab, .deb, .rpm and similar formats are read-only, through the system's bsdtar (built into macOS and Windows 10+)."
+      ],
+      "scripts": 18
+    },
+    {
+      "id": "markup-ebooks",
+      "title": "Markup and e-books",
+      "category": "files",
+      "summary": "Convert, typeset (Typst), render, read and check Markdown, HTML, EPUB, notebooks and 10 more markup formats; big files open as maps and long ones typeset by section. Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "markup-ebooks"
+      },
+      "digest": "sha256:45d597f54d805ffdbd47bc23733168aa77c4a9751c56996235d5ebec5f89071d",
+      "files": 37,
+      "bytes": 689307,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "pypandoc-binary==1.17",
+            "typst==0.15.0",
+            "lxml==6.1.3",
+            "pypdfium2==5.11.0",
+            "pillow==12.3.0",
+            "pyyaml==6.0.3"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Very long documents are typeset and converted section by section.",
+        "Remote images are downloaded (with time limits) before conversion unless --offline is given."
+      ],
+      "scripts": 21
+    },
+    {
+      "id": "email-calendar",
+      "title": "Email, calendars and contacts",
+      "category": "files",
+      "summary": "Read, search, draft and convert email (.eml .msg .emlx mbox Maildir winmail.dat), calendars (.ics agenda, conflicts, free slots, renders) and contacts (.vcf, CSV). Written by Desk.",
+      "license": "MIT",
+      "homepage": "https://github.com/Barnabet/desk",
+      "source": {
+        "type": "builtin",
+        "path": "email-calendar"
+      },
+      "digest": "sha256:ddd697eda75eabcc9e08dacd42dee7c7095333a03ec1887ceb2c453cef816dad",
+      "files": 30,
+      "bytes": 708061,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "olefile==0.47",
+            "icalendar==7.3.0",
+            "python-dateutil==2.9.0.post0",
+            "tzdata==2026.4",
+            "beautifulsoup4==4.15.0",
+            "markdownify==1.2.3",
+            "charset-normalizer==3.5.1",
+            "markdown-it-py==4.2.0",
+            "typst==0.15.0",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ],
+      "caveats": [
+        "Outlook .pst and .ost archives are not supported; export messages as .msg, .eml or mbox.",
+        "Drafts are written as .eml files; nothing is ever sent.",
+        "Encrypted S/MIME or PGP bodies cannot be read."
+      ],
+      "scripts": 23
     },
     {
       "id": "humanizer",

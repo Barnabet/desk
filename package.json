@@ -17,7 +17,8 @@
     "desktop": "pnpm --filter @desk/desktop dev",
     "package:desktop": "pnpm --filter @desk/desktop package",
     "catalog:pin": "node --import tsx packages/core/scripts/catalog.ts pin",
-    "catalog:check": "node --import tsx packages/core/scripts/catalog.ts check"
+    "catalog:check": "node --import tsx packages/core/scripts/catalog.ts check",
+    "catalog:sync": "node --import tsx packages/core/scripts/catalog.ts sync"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -1,0 +1,22 @@
+/* Desk markup-ebooks: default EPUB stylesheet (mk_convert.py --to epub, epub_tool.py build). Replace with --css FILE. */
+body { margin: 0 5%; line-height: 1.5; text-align: justify; hyphens: auto; -webkit-hyphens: auto; font-family: serif; }
+h1, h2, h3, h4, h5, h6 { text-align: left; line-height: 1.25; page-break-after: avoid; break-after: avoid; font-family: sans-serif; hyphens: none; }
+h1 { font-size: 1.6em; margin: 2em 0 1em; } h2 { font-size: 1.3em; margin: 1.6em 0 .6em; } h3 { font-size: 1.1em; margin: 1.3em 0 .5em; }
+h1.title { font-size: 2em; text-align: center; margin-top: 30%; }
+p { margin: 0; text-indent: 1.3em; orphans: 2; widows: 2; }
+h1 + p, h2 + p, h3 + p, h4 + p, blockquote p, li p, figure + p, hr + p, div + p, table + p, pre + p { text-indent: 0; }
+p + p { margin-top: 0; }
+p.author, p.date, p.subtitle { text-align: center; text-indent: 0; }
+blockquote { margin: 1em 1.5em; font-style: italic; }
+img { max-width: 100%; height: auto; }
+figure { margin: 1.2em 0; text-align: center; page-break-inside: avoid; break-inside: avoid; }
+figcaption { font-size: .9em; font-style: italic; }
+code, pre { font-family: monospace; font-size: .85em; }
+pre { white-space: pre-wrap; margin: 1em 0; padding: .6em; background: #f3f3f3; text-align: left; page-break-inside: avoid; }
+table { border-collapse: collapse; margin: 1em auto; font-size: .9em; }
+th, td { border-bottom: 1px solid #bbb; padding: .25em .6em; text-align: left; }
+th { border-bottom: 2px solid #444; }
+hr { border: 0; text-align: center; margin: 1.5em 0; } hr:after { content: "\2042"; }
+nav#toc ol, nav#landmarks ol { list-style: none; padding-left: 1em; } nav#toc a { text-decoration: none; }
+.footnotes, section.footnotes { font-size: .88em; } a.footnote-ref { vertical-align: super; font-size: .75em; }
+.csl-entry { margin-bottom: .4em; padding-left: 1.5em; text-indent: -1.5em; }

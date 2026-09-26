@@ -61,15 +61,15 @@ describe('skill catalog, end to end', () => {
     await page.evaluate(() => (window.location.hash = '#/skills'));
     await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Catalog' }).click();
     await page.getByRole('heading', { name: 'Skill catalog' }).waitFor();
-    for (const bay of ['Research', 'Documents & data', 'Writing & diagrams', 'Planning', 'Code']) await page.getByRole('region', { name: bay }).waitFor();
-    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(20);
+    for (const bay of ['Research', 'Files & media', 'Documents & data', 'Writing & diagrams', 'Planning', 'Code']) await page.getByRole('region', { name: bay }).waitFor();
+    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(30);
     await shot(page, 'c1-catalog');
 
     await page.getByRole('button', { name: 'Install Word documents' }).click();
     const sheet = page.getByRole('dialog', { name: 'Install Word documents' });
     await sheet.getByText('Written by Desk and shipped with the app').waitFor();
     await sheet.getByRole('button', { name: /scripts\/docx_create\.py/ }).click();
-    await sheet.getByText('Create a .docx', { exact: false }).first().waitFor();
+    await sheet.getByText('Create a Word document', { exact: false }).first().waitFor();
     await shot(page, 'c2-review');
     await sheet.getByRole('button', { name: 'Install', exact: true }).click();
     await sheet.getByText('word-documents is installed for every project.').waitFor();

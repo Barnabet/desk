@@ -3,7 +3,7 @@ import { SkillName, SkillScope } from './domain';
 
 /** The skill catalog: reviewed Agent Skills pinned to a commit and a content digest (spec: 2026-09-24-skill-catalog-design). */
 
-export const CatalogCategory = z.enum(['research', 'documents', 'writing', 'planning', 'code']);
+export const CatalogCategory = z.enum(['research', 'files', 'documents', 'writing', 'planning', 'code']);
 export type CatalogCategory = z.infer<typeof CatalogCategory>;
 
 const noDots = (p: string) => !p.split('/').some((s) => s === '.' || s === '..');

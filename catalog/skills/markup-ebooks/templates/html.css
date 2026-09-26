@@ -1,0 +1,40 @@
+/* Desk markup-ebooks: default stylesheet for standalone HTML (mk_convert.py --to html). Replace with --css FILE. */
+:root { --fg: #1d1f23; --muted: #5b6270; --accent: #1f4e79; --rule: #d9dde3; --code-bg: #f4f5f7; --bg: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #e6e7ea; --muted: #a2a8b3; --accent: #8cb8e8; --rule: #3a3f47; --code-bg: #22262c; --bg: #16181c; }
+}
+html { background: var(--bg); color: var(--fg); }
+body { margin: 0 auto; max-width: 46em; padding: 2.5em 1.25em 4em; font: 17px/1.62 Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif; hyphens: auto; overflow-wrap: break-word; text-rendering: optimizeLegibility; }
+header#title-block-header { margin-bottom: 2.2em; padding-bottom: 1em; border-bottom: 2px solid var(--accent); }
+h1.title { font-size: 2.2em; line-height: 1.15; margin: 0 0 .2em; }
+p.subtitle { font-size: 1.25em; color: var(--muted); margin: 0 0 .6em; }
+p.author, p.date { color: var(--muted); margin: .1em 0; }
+.abstract { margin: 1.2em 0 0; font-size: .95em; }
+.abstract-title { font-weight: 700; color: var(--accent); }
+h1, h2, h3, h4, h5, h6 { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.25; margin: 1.8em 0 .6em; color: var(--fg); }
+h1 { font-size: 1.75em; color: var(--accent); } h2 { font-size: 1.4em; color: var(--accent); } h3 { font-size: 1.15em; } h4, h5, h6 { font-size: 1em; }
+.header-section-number { color: var(--muted); margin-right: .5em; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+img, svg, video { max-width: 100%; height: auto; }
+figure { margin: 1.6em 0; text-align: center; }
+figcaption { font-size: .9em; color: var(--muted); margin-top: .5em; }
+blockquote { margin: 1.2em 0; padding: .1em 1.1em; border-left: 3px solid var(--rule); color: var(--muted); font-style: italic; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2.4em auto; width: 40%; }
+code, kbd, samp, pre { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: .86em; }
+code { background: var(--code-bg); padding: .1em .3em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: .9em 1.1em; border-radius: 5px; overflow-x: auto; line-height: 1.45; border-left: 3px solid var(--accent); }
+pre code { background: none; padding: 0; font-size: 1em; }
+table { border-collapse: collapse; margin: 1.4em auto; font-size: .92em; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: block; overflow-x: auto; max-width: 100%; width: fit-content; }
+caption { caption-side: top; color: var(--muted); font-size: .95em; margin-bottom: .4em; }
+th, td { padding: .4em .8em; border-bottom: 1px solid var(--rule); vertical-align: top; }
+thead th { border-top: 2px solid var(--fg); border-bottom: 1.5px solid var(--fg); text-align: left; }
+tbody tr:nth-child(even) { background: color-mix(in srgb, var(--code-bg) 60%, transparent); }
+dt { font-weight: 700; margin-top: .6em; } dd { margin-left: 1.5em; }
+nav#TOC { border: 1px solid var(--rule); border-radius: 6px; padding: .6em 1.4em; margin: 0 0 2em; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: .92em; }
+nav#TOC > ul { padding-left: 1em; } nav#TOC ul { list-style: none; } nav#TOC a { text-decoration: none; }
+.footnotes { font-size: .88em; color: var(--muted); border-top: 1px solid var(--rule); margin-top: 3em; }
+.csl-entry { margin-bottom: .5em; padding-left: 1.5em; text-indent: -1.5em; }
+math[display="block"] { margin: 1em 0; overflow-x: auto; }
+span.smallcaps { font-variant: small-caps; } span.underline { text-decoration: underline; }
+.task-list { list-style: none; padding-left: 1.2em; }
+@media print { body { max-width: none; padding: 0; font-size: 11pt; } a { color: inherit; } pre { white-space: pre-wrap; } }

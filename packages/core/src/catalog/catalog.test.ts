@@ -10,7 +10,7 @@ describe('the shipped catalog', () => {
   const catalog = CatalogFile.parse(raw);
 
   it('validates, with unique ids and fully pinned sources', () => {
-    expect(catalog.entries.length).toBe(20);
+    expect(catalog.entries.length).toBe(30);
     expect(new Set(catalog.entries.map((e) => e.id)).size).toBe(catalog.entries.length);
     for (const e of catalog.entries) {
       if (e.source.type === 'github') expect(e.source.sha, e.id).toMatch(/^[0-9a-f]{40}$/);

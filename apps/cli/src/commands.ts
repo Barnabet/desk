@@ -31,6 +31,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const CATEGORY_TITLES: Array<[CatalogItem['category'], string]> = [
   ['research', 'Research'],
+  ['files', 'Files & media'],
   ['documents', 'Documents & data'],
   ['writing', 'Writing & diagrams'],
   ['planning', 'Planning'],

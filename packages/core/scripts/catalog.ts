@@ -3,6 +3,7 @@
  *
  *   pnpm catalog:pin [ids…] [--ref <ref>]   resolve refs to commits and (re)compute digests in catalog.json
  *   pnpm catalog:check [ids…]               install each entry for real, build its runtime, run its smoke command in the sandbox
+ *   pnpm catalog:sync                       copy catalog/shared/*.py over the copies inside first-party skills' scripts/
  *
  * pin works on the raw JSON so new entries can start with `"sha": "HEAD"` and `"digest": "pending"`. Entries whose
  * repository archive is too large switch to files mode (the skill's files listed and fetched one by one). A Node
@@ -10,7 +11,7 @@
  * `npm:<spec> …` from npm itself (resolved as of the catalog date, no scripts run).
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +42,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const CATALOG = join(here, '..', 'src', 'catalog', 'catalog.json');
 const BUILTIN = join(here, '..', '..', '..', 'catalog', 'skills');
+const SHARED = join(here, '..', '..', '..', 'catalog', 'shared');
 const LICENSE_FILE = /^(LICEN[CS]E|COPYING)(\.[A-Za-z]+)?$/i;
 
 const [command, ...rest] = process.argv.slice(2);
@@ -50,9 +52,30 @@ const ids = rest.filter((a, i) => !a.startsWith('--') && (refFlag < 0 || i !== r
 
 if (command === 'pin') await pin();
 else if (command === 'check') process.exit((await check()) ? 0 : 1);
+else if (command === 'sync') sync();
 else {
-  console.error('usage: catalog.ts pin|check [ids…] [--ref <ref>]');
+  console.error('usage: catalog.ts pin|check|sync [ids…] [--ref <ref>]');
   process.exit(2);
+}
+
+// ── sync ────────────────────────────────────────────────────────────────
+
+/** First-party skills keep their own copies of catalog/shared modules (each skill installs alone); refresh them. */
+function sync(): void {
+  const shared = readdirSync(SHARED).filter((f) => f.endsWith('.py'));
+  let changed = 0;
+  for (const skill of readdirSync(BUILTIN)) {
+    for (const name of shared) {
+      const copy = join(BUILTIN, skill, 'scripts', name);
+      if (!existsSync(copy)) continue;
+      const want = readFileSync(join(SHARED, name), 'utf8');
+      if (readFileSync(copy, 'utf8') === want) continue;
+      writeFileSync(copy, want);
+      changed++;
+      console.log(`synced ${skill}/scripts/${name}`);
+    }
+  }
+  console.log(changed ? `${changed} copies updated; run pnpm catalog:pin for the skills listed` : 'all copies are current');
 }
 
 // ── pin ─────────────────────────────────────────────────────────────────
