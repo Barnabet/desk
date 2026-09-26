@@ -31434,7 +31434,8 @@ export function whoLabel(origin: string | null, titles: Map<string, string>): st
   return origin;
 }
 
-type Lists = { global: SkillSummary[]; projects: Record<string, SkillSummary[]> };
+/** The global list, and each project's own keyed by project id (a Map, so no id reads a prototype member). */
+type Lists = { global: SkillSummary[]; projects: Map<string, SkillSummary[]> };
 
 /** What `injectSkills` gives a screen (the React `useSkills` result). */
 export type SkillsState = {
@@ -31464,7 +31465,7 @@ export function injectSkills(): SkillsState {
         bridge.call('skills.list', {}),
         ...ids.map((id) => bridge.call('skills.list', { projectId: id }).catch((): SkillSummary[] => [])),
       ]);
-      lists.set({ global: all ?? [], projects: Object.fromEntries(ids.map((id, i) => [id, perProject[i] ?? []])) });
+      lists.set({ global: all ?? [], projects: new Map(ids.map((id, i) => [id, perProject[i] ?? []])) });
       error.set(null);
     } catch (err) {
       error.set(describeError(err).message);
@@ -31490,7 +31491,7 @@ export function injectSkills(): SkillsState {
     const projects = overview();
     return buildSkillGraph({
       global: l.global,
-      projects: projects.map((p) => ({ id: p.project.id, name: p.project.name, skills: l.projects[p.project.id] ?? [] })),
+      projects: projects.map((p) => ({ id: p.project.id, name: p.project.name, skills: l.projects.get(p.project.id) ?? [] })),
       threads: projects.flatMap((p) => p.threads.map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: p.project.id, skills: t.skills }))),
     });
   });
@@ -31506,6 +31507,8 @@ Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation:** the plan first kept React's `Record<string, SkillSummary[]>` for the per-project lists (`Object.fromEntries`, read with `l.projects[p.project.id]`). Lookups keyed by strings from outside the UI use a `Map` or `Object.hasOwn` (W2a.1's prototype-lookup sweep), so `Lists.projects` is a `Map` built with `new Map(...)` and read with `get`; a project id named after an `Object.prototype` member can no longer hand `buildSkillGraph` a function for its skills. Behaviour is otherwise React's.
 
 - [ ] **Step 5: Commit**
 
