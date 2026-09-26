@@ -26,6 +26,9 @@ async function setup(handlers: FakeHandlers, overview: ProjectSummary[]) {
   return { bridge, lists, skills: view.fixture.componentInstance.skills };
 }
 
+/** Lets every pending bridge answer land (a macrotask runs after all queued microtasks). */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe('scopeArg and whoLabel', () => {
   it('names the project only for project skills', () => {
     expect(scopeArg({ scope: 'global', name: 'brand-voice' })).toEqual({});
@@ -78,6 +81,29 @@ describe('injectSkills', () => {
     TestBed.inject(GlobalStore).set(state([summary('p1', 'Onboarding'), summary('p2', 'Tax')]));
     await vi.waitFor(() => expect(skills.nodes().map((n) => n.key)).toEqual(['project:p2:receipts']));
     expect(lists()).toEqual([{}, { projectId: 'p1' }, {}, { projectId: 'p1' }, { projectId: 'p2' }]);
+  });
+
+  it('keeps the newest lists when an older refresh answers last', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const { skills, lists } = await setup(
+      {
+        'skills.list': async () => {
+          if (++calls > 1) return [sk('new-skill', 'global')];
+          await gate;
+          return [sk('old-skill', 'global')];
+        },
+      },
+      [],
+    );
+    window.dispatchEvent(new Event('focus'));
+    await vi.waitFor(() => expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']));
+    release();
+    await gate;
+    await settle();
+    expect(lists()).toEqual([{}, {}]);
+    expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']);
   });
 
   it('lists again when the window gets focus, and keeps the last lists when that fails', async () => {

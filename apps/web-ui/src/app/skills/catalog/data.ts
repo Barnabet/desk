@@ -82,13 +82,19 @@ export function injectCatalog(): CatalogState {
   const global = inject(GlobalStore);
   const items = signal<CatalogItem[] | null>(null);
   const error = signal<string | null>(null);
+  // Refreshes overlap (a runtime change, focus, the 3 s poll); only the latest one's answer lands, so a slow earlier
+  // answer never puts back an older catalog.
+  let latest = 0;
 
   const refresh = async (): Promise<void> => {
+    const run = ++latest;
     try {
-      items.set(await bridge.call('catalog.list', {}));
+      const next = await bridge.call('catalog.list', {});
+      if (run !== latest) return;
+      items.set(next);
       error.set(null);
     } catch (err) {
-      error.set(describeError(err).message);
+      if (run === latest) error.set(describeError(err).message);
     }
   };
 

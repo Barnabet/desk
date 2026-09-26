@@ -46,8 +46,12 @@ export function injectSkills(): SkillsState {
   const projectIds = computed(() => overview().map((p) => p.project.id).join(','));
   const lists = signal<Lists | null>(null);
   const error = signal<string | null>(null);
+  // Refreshes overlap (focus, the timer, a new project); only the latest one's answer lands, so a slow earlier answer
+  // never overwrites a newer list.
+  let latest = 0;
 
   const refresh = async (): Promise<void> => {
+    const run = ++latest;
     const joined = untracked(projectIds);
     const ids = joined ? joined.split(',') : [];
     try {
@@ -55,10 +59,11 @@ export function injectSkills(): SkillsState {
         bridge.call('skills.list', {}),
         ...ids.map((id) => bridge.call('skills.list', { projectId: id }).catch((): SkillSummary[] => [])),
       ]);
+      if (run !== latest) return;
       lists.set({ global: all ?? [], projects: new Map(ids.map((id, i) => [id, perProject[i] ?? []])) });
       error.set(null);
     } catch (err) {
-      error.set(describeError(err).message);
+      if (run === latest) error.set(describeError(err).message);
     }
   };
 
