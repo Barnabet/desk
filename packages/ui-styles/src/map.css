@@ -26,6 +26,10 @@
   overflow: hidden;
   cursor: grab;
   touch-action: none;
+  /* Dragging the background pans the map and must not select its labels. A text box would stay selectable
+     (editable elements' auto is contain); the legend and the territory card sit outside the canvas. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 .map-layer {
   position: absolute;
