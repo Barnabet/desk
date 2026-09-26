@@ -10,6 +10,7 @@ import { ToastService } from '../components/toast';
 import { GlobalStore } from '../core/global.store';
 import { RouteService } from '../core/route.service';
 import { SESSION_RELEASE_DELAY } from '../core/session.service';
+import { screenFor } from '../screen-for';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
 import { AttentionScreen } from './attention-screen';
 
@@ -271,5 +272,10 @@ describe('AttentionScreen', () => {
     // Outside a text box, ⌘⌫ denies.
     expect(fireEvent.keyDown(document.body, { key: 'Backspace', metaKey: true })).toBe(false);
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'denied' }));
+  });
+
+  it('is what #/attention shows, with the item the route names', () => {
+    expect(screenFor({ name: 'attention', item: 'approval:a1' })).toEqual({ component: AttentionScreen, inputs: { itemId: 'approval:a1' } });
+    expect(screenFor({ name: 'attention' })).toEqual({ component: AttentionScreen, inputs: { itemId: undefined } });
   });
 });
