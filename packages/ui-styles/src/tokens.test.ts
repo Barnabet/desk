@@ -9,8 +9,8 @@ describe('title bar drag region', () => {
   });
 });
 
-/** Every place that draws UI: these shared styles, the desktop renderer and the pure view logic. */
-const ROOTS = ['./', '../../../apps/desktop/src/renderer/', '../../ui-core/src/'].map((p) => new URL(p, import.meta.url));
+/** Every place that draws UI: these shared styles, the desktop renderer, the pure view logic and the web UI. */
+const ROOTS = ['./', '../../../apps/desktop/src/renderer/', '../../ui-core/src/', '../../../apps/web-ui/src/'].map((p) => new URL(p, import.meta.url));
 const REPO = new URL('../../../', import.meta.url);
 const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\((?!var\()/;
 

@@ -53,9 +53,9 @@ describe('OrbitMap', () => {
     expect(svg.querySelector('g circle')!.namespaceURI).toBe('http://www.w3.org/2000/svg');
     const spokes = Array.from(svg.querySelectorAll('path'), (p) => [p.getAttribute('stroke'), p.getAttribute('stroke-width'), p.getAttribute('stroke-dasharray')]).sort();
     expect(spokes).toEqual([
-      ['#2F5BD3', '2.5', null],
-      ['#A15C00', '2', '4 4'],
-      ['#B7C4E6', '1.5', '2 4'],
+      ['var(--muted-blue)', '1.5', '2 4'],
+      ['var(--run)', '2.5', null],
+      ['var(--wait)', '2', '4 4'],
     ]);
   });
 

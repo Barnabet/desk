@@ -83,10 +83,10 @@ describe('RouteView', () => {
     // Brief → revision is the route taken; revision → messages → now is live; now → next is dashed.
     const paths = [...document.querySelectorAll('.route-svg path')].map((p) => [p.getAttribute('stroke'), p.getAttribute('stroke-width')]);
     expect(paths).toEqual([
-      ['#1C1B18', '2'],
-      ['#2F5BD3', '2.5'],
-      ['#2F5BD3', '2.5'],
-      ['#8A857B', '2'],
+      ['var(--ink)', '2'],
+      ['var(--run)', '2.5'],
+      ['var(--run)', '2.5'],
+      ['var(--muted)', '2'],
     ]);
   });
 });

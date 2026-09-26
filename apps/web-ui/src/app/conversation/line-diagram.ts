@@ -54,9 +54,9 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
       <div class="line-canvas" [style.width.px]="geo.contentWidth" [style.height.px]="geo.height">
         <svg [attr.width]="geo.contentWidth" [attr.height]="geo.height" aria-hidden="true" class="line-svg">
           @for (t of geo.ticks; track t.t) {
-            <path [attr.d]="'M' + t.x + ' 24 V' + geo.height" stroke="#E3DFD6" stroke-dasharray="2 4" />
+            <path [attr.d]="'M' + t.x + ' 24 V' + geo.height" stroke="var(--rule-soft)" stroke-dasharray="2 4" />
           }
-          <path [attr.d]="'M' + geo.nowX + ' 22 V' + geo.height" stroke="#4A4740" stroke-dasharray="3 3" />
+          <path [attr.d]="'M' + geo.nowX + ' 22 V' + geo.height" stroke="var(--text-min)" stroke-dasharray="3 3" />
           @for (l of geo.lanes; track l.lane.threadId) {
             <g [attr.opacity]="l.lane.archived ? 0.45 : 1">
               <path [attr.d]="l.fork" fill="none" [attr.stroke]="l.forkColor" stroke-width="4" stroke-linecap="round" />
@@ -67,19 +67,19 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
                 <path [attr.d]="d" fill="none" [attr.stroke]="l.rejoinColor" stroke-width="4" stroke-linecap="round" />
               }
               @if (l.stub; as stub) {
-                <path class="line-stub" [attr.d]="stub.d" fill="none" stroke="#8A857B" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 5" />
+                <path class="line-stub" [attr.d]="stub.d" fill="none" stroke="var(--muted)" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 5" />
               }
               @for (m of l.marks; track $index) {
                 @if (m.kind === 'detour') {
                   <g>
-                    <path [attr.d]="detour(m.x, l.y)" fill="none" stroke="#EFEAE0" stroke-width="9" />
+                    <path [attr.d]="detour(m.x, l.y)" fill="none" stroke="var(--ground)" stroke-width="9" />
                     <path [attr.d]="detour(m.x, l.y)" fill="none" [attr.stroke]="l.color" stroke-width="4" stroke-linecap="round" />
                   </g>
                 }
               }
             </g>
           }
-          <path [attr.d]="'M' + (geo.trunkStart - 6) + ' ' + geo.trunkY + ' H' + geo.nowX" stroke="#1C1B18" stroke-width="6" stroke-linecap="round" />
+          <path [attr.d]="'M' + (geo.trunkStart - 6) + ' ' + geo.trunkY + ' H' + geo.nowX" stroke="var(--ink)" stroke-width="6" stroke-linecap="round" />
         </svg>
 
         @for (t of geo.ticks; track t.t) {
@@ -204,14 +204,14 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
 
     <div class="line-legend" aria-hidden="true">
       <span><span class="line-swatch line-swatch-desk"></span>Desk</span>
-      <span><span class="line-swatch" style="background: #2F5BD3"></span>running</span>
-      <span><span class="line-swatch" style="background: #8A857B"></span>done</span>
-      <span><span class="line-swatch" style="background: #A15C00"></span>waiting</span>
+      <span><span class="line-swatch" style="background: var(--run)"></span>running</span>
+      <span><span class="line-swatch" style="background: var(--muted)"></span>done</span>
+      <span><span class="line-swatch" style="background: var(--wait)"></span>waiting</span>
       <span><span class="line-legend-dot"></span>needs you</span>
       @if (hasQuestions()) {
         <span><span class="line-legend-q"></span>question</span>
       }
-      <span><svg width="18" height="10" viewBox="0 0 18 10"><path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="#2F5BD3" stroke-width="2" stroke-linecap="round" /></svg>fallback</span>
+      <span><svg width="18" height="10" viewBox="0 0 18 10"><path d="M1 8 H4 C6 8 6 2 9 2 C12 2 12 8 14 8 H17" fill="none" stroke="var(--run)" stroke-width="2" stroke-linecap="round" /></svg>fallback</span>
     </div>
   `,
 })

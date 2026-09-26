@@ -8,18 +8,18 @@ import { projectSummaryLine, projectTone, type Tone } from './project-summary';
 type ToneColors = { fill: string; stroke: string; orbit: string; text: string };
 
 const TONE: Record<Tone, ToneColors> = {
-  running: { fill: '#E3E8F5', stroke: '#C9D3EC', orbit: '#B7C4E6', text: '#1F45A8' },
-  waiting: { fill: '#F3E6CF', stroke: '#E6D3AF', orbit: '#E0C99E', text: '#7A4500' },
-  idle: { fill: '#E6E1D7', stroke: '#D6CFC1', orbit: '#D6CFC1', text: '#4A4740' },
+  running: { fill: 'var(--run-pastel)', stroke: 'var(--run-ring)', orbit: 'var(--muted-blue)', text: 'var(--run-text)' },
+  waiting: { fill: 'var(--wait-pastel)', stroke: 'var(--wait-ring)', orbit: 'var(--wait-orbit)', text: 'var(--wait-text)' },
+  idle: { fill: 'var(--idle-pastel)', stroke: 'var(--rule)', orbit: 'var(--rule)', text: 'var(--text-min)' },
 };
 
 const SPOKE: Partial<Record<AgentStatus, { stroke: string; width: number; dash?: string }>> = {
-  running: { stroke: '#2F5BD3', width: 2.5 },
-  waiting: { stroke: '#A15C00', width: 2, dash: '4 4' },
-  queued: { stroke: '#A15C00', width: 2, dash: '4 4' },
-  failed: { stroke: '#C4441C', width: 2, dash: '4 4' },
+  running: { stroke: 'var(--run)', width: 2.5 },
+  waiting: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
+  queued: { stroke: 'var(--wait)', width: 2, dash: '4 4' },
+  failed: { stroke: 'var(--accent)', width: 2, dash: '4 4' },
 };
-const QUIET_SPOKE = { stroke: '#B7C4E6', width: 1.5, dash: '2 4' };
+const QUIET_SPOKE = { stroke: 'var(--muted-blue)', width: 1.5, dash: '2 4' };
 
 const CALLOUT: Record<AttentionItem['kind'], { label: string; glyph: string }> = {
   approval: { label: 'Approval', glyph: '!' },
@@ -65,7 +65,7 @@ type TerritoryView = {
   template: `
     <svg class="orbit-svg" [attr.width]="width()" [attr.height]="height()" aria-hidden="true">
       @for (r of layout().rings; track $index) {
-        <circle [attr.cx]="layout().sun.x" [attr.cy]="layout().sun.y" [attr.r]="r" fill="none" stroke="#D3CCBE" stroke-dasharray="3 6"></circle>
+        <circle [attr.cx]="layout().sun.x" [attr.cy]="layout().sun.y" [attr.r]="r" fill="none" stroke="var(--orbit)" stroke-dasharray="3 6"></circle>
       }
       @for (v of views(); track v.id) {
         <g>

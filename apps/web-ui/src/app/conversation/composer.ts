@@ -25,7 +25,7 @@ import { DeskBridge } from '../core/desk-bridge';
     <div class="composer-bar">
       <button type="button" class="icon-btn" aria-label="Attach a file" [disabled]="uploading() > 0" (click)="attachInput.click()">
         <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <path d="M11.5 6.5L7 11a3 3 0 0 1-4.2-4.2l4.6-4.6a2 2 0 0 1 2.8 2.8L5.6 9.6a1 1 0 0 1-1.4-1.4L8.4 4" fill="none" stroke="#3D3A34" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M11.5 6.5L7 11a3 3 0 0 1-4.2-4.2l4.6-4.6a2 2 0 0 1 2.8 2.8L5.6 9.6a1 1 0 0 1-1.4-1.4L8.4 4" fill="none" stroke="var(--text)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
       <input #attachInput type="file" multiple hidden data-testid="attach-input" (change)="attach(attachInput)" />

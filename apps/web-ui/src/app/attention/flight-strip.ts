@@ -35,8 +35,8 @@ const CAP_COLOR: Record<AttentionItem['kind'], string> = {
       <span class="strip-col strip-wait" aria-hidden="true">
         <span class="strip-label">Waiting</span>
         <svg width="76" height="10" viewBox="0 0 76 10">
-          <rect x="0" y="3" width="76" height="4" rx="2" fill="#E6E0D4" />
-          <path d="M38 1 V9 M75.5 1 V9" stroke="#8A857B" stroke-width="1" />
+          <rect x="0" y="3" width="76" height="4" rx="2" fill="var(--rule-soft)" />
+          <path d="M38 1 V9 M75.5 1 V9" stroke="var(--muted)" stroke-width="1" />
           <rect x="0" y="3" [attr.width]="barWidth()" height="4" rx="2" [attr.fill]="capColor()" />
         </svg>
         <span class="strip-age-big">{{ age() }}</span>

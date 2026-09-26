@@ -36,10 +36,10 @@ type PointView = { stop: Stop; x: number; y: number; r: number; t: StopText; lab
     <div class="route-canvas" [style.height.px]="l().height">
       <svg [attr.width]="l().width" [attr.height]="l().height" aria-hidden="true" class="route-svg">
         @for (p of l().pieces; track $index) {
-          <path [attr.d]="p.d" fill="none" [attr.stroke]="p.live ? '#2F5BD3' : '#1C1B18'" [attr.stroke-width]="p.live ? 2.5 : 2" />
+          <path [attr.d]="p.d" fill="none" [attr.stroke]="p.live ? 'var(--run)' : 'var(--ink)'" [attr.stroke-width]="p.live ? 2.5 : 2" />
         }
         @if (l().tailPath; as tail) {
-          <path [attr.d]="tail" fill="none" stroke="#8A857B" stroke-width="2" stroke-dasharray="4 5" />
+          <path [attr.d]="tail" fill="none" stroke="var(--muted)" stroke-width="2" stroke-dasharray="4 5" />
         }
       </svg>
       @for (p of points(); track p.stop.n) {
