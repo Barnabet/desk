@@ -24,10 +24,16 @@ import {
   type ProjectSettingsPatch,
   type ReasoningEffort,
   type ServiceStopReason,
+  type BuiltinSkillInfo,
+  type BuiltinsFile,
+  type RuntimeState,
   type SkillScope,
   type StoredEvent,
+  type WritableSkillScope,
 } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
+import { BuiltinSkills, builtinEnabled } from '../skills/builtins';
+import type { SkillRef } from '../catalog/service';
 import { AttachmentStore } from '../attachments/store';
 import { uniqueLibraryName } from '../library/library';
 import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
@@ -101,8 +107,12 @@ export type RuntimeOptions = {
   proxyProbeIntervalMs?: number;
   /** Called with internal errors that are not tied to a request (defaults to console.error). */
   onError?: (err: unknown, context: string) => void;
-  /** Desk-managed runtimes of catalog skills (PATH for scripts, removal with the skill). */
+  /** Desk-managed runtimes of catalog and built-in skills (PATH for scripts, removal with the skill). */
   skillEnv?: SkillEnvProvider;
+  /** Desk's own skills: the folder they ship in (the bundled catalog/skills) and, in tests, another manifest. */
+  builtins?: { root: string; manifest?: BuiltinsFile };
+  /** How long skill_run waits for a built-in's environment (default BUILTIN_RUNTIME_WAIT_MS; tests shorten it). */
+  builtinRuntimeWaitMs?: number;
   /** Remind Desk to update What's up when it ends a turn after changing things (default on; the test harness turns it off). */
   whatsUpReminder?: boolean;
   /** Files agents may never read or replace: deskd's token file, its database, model credentials (see `SandboxGuard`). */
@@ -116,6 +126,9 @@ export type RuntimeOptions = {
   /** Lifecycle wakes (thread starts, notices to Desk) a project may have in a rolling hour before it pauses (default 150). */
   lifecycleBudget?: number;
 };
+
+/** How long a skill run waits for a built-in skill's first-use environment before asking the agent to retry. */
+export const BUILTIN_RUNTIME_WAIT_MS = 5 * 60_000;
 
 /** What the send path records on a message besides its text (design spec §1.2). */
 export type DeliverOptions = {
@@ -153,6 +166,8 @@ export class Runtime {
   /** Project services' processes (long-lived, outlive their thread's runs). */
   readonly serviceProcs: ServiceProcesses;
   readonly skills: SkillStore;
+  /** Desk's built-in skills (absent in daemons and tests that don't ship them). */
+  readonly builtins?: BuiltinSkills;
   /** Images shown to models (`<data>/attachments`), served by GET /v1/attachments/:sha256. */
   readonly attachments: AttachmentStore;
   /** What agents' commands and file tools may never touch; deskd adds its port with `guardPort`. */
@@ -198,7 +213,11 @@ export class Runtime {
         )
       : undefined;
     this.guard = sandboxGuard({ dataDir: o.dataDir, secrets: o.secrets ?? [], readOnly: o.readOnly ?? [] });
-    this.skills = new SkillStore(o.dataDir, this.guard);
+    if (o.builtins) {
+      this.builtins = new BuiltinSkills({ root: o.builtins.root, ...(o.builtins.manifest ? { manifest: o.builtins.manifest } : {}), enabled: (n) => builtinEnabled(o.store.db, n) });
+      this.builtins.verify();
+    }
+    this.skills = new SkillStore(o.dataDir, this.guard, this.builtins);
     this.attachments = new AttachmentStore(join(o.dataDir, 'attachments'));
     this.services = {
       store: o.store,
@@ -225,6 +244,7 @@ export class Runtime {
       resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),
       updateSettings: (projectId, patch) => this.updateSettings(projectId, patch),
       skillEnv: (agentId, only) => this.skillEnv(agentId, only),
+      prepareSkillRuntime: (agentId, skill, signal) => this.prepareSkillRuntime(agentId, skill, signal),
       startService: (projectId, input) => this.startService(projectId, input),
       stopService: (serviceId, by) => this.stopService(serviceId, by),
       restartService: (serviceId, by) => this.restartService(serviceId, by),
@@ -557,6 +577,10 @@ export class Runtime {
       );
     }
     const skills = this.requireUsableSkills(project.id, input.skills ?? []);
+    for (const n of skills) {
+      const s = this.skills.resolve(n, project.id);
+      if (s) this.ensureRuntimeFor(s, project.id);
+    }
     let gitSource: { id: string; path: string } | undefined;
     if (input.gitSourceId) {
       const source = getSource(this.o.store.db, input.gitSourceId);
@@ -741,17 +765,25 @@ export class Runtime {
     const provider = this.o.skillEnv;
     if (!provider) return out;
     const agent = this.requireAgent(agentId);
-    const refOf = (s: { scope: SkillScope; name: string }) => ({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: agent.project_id } : {}) });
+    const envOf = (s: { scope: SkillScope; name: string }) => {
+      const t = this.runtimeTarget(s, agent.project_id);
+      return { ...provider.env(t.ref, t.builtin ? this.builtins!.runtimeSpec(s.name).digest : undefined), builtin: t.builtin };
+    };
     if (only) {
-      const e = provider.env(refOf(only));
-      if (e.state === 'preparing') out.blocked = `${only.name}'s runtime is still being set up. Try again in a minute.`;
-      else if (e.state === 'failed') out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
+      const e = envOf(only);
+      if (e.state === 'preparing') {
+        out.blocked = e.builtin
+          ? `${only.name} is still setting up its Python environment (first use only). Try again in a minute.`
+          : `${only.name}'s runtime is still being set up. Try again in a minute.`;
+      } else if (e.state === 'failed') {
+        out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
+      }
       return { ...out, bins: e.bins, vars: e.vars, note: e.note };
     }
     for (const name of agent.active_skills) {
       const skill = this.skills.resolve(name, agent.project_id);
       if (!skill) continue;
-      const e = provider.env(refOf(skill));
+      const e = envOf(skill);
       if (e.state !== 'ready') continue;
       out.bins.push(...e.bins);
       // Earlier skills come first on PATH, so their variables win too (VIRTUAL_ENV and PLAYWRIGHT_BROWSERS_PATH match the python that runs).
@@ -764,6 +796,7 @@ export class Runtime {
   activateSkills(agentId: string, names: string[]): SkillSummary[] {
     const agent = this.requireAgent(agentId);
     const resolved = this.requireUsableSkills(agent.project_id, names).map((n) => this.skills.resolve(n, agent.project_id)!);
+    for (const s of resolved) this.ensureRuntimeFor(s, agent.project_id);
     const next = [...new Set([...agent.active_skills, ...names])];
     if (next.length !== agent.active_skills.length) {
       this.o.store.append({ project_id: agent.project_id, agent_id: agent.id, type: 'agent.skills_changed', payload: { skills: next } });
@@ -786,6 +819,131 @@ export class Runtime {
     });
     if (!inside) throw new ValidationError(`${path} is not inside a workspace of this project`);
     return real;
+  }
+
+  // ── built-in skills (spec 2026-09-26-builtin-skills-design) ─────────────
+
+  private requireBuiltin(name: string): BuiltinSkills {
+    if (!this.builtins?.entry(name)) throw new NotFoundError(`Unknown built-in skill: ${name}`);
+    return this.builtins;
+  }
+
+  /** Desk's built-in skills with their switch, damage, shadowing (for `projectId`, else global) and environment. */
+  listBuiltins(projectId?: string): BuiltinSkillInfo[] {
+    if (projectId) this.requireOpenProject(projectId);
+    const b = this.builtins;
+    if (!b) return [];
+    return b.names().map((name) => {
+      const e = b.entry(name)!;
+      const shadowed_by =
+        projectId && existsSync(join(this.skills.root('project', projectId), name)) ? 'project' : existsSync(join(this.skills.root('global'), name)) ? 'global' : null;
+      const env = this.o.skillEnv?.env({ scope: 'builtin', name }, b.runtimeSpec(name).digest);
+      return {
+        name,
+        title: e.title,
+        summary: e.summary,
+        caveats: e.caveats,
+        description: this.skills.get('builtin', name)?.description ?? '',
+        scripts: e.scripts,
+        enabled: b.enabled(name),
+        broken: b.broken(name),
+        shadowed_by,
+        runtime: env ? { state: env.state, reason: env.reason } : { state: 'none' as const, reason: null },
+      };
+    });
+  }
+
+  getBuiltin(name: string): SkillDetail {
+    this.requireBuiltin(name);
+    return this.skills.get('builtin', name)!;
+  }
+
+  setBuiltinEnabled(name: string, enabled: boolean): BuiltinSkillInfo {
+    this.requireBuiltin(name);
+    this.o.store.append({ project_id: GLOBAL_PROJECT_ID, agent_id: null, type: 'skill.builtin_toggled', payload: { name, enabled } });
+    return this.listBuiltins().find((b) => b.name === name)!;
+  }
+
+  /** An ordinary, editable copy of a built-in skill; it shadows the built-in until deleted. */
+  duplicateBuiltin(name: string, to: { scope: WritableSkillScope; projectId?: string }) {
+    const b = this.requireBuiltin(name);
+    if (existsSync(join(this.skills.root(to.scope, to.projectId), name))) throw new ConflictError(`A ${to.scope} skill named ${name} already exists`);
+    return this.saveSkill(
+      { scope: to.scope, name, fromDir: b.dir(name), ...(to.projectId ? { projectId: to.projectId } : {}) },
+      { origin: `builtin:${name}@${b.entry(name)!.digest.slice(7, 19)}`, changeNote: 'Duplicated from the built-in skill' },
+    );
+  }
+
+  retryBuiltinRuntime(name: string): { state: RuntimeState; reason: string | null } {
+    const b = this.requireBuiltin(name);
+    const provider = this.o.skillEnv;
+    if (!provider) throw new ConflictError('Skill runtimes are not available in this daemon');
+    const ref: SkillRef = { scope: 'builtin', name };
+    provider.remove(ref);
+    provider.ensure(ref, b.runtimeSpec(name), b.updated);
+    const e = provider.env(ref);
+    return { state: e.state, reason: e.reason };
+  }
+
+  /**
+   * Whose environment a skill runs with: its own (catalog installs); a built-in's for the built-in itself; and a
+   * built-in's for an own skill of the same name that has none (a duplicate), so copies keep their packages.
+   */
+  private runtimeTarget(skill: { scope: SkillScope; name: string }, projectId: string): { ref: SkillRef; builtin: boolean } {
+    const own: SkillRef = { scope: skill.scope, name: skill.name, ...(skill.scope === 'project' ? { projectId } : {}) };
+    if (!this.builtins?.entry(skill.name)) return { ref: own, builtin: false };
+    if (skill.scope === 'builtin') return { ref: own, builtin: true };
+    const provider = this.o.skillEnv;
+    if (provider && provider.env(own).state === 'none') return { ref: { scope: 'builtin', name: skill.name }, builtin: true };
+    return { ref: own, builtin: false };
+  }
+
+  private ensureRuntimeFor(skill: { scope: SkillScope; name: string }, projectId: string): void {
+    const provider = this.o.skillEnv;
+    if (!provider || !this.builtins) return;
+    const t = this.runtimeTarget(skill, projectId);
+    if (t.builtin) provider.ensure(t.ref, this.builtins.runtimeSpec(skill.name), this.builtins.updated);
+  }
+
+  /** Before a skill run: starts a built-in's environment if needed and waits for it (up to the limit). */
+  async prepareSkillRuntime(agentId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
+    const provider = this.o.skillEnv;
+    if (!provider || !this.builtins) return { waitedMs: 0 };
+    const agent = this.requireAgent(agentId);
+    const t = this.runtimeTarget(skill, agent.project_id);
+    if (!t.builtin) return { waitedMs: 0 };
+    const spec = this.builtins.runtimeSpec(skill.name);
+    provider.ensure(t.ref, spec, this.builtins.updated);
+    if (provider.env(t.ref, spec.digest).state !== 'preparing') return { waitedMs: 0 };
+    const start = Date.now();
+    await provider.waitFor(t.ref, this.o.builtinRuntimeWaitMs ?? BUILTIN_RUNTIME_WAIT_MS, signal);
+    return { waitedMs: Date.now() - start };
+  }
+
+  /** Removes catalog copies of Desk's own skills that nobody edited, so the built-ins take over (spec §2.3). */
+  adoptBuiltins(): string[] {
+    const b = this.builtins;
+    if (!b) return [];
+    const last = new Map<string, { origin: string; deleted: boolean }>();
+    for (const e of this.o.store.list({ types: ['skill.saved', 'skill.deleted'] })) {
+      if (e.type !== 'skill.saved' && e.type !== 'skill.deleted') continue;
+      if (!b.entry(e.payload.name) || e.payload.scope === 'builtin') continue;
+      const key = `${e.payload.scope}:${e.payload.scope === 'project' ? e.project_id : ''}:${e.payload.name}`;
+      last.set(key, { origin: e.payload.origin, deleted: e.type === 'skill.deleted' });
+    }
+    const removed: string[] = [];
+    for (const [key, l] of last) {
+      const [scope, projectId, name] = key.split(':') as ['global' | 'project', string, string];
+      if (l.deleted || !l.origin.startsWith(`catalog:${name}@`)) continue;
+      try {
+        if (!existsSync(join(this.skills.root(scope, projectId || undefined), name))) continue;
+        this.deleteSkill(scope, name, projectId || undefined, { origin: 'desk:builtin' });
+        removed.push(key);
+      } catch (err) {
+        this.o.onError?.(err, `adopting built-in ${name}`);
+      }
+    }
+    return removed;
   }
 
   private requireUsableSkills(projectId: string, names: string[]): string[] {

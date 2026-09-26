@@ -101,7 +101,7 @@ export { drainInbox, hasPendingInbox } from './agent/inbox';
 export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agent/prompts';
 export { runAgent, SHUTDOWN_REASON, type RunDeps, type RunOutcome } from './agent/run';
 export { Scheduler, type Job, type SchedulerOptions } from './runtime/scheduler';
-export { Runtime, type RuntimeOptions } from './runtime/runtime';
+export { BUILTIN_RUNTIME_WAIT_MS, Runtime, type RuntimeOptions } from './runtime/runtime';
 export { deskToolsFor, threadToolsFor, toolsForRole } from './runtime/toolsets';
 export { gitCommitTool, gitDiffTool, gitPushTool, gitStatusTool, gitTools, openPrTool } from './tools/git';
 export { bashReadonlyTool } from './tools/bash';
