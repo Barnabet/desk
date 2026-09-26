@@ -27,10 +27,7 @@
 
 ### 2.1 Store and resolution (`skills/store.ts`, `skills/builtins.ts`)
 
-- **Scope.** `SkillScope` (protocol `domain.ts`) becomes `['project', 'global', 'builtin']`. `SkillSummary` gains three fields:
-  - `enabled` (built-ins only)
-  - `broken` (built-ins only, with the reason in `error`)
-  - `shadowed_by` (`'global' | 'project' | null`)
+- **Scope.** `SkillScope` (protocol `domain.ts`) becomes `['project', 'global', 'builtin']`. The new `WritableSkillScope` (`['project', 'global']`) is used wherever a skill is written: `skill_write`, `skill_delete` and catalog installs. A broken built-in carries its reason in `error`.
 - **The `BuiltinSkills` module** (new, `skills/builtins.ts`):
   - It loads the manifest and verifies each tree at start with `readTree` + `treeDigest`, the helpers the catalog already uses.
   - It exposes `list()`, `get(name)`, `dir(name)` and `entry(name)`, the last returning the manifest record.
@@ -57,6 +54,7 @@
   - returns the existing failure message with the reason, if the build failed.
 
   A run that had to wait prefixes its result with "Set up `<name>`'s Python environment (first use, <n> s)."
+- **Copies share the built-in's environment.** A global or project skill named like a built-in, which has no Desk-managed environment of its own, uses the built-in's. The main case is a skill duplicated from a built-in. A copy of `pdf-toolkit` therefore still has pypdf and the rest.
 - **`bash` with active built-ins.** `skillEnv` keeps its current behaviour: only ready runtimes join PATH. Activation has already called `ensure`.
 - **Crash recovery.** At daemon start, any runtime whose last state is `preparing`, catalog or built-in, is recorded as `none` with reason "interrupted", and its partial directory is removed. This fixes the existing stuck-`preparing` gap.
 
@@ -78,11 +76,12 @@ The migration is idempotent: a second run finds nothing to do. It needs no marke
 ## 3. Events, API and CLI
 
 - **Event:** `skill.builtin_toggled {name, enabled}` (project_id null), projected into `builtin_skill_settings(name, enabled)`. This needs an additive migration.
-- **`GET /v1/skills` and `GET /v1/projects/:id/skills`** include built-ins with:
-  - `scope: 'builtin'`
-  - `enabled`, `broken`, `shadowed_by`
-  - `runtime` (state and reason)
+- **`GET /v1/skills` and `GET /v1/projects/:id/skills` are unchanged:** they list the user's own skills. Existing clients treat every non-project skill there as an editable global one, so built-ins get their own list.
 - **New routes:**
+  - `GET /v1/builtin-skills[?project_id=]` lists built-ins, each with:
+    - `name`, `title`, `summary`, `caveats`, `description`, `scripts`
+    - `enabled`, `broken`, `shadowed_by` (for that project, when one is given)
+    - `runtime` (state and reason)
   - `GET /v1/builtin-skills/:name` returns detail.
   - `GET /v1/builtin-skills/:name/files/*` returns files.
   - `PUT /v1/builtin-skills/:name` with `{enabled}` turns a built-in off or on.
