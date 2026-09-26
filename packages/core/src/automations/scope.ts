@@ -76,23 +76,26 @@ export function descendantRunDirs(db: Db, dataDir: string, runId: string): strin
   return out;
 }
 
-export function matchUpstream(o: { db: Db; dataDir: string; run: AutomationRunRow; def: AutomationDefinition; stepId: string; globs: string[] }): string[] {
-  const safe = o.globs.filter((g) => !g.startsWith('/') && !g.split(/[\\/]/).includes('..'));
+/** Regular files matching `globs` under `dir`: relative globs only, symlinked folders not followed, never `.desk/`. */
+export function matchIn(dir: string, globs: string[]): string[] {
+  const safe = globs.filter((g) => !g.startsWith('/') && !g.split(/[\\/]/).includes('..'));
   if (!safe.length) return [];
+  let real: string;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return [];
+  }
+  return fg
+    .sync(safe, { cwd: real, onlyFiles: true, followSymbolicLinks: false, absolute: true, dot: false, ignore: ['.desk/**', 'steps/*/.desk/**', 'logs/**'] })
+    .filter((f) => isWithin(f, real))
+    .sort();
+}
+
+export function matchUpstream(o: { db: Db; dataDir: string; run: AutomationRunRow; def: AutomationDefinition; stepId: string; globs: string[] }): string[] {
   const rows = new Map(stepRuns(o.db, o.run.id).map((r) => [r.step_id, r]));
   const up = ancestors(o.def, o.stepId);
   const out: string[] = [];
-  for (const id of o.def.steps.map((s) => s.id).filter((id) => up.has(id))) {
-    const dir = stepResultDir(o.db, o.dataDir, o.run.id, rows.get(id), id);
-    let real: string;
-    try {
-      real = realpathSync(dir);
-    } catch {
-      continue;
-    }
-    for (const f of fg.sync(safe, { cwd: real, onlyFiles: true, followSymbolicLinks: false, absolute: true, dot: false, ignore: ['.desk/**', 'steps/*/.desk/**'] })) {
-      if (isWithin(f, real)) out.push(f);
-    }
-  }
+  for (const id of o.def.steps.map((s) => s.id).filter((id) => up.has(id))) out.push(...matchIn(stepResultDir(o.db, o.dataDir, o.run.id, rows.get(id), id), o.globs));
   return [...new Set(out)];
 }

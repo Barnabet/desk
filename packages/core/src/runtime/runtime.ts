@@ -37,7 +37,7 @@ import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } 
 import { BuiltinSkills, builtinEnabled } from '../skills/builtins';
 import type { SkillRef } from '../catalog/service';
 import { AttachmentStore } from '../attachments/store';
-import { uniqueLibraryName } from '../library/library';
+import { sanitizeLibraryName, uniqueLibraryName } from '../library/library';
 import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
@@ -283,6 +283,7 @@ export class Runtime {
           this.automations.setGrants(a.id, addGrant(a.grants, grant), 'remembered');
         },
       },
+      publish: (projectId, file, relDir, meta, origin) => this.publishToLibraryAt(projectId, file, relDir, meta, origin),
       agent: {
         create: (input) => this.createStepAgent(input),
         get: (id) => getAgent(this.o.store.db, id),
@@ -467,12 +468,24 @@ export class Runtime {
     meta: { title: string; kind: ArtifactKind; description: string; name?: string },
     origin: string,
   ): Promise<{ id: string; path: string }> {
-    const dir = this.libraryDir(projectId);
+    return this.publishToLibraryAt(projectId, file, '', meta, origin);
+  }
+
+  /** `publishToLibrary` into a library sub-folder (automation copies: `automations/<name>/<stamp>/`), sanitized per segment. */
+  async publishToLibraryAt(
+    projectId: string,
+    file: string,
+    relDir: string,
+    meta: { title: string; kind: ArtifactKind; description: string; name?: string },
+    origin: string,
+  ): Promise<{ id: string; path: string }> {
+    const segments = relDir.split('/').filter(Boolean).map(sanitizeLibraryName);
+    const dir = join(this.libraryDir(projectId), ...segments);
     mkdirSync(dir, { recursive: true });
     const name = uniqueLibraryName(dir, meta.name ?? basename(file));
-    // `file` is an agent's: read it without following a swapped-in symlink, and never a secret.
+    // `file` is an agent's or a script's: read it without following a swapped-in symlink, and never a secret.
     writeFileSync(join(dir, name), await readAgentFile(file, this.guard));
-    return this.recordArtifact(projectId, name, meta, origin);
+    return this.recordArtifact(projectId, [...segments, name].join('/'), meta, origin);
   }
 
   /** Adds user-provided content to the library. */

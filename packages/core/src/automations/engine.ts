@@ -1,10 +1,11 @@
 import { lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   MAX_SUB_DEPTH,
   RETRY_BACKOFF_MS,
   SUMMARY_MAX,
   type AutomationDefinition,
+  type ArtifactKind,
   type AutomationEdge,
   type InputValue,
   type Outputs,
@@ -22,7 +23,7 @@ import type { EventStore } from '../events/store';
 import type { CreateStepAgentInput } from '../runtime/runtime';
 import type { AgentRow } from '../state/queries';
 import { newId } from '../ids';
-import { getProject } from '../state/queries';
+import { getProject, pendingApprovalsFor } from '../state/queries';
 import { readAgentFile } from '../tools/agent-files';
 import { scrubbedEnv, withSkillEnv } from '../tools/bash';
 import type { SandboxGuard } from '../tools/sandbox';
@@ -32,8 +33,9 @@ import { ensureStepDir, logFile, prepareRunFolder, runDir, stepDir } from './fol
 import { activeGrantRules, addGrant, deriveGrant } from './grants';
 import { isSettled, readiness, TERMINAL_STEP, type StepState } from './graph';
 import { findAutomation, getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepAgentOf, stepAgentsOf, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
-import { exprScope, matchUpstream, templateScope, timezoneOf } from './scope';
-import { nextClock } from './schedule';
+import { runReport } from './report';
+import { exprScope, matchIn, matchUpstream, stepResultDir, templateScope, timezoneOf } from './scope';
+import { localStamp, nextClock } from './schedule';
 import { lastLine, parseStepOutput, runScript } from './script';
 import { renderArgs, renderText } from './template';
 
@@ -55,6 +57,8 @@ export type EngineHost = {
   /** Stores an `automation` message on Desk's stream (label `automation "<title>"`) and wakes Desk. */
   deliverToDesk(projectId: string, label: string, text: string): void;
   script: ScriptHost;
+  /** Copies a file into the project library under `relDir` (Runtime.publishToLibraryAt). */
+  publish(projectId: string, file: string, relDir: string, meta: { title: string; kind: ArtifactKind; description: string }, origin: string): Promise<{ id: string; path: string }>;
   agent: AgentHost;
 };
 
@@ -84,6 +88,7 @@ export function activeMs(events: StoredEvent[], nowMs: number): number {
   return open !== null ? total + Math.max(0, nowMs - open) : total;
 }
 
+export const PUBLISH_MAX_FILES = 50;
 const PARENT_ENDED = 'Its parent run ended';
 const NUDGE = 'Call complete with your result, or fail_step with the reason. Nobody reads plain replies in an automation run.';
 
@@ -139,6 +144,7 @@ export class AutomationEngine {
   private readonly parentEnded = new Set<string>();
   /** Executor work still going (child starts, agent creation, script processes). */
   private readonly background = new Set<Promise<unknown>>();
+  private readonly publishing = new Map<string, Set<Promise<void>>>();
 
   constructor(private readonly host: EngineHost) {
     this.register('wait', (ctx) => this.startWait(ctx));
@@ -157,6 +163,8 @@ export class AutomationEngine {
     });
     this.onTick(() => this.agentTimeouts());
     this.register('automation', (ctx) => this.subAutomation(ctx));
+    this.onStepSucceeded((ctx) => this.publishStep(ctx));
+    this.onRunFinished((run) => this.track(this.afterRun(run)));
     this.onRunFinished((run) => this.childFinished(run));
     this.onCancelStep((_run, row) => {
       const child = row.child_run_id ? getRun(this.db, row.child_run_id) : undefined;
@@ -211,6 +219,68 @@ export class AutomationEngine {
     return this.background.size > 0;
   }
 
+  /** The run at the top of a sub-automation chain. */
+  rootOf(run: AutomationRunRow): AutomationRunRow {
+    let r = run;
+    while (r.parent_run_id) {
+      const up = getRun(this.db, r.parent_run_id);
+      if (!up) break;
+      r = up;
+    }
+    return r;
+  }
+
+  /** Copies the step's `publish` matches to the library (spec §3.3); a file that cannot be copied is skipped. */
+  private publishStep({ run, def, step }: StepContext): void {
+    if (!step.publish.length) return;
+    const automation = getAutomation(this.db, run.automation_id)!;
+    const stamp = localStamp(timezoneOf(def), new Date(run.started_at));
+    const relDir = run.test ? `automations/${automation.name}/tests/${stamp}` : `automations/${automation.name}/${stamp}`;
+    const dir = stepResultDir(this.db, this.host.dataDir, run.id, getStepRun(this.db, run.id, step.id), step.id);
+    const job = (async () => {
+      for (const file of matchIn(dir, step.publish).slice(0, PUBLISH_MAX_FILES)) {
+        try {
+          await this.host.publish(run.project_id, file, relDir, { title: basename(file), kind: 'file', description: `From "${step.title}" in automation "${def.title}" (run ${run.id})` }, `automation:${run.id}`);
+        } catch (e) {
+          this.host.onError(e, `publishing ${file} from run ${run.id}`);
+        }
+      }
+    })();
+    let set = this.publishing.get(run.id);
+    if (!set) this.publishing.set(run.id, (set = new Set()));
+    set.add(job);
+    this.track(job);
+  }
+
+  /** After a top-level run: its report to Desk for `desk_review`, or when Desk started it (spec §4.7, §6.1). */
+  private async afterRun(run: AutomationRunRow): Promise<void> {
+    await Promise.allSettled([...(this.publishing.get(run.id) ?? [])]);
+    this.publishing.delete(run.id);
+    if (run.parent_run_id) return;
+    const def = this.definitionOf(run);
+    const byDesk = run.by.startsWith('agent:');
+    if (def.after_run !== 'desk_review' && !byDesk) return;
+    const why = byDesk ? '' : ' This automation asks you to review each run.';
+    this.host.deliverToDesk(run.project_id, `automation "${def.title}"`, `Run ${run.id} ${run.status}.${why}\n\n${runReport(this.db, this.host.dataDir, run.id, this.host.now())}`);
+  }
+
+  /** A step of a run Desk started now waits on the user: Desk hears it once (the report comes at the end). */
+  private noticeWaiting(run: AutomationRunRow, stepId: string): void {
+    const root = this.rootOf(run);
+    if (!root.by.startsWith('agent:')) return;
+    const def = this.definitionOf(run);
+    const step = def.steps.find((s) => s.id === stepId);
+    const row = getStepRun(this.db, run.id, stepId);
+    const ap = row?.agent_id ? pendingApprovalsFor(this.db, row.agent_id)[0] : undefined;
+    const what = row?.question ? `Ask me: ${row.question.text}` : row?.gate ? `approve ${row.gate.subject}` : ap ? `approve ${ap.tool} (${ap.reason})` : 'an answer';
+    const inSub = run.id !== root.id ? ` (in its sub-automation "${def.title}")` : '';
+    this.host.deliverToDesk(
+      root.project_id,
+      `automation "${this.definitionOf(root).title}"`,
+      `Run ${root.id} is waiting for the user at "${step?.title ?? stepId}"${inSub} (${truncate(what, 600)}). Only the user can answer, in the app. You'll get the report when the run finishes.`,
+    );
+  }
+
   /** How many runs this one is nested under (0 for a run nobody started as a step). */
   depthOf(run: AutomationRunRow): number {
     let depth = 0;
@@ -263,6 +333,7 @@ export class AutomationEngine {
 
   private stepChanged(run: AutomationRunRow, payload: Record<string, unknown> & { step_id: string; attempt: number; status: StepStatus }): void {
     this.append(run, { type: 'automation.step_changed', payload: { run_id: run.id, ...payload } } as never);
+    if (payload.status === 'waiting' && (payload.question || payload.gate)) this.noticeWaiting(getRun(this.db, run.id) ?? run, payload.step_id);
   }
 
   /**
@@ -529,8 +600,10 @@ export class AutomationEngine {
         if (this.host.agent.nudges(agent.id) === 0) return this.host.agent.nudge(agent.id, NUDGE);
         return fail('Ended its turn twice without calling complete or fail_step');
       }
+      case 'waiting':
+        return this.noticeWaiting(run, row.step_id);
       default:
-        return; // waiting on an approval, queued or running: not ended
+        return; // queued or running: not ended
     }
   }
 
