@@ -9,20 +9,21 @@ Desk is a local-first macOS daemon (`deskd`), a CLI (`desk`) and an Electron des
 ## Commands
 
 ```sh
-pnpm test         # all unit + integration tests; must pass before any commit
-pnpm typecheck    # tsc --noEmit; must pass before any commit
+pnpm test         # all unit + integration tests, then the web UI's specs (ng test); must pass before any commit
+pnpm typecheck    # tsc --noEmit, then ngc for apps/web-ui; must pass before any commit
 pnpm test:live    # live smokes against the local model proxy (slow; DESK_LIVE=1)
 bin/desk …        # CLI (tsx loader, no build step)
 bin/desk web      # the web UI on http://127.0.0.1:7434: prints a one-time login link (Enter prints another); --port, --no-open, --dev
 pnpm --filter @desk/daemon bundle   # esbuild bundle → apps/daemon/dist/deskd.mjs (+ migrations, better-sqlite3 prebuilds)
 pnpm desktop      # the Electron app against the repo daemon (Vite HMR)
+pnpm web          # the web UI while you work on it: ng build --watch plus desk web --dev (reloads the page); extra args go to desk web
 pnpm test:e2e     # builds the app and runs the Playwright-for-Electron suite (opens windows; set DESK_E2E_SHOTS=<dir> for screenshots)
 pnpm package:desktop   # unsigned (ad hoc) Desk.app → apps/desktop/release/*.dmg + .zip with the bundled deskd and pinned uv; enables e2e/packaged
 pnpm catalog:pin [ids]    # re-pin catalog.json entries: commit SHAs, digests, script counts, Node locks (lock_from)
 pnpm catalog:check [ids]  # install each catalog entry for real (uv on PATH or DESK_UV), build its runtime, run its smoke command sandboxed
 ```
 
-There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly. The desktop app is the exception: esbuild bundles its main and preload, and Vite builds its renderer.
+There is no build step: TypeScript runs through the `tsx` loader, and packages export `src/*.ts` directly. The desktop app is the exception: esbuild bundles its main and preload, and Vite builds its renderer. So is the web UI: `apps/web-ui` is built by the Angular CLI with its own TypeScript 6 (ngc), and every `ng`/`ngc` command goes through `scripts/ng.mjs`, which runs it under a Node Angular accepts (`^22.22.3 || ^24.15.0 || >=26`, found in nvm when the current Node is older; `node scripts/ng.mjs --which` prints it).
 
 ## Layout
 
@@ -65,6 +66,11 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `src/main/`: the only deskd client, through `@desk/bff/server` (`Broker`, `dispatch`, `DaemonManager`); it keeps the Electron `HandlerContext`, tray, notifications, menus and windows (CSP, `desk-app://`).
   - `src/preload/`: exposes only `window.desk.{invoke,on,platform}`.
   - `src/renderer/`: React UI; talks to main only through `bridge.ts`. Agent text goes through `SafeMarkdown`. The logic it shares with the web UI lives in `@desk/ui-core`, its CSS in `@desk/ui-styles` (`main.tsx` loads it once; only `tray/tray.css` stays).
+- `apps/web-ui`: `@desk/web-ui`, the Angular 22 web UI that `desk web` serves from `dist/browser` (zoneless, standalone components, signals, OnPush, no Router: the desktop's hash routes through `@desk/ui-core`).
+  - `src/app/core/`: `DeskBridge`, the only way to desk web (`/rpc` with the session secret, the `/push` socket, and the host operations done in the browser), and one service per renderer state module (`GlobalStore`, `SessionService`, `RouteService`, `LastProject`, `Unread`, …), plus `WebNotifications`.
+  - `src/app/components/` and one folder per place, as in the renderer: one component per React component, same file name in kebab case, same DOM and class names, the attribute selector on the React root element (`header[deskTitleBar]`), inputs named like the React props.
+  - `src/app/app.ts`: the shell. `src/app/screen-for.ts`: the component each route shows (`NotYet` until its phase lands).
+  - `src/app/testing/fake-bridge.ts`: `FakeDeskBridge` and `provideGlobal` for specs.
 - `test/fake-model`: a scriptable OpenAI-compatible server. Every non-live test talks to it.
 - `catalog/skills/`: Desk's first-party catalog skills (`word-documents`, `pdf-toolkit`). After editing them, run `pnpm catalog:pin word-documents pdf-toolkit`; `catalog.test.ts` fails when a digest is stale.
 
@@ -87,6 +93,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - Use Vitest with the harness (`createHarness`, `newRuntime`, `seedThread`) and fake-model scripts. Route by system prompt, or by the number of assistant messages in the request, rather than by call order when agents run concurrently.
   - Sandbox tests skip when `sandbox-exec` is unavailable.
   - Live tests are `*.live.test.ts`.
+  - Web UI specs are `apps/web-ui/src/**/*.spec.ts` (Vitest through `@angular/build:unit-test`, jsdom), written with `@testing-library/angular` and `FakeDeskBridge`; they need no daemon or fake model. A port of a React test keeps its cases, visible text and roles. Run one with `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`.
 - **Secrets.** The model API key comes from `DESK_OPENAI_*`, `~/.config/cliproxyapi.env`, or the macOS Keychain (written by `PUT /v1/config/model-endpoint` via `security -i` on stdin, never argv). It must never reach logs, events, `daemon.json`, `config.json`, API responses or tool environments; `scrubbedEnv` builds tool envs.
 - **Two UIs.** From Plan 17 on, a UI feature ships in the Electron renderer and in the web UI together. Put its logic in `@desk/ui-core`, its styles in `@desk/ui-styles` and any new operation in `@desk/bff/contract`, so the two UIs only differ in their components.
 - **Style.** Strict TS with `noUncheckedIndexedAccess`, ESM, and short doc comments on non-obvious exports. Match the surrounding code.
@@ -104,3 +111,4 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - Desk never merges branches.
 - The desktop renderer never sees the daemon token; every IPC payload is validated in main.
 - desk web never gives the browser the daemon token either. It answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
+- The web UI never turns text into HTML: no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `DomSanitizer`, `bypassSecurityTrust*`, `srcdoc`, `eval` or `document.write` in `apps/web-ui/src` (`security.spec.ts` fails on them). Agent markdown goes through `SafeMarkdown`, which renders `marked`'s tokens with Angular templates, and links through `ExternalLink` (`safeExternalUrl`, then a confirmation).
