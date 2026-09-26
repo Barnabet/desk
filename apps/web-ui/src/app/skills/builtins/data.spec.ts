@@ -97,14 +97,32 @@ describe('injectBuiltins', () => {
     expect(lists()).toBe(2);
   });
 
-  it('lists nothing more once its component is gone: no focus listener, no 30 s timer', async () => {
+  it('lists nothing more once its component is gone, not even a list asked for while one ran', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { fixture, lists } = await setup({
+      'builtins.list': async () => {
+        await gate;
+        return [b('ready')];
+      },
+    });
+    window.dispatchEvent(new Event('focus'));
+    fixture.destroy();
+    release();
+    await settle();
+    expect(lists()).toBe(1);
+  });
+
+  it('clears its poll once its component is gone, and neither focus nor time lists again', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const { fixture, builtins, lists } = await setup({ 'builtins.list': () => [b('ready')] });
     await vi.waitFor(() => expect(builtins.status()).toBe('ready'));
     await fixture.whenStable();
     await settle();
     const before = lists();
+    expect(vi.getTimerCount()).toBe(1);
     fixture.destroy();
+    expect(vi.getTimerCount()).toBe(0);
     window.dispatchEvent(new Event('focus'));
     vi.advanceTimersByTime(60_000);
     await settle();
