@@ -31,8 +31,7 @@ describe('Onboarding', () => {
     expect(screen.getByText('deskd is not running yet.')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Start Desk' }));
     expect(await screen.findByText('deskd 1.0.0 is running.')).toBeTruthy();
-    // GlobalStore may seed itself from broker.snapshot; the step itself calls daemon.start and nothing else.
-    expect(bridge.calls.map((c) => c.channel).filter((c) => c !== 'broker.snapshot')).toEqual(['daemon.start']);
+    expect(bridge.calls.map((c) => c.channel)).toEqual(['daemon.start']);
   });
 
   it('saves and tests a new endpoint without keeping the key, then creates the first project', async () => {
