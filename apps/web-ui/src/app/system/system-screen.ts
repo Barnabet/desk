@@ -305,7 +305,7 @@ export class NoticesSection {
   template: `
     <h2 id="sys-notify">Notifications</h2>
     <label class="toggle">
-      <input type="checkbox" [checked]="appOn() ?? false" [disabled]="appOn() === null" (change)="setApp($event)" />
+      <input type="checkbox" [checked]="appOn() ?? false" [disabled]="appOn() === null || appPending()" (change)="setApp($event)" />
       <span>
         <strong>From the app</strong>
         <span class="muted small">Approvals, questions, hand-offs and stuck threads, while Desk is open in this browser. Silent while its tab has focus.</span>
@@ -317,7 +317,7 @@ export class NoticesSection {
       <p class="field-hint">This browser blocks notifications from Desk. Allow them in its site settings for this address, then come back to this tab.</p>
     }
     <label class="toggle">
-      <input type="checkbox" [checked]="daemon() === 'auto'" [disabled]="daemon() === null" (change)="setDaemon($event)" />
+      <input type="checkbox" [checked]="daemon() === 'auto'" [disabled]="daemon() === null || daemonPending()" (change)="setDaemon($event)" />
       <span>
         <strong>From deskd when the app is closed</strong>
         <span class="muted small">deskd stays quiet while a Desk tab can notify you, so you never get both.</span>
@@ -332,6 +332,13 @@ export class NotificationsSection {
   protected readonly permission = this.notifications.permission;
   protected readonly appOn = signal<boolean | null>(null);
   protected readonly daemon = signal<'auto' | 'off' | null>(null);
+  /**
+   * Each switch takes no click while its permission prompt or write is pending (disabled, and its handler refuses a change
+   * that still arrives): a later click's answer could otherwise land first and be overwritten by the earlier one (an Off
+   * during the prompt, then the On it followed).
+   */
+  protected readonly appPending = signal(false);
+  protected readonly daemonPending = signal(false);
 
   constructor() {
     this.bridge.call('app.settings', {}).then(
@@ -346,9 +353,14 @@ export class NotificationsSection {
 
   protected async setApp(e: Event): Promise<void> {
     const box = e.target as HTMLInputElement;
+    if (this.appPending()) {
+      box.checked = this.appOn() ?? false;
+      return;
+    }
     const on = box.checked;
     // Browsers prompt only inside a user gesture: ask before anything is awaited.
     const asking = on && this.permission() !== 'granted' ? this.notifications.request() : null;
+    this.appPending.set(true);
     try {
       if (asking) await asking;
       this.appOn.set((await this.bridge.call('app.updateSettings', { notifications: on })).notifications);
@@ -357,6 +369,7 @@ export class NotificationsSection {
     } finally {
       // Angular writes [checked] only when appOn changes: the box shows what is stored, as React's controlled one does.
       box.checked = this.appOn() ?? false;
+      this.appPending.set(false);
     }
   }
 
@@ -366,12 +379,18 @@ export class NotificationsSection {
 
   protected async setDaemon(e: Event): Promise<void> {
     const box = e.target as HTMLInputElement;
+    if (this.daemonPending()) {
+      box.checked = this.daemon() === 'auto';
+      return;
+    }
+    this.daemonPending.set(true);
     try {
       this.daemon.set((await this.bridge.call('config.patch', { notifications: box.checked ? 'auto' : 'off' })).notifications);
     } catch (err) {
       this.toasts.error(err);
     } finally {
       box.checked = this.daemon() === 'auto';
+      this.daemonPending.set(false);
     }
   }
 }

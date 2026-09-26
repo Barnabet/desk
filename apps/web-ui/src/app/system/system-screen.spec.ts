@@ -108,6 +108,54 @@ describe('SystemScreen', () => {
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['deskd is not running.']);
   });
 
+  it('shows the value a notification write answered, even when it differs from the click', async () => {
+    const bridge = await setup({ 'config.patch': () => ({ notifications: 'auto' }) });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
+    await waitFor(() => expect(fromDeskd.checked).toBe(true));
+    fireEvent.click(fromDeskd);
+    expect(fromDeskd.checked).toBe(false);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'config.patch')?.input).toEqual({ notifications: 'off' }));
+    await waitFor(() => expect(fromDeskd.checked).toBe(true));
+  });
+
+  it('takes no second click on a notification switch while its permission or write is pending', async () => {
+    let grant: (p: NotificationPermission) => void = () => {};
+    const requestPermission = vi.fn(() => new Promise<NotificationPermission>((resolve) => (grant = resolve)));
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const patches: Array<() => void> = [];
+    const bridge = await setup({
+      'app.settings': () => ({ notifications: false }),
+      'config.patch': (p: { notifications: string }) => new Promise((resolve) => patches.push(() => resolve(p))),
+    });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromApp = within(n).getByLabelText(/From the app/) as HTMLInputElement;
+    const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    await waitFor(() => expect(fromDeskd.disabled).toBe(false));
+    // On opens the browser's prompt; an Off click before it is answered would be overtaken by the On.
+    fireEvent.click(fromApp);
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    expect(fromApp.disabled).toBe(true);
+    // jsdom still toggles a disabled box on a dispatched click, which a browser never delivers: the switch refuses it too.
+    fireEvent.click(fromApp);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    grant('granted');
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings').map((c) => c.input)).toEqual([{ notifications: true }]);
+    expect(fromApp.checked).toBe(true);
+    // deskd's switch: a second write while the first is pending could answer first and be undone by the first's answer.
+    fireEvent.click(fromDeskd);
+    expect(fromDeskd.disabled).toBe(true);
+    fireEvent.click(fromDeskd);
+    await waitFor(() => expect(patches.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    for (const answer of patches.slice().reverse()) answer();
+    await waitFor(() => expect(fromDeskd.disabled).toBe(false));
+    expect(bridge.calls.filter((c) => c.channel === 'config.patch').map((c) => c.input)).toEqual([{ notifications: 'off' }]);
+    expect(fromDeskd.checked).toBe(false);
+  });
+
   it("says when desk web runs this repository's deskd", async () => {
     await setup({ 'daemon.status': () => ({ ...status, agent: 'unsupported' }) });
     const d = screen.getByRole('region', { name: 'deskd' });

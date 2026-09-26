@@ -548,7 +548,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `skills/builtins/builtin-group.ts`, `skills/catalog/review-sheet.ts`, `skills/skills-refresh.ts`, `skills/skills-screen.spec.ts`, `apps/web-ui/e2e/catalog.e2e.test.ts` changed | the review follow-ups after W3a.10 (a late switch or install reaches the screen; the catalog e2e refuses the network) |
 | `apps/web-ui/e2e/catalog.e2e.test.ts` | W3a.10 |
 | `src/app/system/models-editor.ts` + spec | W3b.1 |
-| `src/app/system/system-screen.ts` + spec | W3b.2 |
+| `src/app/system/system-screen.ts` + spec | W3b.2; modify the review follow-ups after W3b.2 (a notification switch waits for its permission and write) |
 | `src/app/components/command-palette.ts` + spec | W3b.3 |
 | `apps/web-ui/e2e/system.e2e.test.ts` | W3b.6 |
 
@@ -38093,7 +38093,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 | Task | What | Proof |
 |---|---|---|
 | W3b.1 | `ModelsEditor`, `toggleEffort`, `modelProblems` | `system/models-editor.spec.ts` (the `modelProblems` and "edits the model registry" cases of `SystemScreen.test.tsx`, plus `toggleEffort`, loading, failure, discard and save) |
-| W3b.2 | `SystemScreen` and its sections (no Repair on the web; the browser's notification permission); `#/system` shows it | `system/system-screen.spec.ts` (the other four cases of `SystemScreen.test.tsx`, plus five web cases, the fifth master's appearance case in its web form, and two for a late status read and a failed switch); `app.spec.ts` updated |
+| W3b.2 | `SystemScreen` and its sections (no Repair on the web; the browser's notification permission); `#/system` shows it | `system/system-screen.spec.ts` (the other four cases of `SystemScreen.test.tsx`, plus five web cases, the fifth master's appearance case in its web form, two for a late status read and a failed switch, and two for overlapping clicks and the answered value (the review fix)); `app.spec.ts` updated |
 | W3b.3 | `CommandPalette` and `PaletteToggle` (⌘K / Ctrl-K); `App` renders the palette while it is open | `components/command-palette.spec.ts` (`CommandPalette.test.tsx` ported, plus closing); `app.spec.ts`: ⌘K and ⌘P in the shell |
 | W3b.4 | every route shows its real screen; `NotYet` deleted | `screen-for.spec.ts` (replaced) |
 | W3b.5 | the parity guard; the React `SystemScreen` names its daemon operations literally | `parity.spec.ts` (new); `SystemScreen.test.tsx` unchanged and passing |
@@ -38544,7 +38544,7 @@ git commit -m "feat(web-ui): the model registry editor (ModelsEditor)" -m "Co-Au
 **Files:**
 - Create: `apps/web-ui/src/app/system/system-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts` (the `system` line), `apps/web-ui/src/app/app.spec.ts` (W0c.14's `System is not in the web UI yet` expectation)
-- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added, and two cases for the deviations below)
+- Test: `apps/web-ui/src/app/system/system-screen.spec.ts` (ports "shows deskd and controls it", "shows the endpoint without the key, and both notification switches", "shows usage by model and project, notices, and the data directory" and "reports skill environments and cleans up the unused ones" from `SystemScreen.test.tsx`; the deskd case asserts that Repair is gone instead of pressing it; plus five web cases, the fifth the Appearance section master's dark mode added, two cases for the deviations below, and two for the review fix after them)
 
 **Interfaces:**
 - Consumes: `DeskBridge` (`call` with `daemon.status`, `daemon.start`, `daemon.restart`, `daemon.stop`, `usage`, `app.settings`, `app.updateSettings`, `config.get`, `config.patch`, `system.runtimes`, `system.runtimesCleanup`, `app.info`, `app.revealLogs`), `GlobalStore` (`state().overview`, `state().system.notices`), `WebNotifications` (`permission`, `request`), `ToastService`, `describeError`, `Button`, `ConfirmDialog`, `FakeDeskBridge`, `provideGlobal` (W0c); `EndpointPanel` (W0d.3); `ModelsEditor` (W3b.1); `tokens` (W2a.2); `bytes`, `clock`, `duration`, `href`, `plural` (`@desk/ui-core`); `ChannelOutput` (`@desk/bff/contract`); `RuntimesReport`, `UsageResponse` (`@desk/protocol`).
@@ -38667,6 +38667,54 @@ describe('SystemScreen', () => {
     fireEvent.click(fromDeskd);
     await waitFor(() => expect(fromDeskd.checked).toBe(true));
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['deskd is not running.']);
+  });
+
+  it('shows the value a notification write answered, even when it differs from the click', async () => {
+    const bridge = await setup({ 'config.patch': () => ({ notifications: 'auto' }) });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
+    await waitFor(() => expect(fromDeskd.checked).toBe(true));
+    fireEvent.click(fromDeskd);
+    expect(fromDeskd.checked).toBe(false);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'config.patch')?.input).toEqual({ notifications: 'off' }));
+    await waitFor(() => expect(fromDeskd.checked).toBe(true));
+  });
+
+  it('takes no second click on a notification switch while its permission or write is pending', async () => {
+    let grant: (p: NotificationPermission) => void = () => {};
+    const requestPermission = vi.fn(() => new Promise<NotificationPermission>((resolve) => (grant = resolve)));
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission });
+    const patches: Array<() => void> = [];
+    const bridge = await setup({
+      'app.settings': () => ({ notifications: false }),
+      'config.patch': (p: { notifications: string }) => new Promise((resolve) => patches.push(() => resolve(p))),
+    });
+    const n = screen.getByRole('region', { name: 'Notifications' });
+    const fromApp = within(n).getByLabelText(/From the app/) as HTMLInputElement;
+    const fromDeskd = within(n).getByLabelText(/From deskd/) as HTMLInputElement;
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    await waitFor(() => expect(fromDeskd.disabled).toBe(false));
+    // On opens the browser's prompt; an Off click before it is answered would be overtaken by the On.
+    fireEvent.click(fromApp);
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    expect(fromApp.disabled).toBe(true);
+    // jsdom still toggles a disabled box on a dispatched click, which a browser never delivers: the switch refuses it too.
+    fireEvent.click(fromApp);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    grant('granted');
+    await waitFor(() => expect(fromApp.disabled).toBe(false));
+    expect(bridge.calls.filter((c) => c.channel === 'app.updateSettings').map((c) => c.input)).toEqual([{ notifications: true }]);
+    expect(fromApp.checked).toBe(true);
+    // deskd's switch: a second write while the first is pending could answer first and be undone by the first's answer.
+    fireEvent.click(fromDeskd);
+    expect(fromDeskd.disabled).toBe(true);
+    fireEvent.click(fromDeskd);
+    await waitFor(() => expect(patches.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    for (const answer of patches.slice().reverse()) answer();
+    await waitFor(() => expect(fromDeskd.disabled).toBe(false));
+    expect(bridge.calls.filter((c) => c.channel === 'config.patch').map((c) => c.input)).toEqual([{ notifications: 'off' }]);
+    expect(fromDeskd.checked).toBe(false);
   });
 
   it("says when desk web runs this repository's deskd", async () => {
@@ -39090,7 +39138,7 @@ export class NoticesSection {
   template: `
     <h2 id="sys-notify">Notifications</h2>
     <label class="toggle">
-      <input type="checkbox" [checked]="appOn() ?? false" [disabled]="appOn() === null" (change)="setApp($event)" />
+      <input type="checkbox" [checked]="appOn() ?? false" [disabled]="appOn() === null || appPending()" (change)="setApp($event)" />
       <span>
         <strong>From the app</strong>
         <span class="muted small">Approvals, questions, hand-offs and stuck threads, while Desk is open in this browser. Silent while its tab has focus.</span>
@@ -39102,7 +39150,7 @@ export class NoticesSection {
       <p class="field-hint">This browser blocks notifications from Desk. Allow them in its site settings for this address, then come back to this tab.</p>
     }
     <label class="toggle">
-      <input type="checkbox" [checked]="daemon() === 'auto'" [disabled]="daemon() === null" (change)="setDaemon($event)" />
+      <input type="checkbox" [checked]="daemon() === 'auto'" [disabled]="daemon() === null || daemonPending()" (change)="setDaemon($event)" />
       <span>
         <strong>From deskd when the app is closed</strong>
         <span class="muted small">deskd stays quiet while a Desk tab can notify you, so you never get both.</span>
@@ -39117,6 +39165,13 @@ export class NotificationsSection {
   protected readonly permission = this.notifications.permission;
   protected readonly appOn = signal<boolean | null>(null);
   protected readonly daemon = signal<'auto' | 'off' | null>(null);
+  /**
+   * Each switch takes no click while its permission prompt or write is pending (disabled, and its handler refuses a change
+   * that still arrives): a later click's answer could otherwise land first and be overwritten by the earlier one (an Off
+   * during the prompt, then the On it followed).
+   */
+  protected readonly appPending = signal(false);
+  protected readonly daemonPending = signal(false);
 
   constructor() {
     this.bridge.call('app.settings', {}).then(
@@ -39131,9 +39186,14 @@ export class NotificationsSection {
 
   protected async setApp(e: Event): Promise<void> {
     const box = e.target as HTMLInputElement;
+    if (this.appPending()) {
+      box.checked = this.appOn() ?? false;
+      return;
+    }
     const on = box.checked;
     // Browsers prompt only inside a user gesture: ask before anything is awaited.
     const asking = on && this.permission() !== 'granted' ? this.notifications.request() : null;
+    this.appPending.set(true);
     try {
       if (asking) await asking;
       this.appOn.set((await this.bridge.call('app.updateSettings', { notifications: on })).notifications);
@@ -39142,6 +39202,7 @@ export class NotificationsSection {
     } finally {
       // Angular writes [checked] only when appOn changes: the box shows what is stored, as React's controlled one does.
       box.checked = this.appOn() ?? false;
+      this.appPending.set(false);
     }
   }
 
@@ -39151,12 +39212,18 @@ export class NotificationsSection {
 
   protected async setDaemon(e: Event): Promise<void> {
     const box = e.target as HTMLInputElement;
+    if (this.daemonPending()) {
+      box.checked = this.daemon() === 'auto';
+      return;
+    }
+    this.daemonPending.set(true);
     try {
       this.daemon.set((await this.bridge.call('config.patch', { notifications: box.checked ? 'auto' : 'off' })).notifications);
     } catch (err) {
       this.toasts.error(err);
     } finally {
       box.checked = this.daemon() === 'auto';
+      this.daemonPending.set(false);
     }
   }
 }
@@ -39298,7 +39365,7 @@ export class SystemScreen {}
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts)`
-Expected: PASS (11 tests: the plan's 9, and the deviations' 2).
+Expected: PASS (13 tests: the plan's 9, the deviations' 2, and the review fix's 2).
 
 - [ ] **Step 5: Show it for `#/system`**
 
@@ -39337,7 +39404,7 @@ After:
 - [ ] **Step 6: Run the screen, the route table and the shell**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/system-screen.spec.ts --include src/app/screen-for.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 11 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
+Expected: PASS: the 13 system cases, `screen-for.spec.ts` as it was (it names no system screen), and `app.spec.ts` with the System heading after `desk:navigate` (the screen's calls fail against the handler-less fake bridge and show their errors in place, which that case does not look at).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -39352,6 +39419,10 @@ git commit -m "feat(web-ui): the System screen: deskd without repair, endpoint, 
 **Deviation (spec):** the blocks above are the committed files. The React sources were re-read on `web-ui` after the merge of master (8883229): `SystemScreen.tsx` and `SystemScreen.test.tsx` are as the section describes them, with master's `AppearanceSection` and its "switches the appearance" case, which this task already ports in its web form (desk web's `app.settings` answers `appearance: 'system'` and its `app.updateSettings` refuses `light` and `dark` with `not_offered`, `apps/web-server/src/web-context.ts`), so the web differences are the ones the porting notes list: no Repair or Install LaunchAgent button and no "Repair installs the bundled one" hints; the Mode and "Starts at login" rows in desk web's terms; the browser permission and its two hints under "From the app", whose hint text (and deskd's) speaks of tabs instead of windows and the menu bar; "since desk web started"; and Appearance with System pressed, all three disabled, and the web's hint instead of macOS's. Two changes from the plan's first code, each with its case (the review fixes' patterns: refreshes use `singleFlight`, late answers are dropped, a bound control shows what is stored):
 - `DaemonSection`'s 10-second poll runs through `singleFlight` (a slow deskd never piles up status reads, and `DestroyRef` stops it), and a status read that started before Start, Restart or Stop answered is dropped (`acted` counts the answers), so a poll that lands after Stop no longer brings Restart back until the next poll, a race the React section has. "keeps what Stop answered when a status read from before it lands later" runs the poll by hand (a `setInterval` spy) and failed on the plan's first code (Restart came back).
 - Both notification switches put their box back in a `finally`, not only after a failure: Angular writes `[checked]` only when the signal changes, so a box whose answer differs from the click (or whose write failed) shows what is stored, as React's controlled checkbox does (the number boxes' review fix in W3b.1, for checkboxes). "puts a notification switch back when its write fails" covers the failure; it passed on the plan's first code too, whose `catch` already did it.
+
+**Deviation (review fix, after W3b.2):** each notification switch takes no click while its permission prompt or write is pending, and the `finally` reset is tested. The blocks above are the files as fixed.
+- `appPending` and `daemonPending` join `[disabled]`, and each handler also refuses a change that arrives while its own is pending (jsdom still toggles a disabled checkbox on a dispatched click and fires `change`; a browser never delivers one). Before, "From the app" stayed enabled during the browser's prompt: On (the prompt opens), then Off (stores `false`), then answering the prompt sent the first click's `notifications: true`, so the box ended checked and `web-settings.json` held `true`, the opposite of the last click. deskd's switch could overlap the same way with two writes answered out of order. "takes no second click on a notification switch while its permission or write is pending" covers both switches; it failed on the committed code (`app.updateSettings` got `false`, then `true`), and its deskd half failed without its own fix.
+- "shows the value a notification write answered, even when it differs from the click": `config.patch` answers `auto` to an Off click, and the box shows it checked. It fails when the reset moves back into `catch` only (Angular does not rewrite `[checked]` for an unchanged signal).
 
 What the screen shows stays clear of secrets: `daemon.status` is `DaemonStatus` (running, version, pid, uptime, proxy, mode, versions, builds, agent), the endpoint panel shows `config.endpoint`'s base URL and source (it carries no key) and only sends a new key, typed into a password box, with `config.saveEndpoint`, Reveal logs asks desk web to open `<data>/logs` on this computer and shows nothing, and `app.info` is the version, platform and data directory. Step 2 failed on `Could not resolve "./system-screen"`, with the Angular compiler's `TS2307` beside it. `screen-for.ts` keeps the now unused `notYet` helper and `NotYet` import until W3b.4 deletes them (no `noUnusedLocals`).
 
