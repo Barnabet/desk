@@ -29,6 +29,20 @@ import type {
   UsageResponse,
   WorkspaceEntry,
   EventType,
+  AutomationAnswerRequest,
+  AutomationCreateRequest,
+  AutomationDetail,
+  AutomationExport,
+  AutomationLayout,
+  AutomationRunRequest,
+  AutomationSaveRequest,
+  AutomationSummary,
+  AutomationValidateRequest,
+  AutomationValidateResponse,
+  AutomationVersionInfo,
+  Grant,
+  RunDetail,
+  RunListEntry,
 } from '@desk/protocol';
 import { ApiError, DaemonUnavailable } from './errors';
 import type {
@@ -48,6 +62,8 @@ import type {
   SkillSummary,
   ServiceRow,
   SourceRow,
+  AutomationSaved,
+  AutomationVersion,
 } from './types';
 
 export type ClientOptions = Credentials & {
@@ -204,11 +220,46 @@ export class DeskClient {
     restart: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/restart`),
   };
 
+  /** Automations: definitions, versions, the user's switch and grants, runs (automations spec §7.1). */
+  automations = {
+    list: (projectId: string) => this.get<AutomationSummary[]>(`/projects/${enc(projectId)}/automations`),
+    create: (projectId: string, req: AutomationCreateRequest) => this.post<AutomationSaved>(`/projects/${enc(projectId)}/automations`, req),
+    validate: (projectId: string, req: AutomationValidateRequest) => this.post<AutomationValidateResponse>(`/projects/${enc(projectId)}/automations/validate`, req),
+    importInto: (projectId: string, exp: AutomationExport) => this.post<AutomationSaved>(`/projects/${enc(projectId)}/automations/import`, exp),
+    get: (id: string) => this.get<AutomationDetail>(`/automations/${enc(id)}`),
+    /** A stale `base_version` throws ApiError 409 with `details.current_version`. */
+    save: (id: string, req: AutomationSaveRequest) => this.put<AutomationSaved>(`/automations/${enc(id)}`, req),
+    remove: (id: string) => this.del<{ ok: true }>(`/automations/${enc(id)}`),
+    layout: (id: string, layout: AutomationLayout) => this.put<{ ok: true }>(`/automations/${enc(id)}/layout`, { layout }),
+    versions: (id: string) => this.get<AutomationVersionInfo[]>(`/automations/${enc(id)}/versions`),
+    version: (id: string, v: number) => this.get<AutomationVersion>(`/automations/${enc(id)}/versions/${v}`),
+    restore: (id: string, v: number) => this.post<AutomationDetail>(`/automations/${enc(id)}/versions/${v}/restore`),
+    setEnabled: (id: string, enabled: boolean) => this.put<AutomationDetail>(`/automations/${enc(id)}/enabled`, { enabled }),
+    setGrants: (id: string, grants: Grant[], reason: 'edited' | 'enabled' = 'edited') => this.put<AutomationDetail>(`/automations/${enc(id)}/grants`, { grants, reason }),
+    keepGrants: (id: string) => this.post<AutomationDetail>(`/automations/${enc(id)}/grants/keep`),
+    exportOf: (id: string) => this.get<AutomationExport>(`/automations/${enc(id)}/export`),
+    run: (id: string, req: AutomationRunRequest = {}) => this.post<{ run_id: string }>(`/automations/${enc(id)}/runs`, req),
+    runs: (id: string, q: { before?: string; limit?: number } = {}) => {
+      const p = new URLSearchParams();
+      if (q.before) p.set('before', q.before);
+      if (q.limit !== undefined) p.set('limit', String(q.limit));
+      const s = p.toString();
+      return this.get<RunListEntry[]>(`/automations/${enc(id)}/runs${s ? `?${s}` : ''}`);
+    },
+    getRun: (runId: string) => this.get<RunDetail>(`/automation-runs/${enc(runId)}`),
+    cancelRun: (runId: string) => this.post<{ ok: true }>(`/automation-runs/${enc(runId)}/cancel`),
+    answer: (runId: string, stepId: string, req: AutomationAnswerRequest) => this.post<{ ok: true }>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/answer`, req),
+    log: (runId: string, stepId: string) => this.get<string>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/log`),
+    transcript: (runId: string, stepId: string, p?: { after?: number; limit?: number }) => this.get<EventPage>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/transcript${page(p)}`),
+    files: (runId: string, path = '') => this.get<WorkspaceEntry[]>(`/automation-runs/${enc(runId)}/files${path ? `?path=${enc(path)}` : ''}`),
+    file: (runId: string, path: string) => this.raw(`/automation-runs/${enc(runId)}/files/raw/${encPath(path)}`),
+  };
+
   approvals = {
     list: (projectId: string, status?: 'pending' | 'approved' | 'denied') =>
       this.get<ApprovalRow[]>(`/projects/${enc(projectId)}/approvals${status ? `?status=${status}` : ''}`),
-    resolve: (id: string, decision: 'approved' | 'denied', note?: string) =>
-      this.post<{ ok: true }>(`/approvals/${enc(id)}/resolve`, { decision, ...(note ? { note } : {}) }),
+    resolve: (id: string, decision: 'approved' | 'denied', note?: string, remember?: boolean) =>
+      this.post<{ ok: true }>(`/approvals/${enc(id)}/resolve`, { decision, ...(note ? { note } : {}), ...(remember ? { remember: true } : {}) }),
   };
 
   attention = {

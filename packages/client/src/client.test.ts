@@ -62,6 +62,32 @@ describe('DeskClient', () => {
     expect((await client.config.endpoint().catch((e: ApiError) => e.status))).toBe(501);
   });
 
+  it('covers automations: definitions, versions, runs, answers, files and conflicts', async () => {
+    const { client, runtime } = await setup();
+    const id = (await client.projects.create({ name: 'Auto', goal: 'g' })).project.id;
+    const def = { title: 'Ask', steps: [{ id: 'ask', title: 'OK?', kind: 'ask', question: 'Go?' }] };
+    const { automation } = await client.automations.create(id, { name: 'ask', definition: def, via: 'cli' });
+    expect((await client.automations.list(id)).map((a) => a.name)).toEqual(['ask']);
+    expect((await client.automations.validate(id, { definition: { title: 'x', steps: [] } })).errors).not.toEqual([]);
+    const saved = await client.automations.save(automation.id, { definition: { ...def, title: 'Ask 2' }, base_version: 1 });
+    expect(saved.automation.version).toBe(2);
+    await expect(client.automations.save(automation.id, { definition: def, base_version: 1 })).rejects.toMatchObject({ status: 409, details: { current_version: 2 } });
+    expect((await client.automations.versions(automation.id)).map((v) => v.version)).toEqual([2, 1]);
+    expect((await client.automations.version(automation.id, 1)).definition.title).toBe('Ask');
+    expect((await client.automations.setEnabled(automation.id, true)).enabled).toBe(true);
+    const { run_id } = await client.automations.run(automation.id);
+    expect((await client.automations.getRun(run_id)).status).toBe('waiting');
+    await client.automations.answer(run_id, 'ask', { decision: 'approve' });
+    expect((await client.automations.runs(automation.id)).map((e) => (e.kind === 'run' ? e.run.status : e.kind))).toEqual(['succeeded']);
+    expect(await client.automations.files(run_id)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'inputs.json' })]));
+    expect(new TextDecoder().decode(await client.automations.file(run_id, 'inputs.json'))).toContain('{');
+    const exp = await client.automations.exportOf(automation.id);
+    expect((await client.automations.importInto(id, { ...exp, name: 'ask-copy' })).automation.name).toBe('ask-copy');
+    await client.automations.remove(automation.id);
+    await expect(client.automations.get(automation.id)).rejects.toMatchObject({ status: 404 });
+    void runtime;
+  });
+
   it('lists, switches, reads and duplicates built-in skills', async () => {
     const { client } = await setup({ builtins: { root: join(import.meta.dirname, '..', '..', '..', 'catalog', 'skills') } });
     const { project } = await client.projects.create({ name: 'Files', goal: 'g' });

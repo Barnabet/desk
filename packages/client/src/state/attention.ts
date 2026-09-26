@@ -7,8 +7,8 @@ export function groupAttention(items: AttentionItem[]): AttentionBays {
   const bays: AttentionBays = { clearance: [], queries: [], handoffs: [], holding: [] };
   for (const i of items) {
     if (i.kind === 'approval') bays.clearance.push(i);
-    else if (i.kind === 'question') bays.queries.push(i);
-    else if (i.kind === 'needs_you') bays.handoffs.push(i);
+    else if (i.kind === 'question' || i.kind === 'automation_ask') bays.queries.push(i);
+    else if (i.kind === 'needs_you' || i.kind === 'automation_enable_request' || i.kind === 'automation_grants_suspended') bays.handoffs.push(i);
     else bays.holding.push(i);
   }
   return bays;
@@ -29,6 +29,14 @@ const ATTENTION_TYPES = new Set<EventType>([
   'tool.call',
   // A pause (the `wakes_paused` notice) may be the only news: nothing else nearby changes attention (design spec §5.4).
   'system.notice',
+  // Automations (spec §7.1): questions and gates, failures, turn-on requests, suspended grants.
+  'automation.step_changed',
+  'automation.run_finished',
+  'automation.enable_requested',
+  'automation.grants_set',
+  'automation.saved',
+  'automation.switched',
+  'automation.deleted',
 ]);
 
 const OVERVIEW_TYPES = new Set<EventType>([

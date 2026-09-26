@@ -11,6 +11,14 @@ describe('attention helpers', () => {
     expect(Object.fromEntries(Object.entries(bays).map(([k, v]) => [k, v.map((i) => i.id)]))).toEqual({ clearance: ['a'], queries: ['q'], handoffs: ['n'], holding: ['s', 'f'] });
   });
 
+  it('puts automation items in their bays', () => {
+    const item = (kind: string) => ({ id: kind, kind, project_id: 'p', project_name: 'P', agent_id: null, title: kind, detail: '', created_at: '2026-09-28T06:00:00.000Z', ref: {} }) as AttentionItem;
+    const bays = groupAttention(['automation_ask', 'automation_failed', 'automation_enable_request', 'automation_grants_suspended'].map(item));
+    expect(bays.queries.map((i) => i.kind)).toEqual(['automation_ask']);
+    expect(bays.handoffs.map((i) => i.kind)).toEqual(['automation_enable_request', 'automation_grants_suspended']);
+    expect(bays.holding.map((i) => i.kind)).toEqual(['automation_failed']);
+  });
+
   it('knows which events change attention and the overview', () => {
     expect(affectsAttention(ev(1, 'approval.requested', { approval_id: 'a', run_id: 'r', tool_call_id: 'c', tool: 'bash', arguments: '{}', reason: 'r', delegate_to_desk: false }))).toBe(true);
     expect(affectsAttention(ev(2, 'usage', { run_id: 'r', model: 'm', prompt_tokens: 1, completion_tokens: 1, estimated: false }))).toBe(false);

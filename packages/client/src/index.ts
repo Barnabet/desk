@@ -9,4 +9,5 @@ export * from './state/timeline';
 export * from './state/messages';
 export * from './state/system';
 export * from './state/attention';
+export * from './state/automations';
 export * from './state/skills';
