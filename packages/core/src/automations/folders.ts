@@ -6,7 +6,7 @@ import type { Db } from '../db/open';
 import { ValidationError } from '../errors';
 import { openAgentFile } from '../tools/agent-files';
 import { isWithin, realOrSelf, type SandboxGuard } from '../tools/sandbox';
-import { listRuns } from './queries';
+import { childRuns, listRuns, type AutomationRunRow } from './queries';
 
 /** File and folder inputs of one run, copied, at most. */
 export const INPUTS_MAX_BYTES = 200 * 1024 * 1024;
@@ -133,22 +133,40 @@ export function ensureStepDir(dataDir: string, runId: string, stepId: string): s
   return dir;
 }
 
+/** A run's sub-automation runs, nested. */
+function descendants(db: Db, runId: string): AutomationRunRow[] {
+  const out: AutomationRunRow[] = [];
+  const queue = [runId];
+  while (queue.length) {
+    for (const c of childRuns(db, queue.shift()!)) {
+      out.push(c);
+      queue.push(c.id);
+    }
+  }
+  return out;
+}
+
 /**
- * Deletes the folders of an automation's finished runs beyond the `keep` newest and older than `days`, except
- * `protect` (the run `previous` reads, runs with open attention items). Rows stay. Returns the removed run ids.
+ * Deletes the folders of an automation's top-level runs beyond the `keep` newest and older than `days`, with their
+ * sub-automation runs' folders. Never a running family, a protected run, or a protected descendant.
  */
 export function pruneRuns(o: { db: Db; dataDir: string; automationId: string; keep?: number; days?: number; now: Date; protect: Set<string> }): string[] {
   const keep = o.keep ?? 20;
   const cutoff = o.now.getTime() - (o.days ?? 30) * 24 * 60 * 60_000;
-  const runs = listRuns(o.db, o.automationId, { limit: 100_000 });
+  const roots = listRuns(o.db, o.automationId, { limit: 100_000 }).filter((r) => !r.parent_run_id);
   const removed: string[] = [];
-  runs.forEach((r, i) => {
+  roots.forEach((r, i) => {
     if (i < keep || r.status === 'running' || o.protect.has(r.id)) return;
     if (Date.parse(r.started_at) >= cutoff) return;
-    const dir = runDir(o.dataDir, r.id);
-    if (!existsSync(dir)) return;
-    rmSync(dir, { recursive: true, force: true });
-    removed.push(r.id);
+    const family = [r, ...descendants(o.db, r.id)];
+    if (family.some((d) => d.status === 'running')) return;
+    for (const d of family) {
+      if (d.id !== r.id && o.protect.has(d.id)) continue;
+      const dir = runDir(o.dataDir, d.id);
+      if (!existsSync(dir)) continue;
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(d.id);
+    }
   });
   return removed;
 }

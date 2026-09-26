@@ -31,10 +31,11 @@ import { scrubbedEnv, withSkillEnv } from '../tools/bash';
 import type { SandboxGuard } from '../tools/sandbox';
 import { skillRunTool } from '../tools/skills';
 import { evalExpr, parseExpr, type Expr } from './expr';
-import { ensureStepDir, logFile, prepareRunFolder, runDir, stepDir } from './folders';
+import { ensureStepDir, logFile, prepareRunFolder, pruneRuns, runDir, stepDir } from './folders';
 import { activeGrantRules, addGrant, deriveGrant } from './grants';
 import { isSettled, readiness, TERMINAL_STEP, type StepState } from './graph';
 import {
+  automationIdsWithRuns,
   findAutomation,
   getAutomation,
   getRun,
@@ -42,6 +43,7 @@ import {
   getVersion,
   listEnabledAutomations,
   listRunningRuns,
+  protectedRuns,
   runningRunOf,
   stepAgentOf,
   stepAgentsOf,
@@ -108,6 +110,7 @@ export function activeMs(events: StoredEvent[], nowMs: number): number {
 export const PUBLISH_MAX_FILES = 50;
 /** A due time older than this at a tick was missed (one tick interval, plus the timer's drift). */
 export const MISSED_AFTER_MS = 2 * ENGINE_TICK_MS;
+export const INTERRUPTED_SCRIPT = 'interrupted: the daemon stopped while this script ran; its side effects are unknown';
 const PARENT_ENDED = 'Its parent run ended';
 const NUDGE = 'Call complete with your result, or fail_step with the reason. Nobody reads plain replies in an automation run.';
 
@@ -165,6 +168,7 @@ export class AutomationEngine {
   private readonly background = new Set<Promise<unknown>>();
   private readonly publishing = new Map<string, Set<Promise<void>>>();
   private ticking: Promise<void> | null = null;
+  private stopping = false;
 
   constructor(private readonly host: EngineHost) {
     this.register('wait', (ctx) => this.startWait(ctx));
@@ -186,6 +190,7 @@ export class AutomationEngine {
     this.onStepSucceeded((ctx) => this.publishStep(ctx));
     this.onRunFinished((run) => this.track(this.afterRun(run)));
     this.onTick((now) => this.fireSchedules(now));
+    this.onRunFinished((run) => this.prune(run.automation_id, run.project_id));
     this.onRunFinished((run) => this.childFinished(run));
     this.onCancelStep((_run, row) => {
       const child = row.child_run_id ? getRun(this.db, row.child_run_id) : undefined;
@@ -271,6 +276,80 @@ export class AutomationEngine {
     if (trigger.catch_up === 'skip' && now.getTime() - latest.getTime() > MISSED_AFTER_MS) return skip('missed');
     const caughtUp = trigger.catch_up === 'once' ? times.length - 1 : 0;
     await this.startRun(a.id, { trigger: 'schedule', test: false, inputs: trigger.inputs ?? {}, by: 'schedule', triggerIndex: index, dueAt, ...(caughtUp ? { caughtUp } : {}) });
+  }
+
+  /** Retention for one automation (spec §3.3); protected runs are computed across its project. */
+  private prune(automationId: string, projectId: string): void {
+    try {
+      pruneRuns({ db: this.db, dataDir: this.host.dataDir, automationId, now: this.host.now(), protect: protectedRuns(this.db, projectId) });
+    } catch (e) {
+      this.host.onError(e, `pruning runs of ${automationId}`);
+    }
+  }
+
+  /**
+   * After a restart (spec §3.6), once agents are repaired and woken: deadlines, scripts cut off mid-run (never re-run
+   * unless idempotent), agent and sub-automation steps re-attached, built-ins cut off between two events relaunched;
+   * then every run moves on, and retention runs.
+   */
+  recover(resumedAgents: ReadonlySet<string>): void {
+    const now = this.host.now().getTime();
+    for (const snapshot of listRunningRuns(this.db)) {
+      try {
+        const run = getRun(this.db, snapshot.id);
+        if (run?.status !== 'running') continue; // ended by a parent's recovery earlier in this loop
+        if (Date.parse(run.deadline_at) <= now) {
+          this.cancelActive(run, 'Run cancelled: deadline');
+          this.finish(getRun(this.db, run.id)!, 'cancelled', 'Cancelled: deadline', 'deadline');
+          continue;
+        }
+        const def = this.definitionOf(run);
+        for (const row of stepRuns(this.db, run.id)) {
+          const step = def.steps.find((s) => s.id === row.step_id);
+          if (!step || row.status !== 'running' || getRun(this.db, run.id)?.status !== 'running') continue;
+          switch (step.kind) {
+            case 'script':
+              this.resolveStep(run.id, step.id, { status: 'failed', error: INTERRUPTED_SCRIPT, retryable: step.idempotent === true });
+              break;
+            case 'agent': {
+              const agent = row.agent_id ? this.host.agent.get(row.agent_id) : undefined;
+              if (!agent) this.resolveStep(run.id, step.id, { status: 'failed', error: 'interrupted: the daemon stopped before the step agent started' });
+              else if (!resumedAgents.has(agent.id) && !['queued', 'running', 'waiting'].includes(agent.status)) this.onAgentEnded(agent);
+              break;
+            }
+            case 'automation': {
+              const child = row.child_run_id ? getRun(this.db, row.child_run_id) : undefined;
+              if (!child) this.resolveStep(run.id, step.id, { status: 'failed', error: 'interrupted: the daemon stopped before the sub-automation run started' });
+              else if (child.status !== 'running') this.childFinished(child);
+              break;
+            }
+            default:
+              this.launch(run, def, step, row.attempt); // wait, ask, tell_desk: cut off between `running` and their next event
+          }
+        }
+        this.advance(run.id);
+      } catch (e) {
+        this.host.onError(e, `recovering automation run ${snapshot.id}`);
+      }
+    }
+    for (const id of automationIdsWithRuns(this.db)) {
+      const a = getAutomation(this.db, id);
+      if (a) this.prune(id, a.project_id);
+    }
+  }
+
+  /** Stops launching, kills running scripts (their steps stay `running` for recovery), waits for background work. */
+  async shutdown(): Promise<void> {
+    this.stopping = true;
+    for (const c of this.scripts.values()) c.abort();
+    await this.settled();
+  }
+
+  /** Cancels an automation's running runs, test runs included (deletion). */
+  async cancelRunsOf(automationId: string, reason: string): Promise<void> {
+    for (const run of listRunningRuns(this.db).filter((r) => r.automation_id === automationId)) {
+      if (getRun(this.db, run.id)?.status === 'running') await this.cancelRun(run.id, reason);
+    }
   }
 
   /** The run at the top of a sub-automation chain. */
@@ -395,6 +474,7 @@ export class AutomationEngine {
    * except for a scheduled run, which is recorded as started and failed so the user sees why it did not happen.
    */
   async startRun(automationId: string, opts: StartRunOptions): Promise<string> {
+    if (this.stopping) throw new ConflictError('deskd is stopping');
     const a = getAutomation(this.db, automationId);
     if (!a || a.deleted_at) throw new NotFoundError(`Unknown automation: ${automationId}`);
     if (getProject(this.db, a.project_id)?.archived_at) throw new ConflictError(`Project ${a.project_id} is archived`);
@@ -437,6 +517,7 @@ export class AutomationEngine {
 
   /** Re-entrant: a call made while the run is advancing runs one more pass afterwards. */
   private advance(runId: string): void {
+    if (this.stopping) return;
     if (this.advancing.has(runId)) {
       this.again.add(runId);
       return;
@@ -798,6 +879,7 @@ export class AutomationEngine {
 
   /** Deadlines, waits, retries, then the hooks (schedules, timeouts). A call made while a tick runs joins it. */
   tick(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
     this.ticking ??= this.tickOnce().finally(() => {
       this.ticking = null;
     });

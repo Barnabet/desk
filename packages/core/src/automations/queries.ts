@@ -132,3 +132,33 @@ export const stepAgentsOf = (db: Db, runId: string, stepId?: string): AgentRow[]
     .where(and(eq(agents.automation_run_id, runId), stepId ? eq(agents.automation_step_id, stepId) : undefined))
     .orderBy(asc(agents.created_at), asc(agents.id))
     .all();
+
+/** Every automation id that has runs, deleted automations included (retention at start). */
+export const automationIdsWithRuns = (db: Db): string[] =>
+  db
+    .selectDistinct({ id: automationRuns.automation_id })
+    .from(automationRuns)
+    .all()
+    .map((r) => r.id);
+
+/**
+ * Runs whose folders retention keeps, per automation of the project: the last succeeded non-test run (what
+ * `previous.*` reads) and the latest top-level run (a failed one carries an attention item).
+ */
+export function protectedRuns(db: Db, projectId: string): Set<string> {
+  const out = new Set<string>();
+  const ids = db.selectDistinct({ id: automationRuns.automation_id }).from(automationRuns).where(eq(automationRuns.project_id, projectId)).all();
+  for (const { id } of ids) {
+    const prev = lastSucceededRun(db, id);
+    if (prev) out.add(prev.id);
+    const latest = db
+      .select({ id: automationRuns.id })
+      .from(automationRuns)
+      .where(and(eq(automationRuns.automation_id, id), isNull(automationRuns.parent_run_id)))
+      .orderBy(desc(automationRuns.started_at), desc(automationRuns.id))
+      .limit(1)
+      .get();
+    if (latest) out.add(latest.id);
+  }
+  return out;
+}

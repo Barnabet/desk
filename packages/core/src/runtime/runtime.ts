@@ -95,7 +95,7 @@ import type { StepResult } from '../automations/engine';
 import { runDir, stepDir } from '../automations/folders';
 import { ancestors } from '../automations/graph';
 import { descendantRunDirs } from '../automations/scope';
-import { findAutomation, getAutomation, getRun, lastSucceededRun, stepAgentOf, stepRuns } from '../automations/queries';
+import { findAutomation, getAutomation, getRun, lastSucceededRun, listAutomations, listRunningRuns, stepAgentOf, stepRuns } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
 import { locateScript } from '../tools/skills';
 import { toolByName, toolsForRole } from './toolsets';
@@ -258,6 +258,7 @@ export class Runtime {
       validateContext: (projectId, name) => this.validateContext(projectId, name),
       now: () => this.now(),
       tools: toolByName,
+      beforeDelete: (id) => this.engine.cancelRunsOf(id, 'Automation deleted'),
     });
     this.engine = new AutomationEngine({
       store: o.store,
@@ -646,6 +647,11 @@ export class Runtime {
   archiveProject(projectId: string): void {
     this.requireOpenProject(projectId);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
+    // Its automations: off (the only switch the system makes, spec §5.4) and their runs cancelled, before agents stop.
+    for (const a of listAutomations(this.o.store.db, projectId)) if (a.enabled) this.automations.setEnabled(a.id, false, 'system');
+    for (const run of listRunningRuns(this.o.store.db).filter((r) => r.project_id === projectId && !r.parent_run_id)) {
+      this.engine.cancelRun(run.id, 'Project archived').catch((err) => this.reportError(err, `cancelling run ${run.id}`));
+    }
     for (const agent of listAgents(this.o.store.db, projectId)) {
       if (!TERMINAL.has(agent.status) || this.scheduler.isActive(agent.id)) this.stopAgent(agent.id, { by: agent.id, reason: 'Project archived' });
     }
@@ -1399,6 +1405,7 @@ export class Runtime {
    */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    await this.engine.shutdown();
     this.scheduler.stopAll(SHUTDOWN_REASON);
     const resolutions = [...this.resolutions];
     for (const r of resolutions) r.controller.abort(SHUTDOWN_REASON);
@@ -1452,6 +1459,8 @@ export class Runtime {
     for (const agent of listLiveAgents(this.o.store.db)) {
       if (approvalsRepaired.has(agent.id) ? this.resumeAfterApproval(agent.id) : this.wake(agent.id)) resumed.push(agent.id);
     }
+    // Automation runs after agents: agent steps re-attach to the agents just resumed (spec §3.6).
+    this.engine.recover(new Set(resumed));
     return resumed;
   }
 
