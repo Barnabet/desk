@@ -22955,7 +22955,7 @@ Spec: `docs/superpowers/specs/2026-09-25-angular-web-ui-design.md` §5 (Keyboard
 | Task | What | Proof |
 |---|---|---|
 | W1c.1 | `FlightStrip` and `StripRack`: bays with counts; strips with codes, who, the gauge and the selection | `strip-rack.spec.ts` (new, 4 cases: the React files have no test of their own) |
-| W1c.2 | `Inspector` and `describeArgs`: approval, question, hand-off, stalled, failed, and paused (Resume) | `inspector.spec.ts` (new, 10 cases, for the same reason) |
+| W1c.2 | `Inspector` and `describeArgs`: approval, question, hand-off, stalled, failed, and paused (Resume) | `inspector.spec.ts` (new, 13 cases, for the same reason) |
 | W1c.3 | `AttentionScreen`: rack order, the selection in the route, J/K, ⌘⏎, ⌘⌫, E, the 409 toast, the legend, All clear | `attention-screen.spec.ts` (the 7 cases of `AttentionScreen.test.tsx`, ported one for one, plus ⌘⌫ and typing) |
 | W1c.4 | `#/attention` shows `AttentionScreen`; the W1 e2e | one more `attention-screen.spec.ts` case; `apps/web-ui/e2e/flows.e2e.test.ts` (2 scenarios) |
 | W1c.5 | verify (W1's exit check) | `pnpm typecheck`, root Vitest, every web-ui spec, `pnpm test:web-e2e` |
@@ -23341,6 +23341,8 @@ git commit -m "feat(web-ui): flight strips and the strip rack: bays, codes, who,
 
 It reads the project's session for the approval, the agent and the transcript. Only `AttentionScreen.test.tsx` covered it in React; this spec covers every branch on its own, and W1c.3 ports the screen's cases.
 
+**Deviation (review fix):** the spec first had 10 cases, and three of the Inspector's bindings failed none of them: the `arguments` label on the readable block of a tool that is not a shell command, the busy option and the held Send of a question, and Resume held (but not busy) while another action is on its way. Three cases cover them: "reads any other tool as its pretty JSON arguments, with no command" (a `web_fetch` approval), "holds every option and Send while an answer is on its way" and "holds Resume, without marking it busy, while another action is on its way" (13 tests). `inspector.ts` does not change.
+
 **Files:**
 - Create: `apps/web-ui/src/app/attention/inspector.ts`
 - Test: `apps/web-ui/src/app/attention/inspector.spec.ts`
@@ -23535,6 +23537,18 @@ describe('Inspector', () => {
     expect(insp.querySelector('.rule-chip')).toBeNull();
   });
 
+  it('reads any other tool as its pretty JSON arguments, with no command', async () => {
+    const fetch: AttentionItem = { id: 'approval:a2', kind: 'approval', project_id: 'p', project_name: 'Tax 2026', agent_id: 't', title: 'Signup checklist wants to run web_fetch', detail: '', created_at: minutesAgo(4), ref: { approval_id: 'a2', thread_id: 't' } };
+    const request = ev(3, 'approval.requested', { approval_id: 'a2', run_id: 'r', tool_call_id: 'c', tool: 'web_fetch', arguments: '{"url":"https://example.com"}', reason: 'Policy rule {"tool":"web_fetch"} → ask', delegate_to_desk: false }, { agent: 't' });
+    await inspect({ item: fetch }, watching([events[0]!, request]));
+    const insp = screen.getByRole('article', { name: 'Selected: clearance request' });
+    expect(await within(insp).findByRole('button', { name: 'Show raw arguments' })).toBeTruthy();
+    expect(within(insp).queryByLabelText('Command')).toBeNull();
+    expect(insp.querySelector('.codeblock-lang')!.textContent).toBe('arguments');
+    expect(insp.querySelector('.codeblock pre code')!.textContent).toBe('{\n  "url": "https://example.com"\n}');
+    expect(fact(insp, 'TOOL').textContent).toBe('web_fetch');
+  });
+
   it("offers Desk's options, a free answer, and the conversation", async () => {
     const { answer, open } = await inspect({ item: question });
     const insp = screen.getByRole('article', { name: 'Selected: question from desk' });
@@ -23552,6 +23566,19 @@ describe('Inspector', () => {
     fireEvent.click(within(insp).getByRole('button', { name: /^Open conversation/ }));
     expect(open).toHaveBeenCalledTimes(1);
     expect(insp.textContent).not.toContain('Note to the thread');
+  });
+
+  it('holds every option and Send while an answer is on its way', async () => {
+    await inspect({ item: question, busy: 'Data source' });
+    const insp = screen.getByRole('article', { name: 'Selected: question from desk' });
+    const picked = within(insp).getByRole('button', { name: 'Data source' }) as HTMLButtonElement;
+    const other = within(insp).getByRole('button', { name: 'Teammate' }) as HTMLButtonElement;
+    expect(picked.getAttribute('aria-busy')).toBe('true');
+    expect(picked.disabled).toBe(true);
+    expect(other.disabled).toBe(true);
+    expect(other.getAttribute('aria-busy')).toBeNull();
+    fireEvent.input(within(insp).getByLabelText('Answer in your own words'), { target: { value: 'Both' } });
+    expect((within(insp).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('says an answered question was sent instead of asking again', async () => {
@@ -23609,6 +23636,14 @@ describe('Inspector', () => {
     const resume = within(insp).getByRole('button', { name: 'Resume' }) as HTMLButtonElement;
     expect(resume.getAttribute('aria-busy')).toBe('true');
     expect(resume.disabled).toBe(true);
+  });
+
+  it('holds Resume, without marking it busy, while another action is on its way', async () => {
+    await inspect({ item: paused, busy: 'approved' });
+    const insp = screen.getByRole('article', { name: 'Selected: paused project' });
+    const resume = within(insp).getByRole('button', { name: 'Resume' }) as HTMLButtonElement;
+    expect(resume.disabled).toBe(true);
+    expect(resume.getAttribute('aria-busy')).toBeNull();
   });
 });
 ```
@@ -23852,7 +23887,7 @@ export class Inspector {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/attention/inspector.spec.ts)`
-Expected: PASS (2 describes, 10 tests).
+Expected: PASS (2 describes, 13 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -24314,7 +24349,7 @@ Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include 
 Expected: PASS (8 tests).
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/attention/strip-rack.spec.ts --include src/app/attention/inspector.spec.ts --include src/app/attention/attention-screen.spec.ts)`
-Expected: PASS (3 files, 22 tests).
+Expected: PASS (3 files, 25 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.

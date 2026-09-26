@@ -173,6 +173,18 @@ describe('Inspector', () => {
     expect(insp.querySelector('.rule-chip')).toBeNull();
   });
 
+  it('reads any other tool as its pretty JSON arguments, with no command', async () => {
+    const fetch: AttentionItem = { id: 'approval:a2', kind: 'approval', project_id: 'p', project_name: 'Tax 2026', agent_id: 't', title: 'Signup checklist wants to run web_fetch', detail: '', created_at: minutesAgo(4), ref: { approval_id: 'a2', thread_id: 't' } };
+    const request = ev(3, 'approval.requested', { approval_id: 'a2', run_id: 'r', tool_call_id: 'c', tool: 'web_fetch', arguments: '{"url":"https://example.com"}', reason: 'Policy rule {"tool":"web_fetch"} → ask', delegate_to_desk: false }, { agent: 't' });
+    await inspect({ item: fetch }, watching([events[0]!, request]));
+    const insp = screen.getByRole('article', { name: 'Selected: clearance request' });
+    expect(await within(insp).findByRole('button', { name: 'Show raw arguments' })).toBeTruthy();
+    expect(within(insp).queryByLabelText('Command')).toBeNull();
+    expect(insp.querySelector('.codeblock-lang')!.textContent).toBe('arguments');
+    expect(insp.querySelector('.codeblock pre code')!.textContent).toBe('{\n  "url": "https://example.com"\n}');
+    expect(fact(insp, 'TOOL').textContent).toBe('web_fetch');
+  });
+
   it("offers Desk's options, a free answer, and the conversation", async () => {
     const { answer, open } = await inspect({ item: question });
     const insp = screen.getByRole('article', { name: 'Selected: question from desk' });
@@ -190,6 +202,19 @@ describe('Inspector', () => {
     fireEvent.click(within(insp).getByRole('button', { name: /^Open conversation/ }));
     expect(open).toHaveBeenCalledTimes(1);
     expect(insp.textContent).not.toContain('Note to the thread');
+  });
+
+  it('holds every option and Send while an answer is on its way', async () => {
+    await inspect({ item: question, busy: 'Data source' });
+    const insp = screen.getByRole('article', { name: 'Selected: question from desk' });
+    const picked = within(insp).getByRole('button', { name: 'Data source' }) as HTMLButtonElement;
+    const other = within(insp).getByRole('button', { name: 'Teammate' }) as HTMLButtonElement;
+    expect(picked.getAttribute('aria-busy')).toBe('true');
+    expect(picked.disabled).toBe(true);
+    expect(other.disabled).toBe(true);
+    expect(other.getAttribute('aria-busy')).toBeNull();
+    fireEvent.input(within(insp).getByLabelText('Answer in your own words'), { target: { value: 'Both' } });
+    expect((within(insp).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('says an answered question was sent instead of asking again', async () => {
@@ -247,5 +272,13 @@ describe('Inspector', () => {
     const resume = within(insp).getByRole('button', { name: 'Resume' }) as HTMLButtonElement;
     expect(resume.getAttribute('aria-busy')).toBe('true');
     expect(resume.disabled).toBe(true);
+  });
+
+  it('holds Resume, without marking it busy, while another action is on its way', async () => {
+    await inspect({ item: paused, busy: 'approved' });
+    const insp = screen.getByRole('article', { name: 'Selected: paused project' });
+    const resume = within(insp).getByRole('button', { name: 'Resume' }) as HTMLButtonElement;
+    expect(resume.disabled).toBe(true);
+    expect(resume.getAttribute('aria-busy')).toBeNull();
   });
 });
