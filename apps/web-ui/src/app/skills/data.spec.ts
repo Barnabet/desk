@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { render } from '@testing-library/angular';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ProjectSummary } from '@desk/protocol';
 import { GlobalStore } from '../core/global.store';
@@ -23,11 +23,15 @@ async function setup(handlers: FakeHandlers, overview: ProjectSummary[]) {
   const bridge = new FakeDeskBridge(handlers);
   const view = await render(Probe, { providers: [...bridge.providers, provideGlobal(state(overview))] });
   const lists = () => bridge.calls.filter((c) => c.channel === 'skills.list').map((c) => c.input);
-  return { bridge, lists, skills: view.fixture.componentInstance.skills };
+  return { bridge, lists, fixture: view.fixture, skills: view.fixture.componentInstance.skills };
 }
 
 /** Lets every pending bridge answer land (a macrotask runs after all queued microtasks). */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('scopeArg and whoLabel', () => {
   it('names the project only for project skills', () => {
@@ -51,11 +55,21 @@ describe('scopeArg and whoLabel', () => {
 describe('injectSkills', () => {
   it('joins global and per-project lists with the threads using them', async () => {
     const t1 = { id: 't1', title: 'Welcome emails', status: 'running', skills: ['brand-voice', 'email-sequence'] };
+    // The global list is held until the loading state is checked: render's whenStable could otherwise see it answered.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     const { skills, lists } = await setup(
-      { 'skills.list': ({ projectId }: { projectId?: string }) => (projectId === 'p1' ? [sk('brand-voice', 'project', 3), sk('email-sequence', 'global')] : [sk('brand-voice', 'global'), sk('email-sequence', 'global')]) },
+      {
+        'skills.list': async ({ projectId }: { projectId?: string }) => {
+          if (projectId === 'p1') return [sk('brand-voice', 'project', 3), sk('email-sequence', 'global')];
+          await gate;
+          return [sk('brand-voice', 'global'), sk('email-sequence', 'global')];
+        },
+      },
       [summary('p1', 'Onboarding', [t1])],
     );
     expect(skills.status()).toBe('loading');
+    release();
     await vi.waitFor(() => expect(skills.status()).toBe('ready'));
     expect(lists()).toEqual([{}, { projectId: 'p1' }]);
     expect(skills.nodes().map((n) => [n.key, n.version, n.shadows, n.shadowedIn, n.usedBy.map((u) => u.threadId)])).toEqual([
@@ -83,6 +97,28 @@ describe('injectSkills', () => {
     expect(lists()).toEqual([{}, { projectId: 'p1' }, {}, { projectId: 'p1' }, { projectId: 'p2' }]);
   });
 
+  it('sends no list when an overview push leaves the projects as they were, and still follows what the threads use', async () => {
+    const t1 = { id: 't1', title: 'Welcome emails', status: 'running', skills: ['brand-voice'] };
+    const { skills, lists, fixture } = await setup({ 'skills.list': ({ projectId }: { projectId?: string }) => (projectId ? [] : [sk('brand-voice', 'global'), sk('email-sequence', 'global')]) }, [
+      summary('p1', 'Onboarding', [t1]),
+    ]);
+    await vi.waitFor(() => expect(skills.status()).toBe('ready'));
+    const used = () => skills.nodes().map((n) => [n.key, n.usedBy.map((u) => u.threadId)]);
+    expect(used()).toEqual([
+      ['global:brand-voice', ['t1']],
+      ['global:email-sequence', []],
+    ]);
+    expect(lists()).toEqual([{}, { projectId: 'p1' }]);
+    TestBed.inject(GlobalStore).set(state([summary('p1', 'Onboarding', [{ ...t1, skills: ['email-sequence'] }])]));
+    await fixture.whenStable();
+    await settle();
+    expect(used()).toEqual([
+      ['global:brand-voice', []],
+      ['global:email-sequence', ['t1']],
+    ]);
+    expect(lists()).toEqual([{}, { projectId: 'p1' }]);
+  });
+
   it('keeps the newest lists when an older refresh answers last', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -104,6 +140,19 @@ describe('injectSkills', () => {
     await settle();
     expect(lists()).toEqual([{}, {}]);
     expect(skills.nodes().map((n) => n.key)).toEqual(['global:new-skill']);
+  });
+
+  it('lists nothing more once its component is gone: no focus listener, no 30 s timer', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { skills, lists, fixture } = await setup({ 'skills.list': () => [sk('brand-voice', 'global')] }, []);
+    await vi.waitFor(() => expect(skills.status()).toBe('ready'));
+    vi.advanceTimersByTime(30_000);
+    await vi.waitFor(() => expect(lists()).toHaveLength(2));
+    fixture.destroy();
+    window.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(lists()).toHaveLength(2);
   });
 
   it('lists again when the window gets focus, and keeps the last lists when that fails', async () => {
