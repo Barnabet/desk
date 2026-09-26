@@ -56,7 +56,7 @@ describe('App', () => {
     const { view } = await renderApp();
     expect(screen.getByRole('navigation', { name: 'Places' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Threads' }).getAttribute('aria-current')).toBe('page');
-    expect(screen.getByText('Threads is not in the web UI yet')).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('main.screen .page')).not.toBeNull());
     const app = (view.fixture.nativeElement as HTMLElement).querySelector('.app')!;
     expect([...app.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.className.split(' ').join('.')}` : ''))).toEqual([
       'header.titlebar',

@@ -24893,7 +24893,7 @@ Expected: no line for a file under `apps/web-ui/src/app/attention/`, `apps/web-u
 | W2a.3 | `RouteView` | `route-view.spec.ts` (new) |
 | W2a.4 | `Transcript` with `ToolCallFull`, `MessageCard`, `stopDomId`, `Depth`, `ComposerMode` | `transcript.spec.ts` (new) |
 | W2a.5 | `ThreadRoster` (the React `ThreadCard` inlined) | `thread-roster.spec.ts` (new) |
-| W2a.6 | `ThreadDetail`, `ThreadsScreen`; `#/p/<id>/threads` shows them | `threads-screen.spec.ts` (`ThreadsScreen.test.tsx` ported case for case, plus two missing-state cases and the route); `app.spec.ts` updated |
+| W2a.6 | `ThreadDetail`, `ThreadsScreen`; `#/p/<id>/threads` shows them | `threads-screen.spec.ts` (`ThreadsScreen.test.tsx` ported case for case, plus six coverage cases the earlier reviews deferred here, two missing-state cases and the route); `app.spec.ts` updated |
 | W2a.7 | the W2 threads e2e: the flows and messaging scenarios reach the Threads screen; a thread on a git source | `apps/web-ui/e2e/flows.e2e.test.ts` (3 tests) |
 | W2a.8 | verify | `pnpm typecheck`, root Vitest, every web-ui spec, the production build, the flows e2e |
 
@@ -27435,6 +27435,8 @@ git commit -m "feat(web-ui): the thread roster: cards busiest first, facts, skil
 
 `ThreadsScreen.tsx` holds the project's session and shows "Loading…", the project's missing or failed state, the roster, "This thread isn't here", or one thread. `ThreadDetail.tsx` is one thread: the head (← All threads, the title, the status line with what it waits on from the fold, the one-hop link, the reason, the revision round, the model and effort, the start and elapsed time, and the tokens per model; chips for "answering X", its skills, the branch or scratch workspace, Archived, and "Turn into a skill" once done), the tabs (Route, Result, Diff, Files, Skill drafts with their count, Usage), and the transcript with Stop (live threads) or Archive (finished, not archived) in its head, each after a confirm. The route and the transcript share the selected stop (the last one by default); `?at=<event>` selects the stop that holds that message once, so the user's own choice holds as the thread moves on; a new thread resets the stop, the tab, the Files folder and the pair sheet. The depth (Narrative or Every step) is remembered in `localStorage` (`desk.transcriptDepth`). The React test file is ported case for case; two cases for the missing states and the route case are added.
 
+**Deviation (coverage deferred by W2a.3–W2a.5's reviews):** the reviews of the route, the transcript and the roster left parts of them for this port of `ThreadsScreen.test.tsx`, but the React file does not cover all of them. Its 25 cases cover the roster's wait line (the button, the pair sheet it opens, the one-hop link, plain text when it waits on you), the answering badge, the answer-run stops (the question, the closure, the muted title), "Woke to answer message #N" and `?at=`. Six cases are added for what it misses, each checked to fail when the part it covers is removed: a running thread's chip on its card reads "Paused, will resume" while the model proxy is down, and so does the status line (the module-level `proxy`, reset in `beforeEach` and passed to `provideGlobal`'s `system`); an approval's stop body (the tool and its arguments, the policy's reason in words, "Review in Attention" linking to the item, then "Approved by you · “note”" once resolved, and the route's "You approved"); a detour's and a revision's bodies ("Continued on <model> for the rest of the run. Nothing was lost.", Desk's feedback) with "revision round 1 of 2" on the status line; selecting a stop from Every step, by a numbered entry and by an unnumbered one inside the stop, on the route too; and scrolling the selected stop into view (the last stop first, then one picked on the route), through a stubbed `Element.prototype.scrollIntoView` that the case restores. The components are the plan's code, unchanged (34 tests).
+
 **Files:**
 - Create: `apps/web-ui/src/app/threads/thread-detail.ts`, `apps/web-ui/src/app/threads/threads-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts`, `apps/web-ui/src/app/app.spec.ts` (W0c.14's `Threads is not in the web UI yet` expectation)
@@ -27450,7 +27452,7 @@ Create `apps/web-ui/src/app/threads/threads-screen.spec.ts`:
 
 ```ts
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { ProjectOverview } from '@desk/client';
 import { ev } from '@desk/client/testing';
@@ -27463,11 +27465,14 @@ import { ThreadsScreen } from './threads-screen';
 
 /** The attention items in global state for the next setup (the React test's globalStore.set). */
 let attention: AttentionItem[] = [];
+/** The model proxy's state in global state for the next setup. */
+let proxy: 'up' | 'down' | 'unknown' = 'unknown';
 
 beforeEach(() => {
   clearAttachmentCache();
   localStorage.clear();
   attention = [];
+  proxy = 'unknown';
 });
 
 const agent = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -27541,7 +27546,7 @@ async function setup(events: StoredEvent[] = base, extra: FakeHandlers = {}, thr
   });
   await render(ThreadsScreen, {
     inputs: { projectId: 'p', ...(threadId ? { threadId } : {}), ...(at !== undefined ? { at } : {}) },
-    providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' }, attention }), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
+    providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' }, attention, system: { ...initialGlobalState().system, proxy } }), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
   });
   return bridge;
 }
@@ -27959,6 +27964,99 @@ describe('ThreadsScreen', () => {
     expect(await screen.findByRole('dialog', { name: 'Welcome emails ⇄ Frontend' })).toBeTruthy();
   });
 
+  it('says a running thread will resume on its card while the model proxy is down', async () => {
+    proxy = 'down';
+    await setup(base, {}, null);
+    const card = await screen.findByRole('link', { name: /Welcome emails/ });
+    const chip = within(card).getByText('Paused, will resume');
+    expect(chip.className).toBe('chip chip-wait');
+    expect(card.textContent).not.toContain('Running');
+  });
+
+  it('says a running thread will resume on its status line while the model proxy is down', async () => {
+    proxy = 'down';
+    await setup();
+    const head = (await screen.findByRole('heading', { name: 'Welcome emails', level: 1 })).closest('.thread-head') as HTMLElement;
+    const status = head.querySelector('.thread-status-line > span')!;
+    expect(status.textContent).toBe('Paused, will resume');
+    expect(status.className).toBe('tone-wait');
+  });
+
+  it("shows an approval's stop with the tool, the policy's reason and a link to review it, then who decided", async () => {
+    const bridge = await setup([
+      ...base,
+      ev(6, 'tool.call', { run_id: 'r1', tool_call_id: 'c2', name: 'bash', arguments: '{"command":"rm -rf build"}' }, t),
+      ev(7, 'approval.requested', { approval_id: 'a1', run_id: 'r1', tool_call_id: 'c2', tool: 'bash', arguments: '{"command":"rm -rf build"}', reason: 'Policy rule {"tool":"bash"} → ask', delegate_to_desk: false }, t),
+    ]);
+    const disc = await screen.findByRole('button', { name: /^Stop \d+: Waiting for your approval/ });
+    const n = disc.getAttribute('aria-label')!.match(/^Stop (\d+)/)![1]!;
+    const tr = screen.getByRole('complementary', { name: 'Transcript' });
+    const body = () => tr.querySelector<HTMLElement>(`#tr-stop-${n} .tr-approval`)!;
+    expect(body().textContent).toContain('bash {"command":"rm -rf build"}');
+    expect(within(body()).getByText('Your policy asks before every bash call.')).toBeTruthy();
+    expect(within(body()).getByRole('link', { name: 'Review in Attention' }).getAttribute('href')).toBe('#/attention?item=approval%3Aa1');
+    bridge.emit('desk:event', ev(8, 'approval.resolved', { approval_id: 'a1', decision: 'approved', resolved_by: 'user', note: 'Fine once' }, t));
+    expect(await screen.findByRole('button', { name: new RegExp(`^Stop ${n}: You approved`) })).toBeTruthy();
+    await waitFor(() => expect(within(body()).queryByRole('link')).toBeNull());
+    expect(within(body()).getByText('Approved by you · “Fine once”')).toBeTruthy();
+  });
+
+  it("shows a detour and Desk's revision as stops with their bodies, and the revision round on the status line", async () => {
+    await setup([
+      ...base,
+      ev(6, 'agent.model_switched', { from: 'claude-opus-5-5', to: 'claude-sonnet-5', reason: 'rate_limited', scope: 'run' }, t),
+      ev(7, 'agent.result', { summary: 'Five drafts published', artifacts: [] }, t),
+      ev(8, 'agent.revision', { round: 1, feedback: 'Shorter subject lines, please.' }, t),
+    ]);
+    const detour = await screen.findByRole('button', { name: /^Stop \d+: Rate limited · a short detour/ });
+    const revision = screen.getByRole('button', { name: /^Stop \d+: Desk sent it back/ });
+    const entry = (disc: HTMLElement) => document.getElementById(`tr-stop-${disc.getAttribute('aria-label')!.match(/^Stop (\d+)/)![1]}`)!;
+    expect(entry(detour).querySelector('.tr-text')!.textContent).toBe('Continued on claude-sonnet-5 for the rest of the run. Nothing was lost.');
+    expect(entry(detour).querySelector('.tr-text .mono')!.textContent).toBe('claude-sonnet-5');
+    expect(within(entry(revision)).getByText('Shorter subject lines, please.')).toBeTruthy();
+    expect(document.querySelector('.thread-status-line')!.textContent).toContain(' · revision round 1 of 2 · ');
+  });
+
+  it('selects a stop by clicking its entry in Every step, on the route too', async () => {
+    await setup([...base, ev(6, 'assistant.message', { run_id: 'r1', content: 'Drafting the emails now.', tool_calls: [] }, t)]);
+    await screen.findByRole('heading', { name: 'Welcome emails', level: 1 });
+    const disc = (n: number) => screen.getByRole('button', { name: new RegExp(`^Stop ${n}:`) });
+    expect(disc(2).getAttribute('aria-pressed')).toBe('true');
+    const tr = screen.getByRole('complementary', { name: 'Transcript' });
+    fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
+    const brief = await waitFor(() => document.getElementById('tr-stop-1')!);
+    expect(brief.className).toBe('tr-entry');
+    fireEvent.click(brief);
+    await waitFor(() => expect(disc(1).getAttribute('aria-pressed')).toBe('true'));
+    expect(disc(2).getAttribute('aria-pressed')).toBe('false');
+    expect(document.getElementById('tr-stop-1')!.className).toBe('tr-entry selected');
+    // An entry without a number (the run's text after its tools) selects the stop it belongs to.
+    const text = within(tr).getByText('Drafting the emails now.').closest('.tr-entry') as HTMLElement;
+    expect(text.querySelector('.tr-num-blank')).toBeTruthy();
+    fireEvent.click(text);
+    await waitFor(() => expect(disc(2).getAttribute('aria-pressed')).toBe('true'));
+    expect(document.getElementById('tr-stop-2')!.className).toBe('tr-entry selected');
+  });
+
+  it('scrolls the selected stop into view: the last one first, then the one picked on the route', async () => {
+    const scrolled: Array<[string, unknown]> = [];
+    const had = Object.hasOwn(Element.prototype, 'scrollIntoView');
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element, opts?: boolean | ScrollIntoViewOptions) {
+      scrolled.push([this.id, opts]);
+    });
+    try {
+      await setup();
+      await screen.findByRole('heading', { name: 'Welcome emails', level: 1 });
+      await waitFor(() => expect(scrolled.at(-1)).toEqual(['tr-stop-2', { block: 'nearest', behavior: 'smooth' }]));
+      fireEvent.click(screen.getByRole('button', { name: /^Stop 1:/ }));
+      await waitFor(() => expect(scrolled.at(-1)).toEqual(['tr-stop-1', { block: 'nearest', behavior: 'smooth' }]));
+    } finally {
+      if (had) Element.prototype.scrollIntoView = original;
+      else delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
   it("says a thread that is not in this project isn't here, with a way back to its threads", async () => {
     await setup(base, {}, 'nope');
     const heading = await screen.findByRole('heading', { name: "This thread isn't here" });
@@ -27987,7 +28085,7 @@ describe('ThreadsScreen', () => {
 });
 ```
 
-(Differences from the React file: `installBridge` becomes `FakeDeskBridge` and `render` is awaited; `globalStore.set({ attention })` becomes the module-level `attention` that `setup` passes to `provideGlobal`; `resetSessions()` and `setReleaseDelay(0)` become a fresh TestBed and `SESSION_RELEASE_DELAY` 0; the text boxes are typed into with `fireEvent.input`; what appears after a click (dialogs, the confirm's text, a tab's content) is found with `findBy…`, and the loads and the image of the thumbnail case with `waitFor`. The last three cases are new: the two missing states, which the React file does not cover, and the route.)
+(Differences from the React file: `installBridge` becomes `FakeDeskBridge` and `render` is awaited; `globalStore.set({ attention })` becomes the module-level `attention` that `setup` passes to `provideGlobal`; `resetSessions()` and `setReleaseDelay(0)` become a fresh TestBed and `SESSION_RELEASE_DELAY` 0; the text boxes are typed into with `fireEvent.input`; what appears after a click (dialogs, the confirm's text, a tab's content) is found with `findBy…`, and the loads and the image of the thumbnail case with `waitFor`. The module-level `proxy` feeds `provideGlobal`'s `system.proxy` the same way. The last nine cases are new: six the review asked for (the deviation above), the two missing states, which the React file does not cover, and the route.)
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -28417,7 +28515,7 @@ after (the fake bridge has no `projects.get`, so the screen's host is the React 
 - [ ] **Step 6: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/threads/threads-screen.spec.ts --include src/app/screen-for.spec.ts --include src/app/app.spec.ts)`
-Expected: PASS: the 28 threads cases, `screen-for.spec.ts` as it was (its "every project tab has a screen" still holds), and every `app.spec.ts` case.
+Expected: PASS: the 34 threads cases, `screen-for.spec.ts` as it was (its "every project tab has a screen" still holds), and every `app.spec.ts` case.
 
 Run: `git grep -n "Threads is not in the web UI yet" -- apps/web-ui`
 Expected: no output (exit 1).

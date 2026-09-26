@@ -4,6 +4,7 @@ import { AttentionScreen } from './attention/attention-screen';
 import { MapScreen } from './map/map-screen';
 import { ConversationScreen } from './conversation/conversation-screen';
 import { NotYet } from './screens/not-yet';
+import { ThreadsScreen } from './threads/threads-screen';
 import { Onboarding } from './screens/onboarding';
 
 /** A screen for App to render with NgComponentOutlet: the component, and the inputs this route gives it. */
@@ -42,7 +43,7 @@ export function screenFor(route: Route): ScreenView | null {
         case 'conversation':
           return { component: ConversationScreen, inputs: { projectId: route.id } };
         case 'threads':
-          return notYet('Threads');
+          return { component: ThreadsScreen, inputs: { projectId: route.id, threadId: route.threadId, at: route.at } };
         case 'library':
           return notYet('Library');
         case 'memory':
