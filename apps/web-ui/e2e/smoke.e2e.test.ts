@@ -45,6 +45,8 @@ describe('desk web', () => {
 
     await page.waitForURL(/#\/map$/);
     await page.getByRole('heading', { name: 'Projects', exact: true }).waitFor();
+    // The empty state goes once the pushed global state brings the new project to the map.
+    await page.getByText('No projects yet').waitFor({ state: 'detached' });
     await e2e.shot(page, 'map');
     const [project] = await e2e.client().projects.list();
     expect(project).toMatchObject({ name: 'Launch', goal: 'Relaunch onboarding next month' });

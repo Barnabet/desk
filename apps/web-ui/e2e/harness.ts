@@ -45,8 +45,17 @@ export async function startWebE2E(o: { script?: Script } = {}): Promise<WebE2E> 
   const dataDir = join(root, 'data');
   for (const dir of [join(home, 'code', 'app'), join(home, 'Documents'), join(home, '.config')]) mkdirSync(dir, { recursive: true });
   const closers: Array<() => Promise<void> | void> = [() => rmSync(root, { recursive: true, force: true })];
+  // Every closer runs even when one throws (deskd, the fake model and the temp root still go); the first error is rethrown.
   const close = async () => {
-    for (const c of closers.splice(0).reverse()) await c();
+    const errors: unknown[] = [];
+    for (const c of closers.splice(0).reverse()) {
+      try {
+        await c();
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+    if (errors.length) throw errors[0];
   };
   try {
     const fake = await startFakeModel(o.script ?? (() => text('Noted.')));
