@@ -14,6 +14,7 @@
     "desk": "node --import tsx apps/cli/src/main.ts",
     "deskd": "node --import tsx apps/daemon/src/main.ts",
     "test:e2e": "pnpm --filter @desk/desktop build && vitest run --config vitest.e2e.config.ts",
+    "test:web-e2e": "pnpm --filter @desk/web-ui build && vitest run --config vitest.web-e2e.config.ts",
     "desktop": "pnpm --filter @desk/desktop dev",
     "web": "node scripts/web-dev.mjs",
     "package:desktop": "pnpm --filter @desk/desktop package",

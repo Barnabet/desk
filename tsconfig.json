@@ -24,7 +24,8 @@
     "test/*/src",
     "scripts/*.ts",
     "vitest.config.ts",
-    "vitest.e2e.config.ts"
+    "vitest.e2e.config.ts",
+    "vitest.web-e2e.config.ts"
   ],
   "exclude": [
     "apps/desktop",
