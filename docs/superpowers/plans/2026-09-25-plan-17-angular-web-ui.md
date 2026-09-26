@@ -69,7 +69,9 @@ Every task in W0c–W3b follows these rules. Each section's header repeats the o
   - Standalone (the default), with `changeDetection: ChangeDetectionStrategy.OnPush` and `encapsulation: ViewEncapsulation.None`.
   - `input()` / `input.required()` / `output()`; a React value-and-setter prop pair becomes an input plus an output (`value` and `changed`).
   - `@if` / `@for` / `@switch`.
-  - The only decorators are `@Component` and `@Injectable`: host bindings and listeners go in `host`, never in `@HostBinding` or `@HostListener`.
+  - The only decorators are `@Component` and `@Injectable` (and `@Directive` for `TemplateOf`, W1b.4): host bindings and listeners go in `host`, never in `@HostBinding` or `@HostListener`.
+  - An `<ng-template let-x>` that `*ngTemplateOutlet` fills gets its context typed with `TemplateOf` (`[deskTemplateOf]="entryType"`, `protected readonly entryType = templateOf<PairEntry>()`, W1b.4), so strict templates check `x`'s fields.
+  - An event that fires many times a second and changes nothing rendered (a log's `scroll`) is not a template listener, which schedules change detection per event in the zoneless app: add it with `addEventListener` in `afterNextRender` and remove it through `DestroyRef` (W1b.7's `LogsSheet`).
   - Angular writes a `[class]` value that holds several classes in sorted order, while React keeps the order written: `[class]="'plan-stop plan-' + tone"` renders `plan-done plan-stop`, and `[class]="on ? 'files-entry current' : 'files-entry'"` renders `current files-entry`. So when a React `className` mixes fixed and dynamic parts, the fixed classes go in `class` and only the dynamic ones in `[class]` or `[class.x]`: `class="plan-stop" [class]="'plan-' + tone"`, `class="files-entry" [class.current]="on"`, and in `host` `class: 'strip'` beside `'[class]'` and `'[class.selected]'`. Angular writes the static classes first, then the `[class]` value, then each `[class.x]` in the order written, so the element reads as React's does and a spec can compare `className` exactly. A `[class]` that switches between whole class lists (a host that stands for several React roots, `'page muted'` or `'conversation'`) is still written sorted; a spec compares such a host's `className` only when it holds one class.
 - **No wrapper element.** The attribute selector sits on the React component's root element (`section[deskStripRack]`, `header[deskTitleBar]`), so the shared CSS's flex layouts and structural selectors (`>`, `:last-child`) apply unchanged. Two cases need more:
   - A React component that renders a fragment gets a `display: contents` host (`host: { style: 'display: contents' }`).
@@ -94,6 +96,9 @@ Every task in W0c–W3b follows these rules. Each section's header repeats the o
   - `fireEvent.change` on a text box becomes `fireEvent.input`.
   - Find dialogs with `findByRole`, because `Sheet` moves itself into `document.body` after its first render.
   - Where React clicked a button right after an awaited call, wait for the button to be enabled first.
+  - `rerender` in `@testing-library/angular` 19.5 resets every property or input it is not given unless it gets `partialUpdate: true`, and its `detectChanges` runs no `afterRender` hooks (`afterRenderEffect`, `afterNextRender`), so a spec whose component scrolls or measures there follows it with `await view.fixture.whenStable()`: `await view.rerender({ componentProperties: next, partialUpdate: true }); await view.fixture.whenStable();` (W1b.10's `show()`).
+  - `apps/web-ui` runs jsdom 30 (its devDependency matches the root's `^30.1.1`), so `Blob.text()`, `Blob.arrayBuffer()` and `File.arrayBuffer()` work: a spec passes a plain `new File(['hi'], 'notes.md')` to an upload (which reads it through `fileToBase64`) and reads a Blob with `await blob.text()`, with no FileReader helper (W2b.1's Library upload does the same).
+  - `testing-library`'s `fireEvent` runs change detection itself, so a spec that checks an event renders nothing dispatches it plainly (`el.dispatchEvent(new Event('scroll'))`) and counts renders with `afterEveryRender` (W1b.7).
 - **Runs.** While iterating, run only the named specs: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`, or `pnpm vitest run <files> --maxWorkers=2` at the root. Also run `pnpm --filter @desk/web-ui typecheck`.
 
 ### Worked example: `StripRack` (W1c.1)
@@ -8316,7 +8321,7 @@ Create `apps/web-ui/package.json`:
     "@testing-library/dom": "^10.4.2",
     "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22.10.0",
-    "jsdom": "^27.0.0",
+    "jsdom": "^30.1.1",
     "typescript": "~6.0.3",
     "vitest": "5.0.1"
   }
@@ -19353,6 +19358,8 @@ describe('ImageThumbs', () => {
 
 **Deviation (review fix):** the bounded-cache case first went straight from one image to the next with `rerender`. Showing image 3 twice in a row keeps the same `@for` track key (`$index + ':' + sha256`), so Angular reused the `Thumb`, its `sha` computed compared equal and the load effect never ran: the second 3 never went through `loadAttachment`, and a cache that dropped image 3 right after loading it still passed. React's case unmounts before each render, so every one really reads the cache. The loop now rerenders with an empty list before each image, which destroys the `Thumb`, and keeps the expectation `['1', '2', '3', '1']` (4 tests).
 
+**Deviation (review fix):** `apps/web-ui` first resolved jsdom 27.4.0 (W0c.2's `^27.0.0`), whose `Blob` has no `text()`, `arrayBuffer()` or `bytes()`, so the committed spec read the resized Blob through a FileReader `blobText` helper instead of `await blob.text()`, and W1b.8's and W1b.11's specs gave each uploaded `File` an `arrayBuffer()` through a `readable()` wrapper, since `fileToBase64` (`packages/ui-core/src/files.ts`) calls it. The devDependency now matches the root's `^30.1.1` (W0c.2's block shows it; it was already in the store, so `pnpm install --offline` picks it up and Angular's unit-test builder takes it unchanged), the helpers are gone, and the spec above reads `await blob.text()` again. Port conventions (Specs) records it for later upload specs such as W2b.1's.
+
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/image-thumbs.spec.ts)`
@@ -19773,12 +19780,13 @@ git commit -m "feat(web-ui): tool groups with thread titles in their calls, stat
 `PairSheet.tsx` lists the messages between two agents oldest first (design spec §8 item 8), each answer nested under its question with the question's state ("open · 4m", "answered 14:05", muted "closed" or "withdrawn"), a runtime closure muted as "<thread> could not answer", and on each message the link to the transcript that shows it (`?at=<message id>`, which closes the sheet). It reads the session's fold through `pairView`, so a question's state changes in place when its answer arrives, and lives in its opener's local state (no route). Both React cases are ported.
 
 **Files:**
+- Create: `apps/web-ui/src/app/components/template-of.ts`
 - Create: `apps/web-ui/src/app/components/pair-sheet.ts`
 - Test: `apps/web-ui/src/app/components/pair-sheet.spec.ts` (ported from `apps/desktop/src/renderer/components/PairSheet.test.tsx`)
 
 **Interfaces:**
 - Consumes: `agentTitle`, `MessagesState`, `MessageView` from `@desk/client`; `clock`, `duration`, `href`, `pairView`, `PairEntry` from `@desk/ui-core`; `NowService` (`now`), `Sheet`, `Button`, `SafeMarkdown` (W0c); in the spec `foldMessages`, `ev`, `AgentMessageKind`, `EventOf`, `FakeDeskBridge`.
-- Produces: `PairSheet` — `div[deskPairSheet]`, inputs `projectId`, `messages`, `a`, `b`, output `close`.
+- Produces: `PairSheet` — `div[deskPairSheet]`, inputs `projectId`, `messages`, `a`, `b`, output `close`; `TemplateOf` — `ng-template[deskTemplateOf]`, which types an `<ng-template>`'s `$implicit` for strict templates, and its type token `templateOf<T>()`.
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -19866,19 +19874,45 @@ describe('PairSheet', () => {
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/pair-sheet.spec.ts)`
 Expected: FAIL: the test build stops with `Could not resolve "./pair-sheet"`.
 
-- [ ] **Step 3: Write `pair-sheet.ts`**
+- [ ] **Step 3: Write `template-of.ts` and `pair-sheet.ts`**
 
-Create `apps/web-ui/src/app/components/pair-sheet.ts`:
+Create `apps/web-ui/src/app/components/template-of.ts`:
+
+```ts
+import { Directive, input } from '@angular/core';
+
+/**
+ * Types an `<ng-template>`'s `$implicit` for strict templates, which otherwise read `let-x` as `any`:
+ * `<ng-template #entry let-e [deskTemplateOf]="entryType">` with `protected readonly entryType = templateOf<PairEntry>()`.
+ * Only the input's type matters; nothing reads its value.
+ */
+@Directive({ selector: 'ng-template[deskTemplateOf]' })
+export class TemplateOf<T> {
+  readonly deskTemplateOf = input.required<T>();
+
+  static ngTemplateContextGuard<T>(_dir: TemplateOf<T>, ctx: unknown): ctx is { $implicit: T } {
+    return true;
+  }
+}
+
+/** The type token `TemplateOf` reads: `templateOf<PairEntry>()`. */
+export function templateOf<T>(): T {
+  return undefined as T;
+}
+```
+
+Then create `apps/web-ui/src/app/components/pair-sheet.ts`:
 
 ```ts
 import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, output } from '@angular/core';
 import { agentTitle, type MessagesState, type MessageView } from '@desk/client';
-import { clock, duration, href, pairView } from '@desk/ui-core';
+import { clock, duration, href, pairView, type PairEntry } from '@desk/ui-core';
 import { NowService } from '../core/now.service';
 import { Button } from './button';
 import { SafeMarkdown } from './safe-markdown';
 import { Sheet } from './sheet';
+import { TemplateOf, templateOf } from './template-of';
 
 /**
  * The messages between two agents (design spec §8 item 8), oldest first, each answer nested under its question with
@@ -19887,13 +19921,13 @@ import { Sheet } from './sheet';
  */
 @Component({
   selector: 'div[deskPairSheet]',
-  imports: [NgTemplateOutlet, Sheet, Button, SafeMarkdown],
+  imports: [NgTemplateOutlet, TemplateOf, Sheet, Button, SafeMarkdown],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents' },
   template: `
     <!-- One message: who wrote to whom, its text, a question's state, and where it shows in a transcript. -->
-    <ng-template #entry let-e>
+    <ng-template #entry let-e [deskTemplateOf]="entryType">
       <div class="pair-msg" [class.muted]="e.message.auto">
         <span class="pair-head">{{ head(e.message) }}</span>
         <div deskSafeMarkdown [className]="'pair-text'" [text]="e.message.text"></div>
@@ -19950,6 +19984,8 @@ export class PairSheet {
   private readonly now = inject(NowService).now;
   protected readonly view = computed(() => pairView(this.messages(), this.a(), this.b()));
   protected readonly clock = clock;
+  /** Types `let-e` in the entry template. */
+  protected readonly entryType = templateOf<PairEntry>();
 
   /** "Auth API → Frontend · question · 14:05"; a closure is the runtime's, written when the thread could not answer: never shown as an answer. */
   protected head(m: MessageView): string {
@@ -19971,6 +20007,8 @@ export class PairSheet {
 }
 ```
 
+**Deviation (review fix):** the entry template was `<ng-template #entry let-e>`, so strict templates typed `e` as `any` and checked none of `e.message.auto`, `e.message.state`, `e.message.stateAt`, `e.shownIn` or the arguments to `head()`, `openFor()` and `transcriptHref()`: a misspelt field or a renamed `PairEntry`/`MessageView` field compiled and rendered nothing. `TemplateOf` is a directive with a static `ngTemplateContextGuard` over a type token; with `[deskTemplateOf]="entryType"` on the template, `e` is a `PairEntry`, and `e.message.autox` fails `ngc` with TS2551 where it used to compile. It does nothing at runtime, so the spec is unchanged (2 tests); `pnpm --filter @desk/web-ui typecheck` is its check.
+
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/pair-sheet.spec.ts)`
@@ -19982,7 +20020,7 @@ Expected: exit 0.
 - [ ] **Step 5: Commit**
 
 ```sh
-git add apps/web-ui/src/app/components/pair-sheet.ts apps/web-ui/src/app/components/pair-sheet.spec.ts
+git add apps/web-ui/src/app/components/template-of.ts apps/web-ui/src/app/components/pair-sheet.ts apps/web-ui/src/app/components/pair-sheet.spec.ts
 git commit -m "feat(web-ui): the pair sheet: two agents' messages, answers under their questions, links into transcripts" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -20367,6 +20405,8 @@ git commit -m "feat(web-ui): the plan panel: the route with who waits on you, th
 Create `apps/web-ui/src/app/conversation/services-card.spec.ts`:
 
 ```ts
+import { Injector, afterEveryRender } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { describe, expect, it } from 'vitest';
 import { projectFromOverview, type ProjectOverview, type ServiceRow } from '@desk/client';
@@ -20478,6 +20518,36 @@ describe('ServicesCard', () => {
     expect(bridge.calls.find((c) => c.channel === 'services.logs')?.input).toEqual({ id: 's1', lines: 500 });
     expect(screen.getByRole('dialog', { name: 'web · logs' }).textContent).toContain('npm run dev');
   });
+
+  it('follows the log while it is at the bottom, stays where it was scrolled up to, and never renders on a scroll', async () => {
+    let text = 'one';
+    await show([svc({})], { 'services.logs': () => ({ text, truncated: false }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
+    const log = await screen.findByLabelText('web log');
+    await waitFor(() => expect(log.textContent).toBe('one'));
+    // jsdom lays nothing out: a 1000 px log in a 100 px box.
+    Object.defineProperty(log, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(log, 'clientHeight', { value: 100 });
+    let renders = 0;
+    afterEveryRender(() => renders++, { injector: TestBed.inject(Injector) });
+    await new Promise((r) => setTimeout(r, 50)); // adding a render hook schedules a render itself
+    renders = 0;
+
+    // Plain DOM events: testing-library's fireEvent would run change detection itself.
+    const scroll = () => log.dispatchEvent(new Event('scroll'));
+    log.scrollTop = 200;
+    for (let i = 0; i < 5; i++) scroll();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(renders).toBe(0);
+    text = 'one\ntwo';
+    await waitFor(() => expect(log.textContent).toBe('one\ntwo'), { timeout: 2000 });
+    expect(log.scrollTop).toBe(200);
+
+    log.scrollTop = 880;
+    scroll();
+    text = 'one\ntwo\nthree';
+    await waitFor(() => expect(log.scrollTop).toBe(1000), { timeout: 2000 });
+  });
 });
 ```
 
@@ -20491,7 +20561,7 @@ Expected: FAIL: the test build stops with `Could not resolve "./services-card"`.
 Create `apps/web-ui/src/app/conversation/services-card.ts`:
 
 ```ts
-import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, afterRenderEffect, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewEncapsulation, afterNextRender, afterRenderEffect, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import type { ProjectState, ServiceRow } from '@desk/client';
 import { ago, duration } from '@desk/ui-core';
 import { Button } from '../components/button';
@@ -20553,7 +20623,7 @@ const port = (url: string | null) => {
       @if (error()) {
         <p class="field-error">{{ error() }}</p>
       }
-      <pre class="service-log" #pre [attr.aria-label]="service().name + ' log'" (scroll)="onScroll(pre)">{{ text() === null ? 'Loading…' : text() || '(no output yet)' }}</pre>
+      <pre class="service-log" #pre [attr.aria-label]="service().name + ' log'">{{ text() === null ? 'Loading…' : text() || '(no output yet)' }}</pre>
       <div class="sheet-footer"><button deskButton (click)="close.emit()">Close</button></div>
     </div>
   `,
@@ -20565,6 +20635,7 @@ export class LogsSheet {
   protected readonly error = signal<string | null>(null);
   private readonly pre = viewChild.required<ElementRef<HTMLPreElement>>('pre');
   private readonly serviceId = computed(() => this.service().id);
+  /** Whether the log is at its bottom, so a new tail scrolls it down. Read only after a render: never rendered. */
   private pinned = true;
 
   constructor() {
@@ -20595,10 +20666,17 @@ export class LogsSheet {
       const el = this.pre().nativeElement;
       if (this.pinned) el.scrollTop = el.scrollHeight;
     });
-  }
-
-  protected onScroll(el: HTMLElement): void {
-    this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    // Not a template (scroll) listener: that would schedule change detection on every scroll event, for nothing.
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      const el = this.pre().nativeElement;
+      const onScroll = () => {
+        const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        if (pinned !== this.pinned) this.pinned = pinned;
+      };
+      el.addEventListener('scroll', onScroll, { passive: true });
+      destroyRef.onDestroy(() => el.removeEventListener('scroll', onScroll));
+    });
   }
 }
 
@@ -20691,10 +20769,12 @@ export class ServicesCard {
 }
 ```
 
+**Deviation (review fix):** `LogsSheet` first listened with `(scroll)="onScroll(pre)"` on the log's `<pre>`. A template listener marks the view dirty, so in the zoneless app every scroll event scheduled a render, up to about 60 a second while dragging through a long log, and none of them changed anything: `pinned` is a plain field that nothing renders. React re-rendered nothing on a scroll. The listener is now a passive `addEventListener` added in `afterNextRender` and removed through `DestroyRef`, and it writes `pinned` only when it flips. A sixth case, "follows the log while it is at the bottom, stays where it was scrolled up to, and never renders on a scroll", covers the pinning (no case did) and counts renders with `afterEveryRender` across five plain `scroll` events: 0 now, 1 with the template listener.
+
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/conversation/services-card.spec.ts)`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -20782,6 +20862,8 @@ describe('Composer', () => {
   });
 });
 ```
+
+**Deviation (review fix):** the committed spec first wrapped the attached file in a `readable(...)` helper that gave it an `arrayBuffer()` through FileReader, because `apps/web-ui` resolved jsdom 27, whose `File` has none and `fileToBase64` calls it. With jsdom 30 (W1b.2's note) the spec above attaches a plain `new File(['hi'], 'notes.md')`, as written.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -21569,7 +21651,12 @@ const TEMPLATE = `<section deskLineDiagram [g]="g" [project]="project" [messages
 async function show(o: { g?: ReturnType<typeof geometry>; project?: ProjectState } = {}) {
   const props = { g: o.g ?? geometry(), project: o.project ?? project(), messages, attention: [] as AttentionItem[], now: NOW, station: vi.fn(), pair: vi.fn() };
   const view = await render(TEMPLATE, { imports: [LineDiagram], componentProperties: props, providers: new FakeDeskBridge().providers });
-  return { ...props, rerender: (next: Partial<typeof props>) => view.rerender({ componentProperties: next }) };
+  // rerender's detectChanges skips afterRender hooks; the tick it schedules runs them (the scroll pinning).
+  const rerender = async (next: Partial<typeof props>) => {
+    await view.rerender({ componentProperties: next, partialUpdate: true });
+    await view.fixture.whenStable();
+  };
+  return { ...props, rerender };
 }
 
 /** The label-column entry titled `title`. */
@@ -21650,6 +21737,8 @@ describe('LineDiagram', () => {
   });
 });
 ```
+
+**Deviation (review fix):** `show()`'s `rerender` first called `view.rerender({ componentProperties: next })`. `@testing-library/angular` 19.5 resets every property it is not given unless `partialUpdate` is true, so a rerender with only `g` and `now` deleted the other properties (the project, messages, attention and output spies); and `rerender`'s `detectChanges` runs no `afterRender` hooks, so the `afterRenderEffect` that follows "now" had not scrolled when the case looked, and the scroll-pinning case fails as the task first wrote it. The helper passes `partialUpdate: true` and then awaits `view.fixture.whenStable()`, whose tick runs the hooks; Port conventions (Specs) records the pattern. `line-diagram.ts` also reads `{{ l.thread.activity }}` inside `@if (l.thread?.activity)`, which narrows it: the `?.` there drew the NG8107 warning.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -21827,7 +21916,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
           @if (l.trainX !== null) {
             <div>
               @if (l.thread?.activity) {
-                <span class="line-activity" [style.left.px]="l.trainX - 18" [style.top.px]="l.y - 26">{{ l.thread?.activity }}</span>
+                <span class="line-activity" [style.left.px]="l.trainX - 18" [style.top.px]="l.y - 26">{{ l.thread.activity }}</span>
               }
               <a class="line-train" [style.left.px]="l.trainX" [style.top.px]="l.y" [href]="threadHref(l.lane.threadId)" [attr.aria-label]="l.lane.title + ', running now'"><span aria-hidden="true"></span></a>
             </div>
@@ -22456,6 +22545,8 @@ describe('messages in the conversation', () => {
   });
 });
 ```
+
+**Deviation (review fix):** the committed spec first wrapped the attached file in the same `readable(...)` helper as W1b.8's (jsdom 27 has no `File.arrayBuffer`). With jsdom 30 (W1b.2's note) the attach case above uses a plain `new File(['hi'], 'notes.md')`, as written. The spec needs no `whenStable` after a rerender: it never rerenders, and the chat's `afterRenderEffect` scroll pinning runs on the ticks that its events and clicks schedule.
 
 (Differences from the React file: the React `setup`/`show`/long-conversation bodies share one `mount`; `globalStore.set` becomes `provideGlobal` and `TestBed.inject(GlobalStore).set`; `resetSessions()`/`setReleaseDelay(0)` become a fresh TestBed and `SESSION_RELEASE_DELAY` 0; the composer is typed into with `fireEvent.input`; the sheets are found with `findByRole`, since W0c's `Sheet` moves itself into `document.body` after its first render. The last case of the first block is new: the route.)
 
