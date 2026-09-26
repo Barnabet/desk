@@ -18,6 +18,7 @@ import catalogData from './catalog.json' with { type: 'json' };
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { EventStore } from '../events/store';
 import type { Runtime } from '../runtime/runtime';
+import type { RuntimeSpec } from '../skills/builtins';
 import { parseSkillMd, SKILL_FILE } from '../skills/store';
 import { listProjects } from '../state/queries';
 import { readTree, treeDigest } from './digest';
@@ -34,7 +35,7 @@ type CatalogRef = SkillRef & { scope: WritableSkillScope };
 /** What the catalog needs from the runtime manager (Plan 13 Task 3); absent means "no runtime". */
 export type CatalogRuntimes = {
   state(ref: SkillRef): { state: RuntimeState; reason: string | null };
-  setup(ref: SkillRef, entry: CatalogEntry, updated: string): void;
+  setup(ref: SkillRef, entry: RuntimeSpec, updated: string): void;
 };
 
 export type CatalogServiceOptions = {

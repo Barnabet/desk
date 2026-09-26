@@ -4,9 +4,10 @@ import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, rea
 import { homedir } from 'node:os';
 import { dirname, join, posix, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { GLOBAL_PROJECT_ID, type CatalogEntry, type NodeLockEntry, type RuntimeState, type RuntimesReport, type SkillScope } from '@desk/protocol';
+import { GLOBAL_PROJECT_ID, type NodeLockEntry, type RuntimeState, type RuntimesReport, type SkillScope } from '@desk/protocol';
 import type { EventStore } from '../events/store';
 import type { CatalogRuntimes, SkillRef } from './service';
+import type { RuntimeSpec } from '../skills/builtins';
 import { extractSubtree } from './tar';
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
@@ -15,10 +16,15 @@ export type Exec = (command: string, args: string[], opts: { env: Record<string,
 /** A skill's runtime as tools see it: PATH entries and variables when ready, or why not. */
 export type SkillEnv = { state: RuntimeState; reason: string | null; bins: string[]; vars: Record<string, string>; note: string | null };
 
-/** What the agent runtime needs: the environment of a skill, and removal when the skill is deleted. */
+/** What the agent runtime needs: environments of skills, built lazily for built-in ones, and removal. */
 export interface SkillEnvProvider {
-  env(ref: SkillRef): SkillEnv;
+  /** `expect`: the digest the environment must have been built for; another one reads as `none` (stale). */
+  env(ref: SkillRef, expect?: string): SkillEnv;
   remove(ref: SkillRef): void;
+  /** Builds the environment when it is missing or stale; a failed one waits for an explicit retry. */
+  ensure(ref: SkillRef, spec: RuntimeSpec, updated: string): void;
+  /** Resolves true when no setup is pending or it finished within `timeoutMs`, false on timeout or abort. */
+  waitFor(ref: SkillRef, timeoutMs: number, signal?: AbortSignal): Promise<boolean>;
 }
 
 export type SkillRuntimesOptions = {
@@ -100,19 +106,19 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
     return join(this.root, ref.scope, ref.scope === 'project' ? ref.projectId! : '_global', ref.name);
   }
 
-  state(ref: SkillRef): { state: RuntimeState; reason: string | null } {
-    const { state, reason } = this.current(ref);
+  state(ref: SkillRef, expect?: string): { state: RuntimeState; reason: string | null } {
+    const { state, reason } = this.current(ref, expect);
     return { state, reason };
   }
 
-  env(ref: SkillRef): SkillEnv {
-    const { state, reason, file } = this.current(ref);
+  env(ref: SkillRef, expect?: string): SkillEnv {
+    const { state, reason, file } = this.current(ref, expect);
     if (!file) return { state, reason, bins: [], vars: {}, note: null };
     return { state, reason, bins: file.bins, vars: file.vars, note: file.note ?? null };
   }
 
   /** Builds (or rebuilds) a skill's environment in the background; entries without runtime needs get none. */
-  setup(ref: SkillRef, entry: CatalogEntry, updated: string): void {
+  setup(ref: SkillRef, entry: RuntimeSpec, updated: string): void {
     const rt = entry.runtime;
     if (!rt.python && !rt.node && !rt.extras?.length) {
       if (this.lastEvent(ref) && this.lastEvent(ref)!.state !== 'removed') this.remove(ref);
@@ -129,6 +135,46 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
       ));
     this.pending.set(key, job);
     void job.finally(() => this.pending.get(key) === job && this.pending.delete(key));
+  }
+
+  ensure(ref: SkillRef, spec: RuntimeSpec, updated: string): void {
+    if (this.current(ref, spec.digest).state === 'none') this.setup(ref, spec, updated);
+  }
+
+  async waitFor(ref: SkillRef, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    const job = this.pending.get(this.key(ref));
+    if (!job) return true;
+    let timer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const stop = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+      onAbort = () => resolve(false);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([job.then(() => true as const, () => true as const), stop]);
+    } finally {
+      clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  /** At start: setups a crash or restart cut short are recorded as removed ("interrupted"), their folders deleted. */
+  recoverInterrupted(): number {
+    const last = new Map<string, { ref: SkillRef; state: string }>();
+    for (const e of this.o.store.list({ types: ['skill.runtime_changed'] })) {
+      if (e.type !== 'skill.runtime_changed') continue;
+      const ref: SkillRef = { scope: e.payload.scope, name: e.payload.name, ...(e.payload.scope === 'project' ? { projectId: e.project_id } : {}) };
+      last.set(this.key(ref), { ref, state: e.payload.state });
+    }
+    let n = 0;
+    for (const [key, { ref, state }] of last) {
+      if (state !== 'preparing' || this.pending.has(key)) continue;
+      rmSync(this.dir(ref), { recursive: true, force: true });
+      this.record(ref, 'removed', 'interrupted');
+      n++;
+    }
+    return n;
   }
 
   /** Resolves when the current setup of a skill (if any) has finished (tests, CLI). */
@@ -167,7 +213,7 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 
   // ── building ─────────────────────────────────────────────────────────
 
-  private async build(ref: SkillRef, entry: CatalogEntry, updated: string): Promise<void> {
+  private async build(ref: SkillRef, entry: RuntimeSpec, updated: string): Promise<void> {
     const dir = this.dir(ref);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(join(dir, 'bin'), { recursive: true });
@@ -246,7 +292,7 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
    * The environment already holds everything, so these stand-ins run the script or report success instead of
    * installing anything (they never reach the network).
    */
-  private writeCompatShims(dir: string, entry: CatalogEntry): void {
+  private writeCompatShims(dir: string, entry: RuntimeSpec): void {
     const rt = entry.runtime;
     if (rt.python) {
       const py = shq(join(dir, 'py', 'bin', 'python'));
@@ -412,12 +458,13 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
   // ── state ────────────────────────────────────────────────────────────
 
   /** The recorded state checked against the disk: a ready environment whose files or browser are gone has failed. */
-  private current(ref: SkillRef): { state: RuntimeState; reason: string | null; file: EnvFile | null } {
+  private current(ref: SkillRef, expect?: string): { state: RuntimeState; reason: string | null; file: EnvFile | null } {
     const last = this.lastEvent(ref);
     if (!last || last.state === 'removed') return { state: 'none', reason: null, file: null };
     if (last.state !== 'ready') return { state: last.state, reason: last.reason, file: null };
     const file = readEnvFile(join(this.dir(ref), 'desk-env.json'));
     if (!file) return { state: 'failed', reason: 'The environment is missing from disk. Retry to rebuild it.', file: null };
+    if (expect && file.digest !== expect) return { state: 'none', reason: null, file: null };
     const browser = file.vars.DESK_BROWSER;
     if (browser && !existsSync(browser)) {
       return { state: 'failed', reason: `The browser this skill used is no longer installed (${browser}). Retry to find another one or download Chromium.`, file: null };
@@ -463,7 +510,7 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 
   private listEnvs(): SkillRef[] {
     const out: SkillRef[] = [];
-    for (const scope of ['global', 'project'] as SkillScope[]) {
+    for (const scope of ['global', 'project', 'builtin'] as SkillScope[]) {
       const scopeDir = join(this.root, scope);
       if (!existsSync(scopeDir)) continue;
       for (const owner of readdirSync(scopeDir)) {
@@ -479,7 +526,7 @@ export class SkillRuntimes implements CatalogRuntimes, SkillEnvProvider {
 const base = (name: string) => name.split('/').pop()!;
 
 /** What agents are told about a ready runtime, next to the skill's instructions; `browser` is the one the `browser` extra found. */
-export function runtimeNote(entry: CatalogEntry, browser: InstalledBrowser | null = null): string | undefined {
+export function runtimeNote(entry: RuntimeSpec, browser: InstalledBrowser | null = null): string | undefined {
   const rt = entry.runtime;
   const parts: string[] = [];
   if (rt.python) parts.push(`Python ${rt.python.version}${rt.python.packages.length ? ` with ${rt.python.packages.join(', ')}` : ''} (run scripts with python3)`);

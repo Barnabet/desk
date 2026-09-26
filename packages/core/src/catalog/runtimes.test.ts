@@ -14,6 +14,7 @@ import type { Runtime } from '../runtime/runtime';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
 import { testToolContext } from '../testing/context';
 import { makeTarball } from '../testing/tarball';
+import { runtimeKey } from '../skills/builtins';
 import { findBrowser, findBrowsers, runtimeNote, SkillRuntimes, type Exec, type InstalledBrowser, type SkillEnv } from './runtimes';
 
 let h: Harness;
@@ -459,7 +460,7 @@ describe('skill runtimes in tools', () => {
       testing: ready('testing', { VIRTUAL_ENV: '/testing/py', PLAYWRIGHT_BROWSERS_PATH: '/testing/browsers' }),
       research: ready('research', { VIRTUAL_ENV: '/research/py', PLAYWRIGHT_BROWSERS_PATH: '/research/browsers', DESK_BROWSER: '/chrome' }),
     };
-    rt = newRuntime(h, { skillEnv: { env: (r) => envs[r.name]!, remove: () => {} } });
+    rt = newRuntime(h, { skillEnv: { env: (r) => envs[r.name]!, remove: () => {}, ensure: () => {}, waitFor: async () => true } });
     const projectId = rt.createProject({ name: 'P', goal: 'G', settings: { desk_model: FAKE_MODEL.id, thread_model: FAKE_MODEL.id } });
     const desk = getDeskAgent(h.store.db, projectId)!;
     for (const name of Object.keys(envs)) rt.saveSkill({ scope: 'global', name, description: name, instructions: 'x' });
@@ -469,5 +470,80 @@ describe('skill runtimes in tools', () => {
       bins: ['/testing/bin', '/research/bin'],
       vars: { VIRTUAL_ENV: '/testing/py', PLAYWRIGHT_BROWSERS_PATH: '/testing/browsers', DESK_BROWSER: '/chrome' },
     });
+  });
+});
+
+describe('built-in skill environments', () => {
+  const bref = { scope: 'builtin' as const, name: 'pdf-toolkit' };
+  const spec = (pkgs: string[]) => ({ digest: runtimeKey({ python: { version: '3.12', packages: pkgs } }), runtime: { python: { version: '3.12', packages: pkgs } } });
+  /** A uv that takes `ms` to create a venv. */
+  const slowUv = (ms: number) => {
+    const uv = join(h.dir, 'uv-slow');
+    writeFileSync(uv, ['#!/bin/sh', `sleep ${ms / 1000}`, 'if [ "$1" = venv ]; then eval last=\\${$#}; mkdir -p "$last/bin"; printf \'#!/bin/sh\\necho py-ok\\n\' > "$last/bin/python"; chmod +x "$last/bin/python"; fi', 'exit 0', ''].join('\n'));
+    chmodSync(uv, 0o755);
+    return uv;
+  };
+
+  it('builds once on ensure, then keeps it', async () => {
+    const { uv, log } = uvStub();
+    const r = make({ uv });
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    expect(r.state(bref).state).toBe('preparing');
+    await r.settled(bref);
+    expect(r.state(bref, spec(['pypdf==6.19.0']).digest).state).toBe('ready');
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    expect(readFileSync(log, 'utf8').trim().split('\n').filter((l) => l.startsWith('venv'))).toHaveLength(1);
+    expect(r.dir(bref)).toMatch(/runtimes\/builtin\/_global\/pdf-toolkit$/);
+  });
+
+  it('rebuilds when the package list changes', async () => {
+    const { uv } = uvStub();
+    const r = make({ uv });
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    await r.settled(bref);
+    const next = spec(['pypdf==6.20.0']);
+    expect(r.state(bref, next.digest).state).toBe('none');
+    r.ensure(bref, next, '2026-09-27');
+    await r.settled(bref);
+    expect(r.state(bref, next.digest).state).toBe('ready');
+  });
+
+  it('does not retry a failed build by itself', async () => {
+    const r = make({ uv: null });
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    await r.settled(bref);
+    expect(r.state(bref).state).toBe('failed');
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    expect(r.state(bref).state).toBe('failed');
+  });
+
+  it('waits for a pending build, up to a limit or an abort', async () => {
+    const r = make({ uv: slowUv(400) });
+    expect(await r.waitFor(bref, 10)).toBe(true);
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    expect(await r.waitFor(bref, 20)).toBe(false);
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 20);
+    expect(await r.waitFor(bref, 60_000, abort.signal)).toBe(false);
+    expect(await r.waitFor(bref, 10_000)).toBe(true);
+    expect(r.state(bref).state).toBe('ready');
+  });
+
+  it('records setups cut short by a restart as removed', async () => {
+    const r = make({ uv: slowUv(300) });
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    const restarted = make({ uv: null }); // another daemon over the same log, as after a crash
+    expect(restarted.recoverInterrupted()).toBe(1);
+    expect(restarted.state(bref).state).toBe('none');
+    expect(restarted.recoverInterrupted()).toBe(0);
+    await r.settled(bref); // the old process's build, so it doesn't outlive the test
+  });
+
+  it('reports built-in environments', async () => {
+    const { uv } = uvStub();
+    const r = make({ uv });
+    r.ensure(bref, spec(['pypdf==6.19.0']), '2026-09-26');
+    await r.settled(bref);
+    expect(r.report().envs).toContainEqual(expect.objectContaining({ scope: 'builtin', name: 'pdf-toolkit', orphan: false }));
   });
 });
