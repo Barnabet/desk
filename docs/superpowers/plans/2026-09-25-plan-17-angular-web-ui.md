@@ -28811,6 +28811,8 @@ After the second case (its last line `  }, 180_000);`), inside `describe('the co
   }, 180_000);
 ```
 
+**Deviation (a deskd bug the repository case found):** the first run failed at "Markdown renders": after `badge.svg`, `copy.md` never showed, because deskd answered its `GET /v1/threads/:id/files/raw/*` with a 500 (`v is not iterable`). `apps/daemon/src/routes/ui.ts` handed every raw response one module-level headers object (`octet`), and `@hono/node-server` writes the body's `Content-Length` (a number) into the plain object it is given, so the second file's response found a number where Hono expects a string or a list. It hit every second workspace file and skill-version file (the desktop's too), unseen because `ui.test.ts` calls `app.request`, which skips node-server. A `fix(daemon): …` commit before this task's makes `octet()` build a fresh object per response, with a `ui.test.ts` case that serves the app through `startServer` and reads two thread files and two skill-version files in a row (it failed with the 500 before the fix). The e2e steps are as written.
+
 - [ ] **Step 7: Build the UI and run the file**
 
 Nothing else may run Chromium or Electron meanwhile.
