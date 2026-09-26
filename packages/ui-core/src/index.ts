@@ -1,4 +1,5 @@
 export * from './catalog';
+export * from './builtins';
 export * from './files';
 export * from './format';
 export * from './library';
