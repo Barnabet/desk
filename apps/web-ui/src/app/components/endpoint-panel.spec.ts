@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/angular';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DeskBridge } from '../core/desk-bridge';
 import { FakeDeskBridge } from '../testing/fake-bridge';
 import { EndpointPanel, type EndpointState } from './endpoint-panel';
@@ -11,8 +11,8 @@ const keychain = { configured: true, source: 'keychain', base_url: 'http://127.0
 async function setup(handlers: ConstructorParameters<typeof FakeDeskBridge>[0]) {
   const bridge = new FakeDeskBridge(handlers);
   const statuses: EndpointState[] = [];
-  await render(EndpointPanel, { providers: [{ provide: DeskBridge, useValue: bridge }], on: { statusChanged: (s: EndpointState) => statuses.push(s) } });
-  return { bridge, statuses, user: userEvent.setup() };
+  const view = await render(EndpointPanel, { providers: [{ provide: DeskBridge, useValue: bridge }], on: { statusChanged: (s: EndpointState) => statuses.push(s) } });
+  return { bridge, statuses, view, user: userEvent.setup() };
 }
 
 describe('EndpointPanel', () => {
@@ -53,6 +53,21 @@ describe('EndpointPanel', () => {
     expect(await screen.findByText('This deskd manages its model endpoint itself.')).toBeTruthy();
     expect(statuses).toEqual(['unsupported']);
     expect(screen.queryByLabelText('API key')).toBeNull();
+  });
+
+  it('reports nothing once it is gone, when the endpoint loads after it (Skip for now during the load)', async () => {
+    let loaded!: (s: typeof env) => void;
+    const warn = vi.spyOn(console, 'warn');
+    try {
+      const { statuses, view } = await setup({ 'config.endpoint': () => new Promise<typeof env>((resolve) => (loaded = resolve)) });
+      view.fixture.destroy();
+      loaded(env);
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(statuses).toEqual([]);
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('NG0953');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('shows any other failure to load', async () => {

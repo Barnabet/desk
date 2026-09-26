@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, output, signal, type OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ViewEncapsulation, computed, inject, output, signal, type OnInit } from '@angular/core';
 import type { ModelEndpointStatus, ModelEndpointTestResult } from '@desk/protocol';
 import { DeskBridge, DeskCallError } from '../core/desk-bridge';
 import { Button } from './button';
@@ -88,6 +88,12 @@ export class EndpointPanel implements OnInit {
   protected readonly result = signal<ModelEndpointTestResult | null>(null);
   protected readonly pending = signal<'test' | 'save' | null>(null);
   protected readonly error = signal<string | null>(null);
+  /** False once destroyed (Skip before the endpoint loaded): a late load or save then reports nothing, as React ignores it. */
+  private live = true;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.live = false));
+  }
 
   ngOnInit(): void {
     this.bridge
@@ -146,6 +152,7 @@ export class EndpointPanel implements OnInit {
   }
 
   private setStatus(s: EndpointState): void {
+    if (!this.live) return;
     this.status.set(s);
     this.statusChanged.emit(s);
   }
