@@ -38054,7 +38054,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (12), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (10), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (9), `skills/skills-screen.spec.ts` (12), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
@@ -38071,10 +38071,12 @@ Expected: neither `notYet('Skills')` nor `notYet('The skill catalog')`. At most 
 - [ ] **Step 6: The desktop app is untouched, and nothing is left behind**
 
 Run: `git diff --stat "$(git log -1 --format=%H --grep='^Merge origin/master into web-ui')" HEAD -- apps/desktop`
-Expected: no output: nothing under `apps/desktop` changed since the merge of master that came after W3a.2 (8883229, which brought master's React skills, catalog and built-in screens; the section's own commits never touch `apps/desktop`). If master is merged again before this task, the newest such merge is the base.
+Expected: six files and nothing else, each changed only where a helper moved into `@desk/ui-core` (the removed code is in ui-core unchanged, apart from renames such as `pad` → `pad2` and `BAYS` → `CATALOG_BAYS`, and wider parameter types), so the React files keep their behaviour and their tests: W1b.13's `renderer/conversation/Composer.tsx` (`pastedName` imported, d355a2e; f9d434f dropped its re-export, which nothing imported) and `renderer/conversation/LineDiagram.tsx` (`linkText` imported, ad3711d); W3a.2b's `renderer/skills/builtins/data.ts` (`builtinKey`, `parseBuiltinKey` and `runtimeLabel` re-exported, cb1c624); and the review follow-ups after W3a.2 (825074b): `renderer/skills/catalog/data.ts` (`CATALOG_BAYS as BAYS` and the pure helpers re-exported), `renderer/skills/data.ts` (`whoLabel`) and `renderer/threads/tabs/UsageTab.tsx` (`tokens`). The base is the merge of master that came after W3a.2 (8883229, which brought master's React skills, catalog and built-in screens); if master is merged again before this task, the newest such merge is the base.
 
 Run: `git status --short`
 Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot folder is outside the repo).
+
+**As run** (after the review follow-ups' commit, e4adf18): Step 1 exit 0. Step 2: 198 files, 1319 tests, no `*.spec.ts` or web e2e file among them. Step 3: 90 files, 491 tests; this section's counts as listed above (Step 3 had said 9 for `skills/data.spec.ts`, which has had 10 since W3a.1's review cases; `skills-screen.spec.ts` has 12 since the follow-ups), `screen-for.spec.ts` 1 and `security.spec.ts` 3. Step 4: the build succeeded, then 5 files and 14 tests passed in about 20 s: `smoke` 2, `flows` 3, `knowledge` 3, `catalog` 3 (its catalog `fetch` refusing the network) and `apps/web-server/src/built-ui.e2e.test.ts` 3; W3b's `system.e2e.test.ts` has not landed. Step 5: only `notYet('System')`. Step 6: the six files above, each an import or re-export of a helper that moved to `@desk/ui-core` (this step first expected no output, which the post-merge moves of W1b.13, W3a.2b and the review follow-ups had made stale); `git status --short` empty.
 
 ---
 
