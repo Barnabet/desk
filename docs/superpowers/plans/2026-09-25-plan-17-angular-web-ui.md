@@ -53,7 +53,7 @@ browser (Angular app)  ── http://127.0.0.1:7434 ──►  desk web (Node, H
 - Every `apps/web-ui` command (Angular CLI, `ngc`, its tests and build) goes through `scripts/ng.mjs`, which runs it on Node ≥ 22.22.3.
 - The deskd token never reaches the browser: it never appears in a response, a page, a push frame, a log line or `web.json`.
 - Every `/rpc` and `/push` input is validated against its zod schema (`channels` or `webChannels`) before anything runs.
-- `apps/web-ui` never uses `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `bypassSecurityTrust*` or `DomSanitizer` (W0c.10's `security.spec.ts` enforces this).
+- `apps/web-ui` never uses `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `setHTMLUnsafe`, `parseHTMLUnsafe`, `DOMParser`, `bypassSecurityTrust*` or `DomSanitizer` (W0c.10's `security.spec.ts` enforces this).
 - Agent text reaches the page only through `SafeMarkdownComponent` (`div[deskSafeMarkdown]`) or plain interpolation.
 - `desk web` binds loopback only. The Host check (421) runs on every request and WebSocket upgrade, and the Origin check (403) runs on `/rpc` and every upgrade.
 - The code is cross-platform: no macOS-only tools, except in the launchd code paths, which are guarded by platform. Paths go through `node:path`, and the folder opener is chosen per platform.
@@ -14463,7 +14463,7 @@ after:
 
 ```
 - desk web never gives the browser the daemon token either. It answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
-- The web UI never turns text into HTML: no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `DomSanitizer`, `bypassSecurityTrust*`, `srcdoc`, `eval` or `document.write` in `apps/web-ui/src` (`security.spec.ts` fails on them). Agent markdown goes through `SafeMarkdown`, which renders `marked`'s tokens with Angular templates, and links through `ExternalLink` (`safeExternalUrl`, then a confirmation).
+- The web UI never turns text into HTML: no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `setHTMLUnsafe`, `parseHTMLUnsafe`, `DOMParser`, `DomSanitizer`, `bypassSecurityTrust*`, `srcdoc`, `eval` or `document.write` in `apps/web-ui/src` (`security.spec.ts` fails on them). Agent markdown goes through `SafeMarkdown`, which renders `marked`'s tokens with Angular templates, and links through `ExternalLink` (`safeExternalUrl`, then a confirmation).
 ```
 
 Run: `git diff CLAUDE.md`
