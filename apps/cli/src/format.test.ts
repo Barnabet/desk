@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredEvent, StreamServerMessage } from '@desk/protocol';
-import { createRenderer } from './format';
+import { automationLine, createRenderer, runLine, stepLine } from './format';
 
 let seq = 0;
 const ev = (agent_id: string | null, body: Pick<StoredEvent, 'type' | 'payload'>): StreamServerMessage => ({
@@ -106,5 +106,47 @@ describe('renderer', () => {
     expect(out).toContain('↳ [Desk — question] Status?');
     expect(out).toContain('you asked "Auth API": Which format did you pick?');
     expect(out).not.toContain('Begin');
+  });
+});
+
+describe('automation lines', () => {
+  it('formats summaries, runs and steps', () => {
+    const summary = {
+      id: 'a',
+      project_id: 'p',
+      name: 'digest',
+      title: 'Digest',
+      description: '',
+      version: 3,
+      tested_version: 2,
+      enabled: true,
+      grants_suspended: true,
+      schedules: [{ cron: '0 8 * * 1', timezone: 'Europe/Paris' }],
+      last_run: { id: 'r', status: 'failed', trigger: 'schedule', test: false, started_at: '2026-09-28T06:00:00.000Z', finished_at: null, summary: null, waiting_on: null },
+      next_due: '2026-10-05T06:00:00.000Z',
+      enable_requested: false,
+      updated_at: '',
+    } as const;
+    expect(automationLine(summary as never)).toBe('digest "Digest" — on · v3 (tested in v2) · 0 8 * * 1 (Europe/Paris) · last: failed 2026-09-28T06:00:00.000Z · next 2026-10-05T06:00:00.000Z · grants suspended');
+    expect(runLine({ kind: 'skipped', automation_id: 'a', trigger_index: 0, due_at: '2026-09-28T06:00:00.000Z', reason: 'missed', ts: '' })).toBe('—  skipped (missed)  2026-09-28T06:00:00.000Z');
+    const step = { step_id: 's', attempt: 2, status: 'failed', route: 'error', outputs: {}, summary: null, error: 'Exit code 1: boom', agent_id: null, child_run_id: null, resume_at: null, gate: null, question: null, note: null, started_at: null, finished_at: null } as const;
+    expect(stepLine('Fetch', step as never)).toBe('  • Fetch → failed (attempt 2) · route error: Exit code 1: boom');
+  });
+
+  it('renders automation questions, gates and run ends in the stream', () => {
+    let out = '';
+    const render = createRenderer((s) => (out += s), { deskId: 'd' });
+    const ev = (type: string, payload: object) => ({ kind: 'event', event: { id: 1, project_id: 'p', agent_id: null, type, payload, ts: '' } }) as never;
+    render(ev('automation.step_changed', { run_id: 'r1', step_id: 'ok', attempt: 1, status: 'waiting', question: { text: 'Publish?', files: [] } }));
+    render(ev('automation.step_changed', { run_id: 'r1', step_id: 'fetch', attempt: 1, status: 'waiting', gate: { tool: 'skill_run', subject: 'web/fetch.py x', reason: 'r' } }));
+    render(ev('automation.run_finished', { run_id: 'r1', status: 'failed', summary: 'Fetch failed' }));
+    expect(out).toBe(
+      [
+        '  ? automation run r1 asks: Publish? (desk automation answer r1 ok approve|reject)',
+        '  ! automation run r1 wants to run web/fetch.py x (desk automation answer r1 fetch approve|reject [--remember])',
+        '  ◼ automation run r1 failed: Fetch failed',
+        '',
+      ].join('\n'),
+    );
   });
 });

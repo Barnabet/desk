@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
-import type { CatalogItem, CatalogReview, StreamServerMessage } from '@desk/protocol';
+import type { AutomationSummary, CatalogItem, CatalogReview, RunDetail, StreamServerMessage } from '@desk/protocol';
 import type { ServiceRow } from '@desk/client';
 import { runChat } from './chat';
 import { ApiError, clientFromDataDir, DeskClient, platformDataDir, readDaemonInfo } from './client';
-import { createRenderer } from './format';
+import { automationLine, createRenderer, runLine, stepLine } from './format';
 import { install, isInstalled, plistFor, uninstall } from './launchd';
 
 export type CliIO = {
@@ -134,6 +134,40 @@ async function sayAndFollow(client: DeskClient, project: Project, text: string, 
     await client.post(`/projects/${project.id}/messages`, { text });
     const timedOut = await Promise.race([finished.then(() => false), sleep(timeoutMs).then(() => true)]);
     if (timedOut) io.out(`\n(still working — follow with: desk chat ${project.name})\n`);
+  } finally {
+    close();
+  }
+}
+
+async function requireAutomation(client: DeskClient, project: Project, name: string): Promise<AutomationSummary> {
+  const a = (await client.automations.list(project.id)).find((x) => x.name === name);
+  if (!a) throw new Error(`No automation named "${name}" in ${project.name}. See: desk automations ${project.name}`);
+  return a;
+}
+
+/** Streams a run's steps until it ends (from `afterSeq`, taken before the run started). Throws when it fails or is cancelled. */
+async function followRun(client: DeskClient, project: Project, runId: string, afterSeq: number, io: CliIO): Promise<void> {
+  const detail: RunDetail = await client.automations.getRun(runId);
+  const titleOf = (id: string) => detail.definition.steps.find((s) => s.id === id)?.title ?? id;
+  let finish!: (status: string, summary: string) => void;
+  const done = new Promise<{ status: string; summary: string }>((r) => (finish = (status, summary) => r({ status, summary })));
+  const close = await client.stream(project.id, afterSeq, (m: StreamServerMessage) => {
+    if (m.kind !== 'event') return;
+    const e = m.event;
+    if (e.type === 'automation.step_changed' && e.payload.run_id === runId) {
+      const p = e.payload;
+      if (p.status === 'waiting' && p.question) io.out(`  ? ${titleOf(p.step_id)} asks: ${p.question.text}\n    answer: desk automation answer ${runId} ${p.step_id} approve|reject [note]\n`);
+      else if (p.status === 'waiting' && p.gate) io.out(`  ! ${titleOf(p.step_id)} wants to run ${p.gate.subject}\n    answer: desk automation answer ${runId} ${p.step_id} approve|reject [--remember]\n`);
+      else if (p.status !== 'pending' && p.status !== 'running')
+        io.out(`${stepLine(titleOf(p.step_id), { step_id: p.step_id, attempt: p.attempt, status: p.status, route: p.route ?? null, outputs: p.outputs ?? {}, summary: p.summary ?? null, error: p.error ?? null, agent_id: null, child_run_id: null, resume_at: null, gate: null, question: null, note: null, started_at: null, finished_at: null })}\n`);
+    }
+    if (e.type === 'automation.run_finished' && e.payload.run_id === runId) finish(e.payload.status, e.payload.summary);
+  });
+  try {
+    if (detail.status === 'succeeded' || detail.status === 'failed' || detail.status === 'cancelled') finish(detail.status, detail.summary ?? '');
+    const end = await done;
+    io.out(`Run ${runId} ${end.status}: ${end.summary}\n`);
+    if (end.status !== 'succeeded') throw new Error(`Run ${runId} ${end.status}`);
   } finally {
     close();
   }
@@ -397,6 +431,109 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       say(`${verb} ${id}`);
     });
   }
+
+  // ── automations ────────────────────────────────────────────────────
+  program.command('automations <project>').description("List the project's automations").action(async (ref: string) => {
+    const c = client();
+    const p = await resolveProject(c, ref);
+    const list = await c.automations.list(p.id);
+    say(list.length ? list.map(automationLine).join('\n') : 'No automations. Ask Desk to build one, or: desk automation import <project> <file.json>');
+  });
+  const automation = program.command('automation').description('Show, run and manage automations');
+  automation
+    .command('show <project> <name>')
+    .option('--version <n>', 'a past version')
+    .action(async (ref: string, name: string, opts: { version?: string }) => {
+      const c = client();
+      const p = await resolveProject(c, ref);
+      const a = await c.automations.get((await requireAutomation(c, p, name)).id);
+      const def = opts.version ? (await c.automations.version(a.id, Number(opts.version))).definition : a.definition;
+      say(
+        [
+          `${a.name} ${JSON.stringify(def.title)} v${opts.version ?? a.version} — ${a.enabled ? 'on' : 'off'}${a.grants_suspended ? ' · grants suspended' : ''}`,
+          ...(def.description ? [def.description] : []),
+          `Inputs:${def.inputs.length ? '' : ' (none)'}`,
+          ...def.inputs.map((i) => `- ${i.key} (${i.type})${i.default !== undefined ? ` = ${String(i.default)}` : i.required ? ' required' : ''}`),
+          `Schedules:${def.triggers.length ? '' : ' (none: Run now only)'}`,
+          ...def.triggers.map((t) => `- ${t.cron} (${t.timezone}), catch up ${t.catch_up}`),
+          'Steps:',
+          ...def.steps.map((s) => `- ${s.id} [${s.kind}] ${s.title}`),
+          `Edges:${def.edges.length ? '' : ' (none)'}`,
+          ...def.edges.map((e) => `- ${e.from} → ${e.to}${e.route ? ` [${e.route}]` : ''}${e.when ? ` when ${e.when}` : ''}`),
+          `Grants:${a.grants.length ? '' : ' (none)'}`,
+          ...a.grants.map((g) => `- ${g.action} ${g.tool}${g.match ? ` ${JSON.stringify(g.match)}` : ''}`),
+          `After a run: ${def.after_run}`,
+        ].join('\n'),
+      );
+    });
+  automation
+    .command('run <project> <name>')
+    .option('-i, --input <key=value>', 'an input value (repeatable)', (v: string, all: string[]) => [...all, v], [] as string[])
+    .option('--test', 'a test run (scripts see DESK_TEST=1)')
+    .option('-f, --follow', 'stream its steps until it ends')
+    .action(async (ref: string, name: string, opts: { input: string[]; test?: boolean; follow?: boolean }) => {
+      const c = client();
+      const p = await resolveProject(c, ref);
+      const a = await c.automations.get((await requireAutomation(c, p, name)).id);
+      const inputs: Record<string, string> = {};
+      for (const pair of opts.input) {
+        const eq = pair.indexOf('=');
+        if (eq <= 0) throw new Error(`Expected key=value, got "${pair}"`);
+        const key = pair.slice(0, eq);
+        const spec = a.definition.inputs.find((i) => i.key === key);
+        const value = pair.slice(eq + 1);
+        inputs[key] = spec && (spec.type === 'file' || spec.type === 'folder') ? resolve(value) : value;
+      }
+      const seq: number = (await c.get(`/projects/${p.id}`)).last_seq;
+      const { run_id } = await c.automations.run(a.id, { inputs, test: opts.test ?? false });
+      say(`Started ${opts.test ? 'test ' : ''}run ${run_id} of ${a.name}`);
+      if (opts.follow) await followRun(c, p, run_id, seq, io);
+    });
+  for (const [cmd, enabled] of [
+    ['on', true],
+    ['off', false],
+  ] as const) {
+    automation.command(`${cmd} <project> <name>`).action(async (ref: string, name: string) => {
+      const c = client();
+      const p = await resolveProject(c, ref);
+      const a = await c.automations.setEnabled((await requireAutomation(c, p, name)).id, enabled);
+      const untested = enabled && a.tested_version !== a.version ? ` (v${a.version} has no succeeded test run)` : '';
+      say(`Turned ${cmd} ${a.name}${untested}`);
+    });
+  }
+  automation
+    .command('runs <project> <name>')
+    .option('-n, --limit <n>', 'how many', '20')
+    .action(async (ref: string, name: string, opts: { limit: string }) => {
+      const c = client();
+      const p = await resolveProject(c, ref);
+      const list = await c.automations.runs((await requireAutomation(c, p, name)).id, { limit: Number(opts.limit) || 20 });
+      say(list.length ? list.map(runLine).join('\n') : 'No runs yet');
+    });
+  automation.command('cancel <run>').action(async (runId: string) => {
+    await client().automations.cancelRun(runId);
+    say(`Cancelled run ${runId}`);
+  });
+  automation
+    .command('answer <run> <step> <decision> [note...]')
+    .description('approve or reject an Ask me step or a script gate')
+    .option('--remember', 'approve and remember the grant (script gates)')
+    .action(async (runId: string, stepId: string, decision: string, note: string[] = [], opts: { remember?: boolean }) => {
+      if (decision !== 'approve' && decision !== 'reject') throw new Error('The decision is approve or reject');
+      await client().automations.answer(runId, stepId, { decision, ...(note.length ? { note: note.join(' ') } : {}), ...(opts.remember ? { remember: true } : {}) });
+      say(`${decision === 'approve' ? 'Approved' : 'Rejected'} ${stepId} in run ${runId}`);
+    });
+  automation.command('export <project> <name>').description('Print the automation as JSON').action(async (ref: string, name: string) => {
+    const c = client();
+    const p = await resolveProject(c, ref);
+    say(JSON.stringify(await c.automations.exportOf((await requireAutomation(c, p, name)).id), null, 2));
+  });
+  automation.command('import <project> <file>').action(async (ref: string, file: string) => {
+    const c = client();
+    const p = await resolveProject(c, ref);
+    const { automation: a, warnings } = await c.automations.importInto(p.id, JSON.parse(readFileSync(resolve(file), 'utf8')));
+    say([`Imported ${a.name} v${a.version} (off; turn it on with: desk automation on ${p.name} ${a.name})`, ...warnings.map((w) => `  warning: ${w.path}: ${w.message}`)].join('\n'));
+  });
 
   // ── memory, library, usage ─────────────────────────────────────────
   program.command('memory <project> [query...]').description('List or search project memory').action(async (ref: string, query: string[] = []) => {
