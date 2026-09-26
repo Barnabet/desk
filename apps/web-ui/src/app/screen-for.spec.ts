@@ -10,7 +10,7 @@ describe('screenFor', () => {
     expect(screenFor({ name: 'map' })).toEqual({ component: MapScreen, inputs: { newProject: false } });
     expect(screenFor({ name: 'onboarding' })).toEqual({ component: Onboarding, inputs: {} });
     expect(screenFor({ name: 'catalog', review: 'pdf-toolkit' })?.inputs).toEqual({ label: 'The skill catalog' });
-    expect(screenFor({ name: 'project', id: 'p', tab: 'memory', q: 'auth' })?.inputs).toEqual({ label: 'Memory' });
+    expect(screenFor({ name: 'project', id: 'p', tab: 'memory', q: 'auth' })?.inputs).toEqual({ projectId: 'p', q: 'auth' });
     for (const tab of ['conversation', 'threads', 'library', 'memory', 'settings'] as const) expect(screenFor({ name: 'project', id: 'p', tab })).not.toBeNull();
   });
 });
