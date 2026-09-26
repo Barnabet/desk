@@ -443,6 +443,15 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       const c = client();
       const rows = await c.get<any[]>(await skillsBase(c, ref));
       say(rows.length ? rows.map(skillLine).join('\n') : 'No skills');
+      const builtins = await c.builtins.list(ref ? { projectId: (await resolveProject(c, ref)).id } : {});
+      if (builtins.length) {
+        say('\nBuilt into Desk:');
+        for (const b of builtins) {
+          const env = b.runtime.state === 'none' ? 'set up on first use' : b.runtime.state;
+          const notes = [b.enabled ? null : 'off', b.broken ? 'damaged' : null, b.shadowed_by ? `shadowed by your ${b.shadowed_by} skill` : null, `environment ${env}`];
+          say(`  ${b.name} — ${b.title} (${notes.filter(Boolean).join(', ')})`);
+        }
+      }
     });
   const skill = program.command('skill').description('Manage skills (global unless --project is given)');
   skill.command('show <name>').option('-p, --project <project>').action(async (name: string, opts: { project?: string }) => {
@@ -475,6 +484,24 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     const r = await c.post(`${await skillsBase(c, opts.project)}/${name}/restore`, { version: Number(version) });
     say(`Restored ${name} v${version} as v${r.version}`);
   });
+  skill.command('off <name>').description("Turn off one of Desk's built-in skills").action(async (name: string) => {
+    await client().builtins.setEnabled(name, false);
+    say(`Turned off ${name}. Agents no longer see it.`);
+  });
+  skill.command('on <name>').description('Turn a built-in skill back on').action(async (name: string) => {
+    await client().builtins.setEnabled(name, true);
+    say(`Turned on ${name}.`);
+  });
+  skill
+    .command('duplicate <name>')
+    .description('Copy a built-in skill into your own skills (global unless --project) to customise it')
+    .option('-p, --project <project>')
+    .action(async (name: string, opts: { project?: string }) => {
+      const c = client();
+      const req = opts.project ? { scope: 'project' as const, project_id: (await resolveProject(c, opts.project)).id } : { scope: 'global' as const };
+      const r = await c.builtins.duplicate(name, req);
+      say(`Duplicated ${name} to ${r.dir}. Your copy is used instead of the built-in.`);
+    });
   // ── catalog ────────────────────────────────────────────────────────
   const catalogState = (item: CatalogItem, projectNames: Map<string, string>) => {
     const global = item.installs.find((i) => i.scope === 'global');
