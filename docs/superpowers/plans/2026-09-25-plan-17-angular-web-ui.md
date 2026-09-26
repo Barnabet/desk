@@ -33238,9 +33238,12 @@ export class RuntimeLine {
   protected readonly pending = signal(false);
 
   protected readonly words = computed(() => runtimeWords(this.entry()));
+  /** This skill's live setup step; an own key only, since the skill's name comes from the catalog. */
   private readonly progress = computed(() => {
     const i = this.install();
-    return this.global.state().runtimes.progress[runtimeKey(i.scope, i.project_id, this.entry().id)];
+    const all = this.global.state().runtimes.progress;
+    const key = runtimeKey(i.scope, i.project_id, this.entry().id);
+    return Object.hasOwn(all, key) ? all[key] : undefined;
   });
   protected readonly progressText = computed(() => {
     const p = this.progress();
@@ -33274,6 +33277,8 @@ Expected: PASS (5 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation:** the plan first read the live step as `progress[runtimeKey(…)]`, as React does. Lookups keyed by strings from outside the UI use a `Map` or `Object.hasOwn` (W2a.1's prototype-lookup sweep), so the code above reads it only when `Object.hasOwn` says the key is the record's own. `runtimeKey`'s scope prefix already keeps a catalog id from naming an `Object.prototype` member; the check makes that hold without relying on the key's shape. Behaviour is otherwise React's, and `RuntimeLine.tsx` has not changed since the merge of master (8883229). 5 tests.
 
 - [ ] **Step 5: Commit**
 
