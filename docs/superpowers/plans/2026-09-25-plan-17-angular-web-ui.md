@@ -33686,7 +33686,7 @@ Create `apps/web-ui/src/app/skills/catalog/review-sheet.spec.ts`:
 ```ts
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { fireEvent, render, screen, within } from '@testing-library/angular';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { CatalogItem } from '@desk/protocol';
@@ -33817,6 +33817,23 @@ describe('ReviewSheet', () => {
     expect(within(sheet).queryByText('Fetching the pinned files and checking them…')).toBeNull();
   });
 
+  it('stays open while the install runs, so the screen still hears of it', async () => {
+    let release: (r: { skill: { name: string; scope: 'global'; version: number; project_id: null }; state: 'installed'; runtime: 'ready' }) => void = () => {};
+    const { changed, closed, sheet } = await setup({ handlers: { 'catalog.install': () => new Promise((resolve) => (release = resolve)) } });
+    await within(sheet).findByText('Search free scholarly APIs for papers.');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Install' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(closed).not.toHaveBeenCalled();
+    release({ skill: { name: 'paper-lookup', scope: 'global', version: 1, project_id: null }, state: 'installed', runtime: 'ready' });
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(within(sheet).getByText('paper-lookup is installed for every project.')).toBeTruthy();
+    expect(closed).not.toHaveBeenCalled();
+  });
+
   it('prepares once for its id, even when the call reads a signal that changes later', async () => {
     // The real bridge can read its signedOut signal inside call() (a sign-in retry); prepare must not track it.
     const signedIn = signal(true);
@@ -33885,7 +33902,7 @@ type OpenFile = { path: string; data: Uint8Array; line?: number };
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents', '[attr.id]': 'null' },
   template: `
-    <div deskSheet [title]="title()" [width]="860" (close)="close.emit()">
+    <div deskSheet [title]="title()" [width]="860" (close)="dismiss()">
       @if (error(); as err) {
         <p class="field-error" role="alert">Couldn't prepare this skill: {{ err }}</p>
       } @else if (ready(); as r) {
@@ -33990,7 +34007,7 @@ type OpenFile = { path: string; data: Uint8Array; line?: number };
           <button deskButton (click)="close.emit()">Close</button>
           <button deskButton variant="primary" (click)="openSkill(done)">Open skill</button>
         } @else {
-          <button deskButton (click)="close.emit()">Cancel</button>
+          <button deskButton [disabled]="pending()" (click)="dismiss()">Cancel</button>
           <button deskButton variant="primary" [pending]="pending()" [disabled]="installOff()" (click)="install()">{{ installLabel() }}</button>
         }
       </div>
@@ -34084,6 +34101,11 @@ export class ReviewSheet {
     });
   }
 
+  /** Cancel, Escape and the backdrop do nothing while the install runs, so its `changed` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.pending()) this.close.emit();
+  }
+
   protected checked(e: Event): boolean {
     return (e.target as HTMLInputElement).checked;
   }
@@ -34137,12 +34159,14 @@ export class ReviewSheet {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/catalog/review-sheet.spec.ts)`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests; 6 before the review fix after W3a.8).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
 **Deviation (review fix):** two fixes. (1) The last case ended with `await waitFor(() => expect(sheet.querySelector('.review')).toBeNull())`, which always passed: the error branch never renders `.review`. It now checks that "Fetching the pinned files and checking them…" is gone. (2) The prepare `effect` called `catalog.prepare` while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would prepare the entry again when it changed. The call now runs in `untracked`, as `TerritoryInspector`'s plan fetch and `injectSkills` do, and a sixth case (a handler that reads a signal, which then changes) fails without it (6 tests). The review after W3a.6 added the proof that the loading text appears at all: the failure case holds its prepare handler on a promise, checks "Fetching the pinned files and checking them…" is shown, then releases it and checks the text is gone once the error shows (still 6 tests).
+
+**Deviation (review fix, after W3a.8):** the blocks above are the committed files. Cancel, Escape and a backdrop click closed the sheet while an install was running; the screen then destroys the sheet, and the install's late `changed` was dropped (Angular's NG0953), so the screen never listed the skills and the catalog again. React still delivers `onChanged` in that case. While `pending()`, the sheet now ignores close: Cancel is `[disabled]="pending()"`, and both it and the `Sheet`'s `(close)` (Escape and the backdrop) go through `dismiss()`, which does nothing while the install runs. A seventh case holds `catalog.install`, tries Cancel, Escape and the backdrop, expects no `close`, then releases it and expects `changed` and "paper-lookup is installed for every project." It failed without the fix, first on Cancel's `disabled`, and with only `[disabled]` on `close` called 3 times (jsdom still dispatches a click to a disabled button, so the guard is `dismiss()`'s). The same fix went into W3a.8's `SkillEditor` and `ImportSheet`. 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -34765,6 +34789,7 @@ describe('SkillPanel', () => {
     expect(bridge.calls.find((c) => c.channel === 'skills.remove')?.input).toEqual({ name: 'email-sequence' });
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Restored v1 as a new version.', 'Deleted email-sequence.']);
   });
+
   it('drops a file that lands after another skill opened', async () => {
     let release: (data: Uint8Array) => void = () => {};
     const { view, panel } = await setup({ handlers: { 'skills.file': () => new Promise<Uint8Array>((resolve) => (release = resolve)) } });
@@ -34793,6 +34818,39 @@ describe('SkillPanel', () => {
     await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(1));
     expect(outputs.close).not.toHaveBeenCalled();
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Deleted email-sequence.']);
+  });
+
+  it('closes an open confirm when another skill opens, so it never acts on that one', async () => {
+    const { bridge, view, panel } = await setup();
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog', { name: 'Delete email-sequence?' })).toBeTruthy();
+    await view.rerender({ inputs: { skill: { scope: 'project', projectId: 'p1', name: 'brand-voice' } }, partialUpdate: true });
+    await waitFor(() => expect(panel.getAttribute('aria-label')).toBe('Skill brand-voice'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(bridge.calls.filter((c) => c.channel === 'skills.remove')).toEqual([]);
+  });
+
+  it("keeps each skill's pending action marked when the user goes from one to another and back", async () => {
+    const releases: Array<(r: { ok: true }) => void> = [];
+    const { view, outputs, panel } = await setup({ handlers: { 'skills.remove': () => new Promise<{ ok: true }>((resolve) => releases.push(resolve)) } });
+    const deleteBusy = () => within(panel).getByRole('button', { name: 'Delete' }).getAttribute('aria-busy');
+    const open = async (skill: SkillRef, label: string) => {
+      await view.rerender({ inputs: { skill }, on: outputs, partialUpdate: true });
+      await waitFor(() => expect(panel.getAttribute('aria-label')).toBe(label));
+    };
+    const deleteHere = async (name: string) => {
+      fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+      fireEvent.click(within(await screen.findByRole('dialog', { name: `Delete ${name}?` })).getByRole('button', { name: 'Delete' }));
+    };
+    await deleteHere('email-sequence');
+    await open({ scope: 'project', projectId: 'p1', name: 'brand-voice' }, 'Skill brand-voice');
+    await deleteHere('brand-voice');
+    expect(deleteBusy()).toBe('true');
+    await open({ scope: 'global', name: 'email-sequence' }, 'Skill email-sequence');
+    expect(deleteBusy()).toBe('true');
+    releases.forEach((release) => release({ ok: true }));
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(deleteBusy()).toBeNull());
   });
 
   it('says when the skill is a copy of a built-in one, with a link to the built-in', async () => {
@@ -35046,7 +35104,7 @@ export class Compare {
                   @if (h.current) {
                     <span class="chip chip-done">current</span>
                   } @else {
-                    <button deskButton size="sm" [pending]="busyHere() === 'restore-' + h.version" (click)="askRestore(h.version)">Restore</button>
+                    <button deskButton size="sm" [pending]="busyHere('restore-' + h.version)" (click)="askRestore(h.version)">Restore</button>
                   }
                 </li>
               }
@@ -35061,7 +35119,7 @@ export class Compare {
         <button deskButton variant="primary" (click)="edit.emit(d)">Edit</button>
         <button deskButton (click)="askDesk.emit()">Refine with Desk</button>
         <span class="grow"></span>
-        <button deskButton variant="ghost" [pending]="busyHere() === 'delete'" (click)="askDelete()">Delete</button>
+        <button deskButton variant="ghost" [pending]="busyHere('delete')" (click)="askDelete()">Delete</button>
       </div>
     } @else {
       <p class="muted">Loading…</p>
@@ -35103,13 +35161,10 @@ export class SkillPanel {
   protected readonly detail = signal<SkillDetail | null>(null);
   protected readonly history = signal<SkillHistoryEntry[]>([]);
   protected readonly error = signal<string | null>(null);
-  protected readonly confirming = signal<Confirming | null>(null);
-  /** The action running, and the skill it runs on: a late one never marks another skill's button. */
-  private readonly busy = signal<{ key: string; what: string } | null>(null);
-  protected readonly busyHere = computed(() => {
-    const b = this.busy();
-    return b && b.key === this.key() ? b.what : null;
-  });
+  /** The open Delete or Restore confirm; another skill opening closes it, so it never acts on that one. */
+  protected readonly confirming = linkedSignal<string, Confirming | null>({ source: this.key, computation: () => null });
+  /** Every action running, as `<skill key>|<what>`: each skill's buttons show their own, however the user moves between skills. */
+  private readonly busy = signal<ReadonlySet<string>>(new Set());
   private readonly reload = signal(0);
 
   protected readonly current = computed(() => this.history().find((h) => h.current));
@@ -35156,6 +35211,11 @@ export class SkillPanel {
           if (live) this.error.set(describeError(err).message);
         });
     });
+  }
+
+  /** Whether `what` (`delete`, `restore-<version>`) is running on the open skill. */
+  protected busyHere(what: string): boolean {
+    return this.busy().has(`${this.key()}|${what}`);
   }
 
   protected tabLabel(t: Tab, d: SkillDetail): string {
@@ -35216,21 +35276,26 @@ export class SkillPanel {
 
   /** Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload does not. */
   private async act(what: string, fn: () => Promise<unknown>, done: string): Promise<boolean> {
-    const mine = { key: this.key(), what };
+    const key = this.key();
+    const mark = `${key}|${what}`;
     this.confirming.set(null);
-    this.busy.set(mine);
+    this.busy.update((b) => new Set(b).add(mark));
     try {
       await fn();
       this.toasts.toast({ tone: 'info', message: done });
       this.changed.emit();
-      if (this.key() === mine.key) this.reload.update((r) => r + 1);
+      if (this.key() === key) this.reload.update((r) => r + 1);
       return true;
     } catch (err) {
       this.toasts.error(err);
       return false;
     } finally {
-      // Clears only its own mark, so an action started on the new skill keeps its own.
-      this.busy.update((b) => (b === mine ? null : b));
+      // Clears only its own mark, so every other action, on this skill or another, keeps its own.
+      this.busy.update((b) => {
+        const next = new Set(b);
+        next.delete(mark);
+        return next;
+      });
     }
   }
 }
@@ -35239,7 +35304,7 @@ export class SkillPanel {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-panel.spec.ts)`
-Expected: PASS (10 tests; 8 before the review fix below).
+Expected: PASS (12 tests; 8 before the first review fix below, 10 before the second).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -35247,6 +35312,8 @@ Expected: exit 0.
 **Deviation:** two changes from the plan's first code, both for the port conventions; the blocks above are the committed files. (1) Both fetch `effect`s (the panel's `skills.get` and `skills.history`, `Compare`'s two `skills.version`) called the bridge while tracking, so a signal read inside the call (the real bridge's `signedOut`, on a sign-in retry) would fetch again when it changed. The calls now run in `untracked`, as `ReviewSheet`'s prepare does since W3a.5's review, and a new case (handlers that read a signal, which then changes) fails without either one (it counted 2 `skills.get` calls without the panel's, 4 `skills.version` calls without `Compare`'s): 8 tests, not 7. (2) `Compare`'s `from` and `to` were `linkedSignal`s sourced from `versions`, an array rebuilt with every history fetch. They kept their value anyway (`prev?.value`), but user-editable state derives from a computed primitive: they are now sourced from `firstFrom` and `firstTo` (the versions React's `useState` seeds), with the same keep-the-pick computation. Otherwise the code is `SkillPanel.tsx` as it is on `web-ui` since the merge of master (8883229), unchanged after it: the scope chip still shows Global or the project's name (`SkillRef`'s scope is `'global' | 'project'`; built-ins open in `BuiltinPanel`, W3a.8b), the "Customised from the built-in skill" note links to `#/skills/builtin%3A<name>`, and every action (Edit, Refine with Desk, Restore, Delete) is offered for both scopes, as in React. The spec failed first on `Could not resolve "./skill-panel"`, with the Angular compiler's `TS2307` beside it.
 
 **Deviation (review fix):** the blocks above are the committed files. A file, delete or restore answer could land after another skill opened: `openFile` set the old skill's file on the new one (the Files tab then showed it), a delete closed the skill the user had opened since, and `busy` was one string for every skill, so the new skill's Delete or Restore showed the old action as pending. `openFile`, `remove` and `act` now capture `key()` before their `await` and drop what lands for another key: no `file`, no error toast for the old file, no `close`, no reload. `busy` holds `{ key, what }` and the template reads `busyHere()` (the action only while its skill is open); `act` clears only its own mark, so the old key's still clears and an action started on the new skill keeps its own. The old action's toast and `changed` still come, since it did happen and the list changed. Two cases hold a `skills.file` and a `skills.remove` answer, switch the skill, then release them: the old content is not shown ("Pick a file to view it."), the new skill's Delete is not busy, and `close` is not emitted (each failed without its fix; the second passes `on` again to `rerender`, which drops the output listeners it is not given). 10 tests.
+
+**Deviation (review fix, after W3a.8):** the blocks above are the committed files. Two more ways an action could cross skills. (1) `confirming` was a plain signal, so a Delete or Restore confirm left open survived another skill opening and then acted on that one; it is now `linkedSignal<string, Confirming | null>({ source: this.key, computation: () => null })`, like `tab` and `file`. (2) `busy` held one action: start one on A, another on B, go back to A, and A's still-running action lost its pending mark. `busy` is now a set of `<skill key>|<what>` marks: `act` adds its mark when it starts and deletes only that mark when it settles, and the template asks `busyHere('delete')` or `busyHere('restore-' + version)`, which checks the open skill's key. Two cases: a Delete confirm open when another skill opens is gone and removed nothing; and a held delete on email-sequence, then one on brand-voice, then back to email-sequence, shows both Delete buttons busy until they settle. Each failed first (the dialog stayed; A's `aria-busy` was null). A blank line now separates the file case from the one before it. 12 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -35370,6 +35437,25 @@ describe('SkillEditor', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     expect(closed).toHaveBeenCalledTimes(1);
   });
+
+  it('stays open while the save runs, so the saved skill still reaches the screen', async () => {
+    const detail = { name: 'email-sequence', scope: 'global', description: 'Writes emails', dir: '/s/email-sequence', version: 2, instructions: 'Plan it.', frontmatter: {}, files: [] } as SkillDetail;
+    let release: (r: { version: number }) => void = () => {};
+    const { saved, closed, sheet } = await setup({
+      skill: { ref: { scope: 'global', name: 'email-sequence' }, detail },
+      handlers: { 'skills.save': () => new Promise<{ version: number }>((resolve) => (release = resolve)) },
+    });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Save new version' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(closed).not.toHaveBeenCalled();
+    release({ version: 3 });
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ scope: 'global', name: 'email-sequence' }));
+    expect(closed).not.toHaveBeenCalled();
+  });
 });
 ```
 
@@ -35436,12 +35522,13 @@ import { ImportSheet } from './import-sheet';
 async function setup(handlers: FakeHandlers) {
   const bridge = new FakeDeskBridge(handlers);
   const done = vi.fn();
+  const closed = vi.fn();
   await render(ImportSheet, {
     inputs: { path: '/Users/me/.claude/skills/pdf', projects: [{ id: 'p1', name: 'Onboarding' }, { id: 'p2', name: 'Tax' }] },
-    on: { done },
+    on: { done, close: closed },
     providers: [...bridge.providers, provideGlobal(initialGlobalState())],
   });
-  return { bridge, done, sheet: await screen.findByRole('dialog', { name: 'Import a skill' }) };
+  return { bridge, done, closed, sheet: await screen.findByRole('dialog', { name: 'Import a skill' }) };
 }
 
 describe('ImportSheet', () => {
@@ -35473,6 +35560,21 @@ describe('ImportSheet', () => {
     refuse = false;
     fireEvent.click(within(sheet).getByRole('button', { name: 'Import' }));
     await waitFor(() => expect(done).toHaveBeenCalledWith({ scope: 'global', name: 'pdf' }));
+  });
+
+  it('stays open while the import runs, so the imported skill still reaches the screen', async () => {
+    let release: (r: { version: number; dir: string; created: boolean; description: string }) => void = () => {};
+    const { done, closed, sheet } = await setup({ 'skills.import': () => new Promise((resolve) => (release = resolve)) });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Import' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(closed).not.toHaveBeenCalled();
+    release({ version: 1, dir: '/data/skills/pdf', created: true, description: '' });
+    await waitFor(() => expect(done).toHaveBeenCalledWith({ scope: 'global', name: 'pdf' }));
+    expect(closed).not.toHaveBeenCalled();
   });
 });
 ```
@@ -35509,7 +35611,7 @@ type Errors = Partial<Record<'name' | 'description' | 'instructions' | 'form', s
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents' },
   template: `
-    <div deskSheet [title]="sheetTitle()" [width]="720" (close)="close.emit()">
+    <div deskSheet [title]="sheetTitle()" [width]="720" (close)="dismiss()">
       @if (!skill()) {
         <div class="skill-editor-row">
           <div deskField id="skill-name" label="Name" [error]="errors().name ?? null" hint="Lowercase words joined by hyphens, like weekly-report.">
@@ -35574,7 +35676,7 @@ type Errors = Partial<Record<'name' | 'description' | 'instructions' | 'form', s
         <p class="field-error" role="alert">{{ form }}</p>
       }
       <div class="sheet-footer">
-        <button deskButton (click)="close.emit()">Cancel</button>
+        <button deskButton [disabled]="pending()" (click)="dismiss()">Cancel</button>
         <button deskButton variant="primary" [pending]="pending()" (click)="save()">{{ skill() ? 'Save new version' : 'Create skill' }}</button>
       </div>
     </div>
@@ -35620,6 +35722,11 @@ export class SkillEditor implements OnInit {
 
   protected val(e: Event): string {
     return (e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
+  }
+
+  /** Cancel, Escape and the backdrop do nothing while the save runs, so its `saved` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.pending()) this.close.emit();
   }
 
   protected sizeOf(f: NewFile): string {
@@ -35815,7 +35922,7 @@ import { DeskBridge } from '../core/desk-bridge';
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents' },
   template: `
-    <div deskSheet title="Import a skill" (close)="close.emit()">
+    <div deskSheet title="Import a skill" (close)="dismiss()">
       <p class="small">From <span class="mono">{{ path() }}</span>. The folder needs a SKILL.md. It's copied in; the original stays where it is.</p>
       <div deskField id="import-scope" label="Scope">
         <select id="import-scope" class="select" (change)="scope.set(val($event))">
@@ -35829,7 +35936,7 @@ import { DeskBridge } from '../core/desk-bridge';
         <input id="import-name" class="input mono" [value]="name()" (input)="name.set(val($event))" />
       </div>
       <div class="sheet-footer">
-        <button deskButton (click)="close.emit()">Cancel</button>
+        <button deskButton [disabled]="pending()" (click)="dismiss()">Cancel</button>
         <button deskButton variant="primary" [pending]="pending()" (click)="run()">Import</button>
       </div>
     </div>
@@ -35850,6 +35957,11 @@ export class ImportSheet {
 
   protected val(e: Event): string {
     return (e.target as HTMLInputElement | HTMLSelectElement).value;
+  }
+
+  /** Cancel, Escape and the backdrop do nothing while the import runs, so its `done` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.pending()) this.close.emit();
   }
 
   protected async run(): Promise<void> {
@@ -35875,12 +35987,14 @@ export class ImportSheet {
 - [ ] **Step 4: Run them**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/skills/skill-editor.spec.ts --include src/app/skills/ask-desk.spec.ts --include src/app/skills/import-sheet.spec.ts)`
-Expected: PASS (3 files, 6 tests).
+Expected: PASS (3 files, 8 tests; 6 before the review fix below).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
 
 **Deviation:** one change from the plan's first code; the blocks above are the committed files. An existing file's row bound `[attr.class]="remove().has(f.path) ? 'removing' : null"`; it is now `[class.removing]="remove().has(f.path)"`, the port conventions' way to write a dynamic class (the row has no fixed one, so its `className` reads `removing` or nothing, as React's does). Otherwise the three sheets are `SkillEditor.tsx`, `AskDesk.tsx` and `SkillsScreen.tsx`'s `ImportSheet` as they are on `web-ui` after the merge of master (8883229): none of the three changed in or after it (their last changes are e8ab53e's import moves). The merge's built-in skills never reach them: the editor's and the import's scope pickers still offer Global or one project (`WritableSkillScope`, which a user may write to), a global skill named like a built-in is saved as an ordinary one that shadows it (deskd's rule, with no warning in React's editor), and Duplicate is `BuiltinPanel`'s own sheet (W3a.8b). The only intended departure from React stays the plan's: `ImportSheet` names the imported skill after the last segment of `dir` split on `/` or `\`. The specs failed first on `Could not resolve "./skill-editor"`, `"./ask-desk"` and `"./import-sheet"`, with the Angular compiler's `TS2307` beside each.
+
+**Deviation (review fix):** the blocks above are the committed files. Cancel, Escape and a backdrop click closed `SkillEditor` while its save ran and `ImportSheet` while its import ran; the screen then destroys the sheet, and the late `saved` or `done` was dropped (Angular's NG0953), so the new skill never opened. React still delivers `onSaved` and `onDone` in that case. While `pending()`, both sheets now ignore close: Cancel is `[disabled]="pending()"`, and both it and the `Sheet`'s `(close)` (Escape and the backdrop) go through `dismiss()`, which does nothing while the call runs (W3a.5's `ReviewSheet` got the same fix). Each spec gained a case that holds the call, tries Cancel, Escape and the backdrop, expects no `close`, then releases the call and expects `saved` or `done`. Both failed without the fix, first on Cancel's `disabled`, and with only `[disabled]` on `close` called 3 times (jsdom still dispatches a click to a disabled button, so the guard is `dismiss()`'s). `AskDesk` is unchanged: its `close` is its success path. 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -37552,7 +37666,7 @@ Expected: PASS. This section changes nothing the root suite runs (ui-core's `ski
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (6), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (10), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (6 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's files: `skills/data.spec.ts` (9), `skills/catalog/data.spec.ts` (7), `skills/builtins/data.spec.ts` (6), `skills/catalog/runtime-line.spec.ts` (5), `skills/catalog/catalog-view.spec.ts` (3), `skills/catalog/review-sheet.spec.ts` (7), `skills/skill-list.spec.ts` and `skills/skills-map-view.spec.ts` (5 together), `skills/skill-panel.spec.ts` (12), `skills/skill-editor.spec.ts`, `skills/ask-desk.spec.ts` and `skills/import-sheet.spec.ts` (8 together), `skills/builtins/builtins.spec.ts` (4), `skills/skills-screen.spec.ts` (7), `skills/catalog/catalog.spec.ts` (4); W0c's `screen-for.spec.ts` with its updated catalog line; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 

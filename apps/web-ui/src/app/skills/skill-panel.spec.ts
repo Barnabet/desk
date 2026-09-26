@@ -194,6 +194,7 @@ describe('SkillPanel', () => {
     expect(bridge.calls.find((c) => c.channel === 'skills.remove')?.input).toEqual({ name: 'email-sequence' });
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Restored v1 as a new version.', 'Deleted email-sequence.']);
   });
+
   it('drops a file that lands after another skill opened', async () => {
     let release: (data: Uint8Array) => void = () => {};
     const { view, panel } = await setup({ handlers: { 'skills.file': () => new Promise<Uint8Array>((resolve) => (release = resolve)) } });
@@ -222,6 +223,39 @@ describe('SkillPanel', () => {
     await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(1));
     expect(outputs.close).not.toHaveBeenCalled();
     expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['Deleted email-sequence.']);
+  });
+
+  it('closes an open confirm when another skill opens, so it never acts on that one', async () => {
+    const { bridge, view, panel } = await setup();
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog', { name: 'Delete email-sequence?' })).toBeTruthy();
+    await view.rerender({ inputs: { skill: { scope: 'project', projectId: 'p1', name: 'brand-voice' } }, partialUpdate: true });
+    await waitFor(() => expect(panel.getAttribute('aria-label')).toBe('Skill brand-voice'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(bridge.calls.filter((c) => c.channel === 'skills.remove')).toEqual([]);
+  });
+
+  it("keeps each skill's pending action marked when the user goes from one to another and back", async () => {
+    const releases: Array<(r: { ok: true }) => void> = [];
+    const { view, outputs, panel } = await setup({ handlers: { 'skills.remove': () => new Promise<{ ok: true }>((resolve) => releases.push(resolve)) } });
+    const deleteBusy = () => within(panel).getByRole('button', { name: 'Delete' }).getAttribute('aria-busy');
+    const open = async (skill: SkillRef, label: string) => {
+      await view.rerender({ inputs: { skill }, on: outputs, partialUpdate: true });
+      await waitFor(() => expect(panel.getAttribute('aria-label')).toBe(label));
+    };
+    const deleteHere = async (name: string) => {
+      fireEvent.click(await within(panel).findByRole('button', { name: 'Delete' }));
+      fireEvent.click(within(await screen.findByRole('dialog', { name: `Delete ${name}?` })).getByRole('button', { name: 'Delete' }));
+    };
+    await deleteHere('email-sequence');
+    await open({ scope: 'project', projectId: 'p1', name: 'brand-voice' }, 'Skill brand-voice');
+    await deleteHere('brand-voice');
+    expect(deleteBusy()).toBe('true');
+    await open({ scope: 'global', name: 'email-sequence' }, 'Skill email-sequence');
+    expect(deleteBusy()).toBe('true');
+    releases.forEach((release) => release({ ok: true }));
+    await waitFor(() => expect(outputs.changed).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(deleteBusy()).toBeNull());
   });
 
   it('says when the skill is a copy of a built-in one, with a link to the built-in', async () => {

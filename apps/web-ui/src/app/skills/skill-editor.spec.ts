@@ -96,4 +96,23 @@ describe('SkillEditor', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     expect(closed).toHaveBeenCalledTimes(1);
   });
+
+  it('stays open while the save runs, so the saved skill still reaches the screen', async () => {
+    const detail = { name: 'email-sequence', scope: 'global', description: 'Writes emails', dir: '/s/email-sequence', version: 2, instructions: 'Plan it.', frontmatter: {}, files: [] } as SkillDetail;
+    let release: (r: { version: number }) => void = () => {};
+    const { saved, closed, sheet } = await setup({
+      skill: { ref: { scope: 'global', name: 'email-sequence' }, detail },
+      handlers: { 'skills.save': () => new Promise<{ version: number }>((resolve) => (release = resolve)) },
+    });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Save new version' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(closed).not.toHaveBeenCalled();
+    release({ version: 3 });
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ scope: 'global', name: 'email-sequence' }));
+    expect(closed).not.toHaveBeenCalled();
+  });
 });

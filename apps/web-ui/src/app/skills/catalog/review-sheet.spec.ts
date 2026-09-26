@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { fireEvent, render, screen, within } from '@testing-library/angular';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState } from '@desk/bff/contract';
 import type { CatalogItem } from '@desk/protocol';
@@ -129,6 +129,23 @@ describe('ReviewSheet', () => {
     expect((await within(sheet).findByRole('alert')).textContent).toBe("Couldn't prepare this skill: paper-lookup does not match the catalog");
     expect((within(sheet).getByRole('button', { name: 'Install' }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(sheet).queryByText('Fetching the pinned files and checking them…')).toBeNull();
+  });
+
+  it('stays open while the install runs, so the screen still hears of it', async () => {
+    let release: (r: { skill: { name: string; scope: 'global'; version: number; project_id: null }; state: 'installed'; runtime: 'ready' }) => void = () => {};
+    const { changed, closed, sheet } = await setup({ handlers: { 'catalog.install': () => new Promise((resolve) => (release = resolve)) } });
+    await within(sheet).findByText('Search free scholarly APIs for papers.');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Install' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(closed).not.toHaveBeenCalled();
+    release({ skill: { name: 'paper-lookup', scope: 'global', version: 1, project_id: null }, state: 'installed', runtime: 'ready' });
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(within(sheet).getByText('paper-lookup is installed for every project.')).toBeTruthy();
+    expect(closed).not.toHaveBeenCalled();
   });
 
   it('prepares once for its id, even when the call reads a signal that changes later', async () => {

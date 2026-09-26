@@ -20,7 +20,7 @@ type Errors = Partial<Record<'name' | 'description' | 'instructions' | 'form', s
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents' },
   template: `
-    <div deskSheet [title]="sheetTitle()" [width]="720" (close)="close.emit()">
+    <div deskSheet [title]="sheetTitle()" [width]="720" (close)="dismiss()">
       @if (!skill()) {
         <div class="skill-editor-row">
           <div deskField id="skill-name" label="Name" [error]="errors().name ?? null" hint="Lowercase words joined by hyphens, like weekly-report.">
@@ -85,7 +85,7 @@ type Errors = Partial<Record<'name' | 'description' | 'instructions' | 'form', s
         <p class="field-error" role="alert">{{ form }}</p>
       }
       <div class="sheet-footer">
-        <button deskButton (click)="close.emit()">Cancel</button>
+        <button deskButton [disabled]="pending()" (click)="dismiss()">Cancel</button>
         <button deskButton variant="primary" [pending]="pending()" (click)="save()">{{ skill() ? 'Save new version' : 'Create skill' }}</button>
       </div>
     </div>
@@ -131,6 +131,11 @@ export class SkillEditor implements OnInit {
 
   protected val(e: Event): string {
     return (e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
+  }
+
+  /** Cancel, Escape and the backdrop do nothing while the save runs, so its `saved` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.pending()) this.close.emit();
   }
 
   protected sizeOf(f: NewFile): string {

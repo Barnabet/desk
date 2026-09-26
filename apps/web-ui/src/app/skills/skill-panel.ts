@@ -226,7 +226,7 @@ export class Compare {
                   @if (h.current) {
                     <span class="chip chip-done">current</span>
                   } @else {
-                    <button deskButton size="sm" [pending]="busyHere() === 'restore-' + h.version" (click)="askRestore(h.version)">Restore</button>
+                    <button deskButton size="sm" [pending]="busyHere('restore-' + h.version)" (click)="askRestore(h.version)">Restore</button>
                   }
                 </li>
               }
@@ -241,7 +241,7 @@ export class Compare {
         <button deskButton variant="primary" (click)="edit.emit(d)">Edit</button>
         <button deskButton (click)="askDesk.emit()">Refine with Desk</button>
         <span class="grow"></span>
-        <button deskButton variant="ghost" [pending]="busyHere() === 'delete'" (click)="askDelete()">Delete</button>
+        <button deskButton variant="ghost" [pending]="busyHere('delete')" (click)="askDelete()">Delete</button>
       </div>
     } @else {
       <p class="muted">Loading…</p>
@@ -283,13 +283,10 @@ export class SkillPanel {
   protected readonly detail = signal<SkillDetail | null>(null);
   protected readonly history = signal<SkillHistoryEntry[]>([]);
   protected readonly error = signal<string | null>(null);
-  protected readonly confirming = signal<Confirming | null>(null);
-  /** The action running, and the skill it runs on: a late one never marks another skill's button. */
-  private readonly busy = signal<{ key: string; what: string } | null>(null);
-  protected readonly busyHere = computed(() => {
-    const b = this.busy();
-    return b && b.key === this.key() ? b.what : null;
-  });
+  /** The open Delete or Restore confirm; another skill opening closes it, so it never acts on that one. */
+  protected readonly confirming = linkedSignal<string, Confirming | null>({ source: this.key, computation: () => null });
+  /** Every action running, as `<skill key>|<what>`: each skill's buttons show their own, however the user moves between skills. */
+  private readonly busy = signal<ReadonlySet<string>>(new Set());
   private readonly reload = signal(0);
 
   protected readonly current = computed(() => this.history().find((h) => h.current));
@@ -336,6 +333,11 @@ export class SkillPanel {
           if (live) this.error.set(describeError(err).message);
         });
     });
+  }
+
+  /** Whether `what` (`delete`, `restore-<version>`) is running on the open skill. */
+  protected busyHere(what: string): boolean {
+    return this.busy().has(`${this.key()}|${what}`);
   }
 
   protected tabLabel(t: Tab, d: SkillDetail): string {
@@ -396,21 +398,26 @@ export class SkillPanel {
 
   /** Runs one action on the open skill; its toast and `changed` still come when another skill opened meanwhile, the reload does not. */
   private async act(what: string, fn: () => Promise<unknown>, done: string): Promise<boolean> {
-    const mine = { key: this.key(), what };
+    const key = this.key();
+    const mark = `${key}|${what}`;
     this.confirming.set(null);
-    this.busy.set(mine);
+    this.busy.update((b) => new Set(b).add(mark));
     try {
       await fn();
       this.toasts.toast({ tone: 'info', message: done });
       this.changed.emit();
-      if (this.key() === mine.key) this.reload.update((r) => r + 1);
+      if (this.key() === key) this.reload.update((r) => r + 1);
       return true;
     } catch (err) {
       this.toasts.error(err);
       return false;
     } finally {
-      // Clears only its own mark, so an action started on the new skill keeps its own.
-      this.busy.update((b) => (b === mine ? null : b));
+      // Clears only its own mark, so every other action, on this skill or another, keeps its own.
+      this.busy.update((b) => {
+        const next = new Set(b);
+        next.delete(mark);
+        return next;
+      });
     }
   }
 }

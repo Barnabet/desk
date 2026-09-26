@@ -36,7 +36,7 @@ type OpenFile = { path: string; data: Uint8Array; line?: number };
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents', '[attr.id]': 'null' },
   template: `
-    <div deskSheet [title]="title()" [width]="860" (close)="close.emit()">
+    <div deskSheet [title]="title()" [width]="860" (close)="dismiss()">
       @if (error(); as err) {
         <p class="field-error" role="alert">Couldn't prepare this skill: {{ err }}</p>
       } @else if (ready(); as r) {
@@ -141,7 +141,7 @@ type OpenFile = { path: string; data: Uint8Array; line?: number };
           <button deskButton (click)="close.emit()">Close</button>
           <button deskButton variant="primary" (click)="openSkill(done)">Open skill</button>
         } @else {
-          <button deskButton (click)="close.emit()">Cancel</button>
+          <button deskButton [disabled]="pending()" (click)="dismiss()">Cancel</button>
           <button deskButton variant="primary" [pending]="pending()" [disabled]="installOff()" (click)="install()">{{ installLabel() }}</button>
         }
       </div>
@@ -233,6 +233,11 @@ export class ReviewSheet {
           if (live) this.error.set(describeError(err).message);
         });
     });
+  }
+
+  /** Cancel, Escape and the backdrop do nothing while the install runs, so its `changed` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.pending()) this.close.emit();
   }
 
   protected checked(e: Event): boolean {

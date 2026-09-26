@@ -9,12 +9,13 @@ import { ImportSheet } from './import-sheet';
 async function setup(handlers: FakeHandlers) {
   const bridge = new FakeDeskBridge(handlers);
   const done = vi.fn();
+  const closed = vi.fn();
   await render(ImportSheet, {
     inputs: { path: '/Users/me/.claude/skills/pdf', projects: [{ id: 'p1', name: 'Onboarding' }, { id: 'p2', name: 'Tax' }] },
-    on: { done },
+    on: { done, close: closed },
     providers: [...bridge.providers, provideGlobal(initialGlobalState())],
   });
-  return { bridge, done, sheet: await screen.findByRole('dialog', { name: 'Import a skill' }) };
+  return { bridge, done, closed, sheet: await screen.findByRole('dialog', { name: 'Import a skill' }) };
 }
 
 describe('ImportSheet', () => {
@@ -46,5 +47,20 @@ describe('ImportSheet', () => {
     refuse = false;
     fireEvent.click(within(sheet).getByRole('button', { name: 'Import' }));
     await waitFor(() => expect(done).toHaveBeenCalledWith({ scope: 'global', name: 'pdf' }));
+  });
+
+  it('stays open while the import runs, so the imported skill still reaches the screen', async () => {
+    let release: (r: { version: number; dir: string; created: boolean; description: string }) => void = () => {};
+    const { done, closed, sheet } = await setup({ 'skills.import': () => new Promise((resolve) => (release = resolve)) });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Import' }));
+    const cancel = within(sheet).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
+    await waitFor(() => expect(cancel.disabled).toBe(true));
+    fireEvent.click(cancel);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(sheet.parentElement!);
+    expect(closed).not.toHaveBeenCalled();
+    release({ version: 1, dir: '/data/skills/pdf', created: true, description: '' });
+    await waitFor(() => expect(done).toHaveBeenCalledWith({ scope: 'global', name: 'pdf' }));
+    expect(closed).not.toHaveBeenCalled();
   });
 });

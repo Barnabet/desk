@@ -17,7 +17,7 @@ import { DeskBridge } from '../core/desk-bridge';
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents' },
   template: `
-    <div deskSheet title="Import a skill" (close)="close.emit()">
+    <div deskSheet title="Import a skill" (close)="dismiss()">
       <p class="small">From <span class="mono">{{ path() }}</span>. The folder needs a SKILL.md. It's copied in; the original stays where it is.</p>
       <div deskField id="import-scope" label="Scope">
         <select id="import-scope" class="select" (change)="scope.set(val($event))">
@@ -31,7 +31,7 @@ import { DeskBridge } from '../core/desk-bridge';
         <input id="import-name" class="input mono" [value]="name()" (input)="name.set(val($event))" />
       </div>
       <div class="sheet-footer">
-        <button deskButton (click)="close.emit()">Cancel</button>
+        <button deskButton [disabled]="pending()" (click)="dismiss()">Cancel</button>
         <button deskButton variant="primary" [pending]="pending()" (click)="run()">Import</button>
       </div>
     </div>
@@ -52,6 +52,11 @@ export class ImportSheet {
 
   protected val(e: Event): string {
     return (e.target as HTMLInputElement | HTMLSelectElement).value;
+  }
+
+  /** Cancel, Escape and the backdrop do nothing while the import runs, so its `done` still reaches the screen. */
+  protected dismiss(): void {
+    if (!this.pending()) this.close.emit();
   }
 
   protected async run(): Promise<void> {
