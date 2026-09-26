@@ -12,7 +12,7 @@ import type {
   ToolResultStatus,
 } from '@desk/protocol';
 import type { AttachmentStore } from '../attachments/store';
-import type { AutomationEngine } from '../automations/engine';
+import type { AutomationEngine, StepResult } from '../automations/engine';
 import type { Automations } from '../automations/service';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
@@ -64,6 +64,8 @@ export interface RuntimeServices {
   /** The model a tool call runs under (`model`, else the agent's own), and whether it accepts images. */
   agentModel(agentId: string, model?: string): { id: string; vision: boolean };
   activateSkills(agentId: string, names: string[]): SkillSummary[];
+  /** An automation step agent's result (complete / fail_step): validated, then its step settles. */
+  recordStepResult(agentId: string, result: StepResult): void;
   saveSkill(
     input: SkillSaveInput,
     meta: { origin?: string; changeNote?: string; projectId?: string; agentId?: string },

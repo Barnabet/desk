@@ -88,3 +88,10 @@ describe('reduceProject', () => {
     expect(s2.services.find((x) => x.name === 'web')).toMatchObject({ status: 'stopped', stop_reason: 'requested', url: 'http://localhost:5173' });
   });
 });
+
+describe('step agents', () => {
+  it('keeps step agents out of the thread list', () => {
+    const s = reduceProject(projectFromOverview(overview), { id: 99, ts: '2026-09-28T06:00:00.000Z', project_id: overview.project.id, agent_id: 'step1', type: 'agent.created', payload: { role: 'step', model: 'm', title: 'Summarise', brief: 'b', workspace_path: '/w', parent_id: null, automation: { run_id: 'r', step_id: 's' } } } as never);
+    expect(s.threads.map((t) => t.id)).not.toContain('step1');
+  });
+});

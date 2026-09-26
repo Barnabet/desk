@@ -157,3 +157,24 @@ describe('Scheduler', () => {
     await expect(s.stopAndWait('a')).resolves.toBeUndefined();
   });
 });
+
+describe('step agents', () => {
+  it('counts step runs against the project thread cap', async () => {
+    const started: string[] = [];
+    const gates = new Map<string, () => void>();
+    const s = new Scheduler({
+      modelConcurrency: () => 10,
+      projectConcurrency: () => 1,
+      run: (job) => new Promise<void>((resolve) => { started.push(job.agentId); gates.set(job.agentId, resolve); }),
+      afterRun: () => {},
+      onError: () => {},
+    });
+    s.enqueue({ agentId: 'step1', projectId: 'p', model: 'm', role: 'step', kind: 'run' });
+    s.enqueue({ agentId: 'thread1', projectId: 'p', model: 'm', role: 'thread', kind: 'run' });
+    await new Promise((r) => setImmediate(r));
+    expect(started).toEqual(['step1']);
+    gates.get('step1')!();
+    await new Promise((r) => setImmediate(r));
+    expect(started).toEqual(['step1', 'thread1']);
+  });
+});

@@ -10,6 +10,7 @@ import {
   messageById,
   openFrom,
   openTo,
+  Outputs,
   sanitizeLabel,
   sentSince,
   ServiceName,
@@ -41,7 +42,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { pendingInbox } from '../agent/inbox';
-import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
+import { deskSystemPrompt, stepSystemPrompt, threadSystemPrompt } from '../agent/prompts';
 import { answerGate, answerText, ANSWER_MAX_STEPS, closureText, WHY } from '../agent/answer';
 import { runAgent, SHUTDOWN_REASON, type RunDeps } from '../agent/run';
 import type { EventStore } from '../events/store';
@@ -89,7 +90,10 @@ import { Scheduler, type Job } from './scheduler';
 import { AutomationEngine } from '../automations/engine';
 import { addGrant } from '../automations/grants';
 import { Automations } from '../automations/service';
-import { findAutomation } from '../automations/queries';
+import type { StepResult } from '../automations/engine';
+import { runDir, stepDir } from '../automations/folders';
+import { ancestors } from '../automations/graph';
+import { findAutomation, lastSucceededRun, stepAgentOf, stepRuns } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
 import { locateScript } from '../tools/skills';
 import { toolByName, toolsForRole } from './toolsets';
@@ -139,6 +143,22 @@ export type RuntimeOptions = {
 export const BUILTIN_RUNTIME_WAIT_MS = 5 * 60_000;
 
 /** What the send path records on a message besides its text (design spec §1.2). */
+export type CreateStepAgentInput = {
+  /** The id to use: the engine records it on the step before the agent can run, so its first complete is accepted. */
+  agentId?: string;
+  projectId: string;
+  runId: string;
+  stepId: string;
+  title: string;
+  /** The step's brief with its templates rendered. */
+  brief: string;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
+  skills: string[];
+  gitSourceId?: string;
+  automationName: string;
+};
+
 export type DeliverOptions = {
   /** The question this message answers. */
   replyTo?: number;
@@ -273,6 +293,7 @@ export class Runtime {
         return { id, vision: this.modelSeesImages(id) };
       },
       activateSkills: (agentId, names) => this.activateSkills(agentId, names),
+      recordStepResult: (agentId, result) => this.recordStepResult(agentId, result),
       saveSkill: (input, meta) => this.saveSkill(input, meta),
       deleteSkill: (scope, name, projectId, meta) => this.deleteSkill(scope, name, projectId, meta),
       skillDraftDir: (projectId, path) => this.skillDraftDir(projectId, path),
@@ -1703,9 +1724,101 @@ export class Runtime {
     if (!this.guard.ports.includes(port)) this.guard.ports.push(port);
   }
 
+  /**
+   * An automation step's agent (spec §4.2): its workspace is the step folder (a git worktree on desk/auto-<name>-<id>
+   * with a git source), it has no parent, and it starts with the runtime's own start message.
+   */
+  async createStepAgent(input: CreateStepAgentInput): Promise<string> {
+    const project = this.requireOpenProject(input.projectId);
+    const info = this.o.models.get(input.model);
+    if (input.reasoningEffort && !info.reasoning_efforts.includes(input.reasoningEffort)) {
+      throw new ValidationError(`${input.model} does not take reasoning effort "${input.reasoningEffort}"`);
+    }
+    const skills = this.requireUsableSkills(project.id, input.skills);
+    for (const n of skills) {
+      const s = this.skills.resolve(n, project.id);
+      if (s) this.ensureRuntimeFor(s, project.id);
+    }
+    const id = input.agentId ?? newId();
+    const workspacePath = stepDir(this.o.dataDir, input.runId, input.stepId);
+    let git: { source_id: string; branch: string; base: string; common_dir: string } | null = null;
+    if (input.gitSourceId) {
+      const source = getSource(this.o.store.db, input.gitSourceId);
+      if (!source || source.project_id !== project.id || source.kind !== 'git') throw new ValidationError(`Unknown git source: ${input.gitSourceId}`);
+      // The worktree takes the step folder's place (the engine created it empty, with only .desk/).
+      await removeWorkspace({ path: workspacePath, gitSourcePath: source.path });
+      const ws = await createWorkspace({ path: workspacePath, git: { sourcePath: source.path, branch: `desk/auto-${input.automationName}-${id.slice(-6).toLowerCase()}` } });
+      mkdirSync(join(workspacePath, '.desk'), { recursive: true });
+      git = ws.git ? { source_id: source.id, ...ws.git } : null;
+    } else {
+      mkdirSync(workspacePath, { recursive: true });
+    }
+    this.o.store.append([
+      {
+        project_id: project.id,
+        agent_id: id,
+        type: 'agent.created',
+        payload: {
+          role: 'step',
+          model: input.model,
+          ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+          title: input.title,
+          brief: input.brief,
+          workspace_path: workspacePath,
+          parent_id: null,
+          git,
+          ...(skills.length ? { skills } : {}),
+          automation: { run_id: input.runId, step_id: input.stepId },
+        },
+      },
+      { project_id: project.id, agent_id: id, type: 'message.agent', payload: { from_agent_id: id, from_label: REMINDER_LABEL, kind: 'start', text: 'Begin this step.' } },
+    ]);
+    this.wake(id);
+    return id;
+  }
+
+  /** A step agent's complete or fail_step: checked against the step's output keys and routes, then settled at once. */
+  recordStepResult(agentId: string, result: StepResult): void {
+    const link = stepAgentOf(this.o.store.db, agentId);
+    if (!link) throw new Error('Only an automation step can do this');
+    if (link.step.agent_id !== agentId || link.run.status !== 'running' || (link.step.status !== 'running' && link.step.status !== 'waiting')) {
+      throw new Error('This step has already ended; stop here.');
+    }
+    const step = this.engine.definitionOf(link.run).steps.find((s) => s.id === link.step.step_id);
+    if (step?.kind !== 'agent') throw new Error('Only an agent step can do this');
+    if (result.status === 'succeeded') {
+      const declared = step.output_keys.map((o) => o.key);
+      const extra = Object.keys(result.outputs).filter((k) => !declared.includes(k));
+      if (extra.length) throw new Error(`Undeclared outputs: ${extra.join(', ')}. This step's outputs: ${declared.join(', ') || 'none'}.`);
+      const parsed = Outputs.safeParse(result.outputs);
+      if (!parsed.success) throw new Error(`Invalid outputs: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      if (result.route !== null && !step.routes.includes(result.route)) {
+        throw new Error(`"${result.route}" is not one of this step's routes (${step.routes.join(', ') || 'none'}).`);
+      }
+      this.engine.resolveStep(link.run.id, step.id, { ...result, outputs: parsed.data });
+      return;
+    }
+    this.engine.resolveStep(link.run.id, step.id, result);
+  }
+
   private readRoots(agent: AgentRow): string[] {
     const roots = listSources(this.o.store.db, agent.project_id).map((s) => s.path);
-    return [...(agent.workspace_path ? [agent.workspace_path] : []), ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
+    const own = agent.workspace_path ? [agent.workspace_path] : [];
+    // A step agent reads its whole run (earlier steps' folders, inputs) and the previous succeeded run of its automation.
+    if (agent.role === 'step' && agent.automation_run_id) {
+      own.push(runDir(this.o.dataDir, agent.automation_run_id));
+      const link = stepAgentOf(this.o.store.db, agent.id);
+      const prev = link ? lastSucceededRun(this.o.store.db, link.run.automation_id) : undefined;
+      if (prev && prev.id !== agent.automation_run_id) own.push(runDir(this.o.dataDir, prev.id));
+    }
+    return [...own, ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
+  }
+
+  /** A step agent's step limit: its step's max_steps, else 100. */
+  private stepMaxSteps(agent: AgentRow): number {
+    const link = stepAgentOf(this.o.store.db, agent.id);
+    const step = link ? this.engine.definitionOf(link.run).steps.find((s) => s.id === link.step.step_id) : undefined;
+    return step?.kind === 'agent' ? (step.max_steps ?? 100) : 100;
   }
 
   private systemPrompt(agent: AgentRow, project: ProjectRow): string {
@@ -1713,7 +1826,26 @@ export class Runtime {
     const provider = this.o.skillEnv;
     const skillNote = (s: { scope: SkillScope; name: string }) => provider?.env({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: project.id } : {}) }).note ?? null;
     const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote, messages: this.messages(project.id) };
-    return agent.role === 'desk' ? deskSystemPrompt(ctx) : threadSystemPrompt(ctx);
+    if (agent.role === 'desk') return deskSystemPrompt(ctx);
+    if (agent.role === 'step') {
+      const link = stepAgentOf(this.o.store.db, agent.id);
+      if (link) {
+        const def = this.engine.definitionOf(link.run);
+        const step = def.steps.find((s) => s.id === link.step.step_id);
+        if (step?.kind === 'agent') {
+          const up = ancestors(def, step.id);
+          const rows = new Map(stepRuns(this.o.store.db, link.run.id).map((r) => [r.step_id, r]));
+          const upstream = def.steps
+            .filter((s) => up.has(s.id))
+            .map((s) => {
+              const r = rows.get(s.id);
+              return { id: s.id, title: s.title, status: r?.status ?? 'pending', route: r?.route ?? null, summary: r?.summary ?? null, outputs: r?.outputs ?? {}, dir: stepDir(this.o.dataDir, link.run.id, s.id) };
+            });
+          return stepSystemPrompt({ ...ctx, step, def, run: link.run, upstream });
+        }
+      }
+    }
+    return threadSystemPrompt(ctx);
   }
 
   private sandboxAvailable(): Promise<boolean> {
@@ -1757,7 +1889,7 @@ export class Runtime {
    * pauses and the wake is dropped.
    */
   private admit(projectId: string, trigger: Trigger): boolean {
-    if (trigger === 'user' || trigger === 'queued') return true;
+    if (trigger === 'user' || trigger === 'queued' || trigger === 'automation') return true;
     if (this.paused.has(projectId)) return false;
     let windows = this.wakeWindows.get(projectId);
     if (!windows) this.wakeWindows.set(projectId, (windows = { agent: [], lifecycle: [] }));
@@ -1867,7 +1999,7 @@ export class Runtime {
         adapter: this.o.adapter,
         tools: this.toolsFor(agent),
         systemPrompt: (a, p) => this.systemPrompt(a, p),
-        maxSteps: answer ? ANSWER_MAX_STEPS : agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
+        maxSteps: answer ? ANSWER_MAX_STEPS : agent.role === 'desk' ? maxSteps.desk : agent.role === 'step' ? this.stepMaxSteps(agent) : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),
         contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),

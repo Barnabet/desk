@@ -107,6 +107,7 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
         created_at: e.ts,
         updated_at: e.ts,
       });
+      if (e.payload.role === 'step') return s; // automation step agents are shown in their run, not as threads
       return e.payload.role === 'desk' ? { ...s, desk: row } : { ...s, threads: [...s.threads, row] };
     }
     case 'agent.status_changed':

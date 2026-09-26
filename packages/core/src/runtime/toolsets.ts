@@ -4,8 +4,9 @@ import { deskCoordinationTools } from '../tools/desk';
 import { editFileTool, fileTools, globTool, grepTool, listDirTool, readFileTool, writeFileTool } from '../tools/fs';
 import { gitTools } from '../tools/git';
 import { jobTools } from '../tools/jobs';
-import { libraryTools } from '../tools/library';
-import { memoryTools } from '../tools/memory';
+import { libraryListTool, libraryReadTool, libraryTools } from '../tools/library';
+import { memorySearchTool, memoryTools } from '../tools/memory';
+import { stepTools } from '../tools/step';
 import { serviceTools } from '../tools/services';
 import { skillAuthoringTools, skillUseTools } from '../tools/skills';
 import { threadCoordinationTools } from '../tools/thread';
@@ -51,8 +52,29 @@ export function threadToolsFor(agent: AgentRow): Tool[] {
   ];
 }
 
+/**
+ * Automation step agents: workspace tools, the web, skills (use only), reading memory and the library, and their own
+ * complete / fail_step. No messaging, services, memory writes or publishing: nobody is watching and outputs go
+ * through the step's `publish` (spec §4.2).
+ */
+export function stepToolsFor(agent: AgentRow): Tool[] {
+  return [
+    ...fileTools,
+    viewImageTool,
+    bashTool,
+    ...jobTools,
+    ...webTools,
+    memorySearchTool,
+    libraryListTool,
+    libraryReadTool,
+    ...skillUseTools,
+    ...(agent.git_branch ? gitTools : []),
+    ...stepTools,
+  ];
+}
+
 export function toolsForRole(agent: AgentRow): Tool[] {
-  return agent.role === 'desk' ? deskToolsFor(agent) : threadToolsFor(agent);
+  return agent.role === 'desk' ? deskToolsFor(agent) : agent.role === 'step' ? stepToolsFor(agent) : threadToolsFor(agent);
 }
 
 let byName: Map<string, Tool> | undefined;
