@@ -4452,6 +4452,8 @@ desk web starts, restarts and stops deskd itself (spec §3). When the desktop ap
 
 **Deviation (review fix):** the plan first took the plist's existence alone as "installed". desk web honours `DESK_DATA_DIR` (W0c.16's smoke runs with one), and the plist pins `--data-dir` to the app's data dir, so desk web on another data dir kickstarted and booted out the user's real deskd and then timed out on its own `daemon.json`. `webAgent` now also requires the plist's `ProgramArguments` to hold `--data-dir` followed by this manager's data dir (XML-unescaped, compared after `path.resolve`); both `plist()` and the CLI's `plistFor` write that pair. Two cases cover it: another data dir (spawn and pid stop, no `launchctl`, the plist untouched) and an escaped data dir.
 
+**Deviation (W2a.1's review fix):** `unescapeXml` looks a named entity up with `Object.hasOwn`, so `&constructor;` in a hand-edited plist stays as it is instead of becoming `Object`'s source text (the prototype-lookup sweep of W2a.1's review).
+
 **Files:**
 - Modify: `packages/bff/src/contract/types.ts`, `packages/bff/src/server/daemon.ts`
 - Test: `packages/bff/src/server/daemon.test.ts` (append)
@@ -4645,7 +4647,7 @@ const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot:
 /** Undoes XML escaping: the named entities `launchdPlist` and the CLI's `plistFor` write, and character references. */
 function unescapeXml(s: string): string {
   return s.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (m, e: string) => {
-    if (!e.startsWith('#')) return XML_ENTITIES[e] ?? m;
+    if (!e.startsWith('#')) return Object.hasOwn(XML_ENTITIES, e) ? XML_ENTITIES[e]! : m; // never `&constructor;` → Object
     return String.fromCodePoint(e.startsWith('#x') ? Number.parseInt(e.slice(2), 16) : Number.parseInt(e.slice(1), 10));
   });
 }
@@ -8593,7 +8595,7 @@ git commit -m "feat(web-ui): the Angular 22 workspace: zoneless bootstrap, a CSP
 
 Spec §3 and §5. `call(op, input)`:
 - `app.openExternal`: `safeExternalUrl`, then `window.open(url, '_blank', 'noopener,noreferrer')`, synchronously, so it runs inside the click that confirmed it (an `await` first would trip Safari's popup blocker). A refused link throws `DeskCallError('invalid_url', …)`.
-- `app.saveFile`: a Blob of type `application/octet-stream`, an `<a download>` clicked and removed, the object URL revoked right after the click (§4.11).
+- `app.saveFile`: a Blob of type `application/octet-stream`, an `<a download>` clicked and removed, the object URL revoked right after the click, in a `setTimeout(…, 0)` (§4.11; W2a.1's review fix).
 - `app.pickFolder`: sets `folderRequest` for the folder browser and resolves with what `answerFolder` gets (a path, or null). A second request settles the first with null.
 - `broker.watch` / `broker.unwatch` (`PUSH_OPS`): `{ op, id, input }` on the socket, resolved by `{ ack: id, result }`. Requests wait until the socket is signed in; unanswered ones are sent again after a reconnect.
 - anything else: `POST /rpc/<op>` with `content-type: application/json` and `x-desk-session`, body `encodeBytes(input)`, answer `decodeBytes(json)`. `ok: false` throws `DeskCallError` with the error's code and message, and its status (else the HTTP status when it is 400 or more).
@@ -8601,6 +8603,8 @@ Spec §3 and §5. `call(op, input)`:
 `onPush(channel, cb)` opens one `/push` socket on first use (`ws://<host>/push`), sends `{ session }` first, and treats the first `desk:global` frame as "signed in": it then sends `{ notifyPermission }` and the waiting requests. A drop reconnects after 0.5, 1, 2, 5, then every 10 seconds; each sign-in after the first calls the `onReconnect` listeners, since a new socket is a new broker sender. A 401 or a close with 4401 drops the stored secret and sets `signedOut` (unless another tab has stored a newer secret, which this page then adopts); a `storage` event with a new secret signs the page back in. Only a 401 for the secret the page still holds signs it out: a call refused for a secret the page has since replaced is tried once more with the current one.
 
 **Deviation (review fix):** `rpc()` first signed out on any 401. When desk web restarted and another tab stored a new secret, a call this page had already sent with the old one came back 401 after the page had adopted the new one, and `signOut()` then removed the new, valid secret and signed the page out (and any tab that reloaded); and a 401 on which `signOut()` adopted a newer stored secret still rejected with the signed-out error. `rpc(op, input, retried = false)` now signs out only when the refused secret is still the page's, and retries once when the page holds another by then. Five spec cases were added: that race, adopting a newer stored secret on a 401 (and signing out when the retry is refused too), the whole reconnect backoff (0.5, 1, 2, 5, then 10 s, starting over once signed in), adopting another tab's secret on a 4401, and `bad_response` for desk web's plain-text 421 (2 files, 20 tests).
+
+**Deviation (W2a.1's review fix):** `saveFile` revoked the object URL synchronously after `a.click()`, and some Firefox versions cancel such a download; it now revokes in a `setTimeout(…, 0)`, and the spec checks that nothing is revoked before that task runs.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -8783,7 +8787,7 @@ describe('DeskBridge host operations', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('saves a file through an octet-stream blob, revoked right after the click', async () => {
+  it('saves a file through an octet-stream blob, revoked in a task after the click', async () => {
     const blobs: Blob[] = [];
     const revoke = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: (b: Blob) => (blobs.push(b), 'blob:desk/1') });
@@ -8796,6 +8800,9 @@ describe('DeskBridge host operations', () => {
       await expect(TestBed.inject(DeskBridge).call('app.saveFile', { name: 'report.pdf', data: new Uint8Array([1, 2, 3]) })).resolves.toBe(true);
       expect(blobs.map((b) => [b.type, b.size])).toEqual([['application/octet-stream', 3]]);
       expect(clicks).toEqual([{ href: 'blob:desk/1', download: 'report.pdf', connected: true }]);
+      // Some Firefox versions cancel a download whose URL is revoked in the same task as the click.
+      expect(revoke).not.toHaveBeenCalled();
+      await new Promise((r) => setTimeout(r, 0));
       expect(revoke).toHaveBeenCalledWith('blob:desk/1');
       expect(document.querySelector('a[download]')).toBeNull();
       expect(fetchMock).not.toHaveBeenCalled();
@@ -9208,7 +9215,8 @@ export class DeskBridge {
       a.click();
     } finally {
       a.remove();
-      URL.revokeObjectURL(url);
+      // In a later task: some Firefox versions cancel a download whose URL is revoked in the click's own task.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     }
     return true;
   }
@@ -21000,6 +21008,8 @@ git commit -m "feat(web-ui): the composer: Enter sends, attachments go to the Li
 
 The host is the row wrapper (`div.chat-item`, `id` from `chatDomId`), which the React screen put around each row, so the jump and flash work on the same element.
 
+**Deviation (W2a.1's review fix):** `titleOf` looked the agent's `thread_id` argument up in the plain `titles` object, so `"thread_id":"constructor"` in a tool row read as `Object`'s source text (`read_thread function Object() { [native code] }`). It now reads own keys only (`Object.hasOwn`), `rowViews` names only ids the message fold holds as its own (`Object.hasOwn(m.agents, id)`, in `@desk/ui-core`), and the React `ChatItems.tsx` does the same for parity. The tool-rows case gains a `constructor` call (3 tools).
+
 **Files:**
 - Create: `apps/web-ui/src/app/conversation/chat-items.ts`
 - Test: `apps/web-ui/src/app/conversation/chat-items.spec.ts`
@@ -21174,11 +21184,22 @@ describe('ChatItemView', () => {
     expect(r.host.textContent).toBe('');
     expect(r.host.childElementCount).toBe(0);
     await r.rerender({
-      item: { kind: 'tools', id: 'tools:5', ts: TS, calls: [ok, { ...ok, id: 'c2', status: 'error' }, { id: 'c3', name: 'read_thread', arguments: '{"thread_id":"a"}', status: 'running', content: null }] },
+      item: {
+        kind: 'tools',
+        id: 'tools:5',
+        ts: TS,
+        calls: [
+          ok,
+          { ...ok, id: 'c2', status: 'error' },
+          { id: 'c3', name: 'read_thread', arguments: '{"thread_id":"a"}', status: 'running', content: null },
+          // An id named after an Object.prototype member reads as itself, never as that member.
+          { id: 'c4', name: 'read_thread', arguments: '{"thread_id":"constructor"}', status: 'error', content: null },
+        ],
+      },
       view: { titles: { a: 'Auth API' } },
     });
-    expect(r.host.querySelector('.toolgroup-title')!.textContent).toBe('Desk is using 2 tools');
-    expect([...r.host.querySelectorAll('.toolgroup li .mono')].map((l) => l.textContent)).toEqual(['message_thread Auth API', 'read_thread Auth API']);
+    expect(r.host.querySelector('.toolgroup-title')!.textContent).toBe('Desk is using 3 tools');
+    expect([...r.host.querySelectorAll('.toolgroup li .mono')].map((l) => l.textContent)).toEqual(['message_thread Auth API', 'read_thread Auth API', 'read_thread constructor']);
   });
 
   it("lists a digest's pairs on demand, each opening the pair's sheet", async () => {
@@ -21490,7 +21511,8 @@ export class ChatItemView {
   /** ToolGroup's titleOf: one function per view, so the group re-renders only when the titles change. */
   protected readonly titleOf = computed(() => {
     const titles = this.view()?.titles;
-    return (id: string): string | undefined => titles?.[id];
+    // Own keys only: the id is the agent's thread_id argument, and 'constructor' must not find Object.prototype's.
+    return (id: string): string | undefined => (titles && Object.hasOwn(titles, id) ? titles[id] : undefined);
   });
   protected readonly long = computed(() => {
     const it = this.item();
@@ -24860,13 +24882,13 @@ Expected: no line for a file under `apps/web-ui/src/app/attention/`, `apps/web-u
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Angular commands go through `scripts/ng.mjs` (it picks a Node that satisfies `^22.22.3`); while iterating run only the named specs: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: no parallel test runs, and only Task W2a.7 starts Chromium (never together with another Chromium or Electron run).
 
-**Runs after W0 (W0a–W0d) and W1b**, and after W1c.4 for Task W2a.7 (it extends `apps/web-ui/e2e/flows.e2e.test.ts`). It runs alongside the other W2 sections; W2b's `LibraryScreen` (and W3's `SkillPanel` and catalog `ReviewSheet`) use this section's `FileViewer`, and W3's `SystemScreen` uses its `tokens`. Nothing in `apps/desktop` changes: the React files and their tests stay as they are.
+**Runs after W0 (W0a–W0d) and W1b**, and after W1c.4 for Task W2a.7 (it extends `apps/web-ui/e2e/flows.e2e.test.ts`). It runs alongside the other W2 sections; W2b's `LibraryScreen` (and W3's `SkillPanel` and catalog `ReviewSheet`) use this section's `FileViewer`, and W3's `SystemScreen` uses its `tokens`. Nothing in `apps/desktop` changes (the React files and their tests stay as they are), except W2a.1's review fix: `FileViewer.tsx`'s download name and `ChatItems.tsx`'s `titleOf`, with a new `FileViewer.test.tsx` and one more `ConversationScreen.test.tsx` expectation.
 
 **How the pieces land (one commit per task):**
 
 | Task | What | Proof |
 |---|---|---|
-| W2a.1 | `SkillBadge`; `FileViewer` and `rasterMime` (§4.11) | `skill-badge.spec.ts`, `file-viewer.spec.ts` (new: the React files have no test) |
+| W2a.1 | `SkillBadge`; `FileViewer` and `rasterMime` (§4.11) | `skill-badge.spec.ts`, `file-viewer.spec.ts` (new: the React files have no test); the review fix's `files.test.ts` and `FileViewer.test.tsx` |
 | W2a.2 | the tabs: `ResultTab`, `DiffTab`, `FilesTab`, `SkillDraftsTab`, `UsageTab` with `usageByModel`, `tokens`, `ModelUsage` | five specs (new) |
 | W2a.3 | `RouteView` | `route-view.spec.ts` (new) |
 | W2a.4 | `Transcript` with `ToolCallFull`, `MessageCard`, `stopDomId`, `Depth`, `ComposerMode` | `transcript.spec.ts` (new) |
@@ -24886,7 +24908,7 @@ Expected: no line for a file under `apps/web-ui/src/app/attention/`, `apps/web-u
 **Produces (shared names beyond the contract):**
 
 - `apps/web-ui/src/app/components/skill-badge.ts`: `SkillBadge` — `span[deskSkillBadge]` (host class `skill-badge`, `title` "<scope> skill" when `scope` is set), inputs `name` (required), `scope?: 'global' | 'project'`. W3's skills screens use it as it is.
-- `apps/web-ui/src/app/components/file-viewer.ts`: `rasterMime(path): string | null` (png, jpg/jpeg, gif, webp; never SVG); `FileViewer` — `div[deskFileViewer]` (host class `file-viewer`), inputs `path: string`, `data: Uint8Array` (both required); projected content lands in the bar between the Raw toggle and "Save a copy…" (the React `actions` prop; LibraryScreen projects its "Close preview" button there).
+- `apps/web-ui/src/app/components/file-viewer.ts`: `rasterMime(path): string | null` (png, jpg/jpeg, gif, webp, looked up in a `Map`; never SVG, never an `Object.prototype` member); `FileViewer` — `div[deskFileViewer]` (host class `file-viewer`), inputs `path: string`, `data: Uint8Array` (both required); projected content lands in the bar between the Raw toggle and "Save a copy…" (the React `actions` prop; LibraryScreen projects its "Close preview" button there).
 - `apps/web-ui/src/app/threads/tabs/`: `ResultTab` — `div[deskResultTab]` (`projectId`, `thread`); `DiffTab` — `div[deskDiffTab]` (`threadId`, `version`); `FilesTab` — `div[deskFilesTab]` (`threadId`, `version`, `dir = model.required<string>()`: bind `[(dir)]`, the React `dir`/`onDir` pair); `SkillDraftsTab` — `div[deskSkillDraftsTab]` (`projectId`, `threadTitle`, `drafts`; output `browse: string`, React's `onBrowse`); `UsageTab` — `div[deskUsageTab]` (`usage: ModelUsage[]`); `usage-tab.ts` also exports `ModelUsage`, `usageByModel(events, agentId)` and `tokens(n)` (W3's `SystemScreen` imports `tokens` from here, as the React one does from `UsageTab.tsx`). Every tab host is `display: contents`: the React tabs switch roots (an empty state, a `ul`, a `div.tab-body`).
 - `apps/web-ui/src/app/threads/route-view.ts`: `RouteView` — `div[deskRouteView]` (host class `route`), inputs `stops`, `running`, `activity`, `reviewRounds`, `messages`, `selected`; output `selectStop: number` (React's `onSelect`).
 - `apps/web-ui/src/app/threads/transcript.ts`: `Depth`, `ComposerMode`, `stopDomId(n)`; `ToolCallFull` — `div[deskToolCallFull]` (host class `tr-call`, input `c`); `MessageCard` — `div[deskMessageCard]` (host class `tr-card tr-card-<dir>[ muted]`, input `c: CardView`, output `pair: string`); `Transcript` — `aside[deskTranscript]` (host class `card transcript`, `aria-label="Transcript"`), inputs `projectId`, `threadId`, `rows`, `entries`, `reviewRounds`, `messages`, `sent`, `selected`, `composer`, `depth = model.required<Depth>()` (React's `depth`/`onDepth`); outputs `pair: string`, `selectStop: number`; projected content is the head's actions (React's `actions`).
@@ -24935,19 +24957,22 @@ apps/web-ui/e2e/flows.e2e.test.ts                           modify (W1c.4)
 - **Stable inputs.** `Transcript` derives the unsent calls, the sent cards and the incoming cards through `computed` memo functions keyed on the reducer's immutable arrays and entries, so `ToolGroup` and `MessageCard` receive the same objects between renders; `titleOf` is a `computed` function, as W1b's rows do.
 - **Text.** Templates keep compared text tight (W0c's rule): the status line, the stop titles, the card heads, `.thread-card-wait` and `.tr-asked` are single lines, and a JSX `{' '}` is `&ngsp;`.
 - **Specs.** `render(Component, { inputs, providers })` or, where the host tag or two-way bindings matter, a template string with `componentProperties` (signals for values a case changes). Text boxes bind `[value]` and `(input)`, so ported cases type with `fireEvent.input`. Dialogs are found with `findByRole` (W0c's `Sheet` moves itself into `document.body` after its first render). The React test's `globalStore.set({ attention })` becomes a module-level `attention` that `setup` hands to `provideGlobal`. No source or spec contains the words W0c's `security.spec.ts` forbids.
-- **Files and Blobs (§4.11).** `FileViewer` never makes an SVG, HTML or unknown type into a Blob: images are only the four raster types, typed as such, and everything else that decodes as UTF-8 is a `CodeBlock`. Downloads use `DeskBridge`'s `app.saveFile` (W0c.3), which already builds an `application/octet-stream` Blob and revokes its URL right after the click; the e2e checks it in Chromium.
+- **Files and Blobs (§4.11).** `FileViewer` never makes an SVG, HTML or unknown type into a Blob: images are only the four raster types, typed as such, and everything else that decodes as UTF-8 is a `CodeBlock`. Downloads use `DeskBridge`'s `app.saveFile` (W0c.3), which already builds an `application/octet-stream` Blob and revokes its URL right after the click (in a `setTimeout(…, 0)` since W2a.1's review fix); the e2e checks it in Chromium. Extension tables are `Map`s (W2a.1's review fix): an object literal answers `x.constructor` with `Object`.
 
 ---
 ### Task W2a.1: `SkillBadge` and `FileViewer` (SVG as text, raster-only image Blobs)
 
 `SkillBadge.tsx` is a skill's name in a small badge; the roster cards and the thread head use it. `FileViewer.tsx` shows one file's bytes: an image through a blob URL, Markdown rendered safely with a Raw toggle (back to rendered for each new file), other text as code, anything else as "Save a copy to open it", and a bar with the path, the size, the host's actions and "Save a copy…". The web version differs in one place (spec §4.11): SVG is not an image here. A browser lets the user open an image in a tab of its own, and a `blob:` document runs with desk web's origin, so only `png`, `jpeg`, `gif` and `webp` become (typed) image Blobs, and an SVG shows as its source text. The React files have no tests; the specs below are new.
 
+**Deviation (review fix):** four fixes. (1) Security: `rasterMime` looked the extension up in an object literal, so `x.__proto__` and `x.constructor` (`extOf` lowercases, so `.CONSTRUCTOR` too) returned `Object.prototype` members and agent-controlled bytes became a `blob:` image with a bogus type. `RASTER` is now a `Map`; the same fix goes into `@desk/ui-core`'s `imageMime` (`IMAGE`, used by the desktop `FileViewer.tsx` and `LibraryScreen.tsx`), with a new `packages/ui-core/src/files.test.ts`. A sweep of `apps/` and `packages/` for other plain-object lookups keyed by user- or agent-controlled strings found three more that can return prototype members, fixed with `Object.hasOwn`: W1b.9's tool-row `titleOf` (web and React) and `rowViews`' thread titles (an agent's `thread_id` of `constructor` read as `Object`'s source), and W0b.5's `unescapeXml`. (2) The spec destroys the viewer after the PNG case and expects its URL revoked, and a case where `app.saveFile` fails shows the error toast. (3) The download name is `name()` (the `?? 'file'` after `pop()` was dead code), and 'file' when it is empty (a path ending in '/'); the React `FileViewer.tsx` does the same, and a new `FileViewer.test.tsx` covers it and the prototype extensions. (4) W0c.3's `DeskBridge.saveFile` revokes the object URL in a `setTimeout(…, 0)` (some Firefox versions cancel the download otherwise). The spec gains the prototype-extension case, the toast case and the empty-name case (8 tests).
+
 **Files:**
 - Create: `apps/web-ui/src/app/components/skill-badge.ts`, `apps/web-ui/src/app/components/file-viewer.ts`
 - Test: `apps/web-ui/src/app/components/skill-badge.spec.ts`, `apps/web-ui/src/app/components/file-viewer.spec.ts`
+- Review fix: modify `packages/ui-core/src/files.ts`, `packages/ui-core/src/row-views.ts` (+ `row-views.test.ts`), `apps/desktop/src/renderer/components/FileViewer.tsx`, `apps/desktop/src/renderer/conversation/ChatItems.tsx` (+ `ConversationScreen.test.tsx`), `apps/web-ui/src/app/core/desk-bridge.ts` (+ spec), `apps/web-ui/src/app/conversation/chat-items.ts` (+ spec), `packages/bff/src/server/daemon.ts`; create `packages/ui-core/src/files.test.ts`, `apps/desktop/src/renderer/components/FileViewer.test.tsx`
 
 **Interfaces:**
-- Consumes: `asText`, `bytes`, `extOf`, `isMarkdown` from `@desk/ui-core`; `DeskBridge` (`call('app.saveFile', { name, data })`), `ToastService` (`error`), `Button`, `CodeBlock`, `SafeMarkdown`, `FakeDeskBridge` (W0c).
+- Consumes: `asText`, `bytes`, `extOf`, `isMarkdown` from `@desk/ui-core`; `DeskBridge` (`call('app.saveFile', { name, data })`), `ToastService` (`error`, and `list` in the spec), `Button`, `CodeBlock`, `SafeMarkdown`, `FakeDeskBridge` (W0c).
 - Produces: `SkillBadge` — `span[deskSkillBadge]`, `name = input.required<string>()`, `scope = input<'global' | 'project'>()`; `rasterMime(path: string): string | null`; `FileViewer` — `div[deskFileViewer]`, `path = input.required<string>()`, `data = input.required<Uint8Array>()`, projected actions.
 
 - [ ] **Step 1: Write the failing specs**
@@ -24976,9 +25001,11 @@ Create `apps/web-ui/src/app/components/file-viewer.spec.ts`:
 
 ```ts
 import { fireEvent, render, screen, waitFor } from '@testing-library/angular';
+import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeDeskBridge } from '../testing/fake-bridge';
 import { FileViewer, rasterMime } from './file-viewer';
+import { ToastService } from './toast';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -25044,6 +25071,17 @@ describe('FileViewer', () => {
     await waitFor(() => expect(created.map((b) => b.type)).toEqual(['image/png', 'image/jpeg']));
     expect(revoked).toEqual(['blob:test/1']);
     expect((await screen.findByRole('img', { name: 'page-2.jpg' })).getAttribute('src')).toBe('blob:test/2');
+    view.fixture.destroy();
+    expect(revoked).toEqual(['blob:test/1', 'blob:test/2']);
+  });
+
+  it('never makes an image of a file whose extension names an Object.prototype member', async () => {
+    expect(['a.__proto__', 'a.constructor', 'a.CONSTRUCTOR', 'a.toString', 'a.hasOwnProperty', 'a.valueOf'].map(rasterMime)).toEqual([null, null, null, null, null, null]);
+    const bridge = new FakeDeskBridge();
+    await render(FileViewer, { inputs: { path: 'out/x.constructor', data: new Uint8Array([0x89, 0x50, 0, 1]) }, providers: bridge.providers });
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByText("This file isn't text, so it can't be shown here. Save a copy to open it.")).toBeTruthy();
+    expect(created).toEqual([]);
   });
 
   it('says a binary file cannot be shown, and saves a copy of it through the browser', async () => {
@@ -25056,6 +25094,25 @@ describe('FileViewer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
     await waitFor(() => expect(bridge.calls).toEqual([{ channel: 'app.saveFile', input: { name: 'archive.bin', data } }]));
     expect(created).toEqual([]);
+  });
+
+  it('shows the error in a toast when saving a copy fails', async () => {
+    const bridge = new FakeDeskBridge({
+      'app.saveFile': () => {
+        throw { code: 'internal', message: 'The download could not start' };
+      },
+    });
+    await render(FileViewer, { inputs: { path: 'out/archive.bin', data: new Uint8Array([0, 1]) }, providers: bridge.providers });
+    fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
+    await waitFor(() => expect(TestBed.inject(ToastService).list().map((t) => [t.tone, t.message])).toEqual([['error', 'The download could not start']]));
+  });
+
+  it("saves a copy named 'file' when the path has no name", async () => {
+    const bridge = new FakeDeskBridge({ 'app.saveFile': () => true });
+    const data = new Uint8Array([0, 1]);
+    await render(FileViewer, { inputs: { path: 'out/', data }, providers: bridge.providers });
+    fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
+    await waitFor(() => expect(bridge.calls).toEqual([{ channel: 'app.saveFile', input: { name: 'file', data } }]));
   });
 
   it("puts its host's actions in the bar, before Save a copy…", async () => {
@@ -25113,11 +25170,18 @@ import { ToastService } from './toast';
 /**
  * The image types shown as images (spec §4.11). A browser lets the user open an image in a tab of its own, where a
  * `blob:` document runs with desk web's origin, so SVG (a document that can run script) is shown as its source instead.
+ * A Map, not an object literal: a file named `x.constructor` or `x.__proto__` must not find Object.prototype's members.
  */
-const RASTER: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+const RASTER = new Map([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
+]);
 
 /** The raster image type of `path`, by its extension; null for anything else, SVG included. */
-export const rasterMime = (path: string): string | null => RASTER[extOf(path)] ?? null;
+export const rasterMime = (path: string): string | null => RASTER.get(extOf(path)) ?? null;
 
 /**
  * Shows one file's bytes: raster images through a blob URL of their own type (never a remote one), Markdown rendered
@@ -25163,6 +25227,8 @@ export class FileViewer {
   protected readonly md = computed(() => this.text() !== null && isMarkdown(this.path()));
   protected readonly ext = computed(() => extOf(this.path()));
   protected readonly name = computed(() => this.path().split('/').pop() ?? '');
+  /** The download's name: 'file' for a path that ends in '/'. */
+  private readonly saveName = computed(() => this.name() || 'file');
   protected readonly size = computed(() => bytes(this.data().length));
   /** The Markdown source instead of its rendering; each new file starts rendered. */
   protected readonly raw = linkedSignal({ source: this.path, computation: () => false });
@@ -25183,10 +25249,10 @@ export class FileViewer {
     });
   }
 
-  /** DeskBridge downloads it as application/octet-stream and revokes the URL right after the click (spec §4.11). */
+  /** DeskBridge downloads it as application/octet-stream and revokes the URL once the click's task is over (spec §4.11). */
   protected async save(): Promise<void> {
     try {
-      await this.bridge.call('app.saveFile', { name: this.path().split('/').pop() ?? 'file', data: new Uint8Array(this.data()) });
+      await this.bridge.call('app.saveFile', { name: this.saveName(), data: new Uint8Array(this.data()) });
     } catch (err) {
       this.toasts.error(err);
     }
@@ -25197,7 +25263,7 @@ export class FileViewer {
 - [ ] **Step 4: Run them**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/components/skill-badge.spec.ts --include src/app/components/file-viewer.spec.ts)`
-Expected: PASS (2 files, 6 tests).
+Expected: PASS (2 files, 9 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
