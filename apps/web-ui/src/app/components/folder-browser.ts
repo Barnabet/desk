@@ -72,7 +72,7 @@ export const isAbsolutePath = (p: string): boolean => /^(?:\/|[A-Za-z]:[\\/]|\\\
         <p class="field-error" role="alert">{{ error() }}</p>
       }
       <div class="actions">
-        <button deskButton variant="primary" (click)="choose()">Choose this folder</button>
+        <button deskButton variant="primary" [pending]="loading() || checking()" (click)="choose()">Choose this folder</button>
         <button deskButton (click)="picked.emit(null)">Cancel</button>
       </div>
     </div>
@@ -89,6 +89,8 @@ export class FolderBrowser implements OnInit {
   protected readonly typed = signal('');
   protected readonly hidden = signal(false);
   protected readonly loading = signal(false);
+  /** Choose is checking a typed folder with deskd. */
+  protected readonly checking = signal(false);
   protected readonly error = signal<string | null>(null);
   /** Only the latest listing lands, whatever order the answers come back in. */
   private seq = 0;
@@ -135,6 +137,8 @@ export class FolderBrowser implements OnInit {
   }
 
   protected async choose(): Promise<void> {
+    // Pending while a listing lands (the folder on screen is about to change) or a typed folder is checked (one answer).
+    if (this.loading() || this.checking()) return;
     const typed = this.typed().trim();
     const shown = this.listing();
     if (shown && (!typed || typed === shown.path)) {
@@ -143,6 +147,7 @@ export class FolderBrowser implements OnInit {
     }
     if (!typed) return;
     this.error.set(null);
+    this.checking.set(true);
     try {
       const l = await this.bridge.call('fs.listDirs', { path: typed, hidden: this.hidden() });
       this.picked.emit(l.path);
@@ -150,6 +155,8 @@ export class FolderBrowser implements OnInit {
       // Outside home and the sources the browser may not list it, but deskd checks every folder it is given (spec §4.7).
       if (err instanceof DeskCallError && err.code === 'not_allowed' && isAbsolutePath(typed)) this.picked.emit(typed);
       else this.error.set(describeError(err).message);
+    } finally {
+      this.checking.set(false);
     }
   }
 }
