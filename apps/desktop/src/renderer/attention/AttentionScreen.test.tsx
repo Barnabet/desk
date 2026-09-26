@@ -29,6 +29,19 @@ const items: AttentionItem[] = [
   { id: 'question:7', kind: 'question', project_id: 'p', project_name: 'Tax 2026', agent_id: 'd', title: 'Data source or teammate first?', detail: '', created_at: recent, ref: { event_id: 7, options: ['Data source', 'Teammate'] } },
 ];
 
+/** Another approval, from thread `t<n>`, waiting `minutes`: it racks after a1 (4 minutes) when younger. */
+const approval = (n: number, minutes: number): AttentionItem => ({
+  id: `approval:a${n}`,
+  kind: 'approval',
+  project_id: 'p',
+  project_name: 'Tax 2026',
+  agent_id: `t${n}`,
+  title: `Thread ${n} wants to run bash`,
+  detail: 'Policy rule {"tool":"bash"} → ask',
+  created_at: new Date(Date.now() - minutes * 60_000).toISOString(),
+  ref: { approval_id: `a${n}`, thread_id: `t${n}` },
+});
+
 const overview = () =>
   ({
     project: { id: 'p', name: 'Tax 2026', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
@@ -86,8 +99,10 @@ describe('AttentionScreen', () => {
   it('approves with ⌘⏎ and sends the note', async () => {
     const bridge = setup({ 'approvals.resolve': () => ({ ok: true }) });
     const insp = await screen.findByRole('article', { name: /clearance request/ });
-    fireEvent.change(within(insp).getByLabelText('Note to the thread (optional)'), { target: { value: 'Use npm test' } });
-    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    const note = within(insp).getByLabelText('Note to the thread (optional)');
+    fireEvent.change(note, { target: { value: 'Use npm test' } });
+    // ⌘⏎ approves from the note too.
+    fireEvent.keyDown(note, { key: 'Enter', metaKey: true });
     await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'approved', note: 'Use npm test' }));
   });
 
@@ -154,5 +169,61 @@ describe('AttentionScreen', () => {
   it('explains GND in the legend', () => {
     setup();
     expect(document.querySelector('.strip-legend')!.textContent).toContain('GNDPaused project');
+  });
+
+  it('ignores a held ⌘⏎ or ⌘⌫, which would decide the next approval unseen', async () => {
+    const bridge = setup({ 'approvals.resolve': () => ({ ok: true }) });
+    await screen.findByRole('article', { name: /clearance request/ });
+    const resolves = () => bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input);
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true, repeat: true });
+    expect(resolves()).toEqual([]);
+    fireEvent.keyDown(document.body, { key: 'Backspace', ctrlKey: true, repeat: true });
+    expect(resolves()).toEqual([]);
+    fireEvent.keyDown(document.body, { key: 'Backspace', ctrlKey: true });
+    await waitFor(() => expect(resolves()).toEqual([{ id: 'a1', decision: 'denied' }]));
+  });
+
+  it('keeps the next approval pending when the one before it fails late', async () => {
+    let fail: (err: unknown) => void = () => {};
+    const bridge = setup(
+      { 'approvals.resolve': (input: { id: string }) => new Promise((_, reject) => (input.id === 'a1' ? (fail = reject) : undefined)) },
+      [...items, approval(2, 2)],
+    );
+    const resolves = () => bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input);
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    await screen.findByRole('article', { name: /clearance request/ });
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(resolves()).toHaveLength(1));
+    fireEvent.keyDown(window, { key: 'j' });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa2'));
+    await waitFor(() => expect(screen.getByRole('article', { name: /clearance request/ }).textContent).toContain('2 of 4'));
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    const approve = await screen.findByRole('button', { name: /^Approve once/ });
+    await waitFor(() => expect(approve.getAttribute('aria-busy')).toBe('true'));
+    // a1's request fails only now: the toast says so, and a2's approval is still on its way.
+    fail({ code: 'internal', message: 'deskd went away', status: 500 });
+    await waitFor(() => expect(toastStore.get().map((t) => t.message)).toContain('deskd went away'));
+    expect(approve.getAttribute('aria-busy')).toBe('true');
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(resolves()).toEqual([
+      { id: 'a1', decision: 'approved' },
+      { id: 'a2', decision: 'approved' },
+    ]);
+  });
+
+  it('denies with ⌘⌫, and leaves ⌘⌫ to a text box', async () => {
+    const bridge = setup({ 'approvals.resolve': () => ({ ok: true }) });
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    const note = within(insp).getByLabelText('Note to the thread (optional)');
+    // In the note, Ctrl+⌫ deletes a word and ⌘⌫ the line: the note keeps the key (no preventDefault), and nothing is denied.
+    expect(fireEvent.keyDown(note, { key: 'Backspace', ctrlKey: true })).toBe(true);
+    expect(fireEvent.keyDown(note, { key: 'Backspace', metaKey: true })).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(bridge.calls.some((c) => c.channel === 'approvals.resolve')).toBe(false);
+    // Outside a text box, ⌘⌫ denies.
+    expect(fireEvent.keyDown(document.body, { key: 'Backspace', metaKey: true })).toBe(false);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'approvals.resolve')?.input).toEqual({ id: 'a1', decision: 'denied' }));
   });
 });

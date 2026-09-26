@@ -31,6 +31,8 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const lastIndex = useRef(0);
+  /** The selected item's id, for requests that finish after the selection moved on. */
+  const selectedId = useRef<string | undefined>(undefined);
 
   const found = flat.findIndex((i) => i.id === itemId);
   const index = found >= 0 ? found : Math.min(lastIndex.current, flat.length - 1);
@@ -40,9 +42,14 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
     else if (selected) replaceRoute({ name: 'attention', item: selected.id });
   }, [found, selected]);
   useEffect(() => {
+    selectedId.current = selected?.id;
     setNote('');
     setBusy(null);
   }, [selected?.id]);
+  /** Clears the pending state once `id`'s request is over, unless the selection has moved on (the next item's may be pending). */
+  const settle = useCallback((id: string) => {
+    if (selectedId.current === id) setBusy(null);
+  }, []);
 
   const select = useCallback((id: string) => replaceRoute({ name: 'attention', item: id }), []);
 
@@ -58,10 +65,10 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
           const by = all.find((x) => x.id === selected.ref.approval_id)?.resolved_by;
           toast({ tone: 'info', message: `Already decided by ${by ? (WHO[by] ?? by) : 'someone else'}.` });
         } else toastError(err);
-        setBusy(null);
+        settle(selected.id);
       }
     },
-    [selected, note, busy],
+    [selected, note, busy, settle],
   );
   const answer = useCallback(
     async (text: string) => {
@@ -73,10 +80,10 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
       } catch (err) {
         toastError(err);
       } finally {
-        setBusy(null);
+        settle(selected.id);
       }
     },
-    [selected],
+    [selected, settle],
   );
   const dismiss = useCallback(async () => {
     if (!selected) return;
@@ -85,21 +92,24 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
       await call('attention.dismiss', { id: selected.id });
     } catch (err) {
       toastError(err);
-      setBusy(null);
+      settle(selected.id);
     }
-  }, [selected]);
+  }, [selected, settle]);
   const open = useCallback(() => selected && navigate(openTarget(selected)), [selected]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!flat.length) return;
       const mod = e.metaKey || e.ctrlKey;
+      // A held key repeats: once the selection moves, a repeat would decide the next approval unseen.
       if (mod && e.key === 'Enter') {
         e.preventDefault();
-        void resolve('approved');
+        if (!e.repeat) void resolve('approved');
       } else if (mod && e.key === 'Backspace') {
+        // In the note, ⌘⌫ and Ctrl+⌫ delete text (to the line start, or a word); they deny only outside a text box.
+        if (typing(e.target)) return;
         e.preventDefault();
-        void resolve('denied');
+        if (!e.repeat) void resolve('denied');
       } else if (!mod && !e.altKey && !typing(e.target)) {
         const k = e.key.toLowerCase();
         if (k === 'j' || k === 'k') {
