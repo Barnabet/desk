@@ -18,7 +18,8 @@
     "package:desktop": "pnpm --filter @desk/desktop package",
     "catalog:pin": "node --import tsx packages/core/scripts/catalog.ts pin",
     "catalog:check": "node --import tsx packages/core/scripts/catalog.ts check",
-    "catalog:sync": "node --import tsx packages/core/scripts/catalog.ts sync"
+    "catalog:sync": "node --import tsx packages/core/scripts/catalog.ts sync",
+    "builtins:pin": "node --import tsx packages/core/scripts/catalog.ts builtins-pin"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -60,7 +60,7 @@ describe('startDaemon', () => {
     expect(await (await fetch(`http://127.0.0.1:${d.port}/v1/health`)).json()).toMatchObject({ version: '1.0.0-test', protocol_version: 1 });
     expect((await api(d, '/projects')).status).toBe(200);
     // The catalog and skill runtimes are wired in: the shipped catalog lists, and runtimes report.
-    expect((await json(api(d, '/catalog'))).length).toBe(30);
+    expect((await json(api(d, '/catalog'))).length).toBe(18);
     expect(await json(api(d, '/system/runtimes'))).toEqual({ bytes: 0, envs: [] });
   });
 

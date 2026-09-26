@@ -116,6 +116,7 @@ export { latestWhatsUp } from './coordination/whatsup';
 export { formatThreadLine, formatThreadSummary, renderTranscript } from './coordination/render';
 export { createWorkspace, removeWorkspace, threadBranchName } from './workspaces/workspaces';
 export { SkillStore, parseSkillMd, serializeSkillMd, type SkillDetail, type SkillSummary, type SkillSaveInput } from './skills/store';
+export { BuiltinSkills, builtinEnabled, loadBuiltinsManifest, runtimeKey, type RuntimeSpec } from './skills/builtins';
 export { skillUseTools, skillAuthoringTools, renderSkill } from './tools/skills';
 export { CatalogService, catalogMarker, httpFetch, loadCatalog, type CatalogFetch, type CatalogRuntimes, type CatalogServiceOptions, type SkillRef } from './catalog/service';
 export { extractSubtree, DEFAULT_CAPS, type ExtractCaps, type ExtractedFile } from './catalog/tar';

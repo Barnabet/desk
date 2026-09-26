@@ -1,0 +1,8 @@
+pillow==12.3.0
+pillow-heif==1.8.0
+resvg-py==0.5.0
+rawpy==0.25.1
+fonttools==4.66.0
+brotli==1.2.0
+numpy==2.5.3
+pyoxipng==9.1.1

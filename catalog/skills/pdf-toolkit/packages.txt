@@ -1,0 +1,6 @@
+pypdf==6.19.0
+pypdfium2==5.11.0
+pdfplumber==0.11.10
+pypandoc-binary==1.17
+typst==0.15.0
+pillow==12.3.0

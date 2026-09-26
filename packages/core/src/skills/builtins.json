@@ -1,0 +1,388 @@
+{
+  "version": 1,
+  "updated": "2026-09-26",
+  "skills": [
+    {
+      "name": "web-research",
+      "title": "Web research",
+      "summary": "Search the web without API keys across many engines, read pages as clean Markdown, render JavaScript pages, crawl docs sites, use archives, and cite with verified quotes. Written by Desk.",
+      "caveats": [
+        "Uses free public search engines without API keys, so results depend on their availability.",
+        "JavaScript pages and screenshots need Chrome or Edge, or a Chromium that Desk downloads once at install.",
+        "Pages behind logins, paywalls or anti-bot walls are never bypassed."
+      ],
+      "digest": "sha256:df19e604f7616f2fe68a0fe785867d7c6a9e2bd1e7a5848fc539edbd10267305",
+      "files": 22,
+      "bytes": 604353,
+      "scripts": 15,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "httpx[http2,brotli]==0.28.1",
+            "truststore==0.10.4",
+            "certifi==2026.7.22",
+            "trafilatura==2.2.0",
+            "selectolax==0.4.12",
+            "feedparser==6.0.14",
+            "playwright==1.63.0",
+            "pypdfium2==5.11.0",
+            "pillow==12.3.0",
+            "yt-dlp==2026.8.19"
+          ]
+        },
+        "extras": [
+          "browser"
+        ]
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "file-inspector",
+      "title": "File inspector",
+      "summary": "Identify any file by content and route it to the right skill, flag zip bombs and damage, survey huge folders, read text of any size and encoding, map and carve binaries, hash. Written by Desk.",
+      "caveats": [
+        "Files are identified by their content and routed to the skill that handles them; formats without a signature are reported as generic data or text."
+      ],
+      "digest": "sha256:12d0ffc34d47ce09def40065ee9a1fee2c8477b9178431e993e1d9be398ad46b",
+      "files": 32,
+      "bytes": 704800,
+      "scripts": 23,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "puremagic==2.2.0",
+            "charset-normalizer==3.5.1",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "word-documents",
+      "title": "Word documents",
+      "summary": "Read, create, edit, fill, compare, render and convert .docx/.odt/.rtf/.doc; 1,000-page files as a cached, searchable map; exact LibreOffice or built-in Typst renders. Written by Desk.",
+      "caveats": [
+        "Exact page layout uses LibreOffice when it is installed; otherwise Desk draws a close approximation with its built-in renderer.",
+        "Legacy .doc, .wpd and .pages files need LibreOffice.",
+        "Password-protected documents cannot be opened."
+      ],
+      "digest": "sha256:99467e98a20ecb46fd24284a114390614bda4df914f7dd195407ca1111ee7d9a",
+      "files": 31,
+      "bytes": 837921,
+      "scripts": 22,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "python-docx==1.2.0",
+            "docxcompose==2.2.0",
+            "mammoth==1.12.2",
+            "pypandoc-binary==1.17",
+            "typst==0.15.0",
+            "pypdfium2==5.11.0",
+            "pillow==12.3.0",
+            "regex==2026.9.10"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "pdf-toolkit",
+      "title": "PDF toolkit",
+      "summary": "Read, search, render, create, fill, stamp, split, compare, optimise and truly redact PDFs, with a map-first path and caching for 1000-page files. No OCR. Written by Desk.",
+      "caveats": [
+        "No OCR: scanned pages are rendered as images for the agent to look at.",
+        "Office inputs to pdf_create need LibreOffice."
+      ],
+      "digest": "sha256:d6b1a80e7234ed3ad52ab4d28df27b1036bfe2ab8364929a8de6a6dcb9ab34b6",
+      "files": 30,
+      "bytes": 674724,
+      "scripts": 20,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "pypdf==6.19.0",
+            "pypdfium2==5.11.0",
+            "pdfplumber==0.11.10",
+            "pypandoc-binary==1.17",
+            "typst==0.15.0",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "spreadsheets",
+      "title": "Spreadsheets",
+      "summary": "Read, query, create, edit, recalculate, render and convert Excel, LibreOffice and CSV files. Big workbooks are read as maps, searched and queried with SQL, and edited in place. Written by Desk.",
+      "caveats": [
+        "Exact print layout and .xls/.xlsb/.ods fidelity use LibreOffice when it is installed; otherwise Desk renders and converts with its own engine.",
+        "Cell edits to big workbooks are patched in place; structural edits (inserting rows or sheets) still rewrite the whole file and are slow."
+      ],
+      "digest": "sha256:813756a87704f49bf8fbc2725362ba5d95bff85dcc95d828e863176bb8ab8c1a",
+      "files": 38,
+      "bytes": 1180065,
+      "scripts": 29,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "openpyxl==3.1.5",
+            "python-calamine==0.8.2",
+            "duckdb==1.5.5",
+            "pillow==12.3.0",
+            "pypdfium2==5.11.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "presentations",
+      "title": "Presentations",
+      "summary": "Create, read, edit, render, lint and convert slide decks (.pptx; .ppt/.odp via LibreOffice): themed builds, big-deck maps and search, spec round trips, cached renders. Written by Desk.",
+      "caveats": [
+        "Exact slide rendering uses LibreOffice when it is installed; otherwise Desk draws a close approximation.",
+        ".ppt, .odp and .key files need LibreOffice."
+      ],
+      "digest": "sha256:2963f74c9a3d3f8ecab2c1f4aa9ca946cb0072b29f953840f3aaa02a8496a5ce",
+      "files": 31,
+      "bytes": 711615,
+      "scripts": 23,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "python-pptx==1.0.2",
+            "pillow==12.3.0",
+            "typst==0.15.0",
+            "pypdfium2==5.11.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "images",
+      "title": "Images and fonts",
+      "summary": "View, convert, edit, annotate, compose, compare and optimise images (HEIC, RAW, SVG, PSD, GIF) and fonts, with tile maps for huge images and paged listings for big folders. Written by Desk.",
+      "caveats": [
+        "Huge PNG and TIFF files are decoded in full once, then read from a tile cache.",
+        "PSD files are read as their flattened composite."
+      ],
+      "digest": "sha256:fad43341d5a997c91e26b853d57e231e5e23096ef9cd4fba056546f493206da1",
+      "files": 26,
+      "bytes": 625014,
+      "scripts": 19,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "pillow==12.3.0",
+            "pillow-heif==1.8.0",
+            "resvg-py==0.5.0",
+            "rawpy==0.25.1",
+            "fonttools==4.66.0",
+            "brotli==1.2.0",
+            "numpy==2.5.3",
+            "pyoxipng==9.1.1"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "audio-video",
+      "title": "Audio and video",
+      "summary": "Inspect, watch (contact sheets), hear (waveforms, LUFS), convert, edit, search and transcribe (Whisper) audio, video and subtitles; cached, paged and mapped for long media. Written by Desk.",
+      "caveats": [
+        "Needs macOS 14 or later on Apple silicon (the PyAV wheels require it).",
+        "Transcription downloads a Whisper model on first use (tiny 75 MB up to large-v3 3.1 GB).",
+        "ffmpeg comes from the imageio-ffmpeg wheel (a static GPL build), downloaded by uv on your machine."
+      ],
+      "digest": "sha256:baa961804b8034d00a3645016dfbd0f75a9930eb7b88063bdecbe621cc3eeee2",
+      "files": 26,
+      "bytes": 638713,
+      "scripts": 19,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "av==18.1.0",
+            "imageio-ffmpeg==0.6.0",
+            "faster-whisper==1.2.1",
+            "numpy==2.5.3",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "data-files",
+      "title": "Data files",
+      "summary": "Read, query with SQL, profile, clean, convert, validate, diff and chart CSV, JSON, Parquet, XML, YAML, TOML, SQLite, Avro and SPSS/Stata/SAS files, big or compressed ones included. Written by Desk.",
+      "caveats": [
+        "Excel workbooks belong to the spreadsheets skill.",
+        "Compressed inputs are checked against size, ratio and dictionary limits before they are decoded."
+      ],
+      "digest": "sha256:76d7460324f3ab7eb650dfaff87b86799d9f94f1e60bc2a89ddfe33cd42244ec",
+      "files": 25,
+      "bytes": 679292,
+      "scripts": 17,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "duckdb==1.5.5",
+            "pyarrow==25.0.1",
+            "pandas==3.0.6",
+            "numpy==2.5.3",
+            "pyyaml==6.0.3",
+            "tomli-w==1.2.0",
+            "jsonschema==4.26.0",
+            "fastavro==1.12.2",
+            "cramjam==2.12.1",
+            "pyreadstat==1.3.6",
+            "matplotlib==3.11.2",
+            "pillow==12.3.0",
+            "lxml==6.1.3",
+            "charset-normalizer==3.5.1",
+            "ijson==3.5.1",
+            "pytz==2026.4"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "archives",
+      "title": "Archives",
+      "summary": "List, check, extract, create, read and grep, test, repack and diff zip, tar.*, 7z, rar, iso and more, with bomb and zip-slip guards and cached maps for huge archives. Written by Desk.",
+      "caveats": [
+        "RAR archives cannot be created, and some RAR variants need unrar or 7-Zip installed to be read.",
+        ".iso, .cab, .deb, .rpm and similar formats are read-only, through the system's bsdtar (built into macOS and Windows 10+)."
+      ],
+      "digest": "sha256:3fd213e6ff422889a3dbe6f07f44ff1c49fd19ea5b3d132fae546d4d87a323b1",
+      "files": 25,
+      "bytes": 577579,
+      "scripts": 18,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "py7zr==1.1.3",
+            "pyzipper==0.4.0",
+            "zstandard==0.25.0",
+            "rarfile==4.5",
+            "inflate64==1.0.4",
+            "pyppmd==1.3.1",
+            "psutil==7.2.2"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "markup-ebooks",
+      "title": "Markup and e-books",
+      "summary": "Convert, typeset (Typst), render, read and check Markdown, HTML, EPUB, notebooks and 10 more markup formats; big files open as maps and long ones typeset by section. Written by Desk.",
+      "caveats": [
+        "Very long documents are typeset and converted section by section.",
+        "Remote images are downloaded (with time limits) before conversion unless --offline is given."
+      ],
+      "digest": "sha256:491b1d9e1481d6858c54689fef9e381a6f2879d4717a4bd321594a581180b329",
+      "files": 38,
+      "bytes": 689402,
+      "scripts": 21,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "pypandoc-binary==1.17",
+            "typst==0.15.0",
+            "lxml==6.1.3",
+            "pypdfium2==5.11.0",
+            "pillow==12.3.0",
+            "pyyaml==6.0.3"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
+      "name": "email-calendar",
+      "title": "Email, calendars and contacts",
+      "summary": "Read, search, draft and convert email (.eml .msg .emlx mbox Maildir winmail.dat), calendars (.ics agenda, conflicts, free slots, renders) and contacts (.vcf, CSV). Written by Desk.",
+      "caveats": [
+        "Outlook .pst and .ost archives are not supported; export messages as .msg, .eml or mbox.",
+        "Drafts are written as .eml files; nothing is ever sent.",
+        "Encrypted S/MIME or PGP bodies cannot be read."
+      ],
+      "digest": "sha256:b263c1b8434a55f257f6b140a40fddf9b0294bb90f5b7bcdba8169beb80a0731",
+      "files": 31,
+      "bytes": 708255,
+      "scripts": 23,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": [
+            "olefile==0.47",
+            "icalendar==7.3.0",
+            "python-dateutil==2.9.0.post0",
+            "tzdata==2026.4",
+            "beautifulsoup4==4.15.0",
+            "markdownify==1.2.3",
+            "charset-normalizer==3.5.1",
+            "markdown-it-py==4.2.0",
+            "typst==0.15.0",
+            "pillow==12.3.0"
+          ]
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    }
+  ]
+}

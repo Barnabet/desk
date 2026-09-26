@@ -15,7 +15,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CatalogFile, type CatalogEntry } from '@desk/protocol';
+import { BuiltinsFile, CatalogFile, type CatalogEntry } from '@desk/protocol';
 import { detectLicense, flattenLock, shellWord as shq } from '../src/catalog/curation';
 import {
   CatalogService,
@@ -41,6 +41,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CATALOG = join(here, '..', 'src', 'catalog', 'catalog.json');
+const BUILTINS = join(here, '..', 'src', 'skills', 'builtins.json');
 const BUILTIN = join(here, '..', '..', '..', 'catalog', 'skills');
 const SHARED = join(here, '..', '..', '..', 'catalog', 'shared');
 const LICENSE_FILE = /^(LICEN[CS]E|COPYING)(\.[A-Za-z]+)?$/i;
@@ -53,8 +54,9 @@ const ids = rest.filter((a, i) => !a.startsWith('--') && (refFlag < 0 || i !== r
 if (command === 'pin') await pin();
 else if (command === 'check') process.exit((await check()) ? 0 : 1);
 else if (command === 'sync') sync();
+else if (command === 'builtins-pin') builtinsPin();
 else {
-  console.error('usage: catalog.ts pin|check|sync [ids…] [--ref <ref>]');
+  console.error('usage: catalog.ts pin|check|sync|builtins-pin [ids…] [--ref <ref>]');
   process.exit(2);
 }
 
@@ -76,6 +78,29 @@ function sync(): void {
     }
   }
   console.log(changed ? `${changed} copies updated; run pnpm catalog:pin for the skills listed` : 'all copies are current');
+}
+
+// ── builtins ──────────────────────────────────────────────────────────
+
+/** Rewrites builtins.json from catalog/skills: digests, counts and each skill's packages.txt (spec 2026-09-26 §5). */
+function builtinsPin(): void {
+  const raw = JSON.parse(readFileSync(BUILTINS, 'utf8')) as { version: 1; updated: string; skills: Array<Record<string, any>> };
+  raw.updated = new Date().toISOString().slice(0, 10);
+  for (const s of raw.skills.filter((x) => !ids.length || ids.includes(x.name))) {
+    const files = readTree(join(BUILTIN, s.name));
+    const junk = files.find((f) => /(^|\/)(__pycache__|\.DS_Store)(\/|$)|\.pyc$/.test(f.path));
+    if (junk) throw new Error(`remove ${s.name}/${junk.path} first: it would become part of the built-in skill`);
+    const pk = files.find((f) => f.path === 'packages.txt');
+    const packages = pk ? pk.content.toString('utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [];
+    s.runtime = { ...(s.runtime ?? {}), python: { version: s.runtime?.python?.version ?? '3.12', packages } };
+    s.digest = treeDigest(files);
+    s.files = files.length;
+    s.bytes = files.reduce((n, f) => n + f.content.length, 0);
+    s.scripts = files.filter((f) => isScript(f.path, f.mode, f.content)).length;
+    console.log(`pinned ${s.name}: ${s.files} files · ${packages.length} packages`);
+  }
+  writeFileSync(BUILTINS, `${JSON.stringify(raw, null, 2)}\n`);
+  BuiltinsFile.parse(raw);
 }
 
 // ── pin ─────────────────────────────────────────────────────────────────
