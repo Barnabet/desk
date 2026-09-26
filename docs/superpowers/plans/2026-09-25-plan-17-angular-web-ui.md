@@ -19082,6 +19082,7 @@ apps/web-ui/src/app/screen-for.ts                            modify (W0c.11)
 
 **Porting notes (decided here, so every task agrees):**
 
+- **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** Each component's attribute selector sits on the React component's root element. Where React returns a fragment (`ToolGroup`: the `details` and the thumbnails; `PairSheet` and `LogsSheet`: a portalled `Sheet`) the host is `display: contents`, as W0c's `ConfirmDialog` and W1a's `OrbitMap` do; `conversation.css` has no child or sibling selectors on those parents, so the layout is unchanged. `ChatItems.tsx` has no single root (it switches over ten row kinds), so `ChatItemView`'s host is the row wrapper the React screen put around it (`div.chat-item` with `id={chatDomId(item.id)}`): the DOM is identical, and the screen's jump finds and flashes the same element. (The contract's example `section[deskChatItems]` names no real root; `div[deskChatItem]` is the port's.) `ConversationScreen`'s React root depends on the session's status, so its host binds the class: `page muted` ("Loading…"), `page` (missing, failed) or `conversation`.
 - **Components that render nothing.** React's `ServicesCard` returns `null` without services and `ImageThumbs` without images. An Angular host always exists, so those hosts drop their classes, set `hidden` and render nothing; the screen also wraps `ServicesCard` in `@if (project.services.length)` so its DOM matches the desktop's. The ported "is hidden without services" case asserts the hidden, empty host instead of an empty container.
 - **Sub-components.** React sub-components that exist only to hold a hook or a line of state are inlined with the same elements and classes: in `ChatItemView` `Clamped` (a `clampOpen` signal and an `ng-template`), `QuestionState` (an `ng-template`), `Quote`, `Digest` (`digestOpen`) and `ResumeButton` (`resumeBusy`), one of each per row as in React; in `PairSheet` `Entry` and its `QuestionState` (an `ng-template`); in `ImageThumbs` the `ImageDialog` (an `open` signal and a `full` load). `Thumb` stays a component (`button[deskThumb]`) because each thumbnail observes its own element.
@@ -19686,7 +19687,7 @@ const LABEL: Record<ToolCallView['status'], string> = { running: 'running', ok: 
   selector: 'span[deskToolStatus]',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { '[class]': "'tool-status tool-status-' + status()" },
+  host: { class: 'tool-status', '[class]': "'tool-status-' + status()" },
   // One line: the label is compared exactly, and a line break around it would become a space.
   template: `@if (status() === 'running') {<span class="live-dot" aria-hidden="true"></span>}{{ label() }}`,
 })
@@ -19889,7 +19890,7 @@ import { Sheet } from './sheet';
   template: `
     <!-- One message: who wrote to whom, its text, a question's state, and where it shows in a transcript. -->
     <ng-template #entry let-e>
-      <div [class]="e.message.auto ? 'pair-msg muted' : 'pair-msg'">
+      <div class="pair-msg" [class.muted]="e.message.auto">
         <span class="pair-head">{{ head(e.message) }}</span>
         <div deskSafeMarkdown [className]="'pair-text'" [text]="e.message.text"></div>
         <span class="pair-foot">
@@ -20259,11 +20260,11 @@ type Stop = { item: PlanItem; tone: string; linked: ThreadView[]; onYou: boolean
     @if (p.plan.length) {
       <ol class="plan-route">
         @for (st of stops(); track st.item.id) {
-          <li [class]="'plan-stop plan-' + st.tone">
+          <li class="plan-stop" [class]="'plan-' + st.tone">
             <span class="plan-dot" aria-hidden="true"></span>
             <div class="plan-text">
               <span class="plan-title">{{ st.item.title }}</span>
-              <span [class]="'plan-sub plan-sub-' + st.tone">{{ status[st.item.status] }}@for (t of st.linked; track t.id) {<span> · <a [href]="threadHref(t.id)">{{ t.title ?? 'Thread' }}</a>{{ revision(t) }}</span>}{{ st.onYou ? ' · waiting on you' : '' }}{{ st.item.status === 'todo' && !st.linked.length ? ' · Desk, once the threads report' : '' }}</span>
+              <span class="plan-sub" [class]="'plan-sub-' + st.tone">{{ status[st.item.status] }}@for (t of st.linked; track t.id) {<span> · <a [href]="threadHref(t.id)">{{ t.title ?? 'Thread' }}</a>{{ revision(t) }}</span>}{{ st.onYou ? ' · waiting on you' : '' }}{{ st.item.status === 'todo' && !st.linked.length ? ' · Desk, once the threads report' : '' }}</span>
               @if (st.item.notes) {
                 <span class="muted small">{{ st.item.notes }}</span>
               }
@@ -20615,7 +20616,7 @@ export class LogsSheet {
         @for (s of project().services; track s.id) {
           @let st = stateOf(s);
           @let open = s.status === 'running' ? openable(s.url) : null;
-          <li [class]="'service service-' + st.tone" [attr.aria-label]="s.name + ', ' + st.text">
+          <li class="service" [class]="'service-' + st.tone" [attr.aria-label]="s.name + ', ' + st.text">
             <span class="service-dot" aria-hidden="true"></span>
             <div class="service-text">
               <span class="service-name">{{ s.name }}@if (s.status === 'running' && portOf(s.url)) {<span class="service-port">{{ portOf(s.url) }}</span>}</span>
@@ -21251,7 +21252,7 @@ const WRITTEN: ReadonlySet<string> = new Set(['note', 'update', 'question', 'blo
             }
           </div>
         } @else {
-          <div [class]="'chat-feed feed-' + it.messageKind">
+          <div class="chat-feed" [class]="'feed-' + it.messageKind">
             <span class="feed-chip">{{ feed(it.messageKind) }}</span>
             @if (written(it.messageKind)) {
               <button type="button" class="link feed-from" (click)="openPair(it.fromAgentId, deskId())">{{ agentLabel(it.fromLabel) }}</button>
@@ -21270,7 +21271,7 @@ const WRITTEN: ReadonlySet<string> = new Set(['note', 'update', 'question', 'blo
         }
       }
       @case ('message') {
-        <div [class]="'chat-msg msg-' + it.messageKind">
+        <div class="chat-msg" [class]="'msg-' + it.messageKind">
           <span class="msg-head">Desk → <button type="button" class="link msg-who" (click)="openPair(it.to, it.from)">{{ v?.toTitle ?? 'a thread' }}</button> · {{ it.messageKind }} · {{ clock(it.ts) }}</span>
           @if (v?.answers; as a) {
             <button type="button" class="msg-quote" (click)="jump.emit('e:' + a.question)">{{ quote(a) }}</button>
@@ -21338,7 +21339,7 @@ const WRITTEN: ReadonlySet<string> = new Set(['note', 'update', 'question', 'blo
         </article>
       }
       @case ('question') {
-        <section [class]="it.answered ? 'question-card answered' : 'question-card'" [attr.aria-labelledby]="'question-' + it.eventId">
+        <section class="question-card" [class.answered]="it.answered" [attr.aria-labelledby]="'question-' + it.eventId">
           <span class="eyebrow"><span class="accent-dot" aria-hidden="true"></span>Desk asks · {{ clock(it.ts) }}</span>
           <p [id]="'question-' + it.eventId" class="question-text">{{ it.question }}</p>
           @if (it.answered) {
@@ -21355,7 +21356,7 @@ const WRITTEN: ReadonlySet<string> = new Set(['note', 'update', 'question', 'blo
       }
       @case ('notice') {
         <!-- The pause's own item is paused:<notice id>: Resume shows while it is listed (design spec §8 item 7). -->
-        <div [class]="'chat-notice notice-' + it.level" role="status"><span [class]="it.level === 'info' ? 'dot ok' : 'dot warn'" aria-hidden="true"></span>{{ it.code === 'proxy_down' ? 'Paused, will resume: the model proxy is unreachable.' : it.message }}@if (resumeId(); as id) {<button deskButton size="sm" class="chat-notice-action" [pending]="resumeBusy()" (click)="resume(id)">Resume</button>}</div>
+        <div class="chat-notice" [class]="'notice-' + it.level" role="status"><span class="dot" [class]="it.level === 'info' ? 'ok' : 'warn'" aria-hidden="true"></span>{{ it.code === 'proxy_down' ? 'Paused, will resume: the model proxy is unreachable.' : it.message }}@if (resumeId(); as id) {<button deskButton size="sm" class="chat-notice-action" [pending]="resumeBusy()" (click)="resume(id)">Resume</button>}</div>
       }
       @case ('compacted') {
         <div class="chat-divider" role="separator">Earlier conversation summarised</div>
@@ -21749,7 +21750,8 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
           <div>
             <button
               type="button"
-              [class]="'line-station line-station-' + st.kind"
+              class="line-station"
+              [class]="'line-station-' + st.kind"
               [style.left.px]="st.x"
               [style.top.px]="geo.trunkY"
               [attr.aria-label]="clock(st.ts) + ', ' + st.label"
@@ -21757,7 +21759,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
               (click)="station.emit(st)"
             ></button>
             @if (st.showLabel) {
-              <span [class]="stationLabelClass(st)" [style.left.px]="st.x" [style.top.px]="geo.trunkY - 31"><span class="mono muted">{{ clock(st.ts) }}</span> {{ st.kind === 'brief' ? 'Your brief · ' + st.label : st.label }}</span>
+              <span class="line-station-label" [class]="stationLabelEdge(st)" [style.left.px]="st.x" [style.top.px]="geo.trunkY - 31"><span class="mono muted">{{ clock(st.ts) }}</span> {{ st.kind === 'brief' ? 'Your brief · ' + st.label : st.label }}</span>
             }
           </div>
         }
@@ -21765,7 +21767,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
         @for (l of geo.lanes; track l.lane.threadId) {
           @for (m of l.marks; track $index) {
             @if (m.kind === 'detour' || m.kind === 'sent_back' || m.kind === 'stalled') {
-              <span [class]="'line-mark line-mark-' + m.kind" [style.left.px]="m.x" [style.top.px]="m.kind === 'detour' ? l.y + 8 : l.y - 24">
+              <span class="line-mark" [class]="'line-mark-' + m.kind" [style.left.px]="m.x" [style.top.px]="m.kind === 'detour' ? l.y + 8 : l.y - 24">
                 @switch (m.kind) {
                   @case ('detour') {
                     <span class="mono">{{ clock(m.ts) }} {{ shortModel(m.label) }}</span><span class="sr-only">: rate limited, continued on the fallback model</span>
@@ -21785,7 +21787,8 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
         @for (q of questionMarks(); track q.key) {
           <button
             type="button"
-            [class]="'line-q line-q-' + q.state"
+            class="line-q"
+            [class]="'line-q-' + q.state"
             [style.left.px]="q.x"
             [style.top.px]="q.y"
             [attr.aria-label]="q.aria"
@@ -21830,7 +21833,8 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
         @for (l of geo.lanes; track l.lane.threadId) {
           @if (l.inlineLabel; as inline) {
             <a
-              [class]="lit() === l.lane.threadId ? 'line-lane-title lit' : 'line-lane-title'"
+              class="line-lane-title"
+              [class.lit]="lit() === l.lane.threadId"
               [style.left.px]="inline.x"
               [style.top.px]="l.y - 20"
               [style.max-width.px]="inline.width"
@@ -21845,15 +21849,15 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
       </div>
     </div>
 
-    <div [class]="lit() !== null && lit() === desk?.id ? 'line-label lit' : 'line-label'" [style.top.px]="geo.trunkY - 15">
+    <div class="line-label" [class.lit]="lit() !== null && lit() === desk?.id" [style.top.px]="geo.trunkY - 15">
       <span class="line-label-title"><span class="line-swatch line-swatch-desk"></span>Desk</span>
-      <span [class]="'line-label-sub status-text-' + (desk?.status ?? 'idle')">{{ deskSub() }}</span>
+      <span class="line-label-sub" [class]="'status-text-' + (desk?.status ?? 'idle')">{{ deskSub() }}</span>
     </div>
     @for (r of rowLabels(); track r.id) {
       <!-- An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3). -->
-      <a [class]="lit() === r.id ? 'line-label lit' : 'line-label'" [style.top.px]="r.y - 15" [href]="r.href">
+      <a class="line-label" [class.lit]="lit() === r.id" [style.top.px]="r.y - 15" [href]="r.href">
         <span class="line-label-title"><span class="line-swatch" [style.background]="r.color"></span>{{ r.title }}</span>
-        <span [class]="'line-label-sub status-text-' + r.tone">@if (r.answering; as answering) {<ng-container>{{ r.tone }} · </ng-container><span deskAnsweringBadge [label]="answering"></span>} @else {<ng-container>{{ r.text }}</ng-container>}</span>
+        <span class="line-label-sub" [class]="'status-text-' + r.tone">@if (r.answering; as answering) {<ng-container>{{ r.tone }} · </ng-container><span deskAnsweringBadge [label]="answering"></span>} @else {<ng-container>{{ r.text }}</ng-container>}</span>
       </a>
     }
 
@@ -21969,8 +21973,9 @@ export class LineDiagram {
     return href({ name: 'project', id: this.project().project.id, tab: 'threads', threadId });
   }
 
-  protected stationLabelClass(st: StationG): string {
-    return `line-station-label${st.x > this.g().x1 - 260 ? ' end' : st.x < 120 ? ' start' : ''}`;
+  /** The station label's edge class ('end' or 'start'), which keeps a label near either end inside the diagram. */
+  protected stationLabelEdge(st: StationG): string {
+    return st.x > this.g().x1 - 260 ? 'end' : st.x < 120 ? 'start' : '';
   }
 
   protected onScroll(el: HTMLElement): void {
@@ -22531,7 +22536,7 @@ function readDraft(projectId: string): string {
     } @else {
       @let project = s.project;
       <section deskLineDiagram [g]="geometry()" [project]="project" [messages]="s.messages" [attention]="projectAttention()" [now]="now()" (station)="onStation($event)" (pair)="pairOf.set($event)"></section>
-      <div [class]="planOpen() ? 'conv-body plan-open' : 'conv-body'">
+      <div class="conv-body" [class.plan-open]="planOpen()">
         <div class="conv-intro">
           <section deskWhatsUp [project]="project" [now]="now()"></section>
           <button type="button" class="btn btn-secondary btn-sm plan-toggle" [attr.aria-expanded]="planOpen()" (click)="planOpen.set(!planOpen())">Plan{{ servicesNote(project) }}</button>
@@ -22936,6 +22941,7 @@ apps/web-ui/e2e/flows.e2e.test.ts                         new
 
 **Porting notes (decided here, so that every task agrees):**
 
+- **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Callbacks.** React's `onSelect` becomes the output `pick`, on both `FlightStrip` and `StripRack`. It is not named `select`, because an output named after a native DOM event also receives that event: `select` bubbles from text fields.
 - **`InspectorActions`.** React's action object (`a`: `note`, `setNote`, `busy`, `answered`, `resolve`, `answer`, `dismiss`, `open`) becomes:
   - the inputs `note`, `busy` and `answered`;
@@ -23113,7 +23119,10 @@ const CAP_COLOR: Record<AttentionItem['kind'], string> = {
   encapsulation: ViewEncapsulation.None,
   host: {
     type: 'button',
-    '[class]': 'classes()',
+    class: 'strip',
+    '[class]': "'strip-' + item().kind",
+    '[class.selected]': 'selected()',
+    '[class.compact]': 'compact()',
     '[attr.aria-current]': "selected() ? 'true' : null",
     '[attr.aria-label]': 'label()',
     '(click)': 'pick.emit()',
@@ -23122,7 +23131,7 @@ const CAP_COLOR: Record<AttentionItem['kind'], string> = {
     <span class="strip-cap" aria-hidden="true"><span class="strip-code">{{ code() }}</span><span class="strip-age">{{ age() }}</span></span>
     <span class="strip-title" aria-hidden="true"><span class="strip-project">{{ item().project_name }}</span><span class="strip-text">{{ item().title }}</span></span>
     @if (!compact()) {
-      <span class="strip-col strip-who" aria-hidden="true"><span class="strip-label">{{ who().label }}</span><span class="strip-name">{{ who().name }}</span><span [class]="tagClass()">{{ who().tag }}</span></span>
+      <span class="strip-col strip-who" aria-hidden="true"><span class="strip-label">{{ who().label }}</span><span class="strip-name">{{ who().name }}</span><span class="strip-tag" [class.wait]="waits()">{{ who().tag }}</span></span>
       <span class="strip-col strip-wait" aria-hidden="true">
         <span class="strip-label">Waiting</span>
         <svg width="76" height="10" viewBox="0 0 76 10">
@@ -23150,11 +23159,11 @@ export class FlightStrip {
   protected readonly age = computed(() => waited(this.item().created_at, this.now()));
   protected readonly barWidth = computed(() => Math.max(3, 76 * gauge(this.item().created_at, this.now())));
   protected readonly capColor = computed(() => CAP_COLOR[this.item().kind]);
-  protected readonly tagClass = computed(() => {
+  /** A stalled or paused strip's tag reads as a wait. */
+  protected readonly waits = computed(() => {
     const kind = this.item().kind;
-    return `strip-tag${kind === 'stalled' || kind === 'paused' ? ' wait' : ''}`;
+    return kind === 'stalled' || kind === 'paused';
   });
-  protected readonly classes = computed(() => `strip strip-${this.item().kind}${this.selected() ? ' selected' : ''}${this.compact() ? ' compact' : ''}`);
   protected readonly label = computed(() => {
     const i = this.item();
     const who = this.who();
@@ -23559,7 +23568,7 @@ export function describeArgs(tool: string, args: string): { command: string | nu
   host: { class: 'card inspector', '[attr.aria-label]': "'Selected: ' + kindName().toLowerCase()" },
   template: `
     <div class="inspector-eyebrow">
-      <span [class]="'strip-code-badge code-' + item().kind">{{ code() }}</span>
+      <span class="strip-code-badge" [class]="'code-' + item().kind">{{ code() }}</span>
       <span class="eyebrow">{{ kindName() }}</span>
       <span class="muted">· {{ item().project_name }} · {{ when() }}</span>
       <span class="grow"></span>
@@ -24682,6 +24691,7 @@ apps/web-ui/e2e/flows.e2e.test.ts                           modify (W1c.4)
 
 **Porting notes (decided here, so every task agrees):**
 
+- **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** Each attribute selector sits on the React component's root element. Where React switches roots (`ThreadsScreen`: a loading line, an empty state, the roster or the detail; each tab: an empty state or its body), the port keeps those exact elements: `ThreadsScreen`'s host binds `page muted` / `page` when it is the root itself and is `display: contents` around `ThreadRoster` (`div.page.roster`) and `ThreadDetail` (`div.thread-detail`), and every tab host is `display: contents`. `threads.css` has no child selectors under `main.screen`, `.thread-tab` or `.roster-grid` that such a host could break, and `.thread-detail { height: 100% }` resolves against `main.screen`, as the desktop's. `ToolCallFull` and `MessageCard` stay components (their roots are fixed, and `ToolCallFull` holds its "Show all" state); `ThreadCard` (`a.card` or `div.thread-card-slot`) and the fragment-returning `EntryFull`, `EntrySummary`, `RunBody`, `AnswerBody` and `StopBody` are `ng-template`s in their parent, so `.thread-card-slot > .thread-card` and the transcript DOM are the desktop's.
 - **Callbacks** become outputs. A React `onSelect` is `selectStop` (a plain `select` output would also catch the native `select` event that bubbles from the steer box); `onPair` is `pair`; `onBrowse` is `browse`. Value/setter pairs become `model()`s: `FilesTab`'s `dir` and `Transcript`'s `depth`.
 - **Effects.** The React `useEffect` fetches (`DiffTab`, `FilesTab`) are `effect`s that read their keys and ignore a late answer through `onCleanup`. `ThreadDetail`'s two effects (reset on a new thread; apply `?at=` once) are one `effect` that remembers the thread it last saw and the `at` it applied. `FileViewer`'s Raw toggle is a `linkedSignal` on `path`; its blob URL is made and revoked by an `effect`. `Transcript`'s list pinning and the selected stop's `scrollIntoView` are `afterRenderEffect`s; the pending sends are pruned by an `effect` when their steer entries arrive.
@@ -25443,7 +25453,7 @@ type Open = { path: string; data: Uint8Array } | null;
                 <ul class="files-list">
                   @for (e of items; track e.path) {
                     <li>
-                      <button type="button" [class]="open()?.path === e.path ? 'files-entry current' : 'files-entry'" [attr.aria-busy]="loadingFile() === e.path ? 'true' : null" (click)="pick(e)"><span aria-hidden="true">{{ e.type === 'dir' ? '▸' : '·' }}</span><span class="grow mono">{{ e.name }}</span><span class="muted small">{{ e.type === 'dir' ? 'folder' : size(e.size) }}</span></button>
+                      <button type="button" class="files-entry" [class.current]="open()?.path === e.path" [attr.aria-busy]="loadingFile() === e.path ? 'true' : null" (click)="pick(e)"><span aria-hidden="true">{{ e.type === 'dir' ? '▸' : '·' }}</span><span class="grow mono">{{ e.name }}</span><span class="muted small">{{ e.type === 'dir' ? 'folder' : size(e.size) }}</span></button>
                     </li>
                   }
                 </ul>
@@ -25830,7 +25840,7 @@ const INNER: Record<StopKind, (s: Stop, m: MessagesState) => string> = {
 };
 
 /** One disc, ready to draw. */
-type PointView = { stop: Stop; x: number; y: number; r: number; t: StopText; label: string; inner: string; cls: string; above: boolean };
+type PointView = { stop: Stop; x: number; y: number; r: number; t: StopText; label: string; inner: string; above: boolean };
 
 /** A thread's route: numbered stops on a serpentine path, the live stretch in blue, and what comes next dashed. */
 @Component({
@@ -25852,7 +25862,11 @@ type PointView = { stop: Stop; x: number; y: number; r: number; t: StopText; lab
         <div>
           <button
             type="button"
-            [class]="selected() === p.stop.n ? p.cls + ' selected' : p.cls"
+            class="route-stop"
+            [class]="'route-stop-' + p.stop.kind"
+            [class.live]="p.stop.live"
+            [class.muted]="p.t.muted"
+            [class.selected]="selected() === p.stop.n"
             [style.left.px]="p.x"
             [style.top.px]="p.y"
             [style.width.px]="p.r * 2"
@@ -25865,8 +25879,8 @@ type PointView = { stop: Stop; x: number; y: number; r: number; t: StopText; lab
           @if (p.stop.cards.length) {
             <span class="route-cards" aria-hidden="true" [style.left.px]="p.x + p.r * 0.85" [style.top.px]="p.y + p.r * 0.8">{{ p.stop.cards.length }} ✉</span>
           }
-          <div [class]="p.above ? 'route-label above' : 'route-label'" [style.left.px]="p.x" [style.top.px]="p.above ? p.y - p.r - 6 : p.y + p.r + 6">
-            <span [class]="p.t.muted ? 'route-label-title muted' : 'route-label-title'">@if (p.stop.kind === 'answer' && p.stop.live) {<span class="live-dot" aria-hidden="true"></span>}{{ p.t.title }}</span>
+          <div class="route-label" [class.above]="p.above" [style.left.px]="p.x" [style.top.px]="p.above ? p.y - p.r - 6 : p.y + p.r + 6">
+            <span class="route-label-title" [class.muted]="p.t.muted">@if (p.stop.kind === 'answer' && p.stop.live) {<span class="live-dot" aria-hidden="true"></span>}{{ p.t.title }}</span>
             @if (p.t.sub) {
               <span class="route-label-sub">{{ p.t.sub }}</span>
             }
@@ -25930,7 +25944,6 @@ export class RouteView {
         t,
         label: `Stop ${p.stop.n}: ${t.title}${t.sub ? `, ${t.sub}` : ''}${cards ? `, ${plural(cards, 'message')}` : ''}`,
         inner: INNER[p.stop.kind](p.stop, m),
-        cls: `route-stop route-stop-${p.stop.kind}${p.stop.live ? ' live' : ''}${t.muted ? ' muted' : ''}`,
         above: p.stop.kind === 'detour',
       };
     });
@@ -26207,7 +26220,7 @@ export class ToolCallFull {
   imports: [SafeMarkdown],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { '[class]': 'cls()' },
+  host: { class: 'tr-card', '[class]': "'tr-card-' + c().dir", '[class.muted]': 'c().auto' },
   template: `
     <span class="tr-card-head">{{ words().before }}<button type="button" class="link tr-card-who" (click)="who($event)">{{ c().name }}</button>{{ words().after }} · {{ time() }}</span>
     <div deskSafeMarkdown [className]="'tr-card-text'" [text]="c().text"></div>
@@ -26217,7 +26230,6 @@ export class MessageCard {
   readonly c = input.required<CardView>();
   /** The counterpart's agent id (React's `onPair`). */
   readonly pair = output<string>();
-  protected readonly cls = computed(() => `tr-card tr-card-${this.c().dir}${this.c().auto ? ' muted' : ''}`);
   protected readonly words = computed(() => cardTitle(this.c()));
   protected readonly time = computed(() => clock(this.c().ts));
 
@@ -26380,10 +26392,10 @@ export class MessageCard {
       @if (depth() === 'narrative') {
         @for (r of narrative(); track r.id) {
           @if (r.stop; as stop) {
-            <div [id]="stopDomId(stop.n)" [class]="selected() === stop.n ? 'tr-entry selected' : 'tr-entry'" (click)="selectStop.emit(stop.n)">
+            <div [id]="stopDomId(stop.n)" class="tr-entry" [class.selected]="selected() === stop.n" (click)="selectStop.emit(stop.n)">
               <span class="tr-num" [attr.aria-label]="'Stop ' + stop.n">{{ stop.n }}</span>
               <div class="tr-body">
-                <span [class]="r.text.muted ? 'tr-title muted' : 'tr-title'">@if (stop.kind === 'answer' && stop.live) {<span class="live-dot" aria-hidden="true"></span>}{{ r.text.title }}{{ r.when }}@if (stop.kind === 'work') {<span class="muted"> · {{ r.text.sub }}</span>}</span>
+                <span class="tr-title" [class.muted]="r.text.muted">@if (stop.kind === 'answer' && stop.live) {<span class="live-dot" aria-hidden="true"></span>}{{ r.text.title }}{{ r.when }}@if (stop.kind === 'work') {<span class="muted"> · {{ r.text.sub }}</span>}</span>
                 <ng-container *ngTemplateOutlet="stopBody; context: { $implicit: stop }" />
               </div>
             </div>
@@ -26398,7 +26410,7 @@ export class MessageCard {
           } @else {
             @let n = stopOfEntry().get(e.id);
             @let inN = inStop().get(e.id);
-            <div [attr.id]="n === undefined ? null : stopDomId(n)" [class]="inN !== undefined && inN === selected() ? 'tr-entry selected' : 'tr-entry'" (click)="pick(inN)">
+            <div [attr.id]="n === undefined ? null : stopDomId(n)" class="tr-entry" [class.selected]="inN !== undefined && inN === selected()" (click)="pick(inN)">
               @if (n === undefined) {
                 <span class="tr-num tr-num-blank" aria-hidden="true"></span>
               } @else {
@@ -26859,7 +26871,6 @@ const ORDER: Record<string, number> = { waiting: 0, running: 1, queued: 2, idle:
 type RosterCard = {
   t: ThreadView;
   href: string;
-  cls: string;
   /** "answering Desk" while the thread's answer run is in progress; its status chip does not change. */
   answering: string | null;
   /** What a waiting thread waits on (waitLabel), shown as its own line (design spec §8 item 13). */
@@ -26880,7 +26891,7 @@ type RosterCard = {
   template: `
     <!-- ThreadCard: the card's link. A waiting thread's wait sits in a slot under it: a button cannot live inside a link. -->
     <ng-template #card let-c>
-      <a [class]="c.cls" [href]="c.href">
+      <a class="card thread-card" [class.archived]="!!c.t.archived_at" [class.has-wait]="!!c.wait" [href]="c.href">
         <div class="thread-card-head">
           <h2>{{ c.t.title ?? 'Untitled thread' }}</h2>
           <span deskStatusChip [status]="c.t.status" [reason]="c.t.reason" [proxyDown]="proxyDown()"></span>
@@ -26989,7 +27000,6 @@ export class ThreadRoster {
         return {
           t,
           href: href({ name: 'project', id: projectId, tab: 'threads', threadId: t.id }),
-          cls: `card thread-card${t.archived_at ? ' archived' : ''}${wait ? ' has-wait' : ''}`,
           answering: answeringLabel(messages, t.id),
           wait,
           hop: wait ? waitHop(messages, t.id, attention) : null,
@@ -28408,6 +28418,7 @@ apps/web-ui/e2e/knowledge.e2e.test.ts                    new
 
 **Porting notes (decided here, so every task agrees):**
 
+- **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** All three React screens switch between three `div` roots (a loading line, a failed project, the screen itself), so each Angular host *is* that `div` and switches its `class` through a host binding: no `display: contents`, and the shared CSS (`.library` grid, `.memory`, `.settings`) applies to the same element as on the desktop. `Entry` keeps its `li` root (`li[deskMemoryEntry]`) inside the React `ul.memory-list`. `PolicyEditor`'s host is its `div.policy`; its rows keep the seven grid cells `.policy-rule` lays out (Angular's comment nodes take no cell). React's `Source` fragment (a link or "you") is inlined in `Entry`'s template, twice, as the React component is used twice.
 - **Callbacks** become outputs: `PolicyEditor`'s `onChange` is `changed` (as W0d.1's `SettingsFields`). The shared `label(id)` that `Entry` receives stays a function input; the screen hands it a `computed` function, so it changes only when the project does.
 - **State.** `useState` is `signal`; `useMemo` is `computed` (keyed on `s().events` through its own `computed`, as the React `[s.events]` dependency). Drafts that React resets in an effect when the project changes are `linkedSignal`s over a `computed` with a custom `equal`: `SettingsScreen`'s About draft follows only the name, goal and instructions, its working style and policy only the settings (compared as JSON, React's `settingsKey`), and `MemoryScreen`'s search box follows the route's `q`. `Entry`'s correction draft is a `linkedSignal` on the entry's content, so a fresh fold of the same entry keeps what the user typed. The React fetch effects (`library.file` on `[projectId, file, version]`; the debounced `memory.list` on `[projectId, query, active.length]`) are `effect`s that read the same keys (`active.length` through a numeric `computed`, so only a new count re-runs it) and ignore a late answer through `onCleanup`.
@@ -28603,6 +28614,8 @@ type Preview = { status: 'loading' } | { status: 'ready'; data: Uint8Array } | {
   encapsulation: ViewEncapsulation.None,
   host: {
     '[class]': 'hostClass()',
+    '[class.dragging]': "view() === 'ready' && dragging()",
+    '[class.with-preview]': "view() === 'ready' && !!file()",
     '(dragover)': 'onDragOver($event)',
     '(dragleave)': 'onDragLeave($event)',
     '(drop)': 'onDrop($event)',
@@ -28635,7 +28648,7 @@ type Preview = { status: 'loading' } | { status: 'ready'; data: Uint8Array } | {
               @for (i of shown(); track i.path) {
                 <li>
                   <button type="button" class="card library-card" [class.current]="i.path === file()" [attr.aria-pressed]="i.path === file()" (click)="select(i.path === file() ? null : i.path)">
-                    <span [class]="'library-glyph kind-' + i.kind" aria-hidden="true">{{ glyph(i) }}</span>
+                    <span class="library-glyph" [class]="'kind-' + i.kind" aria-hidden="true">{{ glyph(i) }}</span>
                     <span class="library-title">{{ i.title }}</span>
                     <span class="mono small library-path">{{ i.path }}</span>
                     <span class="small muted">{{ i.kind }} · {{ who(i.origin) }} · {{ clock(i.ts) }}</span>
@@ -28723,7 +28736,7 @@ export class LibraryScreen {
     const view = this.view();
     if (view === 'loading') return 'page muted';
     if (view === 'error') return 'page';
-    return `library${this.dragging() ? ' dragging' : ''}${this.file() ? ' with-preview' : ''}`;
+    return 'library';
   });
 
   protected readonly kinds = KINDS;
@@ -29130,7 +29143,7 @@ export class Entry {
   imports: [Button, EmptyState, Entry],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { '[class]': 'hostClass()' },
+  host: { class: 'page', '[class]': 'hostClass()' },
   template: `
     @switch (view()) {
       @case ('loading') {Loading…}
@@ -29239,7 +29252,8 @@ export class MemoryScreen {
     const status = this.s().status;
     return status === 'loading' ? 'loading' : status === 'ready' ? 'ready' : 'error';
   });
-  protected readonly hostClass = computed(() => ({ loading: 'page muted', error: 'page', ready: 'page memory' })[this.view()]);
+  /** The class beside the fixed `page`. */
+  protected readonly hostClass = computed(() => ({ loading: 'muted', error: '', ready: 'memory' })[this.view()]);
 
   constructor() {
     effect((onCleanup) => {
@@ -29853,7 +29867,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
   imports: [Button, ConfirmDialog, EmptyState, Field, PolicyEditor, SettingsFields],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { '[class]': 'hostClass()' },
+  host: { class: 'page', '[class]': 'hostClass()' },
   template: `
     @switch (view()) {
       @case ('loading') {Loading…}
@@ -29887,7 +29901,7 @@ const val = (e: Event): string => (e.target as HTMLInputElement | HTMLTextAreaEl
               <ul class="sources">
                 @for (src of f.sources; track src.id) {
                   <li>
-                    <span [class]="'chip ' + (src.kind === 'git' ? 'chip-run' : 'chip-idle')">{{ src.kind }}</span>
+                    <span class="chip" [class]="src.kind === 'git' ? 'chip-run' : 'chip-idle'">{{ src.kind }}</span>
                     <span class="grow"><strong>{{ src.label }}</strong>&ngsp;<span class="mono small muted">{{ src.path }}</span></span>
                     <label class="source-write"><input type="checkbox" [checked]="src.agent_write" [disabled]="busy() === 'w-' + src.id" (change)="setWrite(src.id, $event)" />Agents can write here</label>
                     <button deskButton size="sm" variant="ghost" [attr.aria-label]="'Remove ' + src.label" [pending]="busy() === 'rm-' + src.id" (click)="removeSource(src.id)">Remove</button>
@@ -29975,7 +29989,8 @@ export class SettingsScreen {
     if (s.status === 'loading' || !this.about() || !this.style() || !this.policy()) return 'loading';
     return s.status === 'ready' && s.project ? 'ready' : 'error';
   });
-  protected readonly hostClass = computed(() => ({ loading: 'page muted', error: 'page', ready: 'page settings' })[this.view()]);
+  /** The class beside the fixed `page`. */
+  protected readonly hostClass = computed(() => ({ loading: 'muted', error: '', ready: 'settings' })[this.view()]);
   protected readonly form = computed(() => {
     const s = this.s();
     const about = this.about();
@@ -30510,6 +30525,7 @@ apps/web-ui/e2e/catalog.e2e.test.ts                         new
 
 **Porting notes (decided here, so every task agrees):**
 
+- **Classes** (the port conventions' Component shape rule). Where a React `className` mixes fixed and dynamic parts, the fixed classes sit in `class` (or the host's `class`) and only the dynamic ones in `[class]` or `[class.x]`. Angular writes a multi-class `[class]` value in sorted order, which would break the ported assertions that compare `className` exactly.
 - **Roots.** Each attribute selector sits on the React component's root element: `SkillsScreen` on `div.skills`, `SkillList` on `div.skill-list`, `SkillPanel` on `article.card.skill-panel`, `CatalogView` on `div.catalog`, `LayoutSwitch` on its `div.segmented`, `Compare` on `div.skill-compare`. Components whose React root is a `Sheet` (a portal) or that switch roots are `display: contents` hosts: `SkillEditor`, `AskDesk`, `ImportSheet`, `ReviewSheet` (their `Sheet` moves into `document.body`, leaving an empty host that makes no grid or flex item in `.skills` or `.skill-panel`), `RuntimeLine` (nothing, a `p.runtime-line` or a `div.runtime-line`) and `SkillsMapView` (its React root is `MapCanvas`, whose `.map-canvas` is `position: absolute; inset: 0` against `.skills-body.map`). `skills.css` has two child selectors, `.skills-legend > span` and `.review-files > *`, and both see the same children as on the desktop. `CatalogView`'s React `Card`, `Row` and `Action` are inlined in its template (the action once, as an `ng-template` both layouts use), over one view model per entry computed in TS.
 - **Callbacks** become outputs: `onSelect` → `selectSkill` (a plain `select` output would also catch the native `select` event), `onReview` → `review`, `onEdit` → `edit`, `onAskDesk` → `askDesk`, `onChanged` → `changed`, `onClose` → `close`, `onSaved` → `saved`, `onDone` → `done`, `onRetried` → `retried`, `LayoutSwitch`'s `onChange` → `changed`.
 - **Hooks.** `useSkills`, `useCatalog` and `useCatalogLayout` become `injectSkills()`, `injectCatalog()` and `injectCatalogLayout()`, called in field initializers; their React effects are `effect`s with `onCleanup` (the focus listener, the 30 s and 3 s timers). `useCatalog`'s refetch keyed on `runtimes.seq` reads the sequence through its own `computed`, so a `desk:global` push that leaves it unchanged lists nothing. `SkillsScreen`'s `useView` is a private signal over localStorage `desk.skillsView`.
@@ -31503,12 +31519,12 @@ export class LayoutSwitch {
 type ActionView =
   | { kind: 'installed'; href: string }
   | { kind: 'taken'; title: string }
-  | { kind: 'button'; id: string; cls: string; ariaLabel: string; text: string };
+  | { kind: 'button'; id: string; tone: 'btn-primary' | 'btn-secondary'; ariaLabel: string; text: string };
 
 type EntryView = {
   item: CatalogItem;
   source: string;
-  sourceChip: string;
+  sourceTone: 'chip-done' | 'chip-idle';
   scripts: string | null;
   words: string;
   /** The global install, when its runtime line shows on the card. */
@@ -31531,7 +31547,7 @@ function actionView(item: CatalogItem, install: CatalogInstall | undefined): Act
   return {
     kind: 'button',
     id: item.id,
-    cls: `btn btn-sm ${a.kind === 'install' ? 'btn-primary' : 'btn-secondary'}`,
+    tone: a.kind === 'install' ? 'btn-primary' : 'btn-secondary',
     ariaLabel: a.kind === 'modified' ? `Review ${item.title} (edited since install)` : `${a.label} ${item.title}`,
     text: a.kind === 'modified' ? 'Modified · review' : a.label,
   };
@@ -31542,7 +31558,7 @@ function entryView(item: CatalogItem, projectNames: Map<string, string>): EntryV
   return {
     item,
     source: sourceLabel(item),
-    sourceChip: `chip ${item.source.type === 'builtin' ? 'chip-done' : 'chip-idle'}`,
+    sourceTone: item.source.type === 'builtin' ? 'chip-done' : 'chip-idle',
     scripts: item.scripts ? (item.scripts === 1 ? '1 script' : `${item.scripts} scripts`) : null,
     words: runtimeWords(item),
     runtime: global && global.state !== 'name_taken' ? global : null,
@@ -31568,7 +31584,7 @@ function entryView(item: CatalogItem, projectNames: Map<string, string>): EntryV
           <span class="chip chip-idle" [title]="a.title">Name taken</span>
         }
         @default {
-          <button type="button" [class]="a.cls" [attr.aria-label]="a.ariaLabel" (click)="review.emit(a.id)">{{ a.text }}</button>
+          <button type="button" class="btn btn-sm" [class]="a.tone" [attr.aria-label]="a.ariaLabel" (click)="review.emit(a.id)">{{ a.text }}</button>
         }
       }
     </ng-template>
@@ -31587,7 +31603,7 @@ function entryView(item: CatalogItem, projectNames: Map<string, string>): EntryV
                   <span class="catalog-card-summary">{{ v.item.summary }}</span>
                 </button>
                 <div class="catalog-chips">
-                  <span [class]="v.sourceChip">{{ v.source }}</span>
+                  <span class="chip" [class]="v.sourceTone">{{ v.source }}</span>
                   <span class="chip chip-idle">{{ v.item.license }}</span>
                   @if (v.scripts) {
                     <span class="chip chip-wait">{{ v.scripts }}</span>
@@ -31896,7 +31912,7 @@ type OpenFile = { path: string; data: Uint8Array; line?: number };
             <ul class="files-list" aria-label="Files">
               @for (f of r.review.files; track f.path) {
                 <li>
-                  <button type="button" [class]="file()?.path === f.path ? 'files-entry current' : 'files-entry'" (click)="openFile(f.path)">
+                  <button type="button" class="files-entry" [class.current]="file()?.path === f.path" (click)="openFile(f.path)">
                     <span class="grow mono">{{ f.path }}</span>
                     @if (f.script) {
                       <span class="chip chip-wait">script</span>
@@ -32289,7 +32305,7 @@ const byName = (a: SkillNode, b: SkillNode) => a.name.localeCompare(b.name);
           <ul>
             @for (n of g.nodes; track n.key) {
               <li>
-                <button type="button" [class]="selected() === n.key ? 'skill-row current' : 'skill-row'" [attr.aria-pressed]="selected() === n.key" (click)="selectSkill.emit(n.key)">
+                <button type="button" class="skill-row" [class.current]="selected() === n.key" [attr.aria-pressed]="selected() === n.key" (click)="selectSkill.emit(n.key)">
                   <span class="mono skill-row-name">{{ n.name }}</span>
                   <span class="muted small grow">{{ n.error ? 'Broken: ' + n.error : n.description }}</span>
                   @if (catalogKeys()?.has(n.key)) {
@@ -32393,13 +32409,13 @@ const LINE: Partial<Record<AgentStatus, { stroke: string; dash?: string; width: 
         <span class="skills-shadow-label" [style.left.px]="s.mx" [style.top.px]="s.my - 40">shadowed by</span>
       }
       @for (s of skills(); track s.key) {
-        <button type="button" [class]="s.cls" [style.left.px]="s.x" [style.top.px]="s.y" [style.width.px]="s.d" [style.height.px]="s.d" [attr.aria-label]="s.label" [attr.aria-pressed]="s.pressed" (click)="selectSkill.emit(s.key)">
+        <button type="button" class="skill-node" [class]="s.scope" [class.shadowed]="s.shadowed" [class.broken]="s.broken" [class.from-catalog]="s.fromCatalog" [class.selected]="s.pressed" [style.left.px]="s.x" [style.top.px]="s.y" [style.width.px]="s.d" [style.height.px]="s.d" [attr.aria-label]="s.label" [attr.aria-pressed]="s.pressed" (click)="selectSkill.emit(s.key)">
           <span class="skill-node-name">{{ s.name }}</span>
           <span class="skill-node-v">v{{ s.version }}</span>
         </button>
       }
       @for (m of layout().markers; track m.threadId) {
-        <a [class]="'skill-marker status-' + m.status" [style.left.px]="m.x" [style.top.px]="m.y" [href]="markerHref(m)"><span class="skill-marker-dot" aria-hidden="true"></span>{{ m.title }}</a>
+        <a class="skill-marker" [class]="'status-' + m.status" [style.left.px]="m.x" [style.top.px]="m.y" [href]="markerHref(m)"><span class="skill-marker-dot" aria-hidden="true"></span>{{ m.title }}</a>
       }
     </div>
   `,
@@ -32444,7 +32460,10 @@ export class SkillsMapView {
           name: n.name,
           version: n.version,
           pressed: selected === s.key,
-          cls: `skill-node ${n.scope}${shadowed ? ' shadowed' : ''}${n.error ? ' broken' : ''}${fromCatalog ? ' from-catalog' : ''}${selected === s.key ? ' selected' : ''}`,
+          scope: n.scope,
+          shadowed,
+          broken: !!n.error,
+          fromCatalog,
           label: `${n.name}, ${where}, version ${n.version}${shadowed ? ', shadowed' : ''}${fromCatalog ? ', from the catalog' : ''}${n.usedBy.length ? `, used by ${n.usedBy.length}` : ''}`,
         },
       ];
@@ -32700,7 +32719,8 @@ type Confirming = { kind: 'delete' } | { kind: 'restore'; version: number };
 type OpenFile = { path: string; data: Uint8Array };
 type Use = SkillNode['usedBy'][number];
 
-const CHIP: Record<FileChange['change'], string> = { added: 'chip chip-run', removed: 'chip chip-fail', changed: 'chip chip-idle', same: 'chip chip-idle' };
+/** Each file change's chip tone; the template adds `chip`. */
+const CHIP: Record<FileChange['change'], string> = { added: 'chip-run', removed: 'chip-fail', changed: 'chip-idle', same: 'chip-idle' };
 
 /** Two versions side by side: the instruction lines that changed, and the files added, removed or resized (SkillPanel.tsx `Compare`). */
 @Component({
@@ -32725,7 +32745,7 @@ const CHIP: Record<FileChange['change'], string> = { added: 'chip chip-run', rem
       @if (files().length) {
         <ul class="skill-file-changes">
           @for (f of files(); track f.path) {
-            <li><span [class]="chip[f.change]">{{ f.change }}</span>&ngsp;<span class="mono">{{ f.path }}</span>@if (f.change === 'changed') {<span class="muted small"> {{ bytes(f.before ?? 0) }} → {{ bytes(f.after ?? 0) }}</span>}</li>
+            <li><span class="chip" [class]="chip[f.change]">{{ f.change }}</span>&ngsp;<span class="mono">{{ f.path }}</span>@if (f.change === 'changed') {<span class="muted small"> {{ bytes(f.before ?? 0) }} → {{ bytes(f.after ?? 0) }}</span>}</li>
           }
         </ul>
       }
@@ -32800,7 +32820,7 @@ export class Compare {
   template: `
     <div class="skill-panel-head">
       <h2 class="mono">{{ skill().name }}</h2>
-      <span [class]="'skill-scope ' + skill().scope">{{ scopeLabel() }}</span>
+      <span class="skill-scope" [class]="skill().scope">{{ scopeLabel() }}</span>
       <button type="button" class="icon-btn" aria-label="Close" (click)="close.emit()">✕</button>
     </div>
     @if (error(); as err) {
@@ -32854,7 +32874,7 @@ export class Compare {
               @if (usedBy().length) {
                 <ul class="skill-used">
                   @for (u of usedBy(); track u.threadId) {
-                    <li><span [class]="'status-dot status-dot-' + u.status" aria-hidden="true"></span><a [href]="threadHref(u)">{{ u.title ?? 'Thread' }}</a><span class="muted small"> · {{ u.status }} · {{ projectNames().get(u.projectId) ?? '' }}</span></li>
+                    <li><span class="status-dot" [class]="'status-dot-' + u.status" aria-hidden="true"></span><a [href]="threadHref(u)">{{ u.title ?? 'Thread' }}</a><span class="muted small"> · {{ u.status }} · {{ projectNames().get(u.projectId) ?? '' }}</span></li>
                   }
                 </ul>
               } @else {
@@ -32870,7 +32890,7 @@ export class Compare {
               <ul class="files-list">
                 @for (f of d.files; track f.path) {
                   <li>
-                    <button type="button" [class]="file()?.path === f.path ? 'files-entry current' : 'files-entry'" (click)="openFile(f.path)">
+                    <button type="button" class="files-entry" [class.current]="file()?.path === f.path" (click)="openFile(f.path)">
                       <span class="grow mono">{{ f.path }}</span>
                       <span class="muted small">{{ bytes(f.size) }}</span>
                     </button>
@@ -34136,7 +34156,7 @@ function storedView(): View {
   imports: [AskDesk, Button, CatalogView, EmptyState, ImportSheet, LayoutSwitch, ReviewSheet, SkillEditor, SkillList, SkillPanel, SkillsMapView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { '[class]': 'hostClass()' },
+  host: { class: 'skills', '[class.with-panel]': '!!ref()' },
   template: `
     <div class="skills-main">
       <div class="skills-head">
@@ -34300,7 +34320,6 @@ export class SkillsScreen {
     const id = this.reviewId();
     return id ? this.cat.items().find((i) => i.id === id) : undefined;
   });
-  protected readonly hostClass = computed(() => (this.ref() ? 'skills with-panel' : 'skills'));
 
   protected showView(next: View): void {
     this.view.set(next);
