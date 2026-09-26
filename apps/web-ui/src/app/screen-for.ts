@@ -1,6 +1,7 @@
 import type { Type } from '@angular/core';
 import type { Route } from '@desk/ui-core';
 import { MapScreen } from './map/map-screen';
+import { ConversationScreen } from './conversation/conversation-screen';
 import { NotYet } from './screens/not-yet';
 import { Onboarding } from './screens/onboarding';
 
@@ -38,7 +39,7 @@ export function screenFor(route: Route): ScreenView | null {
     case 'project':
       switch (route.tab) {
         case 'conversation':
-          return notYet('Conversation');
+          return { component: ConversationScreen, inputs: { projectId: route.id } };
         case 'threads':
           return notYet('Threads');
         case 'library':
