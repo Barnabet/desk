@@ -12,10 +12,11 @@ import { PolicyEditor, sameRules } from './PolicyEditor';
 import { SettingsFields, workingStyleOf, type WorkingStyle } from './SettingsFields';
 import { useModels } from './useModels';
 
+/** Runs writes; `busy` holds one key per control being written, so overlapping writes never clear each other's. */
 function useSaver() {
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const run = async (what: string, fn: () => Promise<unknown>, done?: string) => {
-    setBusy(what);
+    setBusy((b) => new Set(b).add(what));
     try {
       await fn();
       if (done) toast({ tone: 'info', message: done });
@@ -24,7 +25,11 @@ function useSaver() {
       toastError(err);
       return false;
     } finally {
-      setBusy(null);
+      setBusy((b) => {
+        const next = new Set(b);
+        next.delete(what);
+        return next;
+      });
     }
   };
   return { busy, run };
@@ -53,13 +58,15 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
     setPolicy(project.settings.policy);
   }, [settingsKey]);
 
-  if (s.status === 'loading' || !about || !style || !policy) return <div className="page muted">Loading…</div>;
+  // The failure comes before the drafts: a project that never loaded has none.
+  if (s.status === 'loading') return <div className="page muted">Loading…</div>;
   if (s.status !== 'ready' || !project || !s.project)
     return (
       <div className="page">
         <EmptyState title="Couldn't load this project">{s.error}</EmptyState>
       </div>
     );
+  if (!about || !style || !policy) return <div className="page muted">Loading…</div>;
 
   const aboutDirty = about.name !== project.name || about.goal !== project.goal || about.instructions !== project.instructions;
   const styleDirty = JSON.stringify(style) !== JSON.stringify(workingStyleOf(project.settings));
@@ -88,7 +95,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
         <div className="actions">
           <Button
             variant="primary"
-            pending={busy === 'about'}
+            pending={busy.has('about')}
             disabled={!aboutDirty || !about.name.trim()}
             onClick={() => void run('about', () => call('projects.update', { id: projectId, patch: { name: about.name.trim(), goal: about.goal, instructions: about.instructions } }), 'Saved.')}
           >
@@ -115,7 +122,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
                   <input
                     type="checkbox"
                     checked={src.agent_write}
-                    disabled={busy === `w-${src.id}`}
+                    disabled={busy.has(`w-${src.id}`)}
                     onChange={(e) => {
                       const agentWrite = e.target.checked;
                       void run(`w-${src.id}`, () => call('projects.setSourceWrite', { id: projectId, sourceId: src.id, agentWrite }));
@@ -123,7 +130,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
                   />
                   Agents can write here
                 </label>
-                <Button size="sm" variant="ghost" aria-label={`Remove ${src.label}`} pending={busy === `rm-${src.id}`} onClick={() => void run(`rm-${src.id}`, () => call('projects.removeSource', { id: projectId, sourceId: src.id }))}>
+                <Button size="sm" variant="ghost" aria-label={`Remove ${src.label}`} pending={busy.has(`rm-${src.id}`)} onClick={() => void run(`rm-${src.id}`, () => call('projects.removeSource', { id: projectId, sourceId: src.id }))}>
                   Remove
                 </Button>
               </li>
@@ -133,7 +140,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
           <p className="muted">No sources yet.</p>
         )}
         <div>
-          <Button size="sm" pending={busy === 'source'} onClick={() => void addSource()}>
+          <Button size="sm" pending={busy.has('source')} onClick={() => void addSource()}>
             Add folder…
           </Button>
         </div>
@@ -143,7 +150,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
         <h2 id="set-style">How Desk works</h2>
         <SettingsFields value={style} models={models} onChange={(p) => setStyle({ ...style, ...p })} />
         <div className="actions">
-          <Button variant="primary" pending={busy === 'style'} disabled={!styleDirty} onClick={() => void run('style', () => call('projects.update', { id: projectId, patch: { settings: style } }), 'Saved.')}>
+          <Button variant="primary" pending={busy.has('style')} disabled={!styleDirty} onClick={() => void run('style', () => call('projects.update', { id: projectId, patch: { settings: style } }), 'Saved.')}>
             Save
           </Button>
           {styleDirty ? (
@@ -160,7 +167,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
         <div className="actions">
           <Button
             variant="primary"
-            pending={busy === 'policy'}
+            pending={busy.has('policy')}
             disabled={!policyDirty || policy.some((r) => !r.tool.trim())}
             onClick={() => void run('policy', () => call('projects.update', { id: projectId, patch: { settings: { policy } } }), 'Policy saved.')}
           >
@@ -178,7 +185,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
         <h2 id="set-archive">Archive</h2>
         <p className="small">Archiving stops the project's threads and hides it from the map. Its library, memory and branches are kept.</p>
         <div>
-          <Button variant="danger" pending={busy === 'archive'} onClick={() => setConfirmArchive(true)}>
+          <Button variant="danger" pending={busy.has('archive')} onClick={() => setConfirmArchive(true)}>
             Archive project…
           </Button>
         </div>

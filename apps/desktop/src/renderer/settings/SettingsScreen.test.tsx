@@ -141,4 +141,48 @@ describe('SettingsScreen', () => {
     setup({}, [ev(9, 'project.updated', { goal: 'File by April' })]);
     await waitFor(() => expect((screen.getByLabelText('Goal') as HTMLTextAreaElement).value).toBe('File by April'));
   });
+
+  it.each([
+    ['fails', { code: 'internal', message: 'deskd is not answering', status: 500 }],
+    ['is missing', { code: 'not_found', message: 'No project p', status: 404 }],
+  ])("says it couldn't load a project that %s", async (_, error) => {
+    setup({
+      'projects.get': () => {
+        throw error;
+      },
+    });
+    expect(await screen.findByRole('heading', { name: "Couldn't load this project" })).toBeTruthy();
+    expect(screen.getByText(error.message)).toBeTruthy();
+    expect(screen.queryByText('Loading…')).toBeNull();
+  });
+
+  it('keeps each write pending on its own control until that write settles', async () => {
+    let addDone!: () => void;
+    let saveDone!: () => void;
+    const bridge = setup({
+      'app.pickFolder': () => '/Users/me/repo',
+      'projects.addSource': () => new Promise<object>((resolve) => (addDone = () => resolve({}))),
+      'projects.update': () => new Promise<object>((resolve) => (saveDone = () => resolve({}))),
+    });
+    const sources = await screen.findByRole('region', { name: 'Sources' });
+    const add = () => within(sources).getByRole('button', { name: 'Add folder…' }) as HTMLButtonElement;
+    const policy = screen.getByRole('region', { name: 'Policy' });
+    const save = () => within(policy).getByRole('button', { name: 'Save policy' }) as HTMLButtonElement;
+    const pending = (b: HTMLButtonElement) => b.getAttribute('aria-busy') === 'true' && b.disabled;
+
+    fireEvent.click(add());
+    await waitFor(() => expect(pending(add())).toBe(true));
+    fireEvent.click(within(policy).getByRole('button', { name: 'Move rule 2 up' }));
+    fireEvent.click(save());
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'projects.update')).toBe(true));
+    await waitFor(() => expect(pending(save())).toBe(true));
+    expect(pending(add())).toBe(true);
+
+    // The policy saves first: its button lets go, "Add folder…" stays pending until its own call settles.
+    saveDone();
+    await waitFor(() => expect(pending(save())).toBe(false));
+    expect(pending(add())).toBe(true);
+    addDone();
+    await waitFor(() => expect(pending(add())).toBe(false));
+  });
 });
