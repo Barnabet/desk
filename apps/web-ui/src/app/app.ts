@@ -2,6 +2,7 @@ import { NgComponentOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, ViewEncapsulation } from '@angular/core';
 import { ConnectionOverlay } from './components/connection-overlay';
 import { ErrorBoundary } from './components/error-boundary';
+import { FolderBrowser } from './components/folder-browser';
 import { ProjectNav } from './components/project-nav';
 import { SignedOut } from './components/signed-out';
 import { TitleBar } from './components/title-bar';
@@ -17,7 +18,7 @@ import { screenFor, screenKey } from './screen-for';
 /** The web UI: the signed-out page, onboarding, or the shell (title bar, project tabs, screen, connection overlay, toasts). */
 @Component({
   selector: 'desk-root',
-  imports: [NgComponentOutlet, ConnectionOverlay, ErrorBoundary, ProjectNav, SignedOut, TitleBar, Toaster],
+  imports: [NgComponentOutlet, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectNav, SignedOut, TitleBar, Toaster],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: block; height: 100%' },
@@ -55,6 +56,9 @@ import { screenFor, screenKey } from './screen-for';
           }
         </ng-template>
       </div>
+      @if (bridge.folderRequest(); as request) {
+        <div deskFolderBrowser [purpose]="request.purpose" (picked)="bridge.answerFolder($event)"></div>
+      }
     }
   `,
 })

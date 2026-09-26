@@ -46,7 +46,7 @@ describe('App', () => {
     go('#/map');
     await renderApp();
     await waitFor(() => expect(window.location.hash).toBe('#/onboarding'));
-    expect(await screen.findByText('Onboarding is not in the web UI yet')).toBeTruthy();
+    expect(await screen.findByText('Welcome to Desk')).toBeTruthy();
     expect(screen.queryByRole('navigation', { name: 'Places' })).toBeNull();
     expect(screen.getByRole('status')).toBeTruthy();
   });
@@ -119,7 +119,7 @@ describe('App', () => {
     go('#/tray');
     await renderApp();
     await waitFor(() => expect(window.location.hash).toBe('#/map'));
-    expect(await screen.findByText('The map is not in the web UI yet')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
   });
 
   it('shows desk:notify items as browser notifications while the page is in the background', async () => {

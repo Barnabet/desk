@@ -1,6 +1,8 @@
 import type { Type } from '@angular/core';
 import type { Route } from '@desk/ui-core';
+import { MapScreen } from './map/map-screen';
 import { NotYet } from './screens/not-yet';
+import { Onboarding } from './screens/onboarding';
 
 /** A screen for App to render with NgComponentOutlet: the component, and the inputs this route gives it. */
 export type ScreenView = { component: Type<unknown>; inputs: Record<string, unknown> };
@@ -22,9 +24,9 @@ export function screenFor(route: Route): ScreenView | null {
     case 'tray':
       return null;
     case 'onboarding':
-      return notYet('Onboarding');
+      return { component: Onboarding, inputs: {} };
     case 'map':
-      return notYet('The map');
+      return { component: MapScreen, inputs: { newProject: route.newProject ?? false } };
     case 'attention':
       return notYet('Attention');
     case 'skills':
