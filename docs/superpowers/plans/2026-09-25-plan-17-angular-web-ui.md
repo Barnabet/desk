@@ -500,7 +500,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/screens/onboarding.ts` + spec | W0d.4 |
 | `src/app/components/folder-browser.ts` + spec | W0d.5 |
 | `src/app/map/map-screen.ts` + spec | W0d.6; modify W1a.5 |
-| `apps/web-ui/e2e/{tsconfig.json,harness.ts,smoke.e2e.test.ts}` | W0d.9 (`harness.ts` modified W3a.10) |
+| `apps/web-ui/e2e/{tsconfig.json,harness.ts,smoke.e2e.test.ts}` | W0d.9 (`harness.ts` modified W3a.10, W3b.6) |
 | `src/app/map/map-canvas.ts` + spec | W1a.1 |
 | `src/app/map/orbit-map.ts` + spec | W1a.2 |
 | `src/app/map/project-list.ts` + spec | W1a.3 |
@@ -31984,7 +31984,7 @@ Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot fo
 
 **Where:** the worktree `~/desk-web` (branch `web-ui`). Every command runs from `/Users/louisgiraud/desk-web` unless a step says otherwise. Angular commands go through `scripts/ng.mjs` (it picks a Node that satisfies `^22.22.3`); while iterating run only the named specs: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`. The machine is shared: no parallel test runs, and only Tasks W3a.10 and W3a.11 start Chromium (never together with another Chromium or Electron run).
 
-**Runs after W0 (W0a–W0d), W1a.1 (`MapCanvas`) and W2a.1 (`FileViewer`, `SkillBadge`).** It runs alongside W3b (system, palette, shortcuts, notifications, the parity guard). W3b does not touch `apps/web-ui/e2e/harness.ts`; Task W3a.10 adds an optional `daemon` field to `startWebE2E`'s options there, and W3b's `system.e2e.test.ts` uses the harness as it is. Nothing in `apps/desktop` changes, except re-exports that move shared helpers into `@desk/ui-core`: the React files and their tests otherwise stay as they are.
+**Runs after W0 (W0a–W0d), W1a.1 (`MapCanvas`) and W2a.1 (`FileViewer`, `SkillBadge`).** It runs alongside W3b (system, palette, shortcuts, notifications, the parity guard). Task W3a.10 adds an optional `daemon` field to `startWebE2E`'s options in `apps/web-ui/e2e/harness.ts`; W3b.6 later adds an opt-in `chromium: 'full'` there (its deviation), which `system.e2e.test.ts` uses. Nothing in `apps/desktop` changes, except re-exports that move shared helpers into `@desk/ui-core`: the React files and their tests otherwise stay as they are.
 
 **How the pieces land (one commit per task):**
 
@@ -38141,6 +38141,7 @@ apps/web-ui/src/app/screens/not-yet.ts                    deleted (git rm)
 apps/web-ui/src/app/parity.spec.ts                        new
 apps/desktop/src/renderer/system/SystemScreen.tsx         modify (one expression: literal daemon operations)
 apps/web-ui/e2e/system.e2e.test.ts                        new
+apps/web-ui/e2e/harness.ts                                modify (W0d.9, W3a.10: an opt-in full Chromium, W3b.6's deviation)
 docs/web.md                                               new
 docs/desktop.md                                           modify
 CLAUDE.md                                                 modify
@@ -40600,12 +40601,13 @@ git commit -m "test(web-ui): the parity guard: same operations as the renderer, 
 
 **Files:**
 - Create: `apps/web-ui/e2e/system.e2e.test.ts`
+- Modify: `apps/web-ui/e2e/harness.ts` (W0d.9, W3a.10: the opt-in `chromium: 'full'`, the deviation below)
 
 **Interfaces:**
-- Consumes: `startWebE2E`, `WebE2E` (`dataDir`, `web.url`, `client()`, `signIn()`, `shot()`, `close()`), `SignedIn` (`context`, `page`, `problems`) (W0d.9; W3a.10's optional `daemon` field is not used); `DeskClient` (`projects.create`, `models.list`, `config.get`); deskd's seed registry (`claude-opus-5-5`, `claude-fable-5-1`, `gpt-6-astra`, `gpt-6-sol`, from `packages/core/src/model/registry.ts`, used while `<data>/models.json` does not exist) and `<data>/models.json`; desk web's `<data>/web-settings.json` (`{ notifications }`, default `true`); the visible names of W3b.1–W3b.3, W0c.12's switcher (dialog "Switch project").
+- Consumes: `startWebE2E`, `WebE2E` (`dataDir`, `web.url`, `client()`, `signIn()`, `shot()`, `close()`), `SignedIn` (`context`, `page`, `problems`) (W0d.9; W3a.10's optional `daemon` field is not used; this task's `chromium: 'full'` is); `DeskClient` (`projects.create`, `models.list`, `config.get`); deskd's seed registry (`claude-opus-5-5`, `claude-fable-5-1`, `gpt-6-astra`, `gpt-6-sol`, from `packages/core/src/model/registry.ts`, used while `<data>/models.json` does not exist) and `<data>/models.json`; desk web's `<data>/web-settings.json` (`{ notifications }`, default `true`); the visible names of W3b.1–W3b.3, W0c.12's switcher (dialog "Switch project").
 - Produces: `apps/web-ui/e2e/system.e2e.test.ts` with its own `go`, `openAt`, `hashOf`, `webSettings`.
 
-Spec §7's W3 e2e for the models editor, plus the System screen's other controls and the two global shortcuts, against a real deskd and desk web. deskd runs inside the test process (the harness's `startDaemon`), so the test never presses Restart, Stop or Reveal logs: the first two would signal this process through `daemon.json`, the last would open a Finder window. Browser notifications need the page's permission: the test grants it to desk web's origin with Playwright and reloads, so the switch works without a prompt.
+Spec §7's W3 e2e for the models editor, plus the System screen's other controls and the two global shortcuts, against a real deskd and desk web. deskd runs inside the test process (the harness's `startDaemon`), so the test never presses Restart, Stop or Reveal logs: the first two would signal this process through `daemon.json`, the last would open a Finder window. Browser notifications need the page's permission. The test first works the switch before any permission is given; the switch saves without waiting on the prompt, which nobody answers. Then it grants the permission to desk web's origin with Playwright and reloads, and the hint goes. This needs the harness's full Chromium, because the headless shell reports every notification permission as denied (the deviation below).
 
 - [ ] **Step 1: Write the e2e**
 
@@ -40622,7 +40624,8 @@ import { startWebE2E, type SignedIn, type WebE2E } from './harness';
 let e2e: WebE2E;
 
 beforeAll(async () => {
-  e2e = await startWebE2E();
+  // The full Chromium: the headless shell reports every notification permission as denied, even a granted one.
+  e2e = await startWebE2E({ chromium: 'full' });
 });
 
 afterAll(async () => {
@@ -40663,7 +40666,9 @@ describe('the System screen in the browser', () => {
     await field('Model 5 id').fill('claude-haiku-5');
     await field('Model 5 context window').fill('100000');
     await field('Model 5 max output tokens').fill('8000');
-    await field('Model 5 concurrency').fill('2');
+    // A number box holds whole numbers: it writes back the number it keeps, as the desktop's controlled box does.
+    await field('Model 5 concurrency').fill('2.9');
+    await expect.poll(() => field('Model 5 concurrency').inputValue()).toBe('2');
     const levels = reg.getByRole('group', { name: 'Model 5 reasoning levels' });
     await levels.getByRole('button', { name: 'low', exact: true }).click();
     await levels.getByRole('button', { name: 'high', exact: true }).click();
@@ -40689,7 +40694,7 @@ describe('the System screen in the browser', () => {
 
     await field('Model 1 concurrency').fill('9');
     await reg.getByRole('button', { name: 'Discard changes' }).click();
-    expect(await field('Model 1 concurrency').inputValue()).toBe('4');
+    await expect.poll(() => field('Model 1 concurrency').inputValue()).toBe('4');
     expect(await reg.getByRole('button', { name: 'Discard changes' }).count()).toBe(0);
     expect(await reg.getByRole('button', { name: 'Save registry' }).isDisabled()).toBe(true);
     await e2e.shot(page, 'system');
@@ -40701,8 +40706,7 @@ describe('the System screen in the browser', () => {
     const client = e2e.client();
     const { project } = await client.projects.create({ name: 'Tax paperwork', goal: 'File on time' });
     const { context, page, problems } = await openAt('#/system');
-    await context.grantPermissions(['notifications'], { origin: new URL(e2e.web.url).origin });
-    await page.reload();
+    await page.getByRole('heading', { name: 'System', level: 1 }).waitFor();
 
     // deskd runs in this test process: look only. Restart and Stop would signal it; Reveal logs would open Finder.
     const d = page.getByRole('region', { name: 'deskd' });
@@ -40720,9 +40724,30 @@ describe('the System screen in the browser', () => {
     await usage.getByRole('button', { name: 'All time' }).click();
     await expect.poll(() => usage.getByRole('button', { name: 'All time' }).getAttribute('aria-pressed')).toBe('true');
 
+    // A browser page follows the system's color scheme: the choice shows System, and none of it can be pressed.
+    const appearance = page.getByRole('region', { name: 'Appearance' }).getByRole('group', { name: 'Appearance' });
+    expect(await appearance.getByRole('button', { name: 'System' }).getAttribute('aria-pressed')).toBe('true');
+    for (const name of ['System', 'Light', 'Dark']) expect(await appearance.getByRole('button', { name }).isDisabled()).toBe(true);
+
+    // Before this browser allows notifications, the hint says so, and the switch saves without waiting on the prompt
+    // it opens (a headless browser shows none, so nobody answers it).
     const n = page.getByRole('region', { name: 'Notifications' });
     const fromApp = n.getByLabel(/From the app/);
     const fromDeskd = n.getByLabel(/From deskd/);
+    await expect.poll(() => fromApp.isChecked()).toBe(true);
+    await n.getByText('This browser has not allowed notifications from Desk yet.').waitFor();
+    expect(await n.getByRole('button', { name: 'Allow notifications' }).count()).toBe(1);
+    await fromApp.uncheck();
+    await expect.poll(() => webSettings().notifications).toBe(false);
+    await expect.poll(() => n.getByText(/notifications from Desk/).count()).toBe(0);
+    // Each switch is disabled while its write is pending: check() waits until it takes clicks again.
+    await fromApp.check();
+    await expect.poll(() => webSettings().notifications).toBe(true);
+    await expect.poll(() => fromApp.isEnabled()).toBe(true);
+    expect(await fromApp.isChecked()).toBe(true);
+
+    await context.grantPermissions(['notifications'], { origin: new URL(e2e.web.url).origin });
+    await page.reload();
     await expect.poll(() => fromApp.isChecked()).toBe(true);
     expect(await n.getByText(/notifications from Desk/).count()).toBe(0);
     await fromApp.uncheck();
@@ -40734,10 +40759,19 @@ describe('the System screen in the browser', () => {
     await expect.poll(async () => (await client.config.get()).notifications).toBe('off');
     await fromDeskd.check();
     await expect.poll(async () => (await client.config.get()).notifications).toBe('auto');
+    await expect.poll(() => fromDeskd.isEnabled()).toBe(true);
     await e2e.shot(page, 'system-notifications');
 
-    await page.keyboard.press('ControlOrMeta+k');
+    // ⌘K works only in the shell: during onboarding the key is the browser's, and no palette opens once the shell is back.
     const palette = page.getByRole('dialog', { name: 'Search Desk' });
+    await go(page, '#/onboarding');
+    await page.getByText('Welcome to Desk').waitFor();
+    await page.keyboard.press('ControlOrMeta+k');
+    await go(page, '#/system');
+    await page.getByRole('heading', { name: 'System', level: 1 }).waitFor();
+    expect(await palette.count()).toBe(0);
+
+    await page.keyboard.press('ControlOrMeta+k');
     await palette.getByRole('combobox').fill('tax');
     await palette.getByRole('option', { name: /Tax paperwork/ }).waitFor();
     await e2e.shot(page, 'palette');
@@ -40770,10 +40804,42 @@ Expected: the production build succeeds, then PASS (2 tests). With `DESK_E2E_SHO
 
 If a step fails, the failure is in the code the step drives (W3b.1–W3b.3, or the section named in the Consumes); fix it there with a test, not in this file.
 
+**Deviation (as run):** the block above is the committed file. It was written after the review fixes of W3b.1–W3b.3, and the committed code wins over the plan's first text, so it differs from that text where the code or the browser does; nothing under `src/` changed. The first run failed twice (the Model 1 discard read `9`, and after the grant the notification hint was still there), and each failure is explained below.
+- **Full Chromium for this file (a harness change).** Playwright's default headless shell reports `Notification.permission` as `denied` in every context, even after `context.grantPermissions(['notifications'])` and a reload. A check in Chromium 153.0.8010.12 found the shell reporting `denied` before and after, while `navigator.permissions.query` said `granted`; the full Chromium reported `default` and then `granted`. So the plan's "no hint after the grant" could not pass on the shell: the screen showed "This browser blocks notifications from Desk", which is what the shell reported. `harness.ts` gains an opt-in `chromium?: WebE2EChromium` (`'shell' | 'full'`, the shell by default). Before:
+  ```ts
+  export async function startWebE2E(o: { script?: Script; daemon?: WebE2EDaemonOptions } = {}): Promise<WebE2E> {
+  ```
+  ```ts
+      const browser: Browser = await chromium.launch();
+  ```
+  After (with a doc comment on the new `WebE2EChromium` type above `startWebE2E`):
+  ```ts
+  export async function startWebE2E(o: { script?: Script; daemon?: WebE2EDaemonOptions; chromium?: WebE2EChromium } = {}): Promise<WebE2E> {
+  ```
+  ```ts
+      const browser: Browser = await chromium.launch(o.chromium === 'full' ? { channel: 'chromium' } : {});
+  ```
+  `'full'` is Playwright's full Chromium in the new headless mode. It is already installed beside the shell (`chromium-1243` in Playwright's cache), so nothing is downloaded. Only this file asks for it; the other four e2e files keep the lighter shell.
+- **The notification switch saves without waiting on the permission prompt** (W3b.2's second review fix). The plan granted the permission first, so that the switch "works without a prompt". The file now works the switch before any grant:
+  - the hint "This browser has not allowed notifications from Desk yet." shows, with Allow notifications;
+  - Off saves `false`, and the hint goes;
+  - On opens the browser's prompt, which headless Chromium never shows or answers, and still saves `true` and takes clicks again.
+
+  Then it grants, reloads, finds no hint and does the plan's Off/On round.
+- **The notification switches are disabled while pending** (W3b.2's first review fix). `check()` and `uncheck()` wait for an enabled box (Playwright's actionability checks), so the rounds need no extra wait. The file also checks that "From the app" is enabled again after its write. Before the notifications screenshot it waits for deskd's switch to be enabled, because the first shot caught that switch greyed out mid-write.
+- **⌘K only works in the shell** (W3b.3's review fixes). Before ⌘K on System, the file goes to `#/onboarding` ("Welcome to Desk"), presses ⌘K there, comes back to `#/system` and checks that no palette opened. Before the fix, that key opened the palette later, uninvited, once the shell showed.
+- **Appearance** (W3b.2, from master's dark mode): the Appearance region's choice shows System pressed, and System, Light and Dark are all disabled.
+- **The number boxes write back the number they hold** (W3b.1's review fix). Model 5's concurrency is filled with `2.9` and reads `2`, and is saved as 2; the plan filled `2`.
+- **Discard reads through `expect.poll`.** The zoneless app renders after Playwright's click has returned, so the plan's immediate `inputValue()` read `9` on the first run.
+
+The harness gives deskd and desk web a temporary home and data dir under the system temp folder (`mkdtemp`, removed on close). `DaemonManager`'s LaunchAgent lookup reads that home, so the Mode and "Starts at login" rows say "Development (runs from this repository)" and "No. desk web starts it from this repository.", and the Data row shows the temporary data dir. The real home and Desk's data dir are never touched.
+
+Results: the file alone passed 2 of 2 (about 7 s) once these changes were in. Before the commit, `pnpm test:web-e2e` passed 6 files and 16 tests in about 33 s: `smoke` 2, `flows` 3, `knowledge` 3, `catalog` 3, `system` 2, and `built-ui` 3. `pnpm typecheck` exited 0, root Vitest passed 198 files and 1319 tests, and `pnpm --filter @desk/web-ui test` passed 94 files and 531 tests. No Chromium or deskd process was left behind.
+
 - [ ] **Step 4: Commit**
 
 ```sh
-git add apps/web-ui/e2e/system.e2e.test.ts
+git add apps/web-ui/e2e/system.e2e.test.ts apps/web-ui/e2e/harness.ts
 git commit -m "test(web): System e2e: edit the model registry, deskd without repair, notification switches, ⌘K and ⌘P" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 

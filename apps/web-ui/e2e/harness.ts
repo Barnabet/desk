@@ -39,10 +39,17 @@ export type WebE2E = {
 export type WebE2EDaemonOptions = Pick<DaemonOptions, 'catalog' | 'runtimes'>;
 
 /**
+ * Which installed Chromium runs the pages: Playwright's headless shell (the default, the lighter one), or its full
+ * Chromium in the new headless mode. The shell reports `Notification.permission` as `denied` whatever the context was
+ * granted, so a file that checks the browser's notification permission asks for `full` (system.e2e.test.ts).
+ */
+export type WebE2EChromium = 'shell' | 'full';
+
+/**
  * A real deskd (in process, on the fake model), desk web in front of it on a free port serving the built Angular app
  * (apps/web-ui/dist/browser: `pnpm test:web-e2e` builds it first), and headless Chromium.
  */
-export async function startWebE2E(o: { script?: Script; daemon?: WebE2EDaemonOptions } = {}): Promise<WebE2E> {
+export async function startWebE2E(o: { script?: Script; daemon?: WebE2EDaemonOptions; chromium?: WebE2EChromium } = {}): Promise<WebE2E> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'desk-web-e2e-')));
   const home = join(root, 'home');
   const dataDir = join(root, 'data');
@@ -68,7 +75,7 @@ export async function startWebE2E(o: { script?: Script; daemon?: WebE2EDaemonOpt
     const warnings: string[] = [];
     const web = await startWebServer({ dataDir, port: 0, open: false, home, log: (m) => void warnings.push(m) });
     closers.push(() => web.close());
-    const browser: Browser = await chromium.launch();
+    const browser: Browser = await chromium.launch(o.chromium === 'full' ? { channel: 'chromium' } : {});
     closers.push(() => browser.close());
     const shots = process.env.DESK_E2E_SHOTS;
 
