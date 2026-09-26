@@ -28024,7 +28024,8 @@ describe('ThreadsScreen', () => {
     expect(disc(2).getAttribute('aria-pressed')).toBe('true');
     const tr = screen.getByRole('complementary', { name: 'Transcript' });
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
-    const brief = await waitFor(() => document.getElementById('tr-stop-1')!);
+    await waitFor(() => expect(document.getElementById('tr-stop-1')?.querySelector('.tr-num-blank, .tr-num')).toBeTruthy());
+    const brief = document.getElementById('tr-stop-1')!;
     expect(brief.className).toBe('tr-entry');
     fireEvent.click(brief);
     await waitFor(() => expect(disc(1).getAttribute('aria-pressed')).toBe('true'));
@@ -28506,10 +28507,11 @@ W0c.14's "shows the shell, the project tabs and the screen for the route" case o
     expect(screen.getByText('Threads is not in the web UI yet')).toBeTruthy();
 ```
 
-after (the fake bridge has no `projects.get`, so the screen's host is the React root `div.page`, "Loading…" then the failed project):
+after (the fake bridge has no `projects.get`, so the screen's host is the React root `div.page`, "Loading…" then the failed project; the case waits for the failed state, since a `.page` is already there while loading):
 
 ```ts
-    await waitFor(() => expect(document.querySelector('main.screen .page')).not.toBeNull());
+    // The fake has no session operations, so the screen settles on its failed state (not the loading page).
+    expect(await screen.findByRole('heading', { name: "Couldn't load this project" })).toBeTruthy();
 ```
 
 - [ ] **Step 6: Run it**
@@ -28845,7 +28847,7 @@ Expected: PASS. This section's tasks change nothing the root suite runs (bff, ui
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (4), `threads/transcript.spec.ts` (7), `threads/thread-roster.spec.ts` (4), `threads/threads-screen.spec.ts` (28), and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's eleven spec files: `components/skill-badge.spec.ts` (1), `components/file-viewer.spec.ts` (8), `threads/tabs/result-tab.spec.ts` (2), `diff-tab.spec.ts` (4), `files-tab.spec.ts` (4), `skill-drafts-tab.spec.ts` (2), `usage-tab.spec.ts` (3), `threads/route-view.spec.ts` (4), `threads/transcript.spec.ts` (7), `threads/thread-roster.spec.ts` (5), `threads/threads-screen.spec.ts` (34), and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the e2e**
 
@@ -37068,10 +37070,11 @@ Before:
     expect(screen.getByText('Threads is not in the web UI yet')).toBeTruthy();
 ```
 
-After (the threads screen's host is a `.page` while it loads or fails, and its roster is `div.page.roster`):
+After (W2a.6's text: the fake bridge has no `projects.get`, so the threads screen settles on its failed state):
 
 ```ts
-    await waitFor(() => expect(document.querySelector('main.screen .page')).not.toBeNull());
+    // The fake has no session operations, so the screen settles on its failed state (not the loading page).
+    expect(await screen.findByRole('heading', { name: "Couldn't load this project" })).toBeTruthy();
 ```
 
 Before:

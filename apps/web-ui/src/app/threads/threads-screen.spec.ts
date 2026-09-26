@@ -571,7 +571,8 @@ describe('ThreadsScreen', () => {
     expect(disc(2).getAttribute('aria-pressed')).toBe('true');
     const tr = screen.getByRole('complementary', { name: 'Transcript' });
     fireEvent.click(within(tr).getByRole('button', { name: 'Every step' }));
-    const brief = await waitFor(() => document.getElementById('tr-stop-1')!);
+    await waitFor(() => expect(document.getElementById('tr-stop-1')?.querySelector('.tr-num-blank, .tr-num')).toBeTruthy());
+    const brief = document.getElementById('tr-stop-1')!;
     expect(brief.className).toBe('tr-entry');
     fireEvent.click(brief);
     await waitFor(() => expect(disc(1).getAttribute('aria-pressed')).toBe('true'));

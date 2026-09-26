@@ -56,7 +56,8 @@ describe('App', () => {
     const { view } = await renderApp();
     expect(screen.getByRole('navigation', { name: 'Places' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Threads' }).getAttribute('aria-current')).toBe('page');
-    await waitFor(() => expect(document.querySelector('main.screen .page')).not.toBeNull());
+    // The fake has no session operations, so the screen settles on its failed state (not the loading page).
+    expect(await screen.findByRole('heading', { name: "Couldn't load this project" })).toBeTruthy();
     const app = (view.fixture.nativeElement as HTMLElement).querySelector('.app')!;
     expect([...app.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.className.split(' ').join('.')}` : ''))).toEqual([
       'header.titlebar',
