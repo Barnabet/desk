@@ -97,6 +97,20 @@ describe('injectBuiltins', () => {
     expect(lists()).toBe(2);
   });
 
+  it('lists nothing more once its component is gone: no focus listener, no 30 s timer', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { fixture, builtins, lists } = await setup({ 'builtins.list': () => [b('ready')] });
+    await vi.waitFor(() => expect(builtins.status()).toBe('ready'));
+    await fixture.whenStable();
+    await settle();
+    const before = lists();
+    fixture.destroy();
+    window.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(lists()).toBe(before);
+  });
+
   it("is an error until a list arrives", async () => {
     const { builtins } = await setup({ 'builtins.list': () => Promise.reject({ code: 'internal', message: 'deskd is not answering' }) });
     await vi.waitFor(() => expect(builtins.status()).toBe('error'));

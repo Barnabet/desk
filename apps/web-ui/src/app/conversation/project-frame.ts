@@ -19,8 +19,11 @@ import { LineDiagram, type StationG } from './line-diagram';
  * unconditionally, so it registers with the frame, before App's screen boundary projected into the body: a screen error
  * lands on the screen's boundary, never here. A diagram error lands there first too, since that boundary is the later one;
  * the diagram stays up, throws again (at the latest on the next "now" tick) and this boundary takes that one, so a failing
- * diagram never reaches the whole-page boundary, and the screen's "Try again" brings the screen back. The geometry catches
- * its own errors: it logs them and the frame shows no diagram.
+ * diagram never reaches the whole-page boundary, and the screen's "Try again" brings the screen back. After the diagram's
+ * own "Try again" the stack is whole again (diagram, screen, all healthy), so the diagram's next error goes to the screen's
+ * boundary once more, which replaces the chat (for up to 15 s the diagram's own boundary is not the one catching), and the
+ * diagram's own boundary catches the error after that; the screen's "Try again" brings the chat back. That is accepted. The
+ * geometry catches its own errors: it logs them and the frame shows no diagram.
  */
 @Component({
   selector: 'div[deskProjectFrame]',
