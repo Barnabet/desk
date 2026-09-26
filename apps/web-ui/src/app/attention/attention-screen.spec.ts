@@ -259,7 +259,7 @@ describe('AttentionScreen', () => {
     const bridge = await setup({ 'approvals.resolve': () => new Promise(() => {}) });
     await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
     const insp = await screen.findByRole('article', { name: /clearance request/ });
-    const note = within(insp).getByLabelText('Note to the thread (optional)') as HTMLTextAreaElement;
+    const note = within(insp).getByLabelText('Note to the thread (optional)') as HTMLInputElement;
     fireEvent.input(note, { target: { value: 'Use npm test' } });
     // Every desk:global push is fresh JSON: the selected item comes back as a new object with the same id.
     const push = (extra: AttentionItem[]) => TestBed.inject(GlobalStore).set((s) => ({ ...s, attention: structuredClone([...items, ...extra]) }));
@@ -273,6 +273,18 @@ describe('AttentionScreen', () => {
     await screen.findByText(/^5 items across 1 project/);
     expect(approve.getAttribute('aria-busy')).toBe('true');
     expect(bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input)).toEqual([{ id: 'a1', decision: 'approved', note: 'Use npm test' }]);
+  });
+
+  it('clears the note when the selection moves to another item', async () => {
+    await setup({}, [...items, approval(2, 2)]);
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    const note = within(insp).getByLabelText('Note to the thread (optional)') as HTMLInputElement;
+    fireEvent.input(note, { target: { value: 'Use npm test' } });
+    fireEvent.keyDown(window, { key: 'j' });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa2'));
+    // The inspector now shows a2: its note starts empty rather than carrying a1's.
+    await waitFor(() => expect((screen.getByLabelText('Note to the thread (optional)') as HTMLInputElement).value).toBe(''));
   });
 
   it('denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box', async () => {
