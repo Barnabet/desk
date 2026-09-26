@@ -171,8 +171,15 @@ export class ModelsEditor {
     return (e.target as HTMLInputElement).value;
   }
 
+  /**
+   * The whole number a box holds. Angular writes `[value]` only when it changes, so a box whose text reads as the number
+   * it already held (4.5 over 4, or 2.2 after 2.9) is rewritten here, as React's controlled number input does.
+   */
   protected number(e: Event): number {
-    return count((e.target as HTMLInputElement).value);
+    const el = e.target as HTMLInputElement;
+    const n = count(el.value);
+    if (el.value === '' ? n === 0 : Number(el.value) !== n) el.value = String(n);
+    return n;
   }
 
   protected checked(e: Event): boolean {

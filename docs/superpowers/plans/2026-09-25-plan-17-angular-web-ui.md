@@ -38280,6 +38280,35 @@ describe('ModelsEditor', () => {
     await waitFor(() => expect(id.value).toBe('claude-fable-5-2'));
     expect(within(reg).queryByRole('button', { name: 'Discard changes' })).toBeNull();
   });
+
+  it('shows the whole number a box holds, as the desktop rewrites it', async () => {
+    const { reg } = await setup();
+    const atOnce = (await within(reg).findByLabelText('Model 1 concurrency')) as HTMLInputElement;
+    // 4.5 counts as 4, which the box already held: nothing changes, and the box says 4 again.
+    fireEvent.input(atOnce, { target: { value: '4.5' } });
+    expect(atOnce.value).toBe('4');
+    expect(within(reg).queryByRole('button', { name: 'Discard changes' })).toBeNull();
+    const output = within(reg).getByLabelText('Model 1 max output tokens') as HTMLInputElement;
+    fireEvent.input(output, { target: { value: '32000.9' } });
+    expect(output.value).toBe('32000');
+    // An emptied box holds 0, and says so.
+    fireEvent.input(atOnce, { target: { value: '' } });
+    expect(atOnce.value).toBe('0');
+    expect(within(reg).getByRole('alert').textContent).toContain('Token limits must be positive and concurrency at least 1.');
+  });
+
+  it('shows the number it saved, not the text typed after it', async () => {
+    const { bridge, reg } = await setup();
+    const atOnce = (await within(reg).findByLabelText('Model 2 concurrency')) as HTMLInputElement;
+    fireEvent.input(atOnce, { target: { value: '2.9' } });
+    expect(atOnce.value).toBe('2');
+    // 2.2 also counts as 2, so the draft does not change: once 2 is saved, the box says 2, not 2.2.
+    fireEvent.input(atOnce, { target: { value: '2.2' } });
+    fireEvent.click(within(reg).getByRole('button', { name: 'Save registry' }));
+    await waitFor(() => expect(within(reg).queryByRole('button', { name: 'Discard changes' })).toBeNull());
+    expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: ModelInfo[] }).models.map((m) => m.concurrency)).toEqual([4, 2]);
+    expect(atOnce.value).toBe('2');
+  });
 });
 ```
 
@@ -38466,8 +38495,15 @@ export class ModelsEditor {
     return (e.target as HTMLInputElement).value;
   }
 
+  /**
+   * The whole number a box holds. Angular writes `[value]` only when it changes, so a box whose text reads as the number
+   * it already held (4.5 over 4, or 2.2 after 2.9) is rewritten here, as React's controlled number input does.
+   */
   protected number(e: Event): number {
-    return count((e.target as HTMLInputElement).value);
+    const el = e.target as HTMLInputElement;
+    const n = count(el.value);
+    if (el.value === '' ? n === 0 : Number(el.value) !== n) el.value = String(n);
+    return n;
   }
 
   protected checked(e: Event): boolean {
@@ -38487,7 +38523,7 @@ export class ModelsEditor {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/system/models-editor.spec.ts)`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests: the plan's 5, and the review fix's 2).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -38500,6 +38536,8 @@ git commit -m "feat(web-ui): the model registry editor (ModelsEditor)" -m "Co-Au
 ```
 
 **Deviation (spec):** the blocks above are the committed files. The component is the plan's first code, unchanged: `ModelsEditor.tsx` on `web-ui` is unchanged by the merge of master (8883229) and after it (its last change, 2cd45af's `vision` switch, came before and is in the blocks), and its two ported cases in `SystemScreen.test.tsx` (`modelProblems`, "edits the model registry") are the ones above, with `fireEvent.change` on the id box as `fireEvent.input`. The spec gained three assertions on the host, which the section's Produces names but no case checked: while "Loading…" and after the failure the host has no class and `display: contents`, and once loaded it reads `models-editor` with no inline display (a host that always carried the class failed the second case). Nothing refetches or pushes the registry, so nothing can reset a draft while it is edited: `models.list` runs once, in the constructor (a component's factory runs with no active consumer, so the call is untracked, as `injectModels` does), and the draft is a plain `signal`, not a `linkedSignal`. As in React, a save's answer replaces the draft (edits made while the save runs are dropped), Save is disabled while it runs (`Button`'s `pending`), and an answer that lands after the editor is gone only sets its own signals and toasts. `ModelInfo` carries no key or endpoint field: the editor reads and writes only the registry (id, family, limits, reasoning levels, vision), and deskd's `PUT /models` validates it again. Step 2 failed on `Could not resolve "./models-editor"`, with the Angular compiler's `TS2307` beside it.
+
+**Deviation (review fix):** the number boxes (context, max output, "At once") show the whole number they hold, as the desktop's do. Angular writes `[value]` only when the bound value changes, so typing `4.5` into a box holding 4 left "4.5" on screen, and `2.9` then `2.2` left "2.2" after 2 was saved. React's controlled number input rewrites the box whenever its text does not read as the value (`react-dom`'s `updateInput`: `(0 === value && "" === element.value) || element.value != value`), so `number(e)` now does the same after counting: `if (el.value === '' ? n === 0 : Number(el.value) !== n) el.value = String(n);`. Two spec cases cover it ("shows the whole number a box holds, as the desktop rewrites it": 4.5, a token limit's 32000.9 and an emptied box; "shows the number it saved, not the text typed after it": 2.9, 2.2, save); both failed on the typed text (`'4.5'`, `'2.2'`) before the fix. Commit: "fix(web-ui): the model registry's number boxes show the number they hold, as the desktop does".
 
 ### Task W3b.2: `SystemScreen`, the machine room; `#/system` shows it
 

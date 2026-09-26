@@ -106,4 +106,33 @@ describe('ModelsEditor', () => {
     await waitFor(() => expect(id.value).toBe('claude-fable-5-2'));
     expect(within(reg).queryByRole('button', { name: 'Discard changes' })).toBeNull();
   });
+
+  it('shows the whole number a box holds, as the desktop rewrites it', async () => {
+    const { reg } = await setup();
+    const atOnce = (await within(reg).findByLabelText('Model 1 concurrency')) as HTMLInputElement;
+    // 4.5 counts as 4, which the box already held: nothing changes, and the box says 4 again.
+    fireEvent.input(atOnce, { target: { value: '4.5' } });
+    expect(atOnce.value).toBe('4');
+    expect(within(reg).queryByRole('button', { name: 'Discard changes' })).toBeNull();
+    const output = within(reg).getByLabelText('Model 1 max output tokens') as HTMLInputElement;
+    fireEvent.input(output, { target: { value: '32000.9' } });
+    expect(output.value).toBe('32000');
+    // An emptied box holds 0, and says so.
+    fireEvent.input(atOnce, { target: { value: '' } });
+    expect(atOnce.value).toBe('0');
+    expect(within(reg).getByRole('alert').textContent).toContain('Token limits must be positive and concurrency at least 1.');
+  });
+
+  it('shows the number it saved, not the text typed after it', async () => {
+    const { bridge, reg } = await setup();
+    const atOnce = (await within(reg).findByLabelText('Model 2 concurrency')) as HTMLInputElement;
+    fireEvent.input(atOnce, { target: { value: '2.9' } });
+    expect(atOnce.value).toBe('2');
+    // 2.2 also counts as 2, so the draft does not change: once 2 is saved, the box says 2, not 2.2.
+    fireEvent.input(atOnce, { target: { value: '2.2' } });
+    fireEvent.click(within(reg).getByRole('button', { name: 'Save registry' }));
+    await waitFor(() => expect(within(reg).queryByRole('button', { name: 'Discard changes' })).toBeNull());
+    expect((bridge.calls.find((c) => c.channel === 'models.replace')?.input as { models: ModelInfo[] }).models.map((m) => m.concurrency)).toEqual([4, 2]);
+    expect(atOnce.value).toBe('2');
+  });
 });
