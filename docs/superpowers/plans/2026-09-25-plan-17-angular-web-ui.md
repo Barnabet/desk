@@ -450,6 +450,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `apps/web-ui/package.json` | W0c.2; modify W0d.9 (e2e devDependencies) |
 | `apps/web-ui/{angular.json,tsconfig.json,tsconfig.app.json,tsconfig.spec.json}`, `src/{index.html,main.ts,build-config.spec.ts}` | W0c.2 |
 | `src/app/app.config.ts` | W0c.2; modify W0c.11 |
+| `src/app/app.config.spec.ts` | W0c.2 |
 | `src/app/app.ts` | W0c.2; modify W0c.14, W0c.15, W0d.7, W3b.3 |
 | `src/app/app.spec.ts` | W0c.2; modify W0c.14, W0c.15, W0d.7, W2a.6, W3b.2, W3b.3, W3b.4 |
 | `src/app/app.onboarding.spec.ts` | W0d.7 |
@@ -7763,7 +7764,7 @@ Expected: no output.
 | Task | What | Proof |
 |---|---|---|
 | W0c.1 | `scripts/ng.mjs`: the Angular CLI and `ngc` under a Node that fits | `scripts/ng.test.ts` |
-| W0c.2 | the `apps/web-ui` workspace (package, `angular.json` with the §9 production build, tsconfigs, bootstrap) and the root wiring (`test`, `typecheck`, tsconfig, `.gitignore`) | `build-config.spec.ts`, `app.spec.ts`, a production build |
+| W0c.2 | the `apps/web-ui` workspace (package, `angular.json` with the §9 production build, tsconfigs, bootstrap) and the root wiring (`test`, `typecheck`, tsconfig, `.gitignore`) | `build-config.spec.ts`, `app.spec.ts`, `app.config.spec.ts`, a production build |
 | W0c.3 | `DeskBridge` and `DeskCallError`; `FakeDeskBridge` for specs | `desk-bridge.spec.ts`, `fake-bridge.spec.ts` |
 | W0c.4 | `RouteService`, `fromStore`, `GlobalStore`; `provideGlobal` | three specs |
 | W0c.5 | `NowService`, `LastProject`, `Unread`, `isOnboarded`, `injectMediaQuery`, `injectWidth` | six specs (`unread.spec.ts` ported) |
@@ -7790,10 +7791,10 @@ Expected: no output.
 
 **Produces (shared names beyond the contract; the contract's names are used as they are):**
 
-- `scripts/ng.mjs` exports `NODE_RANGE`, `supported(version)`, `pickNode({ execPath, version, nvmDir, platform? })`, `defaultNvmDir(env?, platform?)`, `binOf(cwd, pkg, bin)`; `--ngc` runs `ngc`, `--which` prints the Node it would use. `scripts/web-dev.mjs` backs the root `web` script and exports `webDevCommands(root, args?)` and `runTogether(commands, { log? }?)` (`{ done: Promise<number>; stop() }`).
-- `apps/web-ui/src/app/app.config.ts`: `appConfig` (zoneless, and from W0c.11 the `ErrorHandler`). `main.ts` bootstraps `App` with it.
+- `scripts/ng.mjs` exports `NODE_RANGE`, `supported(version)`, `pickNode({ execPath, version, nvmDir, platform? })`, `defaultNvmDir(env?, platform?)`, `binOf(cwd, pkg, bin)`, `isMain(url, argv1?)`; `--ngc` runs `ngc`, `--which` prints the Node it would use. `scripts/web-dev.mjs` backs the root `web` script and exports `webDevCommands(root, args?)`, `runTogether(commands, { log? }?)` (`{ done: Promise<number>; stop() }`) and `stopChild(child, platform?, run?)`.
+- `apps/web-ui/src/app/app.config.ts`: `appConfig` (zoneless, and from W0c.11 the `ErrorHandler`). `main.ts` bootstraps `App` with it; `app.config.spec.ts` checks that it is zoneless.
 - `apps/web-ui/src/app/app.ts`: `App` (`desk-root`): the signed-out page, onboarding without the shell, or the shell around `screenFor(route)`. Later sections add their app-wide pieces to its template: the folder browser (W0d.7) and the command palette (W3b.3).
-- `core/desk-bridge.ts`: `DeskCallError` (`new DeskCallError(ipcError)` or `new DeskCallError(code, message, status?)`; fields `code`, `message`, `status`); `DeskBridge` with `signedOut: Signal<boolean>`, `pushStatus: Signal<PushStatus>`, `folderRequest: Signal<FolderRequest | null>`, `call`, `onPush<T>(channel, cb)`, `onReconnect(cb)`, `answerFolder(path | null)`, `setNotifyPermission(permission)`, `signOut()`; types `DeskBridgeApi`, `PushStatus` (`'idle' | 'connecting' | 'live' | 'reconnecting'`), `FolderRequest` (`{ purpose }`), `FolderPurpose`.
+- `core/desk-bridge.ts`: `DeskCallError` (`new DeskCallError(ipcError)` or `new DeskCallError(code, message, status?)`; fields `code`, `message`, `status`); `DeskBridge` with `signedOut: Signal<boolean>`, `pushStatus: Signal<PushStatus>`, `folderRequest: Signal<FolderRequest | null>`, `call`, `onPush<T>(channel, cb)`, `onReconnect(cb)`, `answerFolder(path | null)`, `setNotifyPermission(permission)`, `signOut()`; types `DeskBridgeApi`, `PushStatus` (`'idle' | 'connecting' | 'live' | 'reconnecting'`), `FolderRequest` (`{ purpose }`), `FolderPurpose`; `notificationPermission()` (exported by W0c.15 for `WebNotifications`).
 - `core/route.service.ts`: `RouteService` (`route: Signal<Route>`, `navigate(to)`, `replace(to)`). `core/store-signal.ts`: `fromStore(store, destroyRef?)`. `core/global.store.ts`: `GlobalStore` (`state`, `set(next)`, `start(): () => void`).
 - `core/session.service.ts`: `SessionService` (`acquire(projectId)`, `release(projectId)`, `state(projectId): Signal<SessionState>`, `transcript(projectId, agentId): Signal<TranscriptState>`), `SessionState`, `SESSION_RELEASE_DELAY` (injection token, default 30 000; specs use 0), `injectSession(projectId: () => string): Signal<SessionState>` (the `useSession` hook: call it in a field initializer), `transcriptOf(events, stream, projectId, agentId)`.
 - `core/now.service.ts`: `NowService` (`now: Signal<number>`). `core/last-project.ts`: `LastProject` (`id`, `remember(id)`, `reset()`). `core/unread.ts`: `Unread` (`seen`, `markSeen(projectId, at?)`, `isUnread(p)`, `reset()`), `lastActivity(p)`, `unreadIn(p, seen)`. `core/onboarded.ts`: `isOnboarded()`, `markOnboarded()` (key `desk.onboarded`, as the desktop's). `core/media.ts`: `injectMediaQuery(query)`. `core/width.ts`: `injectWidth(target: () => HTMLElement | null | undefined, fallback = 1200)`.
@@ -7836,9 +7837,11 @@ Expected: no output.
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `NODE_RANGE = '^22.22.3 || ^24.15.0 || >=26'`, `supported(version: string): boolean`, `defaultNvmDir(env?, platform?): string | null`, `pickNode({ execPath, version, nvmDir, platform? }): string | null`, `binOf(cwd, pkg, bin): string`. Run from `apps/web-ui`: `node ../../scripts/ng.mjs <ng args>`, `node ../../scripts/ng.mjs --ngc <ngc args>`; `node scripts/ng.mjs --which` prints `<node path> <version>`. Root Vitest now also runs `scripts/*.test.ts` and never looks inside `apps/web-ui`.
+- Produces: `NODE_RANGE = '^22.22.3 || ^24.15.0 || >=26'`, `supported(version: string): boolean`, `defaultNvmDir(env?, platform?): string | null`, `pickNode({ execPath, version, nvmDir, platform? }): string | null`, `binOf(cwd, pkg, bin): string`, `isMain(url, argv1 = process.argv[1]): boolean` (the entry guard, shared with W0c.16). Run from `apps/web-ui`: `node ../../scripts/ng.mjs <ng args>`, `node ../../scripts/ng.mjs --ngc <ngc args>`; `node scripts/ng.mjs --which` prints `<node path> <version>`. Root Vitest now also runs `scripts/*.test.ts` and never looks inside `apps/web-ui`.
 
 Angular 22 needs Node `^22.22.3 || ^24.15.0 || >=26`. Node 22.23.3 is installed with nvm, but shells the Claude app starts inherit 22.21.0 on `PATH`. The script keeps the current Node when it fits, else runs the newest fitting `~/.nvm/versions/node/*/bin/node` (on Windows, nvm-windows' `%NVM_HOME%\v*\node.exe`), and puts that Node first on the child's `PATH` so everything the CLI spawns uses it too. It resolves each bin's script from the package's own `package.json`, never through `node_modules/.bin`, whose shell shims would pick `node` from `PATH` again.
+
+**Deviation (review fix):** the entry guard first compared `pathToFileURL(resolve(process.argv[1]))` with `import.meta.url`. Node builds `import.meta.url` from the file's real path but leaves `argv[1]` as given, so `node <a symlinked folder>/scripts/ng.mjs build` exited 0 without running anything, and a build or test command could report success having done nothing. `ng.mjs` now exports `isMain(url, argv1?)`, which compares real paths (`realpathSync` on both sides), and ends with `if (isMain(import.meta.url)) main(…)`; W0c.16's `web-dev.mjs` imports it. `ng.test.ts` also passes an explicit `platform` to every `pickNode` call (the fake nvm holds `bin/node` files, which a Windows host would not look for), covers nvm-windows' `vX.Y.Z/node.exe`, checks `isMain` and `--which` through a symlinked folder (a junction on Windows), and runs the spawn path against fake `@angular/cli` and `@angular/compiler-cli` bins in a temp cwd: the chosen Node, its folder first on `PATH`, `--ngc` taken off the arguments, and the child's exit code passed on (8 tests).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -7846,9 +7849,9 @@ Create `scripts/ng.test.ts`:
 
 ```ts
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -7858,10 +7861,12 @@ type NgScript = {
   defaultNvmDir(env?: Record<string, string | undefined>, platform?: string): string | null;
   pickNode(o: { execPath: string; version: string; nvmDir: string | null; platform?: string }): string | null;
   binOf(cwd: string, pkg: string, bin: string): string;
+  isMain(url: string, argv1?: string): boolean;
 };
 
-const script = fileURLToPath(new URL('./ng.mjs', import.meta.url));
-const ng = (await import(new URL('./ng.mjs', import.meta.url).href)) as NgScript;
+const url = new URL('./ng.mjs', import.meta.url).href;
+const script = fileURLToPath(url);
+const ng = (await import(url)) as NgScript;
 
 const dirs: string[] = [];
 const temp = (): string => {
@@ -7883,6 +7888,24 @@ function nvm(...versions: string[]): string {
   return dir;
 }
 
+/** scripts/ reached through a symlink (a junction on Windows, which needs no privilege). */
+function linkedScripts(): string {
+  const link = join(temp(), 'linked');
+  symlinkSync(dirname(script), link, process.platform === 'win32' ? 'junction' : 'dir');
+  return link;
+}
+
+/** A package under `cwd` whose `bin` prints how it was run (Node, first PATH entry, arguments) and exits with `code`. */
+function fakeBin(cwd: string, pkg: string, bin: string, code: number): void {
+  const dir = join(cwd, 'node_modules', ...pkg.split('/'));
+  mkdirSync(join(dir, 'bin'), { recursive: true });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: pkg, bin: { [bin]: `./bin/${bin}.js` } }));
+  writeFileSync(
+    join(dir, 'bin', `${bin}.js`),
+    `process.stdout.write(JSON.stringify({ node: process.execPath, path: (process.env.PATH || '').split(${JSON.stringify(delimiter)})[0], args: process.argv.slice(2), analytics: process.env.NG_CLI_ANALYTICS })); process.exitCode = ${code};`,
+  );
+}
+
 describe('scripts/ng.mjs', () => {
   it("accepts exactly Angular 22's Node range", () => {
     expect(ng.NODE_RANGE).toBe('^22.22.3 || ^24.15.0 || >=26');
@@ -7892,17 +7915,30 @@ describe('scripts/ng.mjs', () => {
 
   it('keeps a Node that fits, else takes the newest fitting one from nvm', () => {
     const dir = nvm('v22.21.0', 'v22.23.3', 'v24.15.1', 'v25.0.0');
-    expect(ng.pickNode({ execPath: '/opt/node/bin/node', version: 'v24.15.0', nvmDir: dir })).toBe('/opt/node/bin/node');
-    expect(ng.pickNode({ execPath: '/opt/node/bin/node', version: 'v22.21.0', nvmDir: dir })).toBe(join(dir, 'v24.15.1', 'bin', 'node'));
-    expect(ng.pickNode({ execPath: '/opt/node/bin/node', version: 'v22.21.0', nvmDir: nvm('v22.21.0', 'v23.1.0') })).toBeNull();
-    expect(ng.pickNode({ execPath: '/opt/node/bin/node', version: 'v22.21.0', nvmDir: join(temp(), 'missing') })).toBeNull();
-    expect(ng.pickNode({ execPath: '/opt/node/bin/node', version: 'v22.21.0', nvmDir: null })).toBeNull();
+    const from = (version: string, nvmDir: string | null) => ng.pickNode({ execPath: '/opt/node/bin/node', version, nvmDir, platform: 'linux' });
+    expect(from('v24.15.0', dir)).toBe('/opt/node/bin/node');
+    expect(from('v22.21.0', dir)).toBe(join(dir, 'v24.15.1', 'bin', 'node'));
+    expect(from('v22.21.0', nvm('v22.21.0', 'v23.1.0'))).toBeNull();
+    expect(from('v22.21.0', join(temp(), 'missing'))).toBeNull();
+    expect(from('v22.21.0', null)).toBeNull();
+  });
+
+  it("finds nvm-windows' node.exe under NVM_HOME on Windows", () => {
+    const dir = temp();
+    for (const v of ['v22.21.0', 'v24.15.1']) {
+      mkdirSync(join(dir, v));
+      writeFileSync(join(dir, v, 'node.exe'), '');
+    }
+    mkdirSync(join(dir, 'v22.23.3', 'bin'), { recursive: true });
+    writeFileSync(join(dir, 'v22.23.3', 'bin', 'node'), '');
+    expect(ng.pickNode({ execPath: 'C:\\node\\node.exe', version: 'v22.21.0', nvmDir: dir, platform: 'win32' })).toBe(join(dir, 'v24.15.1', 'node.exe'));
+    expect(ng.pickNode({ execPath: 'x', version: 'v22.21.0', nvmDir: dir, platform: 'linux' })).toBe(join(dir, 'v22.23.3', 'bin', 'node'));
   });
 
   it('skips version folders without a node binary, and knows where nvm keeps them', () => {
     const dir = nvm('v22.23.3');
     mkdirSync(join(dir, 'v24.15.1'));
-    expect(ng.pickNode({ execPath: 'x', version: 'v22.21.0', nvmDir: dir })).toBe(join(dir, 'v22.23.3', 'bin', 'node'));
+    expect(ng.pickNode({ execPath: 'x', version: 'v22.21.0', nvmDir: dir, platform: 'linux' })).toBe(join(dir, 'v22.23.3', 'bin', 'node'));
     expect(ng.defaultNvmDir({ NVM_DIR: '/home/me/.nvm' }, 'linux')).toBe(join('/home/me/.nvm', 'versions', 'node'));
     expect(ng.defaultNvmDir({ NVM_HOME: 'C:\\nvm' }, 'win32')).toBe('C:\\nvm');
     expect(ng.defaultNvmDir({}, 'win32')).toBeNull();
@@ -7916,6 +7952,15 @@ describe('scripts/ng.mjs', () => {
     expect(() => ng.binOf(cwd, '@angular/cli', 'ngc')).toThrow('@angular/cli has no "ngc" bin');
   });
 
+  it('knows it is the script Node started, also through a symlinked folder', () => {
+    const link = linkedScripts();
+    expect(ng.isMain(url, script)).toBe(true);
+    expect(ng.isMain(url, join(link, 'ng.mjs'))).toBe(true);
+    expect(ng.isMain(url, join(link, 'web-dev.mjs'))).toBe(false);
+    expect(ng.isMain(url, join(link, 'missing.mjs'))).toBe(false);
+    expect(ng.isMain(url, undefined)).toBe(false);
+  });
+
   const chosen = ng.pickNode({ execPath: process.execPath, version: process.version, nvmDir: ng.defaultNvmDir() });
   it.skipIf(chosen === null)('prints the Node it would run with --which', () => {
     const r = spawnSync(process.execPath, [script, '--which'], { encoding: 'utf8' });
@@ -7923,6 +7968,27 @@ describe('scripts/ng.mjs', () => {
     const [path, version] = r.stdout.trim().split(' ');
     expect(path).toBe(chosen);
     expect(ng.supported(version ?? '')).toBe(true);
+    // Called through a symlinked folder, it still runs (and does not exit 0 having done nothing).
+    const linked = spawnSync(process.execPath, [join(linkedScripts(), 'ng.mjs'), '--which'], { encoding: 'utf8' });
+    expect(linked.status).toBe(0);
+    expect(linked.stdout).toBe(r.stdout);
+  });
+
+  it.skipIf(chosen === null)('runs the CLI or ngc from the cwd under the chosen Node, first on PATH, and passes its exit code on', () => {
+    const cwd = temp();
+    fakeBin(cwd, '@angular/cli', 'ng', 7);
+    fakeBin(cwd, '@angular/compiler-cli', 'ngc', 0);
+    const run = (...args: string[]) => {
+      const r = spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+      if (!r.stdout) throw new Error(r.stderr || `ng.mjs printed nothing (exit ${r.status})`);
+      return { status: r.status, ...(JSON.parse(r.stdout) as { node: string; path: string; args: string[]; analytics: string }) };
+    };
+    const cli = run('build', '--x');
+    expect(cli).toMatchObject({ status: 7, path: dirname(chosen!), args: ['build', '--x'], analytics: 'false' });
+    expect(realpathSync(cli.node)).toBe(realpathSync(chosen!));
+    const ngc = run('--ngc', '-p', 't.json');
+    expect(ngc).toMatchObject({ status: 0, path: dirname(chosen!), args: ['-p', 't.json'], analytics: 'false' });
+    expect(realpathSync(ngc.node)).toBe(realpathSync(chosen!));
   });
 });
 ```
@@ -7987,10 +8053,10 @@ Create `scripts/ng.mjs`:
  * inherit an older Node on PATH), else exits with a message. The rest of the repository keeps its own Node.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const NODE_RANGE = '^22.22.3 || ^24.15.0 || >=26';
 
@@ -8041,6 +8107,20 @@ export function binOf(cwd, pkg, bin) {
   return join(dir, rel);
 }
 
+/**
+ * Whether the module at `url` (its import.meta.url) is the script Node was started with. Both sides are real paths: Node
+ * resolves symlinks in import.meta.url but not in argv[1], so a script run through a symlinked folder would otherwise
+ * exit 0 without doing anything.
+ */
+export function isMain(url, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
 function main(args) {
   const node = pickNode({ execPath: process.execPath, version: process.version, nvmDir: defaultNvmDir() });
   if (!node) {
@@ -8060,13 +8140,13 @@ function main(args) {
   child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) main(process.argv.slice(2));
+if (isMain(import.meta.url)) main(process.argv.slice(2));
 ```
 
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `pnpm vitest run scripts/ng.test.ts --maxWorkers=2`
-Expected: PASS (5 tests; on this machine `--which` prints `/Users/louisgiraud/.nvm/versions/node/v22.23.3/bin/node v22.23.3`).
+Expected: PASS (8 tests; on this machine `--which` prints `/Users/louisgiraud/.nvm/versions/node/v22.23.3/bin/node v22.23.3`).
 
 Run: `node scripts/ng.mjs --which`
 Expected: `/Users/louisgiraud/.nvm/versions/node/v22.23.3/bin/node v22.23.3` (under the Claude app's Node 22.21.0).
@@ -8086,7 +8166,7 @@ git commit -m "build: scripts/ng.mjs runs the Angular CLI under a Node that Angu
 **Files:**
 - Create: `apps/web-ui/package.json`, `apps/web-ui/angular.json`, `apps/web-ui/tsconfig.json`, `apps/web-ui/tsconfig.app.json`, `apps/web-ui/tsconfig.spec.json`, `apps/web-ui/src/index.html`, `apps/web-ui/src/main.ts`, `apps/web-ui/src/app/app.config.ts`, `apps/web-ui/src/app/app.ts`
 - Modify: `package.json` (`test`, `typecheck`), `tsconfig.json` (`exclude`), `.gitignore`, `pnpm-lock.yaml` (by `pnpm install`)
-- Test: `apps/web-ui/src/build-config.spec.ts`, `apps/web-ui/src/app/app.spec.ts`
+- Test: `apps/web-ui/src/build-config.spec.ts`, `apps/web-ui/src/app/app.spec.ts`, `apps/web-ui/src/app/app.config.spec.ts`
 
 **Interfaces:**
 - Consumes: `scripts/ng.mjs` (W0c.1); `initialGlobalState` from `@desk/bff/contract`; `href` from `@desk/ui-core`; `@desk/ui-styles/index.css`.
@@ -8097,6 +8177,8 @@ The workspace is the W0 spike's (`~/Library/Caches/desk-dev/plan17/spike`) with 
 - `angular.json`: `index` and the global `styles` (`@desk/ui-styles/index.css`, resolved through the package's exports like Angular Material's prebuilt themes); the §9 production configuration unchanged; the test target includes only `src/**/*.spec.ts` (the builder's default, `**/*.spec.ts` and `**/*.test.ts`, would also pick up the web e2e files under `apps/web-ui/e2e`);
 - `index.html` without `<base href>` (the CSP says `base-uri 'none'`, and without the Angular Router nothing needs it) and with a viewport tag;
 - `tsconfig.spec.json` adds the `node` types; `tsconfig.app.json` leaves out `src/app/testing` (spec helpers).
+
+**Deviation (review fix):** `app.spec.ts`'s case was first named "bootstraps zoneless and reads the shared packages", but it never read `appConfig`, and Angular 22's TestBed is zoneless on its own (it always adds `provideZonelessChangeDetectionInternal()`), so taking `provideZonelessChangeDetection()` out of `app.config.ts` failed no spec. The case is now named for what it checks, and `app.config.spec.ts` checks `appConfig` itself: an environment injector built from `appConfig.providers` holds `ɵPROVIDED_ZONELESS` (the flag that provider sets in dev mode, which specs run in; Angular reads it to catch zone conflicts), and one built without them does not. W0c.14 rewrites `app.spec.ts` and leaves `app.config.spec.ts` as it is.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -8149,10 +8231,33 @@ import { describe, expect, it } from 'vitest';
 import { App } from './app';
 
 describe('App', () => {
-  it('bootstraps zoneless and reads the shared packages', async () => {
+  it('renders the placeholder from the shared packages', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     expect((fixture.nativeElement as HTMLElement).textContent).toBe('Desk · starting · #/map');
+  });
+});
+```
+
+Create `apps/web-ui/src/app/app.config.spec.ts`:
+
+```ts
+import { createEnvironmentInjector, EnvironmentInjector, ɵPROVIDED_ZONELESS as PROVIDED_ZONELESS } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { describe, expect, it } from 'vitest';
+import { appConfig } from './app.config';
+
+describe('appConfig', () => {
+  // TestBed is zoneless on its own in Angular 22, so no rendering spec notices appConfig losing provideZonelessChangeDetection().
+  // PROVIDED_ZONELESS is the flag that provider sets (in dev mode, as specs run); Angular reads it to catch zone conflicts.
+  it('bootstraps zoneless', () => {
+    const parent = TestBed.inject(EnvironmentInjector);
+    const app = createEnvironmentInjector(appConfig.providers, parent);
+    const bare = createEnvironmentInjector([], parent);
+    expect(app.get(PROVIDED_ZONELESS)).toBe(true);
+    expect(bare.get(PROVIDED_ZONELESS)).toBe(false);
+    app.destroy();
+    bare.destroy();
   });
 });
 ```
@@ -8437,7 +8542,7 @@ Expected: exit 0. It downloads what the store lacks (`marked`, `@angular/router`
 - [ ] **Step 4: Run the tests, the type check and a production build**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false)`
-Expected: PASS (2 files, 4 tests).
+Expected: PASS (3 files, 5 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0 (`ngc -p tsconfig.app.json --noEmit`, TypeScript 6.0).
@@ -8461,7 +8566,7 @@ Expected: PASS; no file under `apps/web-ui` is collected.
 - [ ] **Step 5: Commit**
 
 ```sh
-git add apps/web-ui/package.json apps/web-ui/angular.json apps/web-ui/tsconfig.json apps/web-ui/tsconfig.app.json apps/web-ui/tsconfig.spec.json apps/web-ui/src/index.html apps/web-ui/src/main.ts apps/web-ui/src/app/app.config.ts apps/web-ui/src/app/app.ts apps/web-ui/src/app/app.spec.ts apps/web-ui/src/build-config.spec.ts package.json tsconfig.json .gitignore pnpm-lock.yaml
+git add apps/web-ui/package.json apps/web-ui/angular.json apps/web-ui/tsconfig.json apps/web-ui/tsconfig.app.json apps/web-ui/tsconfig.spec.json apps/web-ui/src/index.html apps/web-ui/src/main.ts apps/web-ui/src/app/app.config.ts apps/web-ui/src/app/app.config.spec.ts apps/web-ui/src/app/app.ts apps/web-ui/src/app/app.spec.ts apps/web-ui/src/build-config.spec.ts package.json tsconfig.json .gitignore pnpm-lock.yaml
 git commit -m "feat(web-ui): the Angular 22 workspace: zoneless bootstrap, a CSP-safe production build, specs through ng test" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -8482,7 +8587,9 @@ Spec §3 and §5. `call(op, input)`:
 - `broker.watch` / `broker.unwatch` (`PUSH_OPS`): `{ op, id, input }` on the socket, resolved by `{ ack: id, result }`. Requests wait until the socket is signed in; unanswered ones are sent again after a reconnect.
 - anything else: `POST /rpc/<op>` with `content-type: application/json` and `x-desk-session`, body `encodeBytes(input)`, answer `decodeBytes(json)`. `ok: false` throws `DeskCallError` with the error's code and message, and its status (else the HTTP status when it is 400 or more).
 
-`onPush(channel, cb)` opens one `/push` socket on first use (`ws://<host>/push`), sends `{ session }` first, and treats the first `desk:global` frame as "signed in": it then sends `{ notifyPermission }` and the waiting requests. A drop reconnects after 0.5, 1, 2, 5, then every 10 seconds; each sign-in after the first calls the `onReconnect` listeners, since a new socket is a new broker sender. A 401 or a close with 4401 drops the stored secret and sets `signedOut` (unless another tab has stored a newer secret, which this page then adopts); a `storage` event with a new secret signs the page back in.
+`onPush(channel, cb)` opens one `/push` socket on first use (`ws://<host>/push`), sends `{ session }` first, and treats the first `desk:global` frame as "signed in": it then sends `{ notifyPermission }` and the waiting requests. A drop reconnects after 0.5, 1, 2, 5, then every 10 seconds; each sign-in after the first calls the `onReconnect` listeners, since a new socket is a new broker sender. A 401 or a close with 4401 drops the stored secret and sets `signedOut` (unless another tab has stored a newer secret, which this page then adopts); a `storage` event with a new secret signs the page back in. Only a 401 for the secret the page still holds signs it out: a call refused for a secret the page has since replaced is tried once more with the current one.
+
+**Deviation (review fix):** `rpc()` first signed out on any 401. When desk web restarted and another tab stored a new secret, a call this page had already sent with the old one came back 401 after the page had adopted the new one, and `signOut()` then removed the new, valid secret and signed the page out (and any tab that reloaded); and a 401 on which `signOut()` adopted a newer stored secret still rejected with the signed-out error. `rpc(op, input, retried = false)` now signs out only when the refused secret is still the page's, and retries once when the page holds another by then. Five spec cases were added: that race, adopting a newer stored secret on a 401 (and signing out when the retry is refused too), the whole reconnect backoff (0.5, 1, 2, 5, then 10 s, starting over once signed in), adopting another tab's secret on a 4401, and `bad_response` for desk web's plain-text 421 (2 files, 20 tests).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -8532,7 +8639,10 @@ class FakeSocket {
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const refused = () => json({ ok: false, error: { code: 'unauthorized', message: 'Sign in again.' } }, 401);
 const lastSocket = (): FakeSocket => FakeSocket.instances.at(-1)!;
+/** The session secret each /rpc call sent, in order. */
+const sentSecrets = () => fetchMock.mock.calls.map(([, init]) => (init.headers as Record<string, string>)['x-desk-session']);
 let fetchMock: Mock<(url: string, init: RequestInit) => Promise<Response>>;
 
 beforeEach(() => {
@@ -8579,6 +8689,13 @@ describe('DeskBridge.call over /rpc', () => {
     await expect(bridge.call('projects.get', { id: 'x' })).rejects.toMatchObject({ code: 'web_unreachable' });
   });
 
+  it('turns an answer that is not JSON into bad_response, such as the plain-text 421 for a wrong Host', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    fetchMock.mockResolvedValueOnce(new Response('Misdirected Request', { status: 421, headers: { 'content-type': 'text/plain' } }));
+    await expect(bridge.call('overview', {})).rejects.toMatchObject({ name: 'DeskCallError', code: 'bad_response', message: 'desk web answered overview with HTTP 421.', status: 421 });
+    expect(bridge.signedOut()).toBe(false);
+  });
+
   it('signs out on 401: the secret is dropped and later calls never leave the page', async () => {
     fetchMock.mockResolvedValue(json({ ok: false, error: { code: 'unauthorized', message: 'Sign in again.' } }, 401));
     const bridge = TestBed.inject(DeskBridge);
@@ -8588,6 +8705,44 @@ describe('DeskBridge.call over /rpc', () => {
     expect(localStorage.getItem('desk.session')).toBeNull();
     await expect(bridge.call('overview', {})).rejects.toMatchObject({ code: 'unauthorized' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a secret another tab stored while a call was out: the 401 for the old one retries with it', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    let answer: (res: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answer = resolve)));
+    fetchMock.mockResolvedValueOnce(json({ ok: true, value: { n: 1 } }));
+    const done = bridge.call('overview', {});
+    localStorage.setItem('desk.session', 'fresh');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'desk.session', newValue: 'fresh' }));
+    answer(refused());
+    await expect(done).resolves.toEqual({ n: 1 });
+    expect(sentSecrets()).toEqual(['s3cret', 'fresh']);
+    expect(bridge.signedOut()).toBe(false);
+    expect(localStorage.getItem('desk.session')).toBe('fresh');
+  });
+
+  it('on a 401, adopts a newer secret another tab stored and tries once more with it', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    fetchMock.mockImplementationOnce(async () => {
+      // Another tab signed in again; this page has not seen its storage event yet.
+      localStorage.setItem('desk.session', 'fresh');
+      return refused();
+    });
+    fetchMock.mockResolvedValueOnce(json({ ok: true, value: { n: 1 } }));
+    await expect(bridge.call('overview', {})).resolves.toEqual({ n: 1 });
+    expect(sentSecrets()).toEqual(['s3cret', 'fresh']);
+    expect(bridge.signedOut()).toBe(false);
+
+    fetchMock.mockImplementationOnce(async () => {
+      localStorage.setItem('desk.session', 'newer');
+      return refused();
+    });
+    fetchMock.mockResolvedValueOnce(refused());
+    await expect(bridge.call('overview', {})).rejects.toMatchObject({ code: 'unauthorized', status: 401 });
+    expect(sentSecrets()).toEqual(['s3cret', 'fresh', 'fresh', 'newer']);
+    expect(bridge.signedOut()).toBe(true);
+    expect(localStorage.getItem('desk.session')).toBeNull();
   });
 
   it('starts signed out without a secret, and signs in when another tab stores one', () => {
@@ -8720,6 +8875,42 @@ describe('DeskBridge over /push', () => {
     expect(bridge.pushStatus()).toBe('live');
     second.receive({ ack: 0, result: { ok: true, value: { ok: true } } });
     await expect(pending).resolves.toEqual({ ok: true });
+  });
+
+  it('waits 0.5, 1, 2 and 5 seconds before each new try, then 10 seconds each time, and starts over once signed in', () => {
+    vi.useFakeTimers();
+    const bridge = TestBed.inject(DeskBridge);
+    bridge.onPush('desk:global', () => {});
+    const waits = (delays: number[]) => {
+      for (const delay of delays) {
+        lastSocket().drop(1006);
+        const sockets = FakeSocket.instances.length;
+        vi.advanceTimersByTime(delay - 1);
+        expect(FakeSocket.instances, `before ${delay} ms`).toHaveLength(sockets);
+        vi.advanceTimersByTime(1);
+        expect(FakeSocket.instances, `at ${delay} ms`).toHaveLength(sockets + 1);
+      }
+    };
+    waits([500, 1000, 2000, 5000, 10_000, 10_000, 10_000]);
+    expect(bridge.pushStatus()).toBe('reconnecting');
+    lastSocket().open();
+    lastSocket().receive({ channel: 'desk:global', payload: {} });
+    expect(bridge.pushStatus()).toBe('live');
+    waits([500, 1000]);
+  });
+
+  it('adopts a newer secret another tab stored when /push refuses the session', () => {
+    const bridge = TestBed.inject(DeskBridge);
+    bridge.onPush('desk:global', () => {});
+    const first = lastSocket();
+    first.open();
+    localStorage.setItem('desk.session', 'fresh');
+    first.drop(4401);
+    expect(bridge.signedOut()).toBe(false);
+    expect(localStorage.getItem('desk.session')).toBe('fresh');
+    expect(FakeSocket.instances).toHaveLength(2);
+    lastSocket().open();
+    expect(lastSocket().sent).toEqual([{ session: 'fresh' }]);
   });
 
   it('signs out when /push refuses the session', async () => {
@@ -8862,7 +9053,8 @@ function notificationPermission(): NotifyPermission {
  * The web UI's only way to desk web (spec §5). `call` posts one operation to /rpc with the session secret; `onPush` listens on
  * the /push socket. The host operations a browser does itself never reach the server (§3): links open here, files download
  * here, and picking a folder opens the folder browser. broker.watch and broker.unwatch travel on the socket, which is their
- * broker sender. A 401, or the socket closed with 4401, drops the secret and signs the page out.
+ * broker sender. A 401, or the socket closed with 4401, drops the secret and signs the page out, unless another tab has stored
+ * a newer secret, which the page then uses; a call refused for a secret the page no longer holds is tried once more.
  */
 @Injectable({ providedIn: 'root' })
 export class DeskBridge {
@@ -9018,7 +9210,7 @@ export class DeskBridge {
     });
   }
 
-  private async rpc(op: string, input: unknown): Promise<unknown> {
+  private async rpc(op: string, input: unknown, retried = false): Promise<unknown> {
     const secret = this.secret;
     if (!secret) {
       this.signOut();
@@ -9035,7 +9227,10 @@ export class DeskBridge {
       throw new DeskCallError(UNREACHABLE);
     }
     if (res.status === 401) {
-      this.signOut();
+      // Only the secret that was sent is refused. signOut() drops it, or adopts a newer one another tab stored; when the page
+      // holds another secret by now (adopted during the call, or just now), the call is tried once more with it.
+      if (this.secret === secret) this.signOut();
+      if (this.secret && this.secret !== secret && !retried) return this.rpc(op, input, true);
       throw new DeskCallError(SIGNED_OUT);
     }
     let result: IpcResult<unknown>;
@@ -9268,7 +9463,7 @@ export class FakeDeskBridge implements DeskBridgeApi {
 - [ ] **Step 5: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/core/desk-bridge.spec.ts --include src/app/testing/fake-bridge.spec.ts)`
-Expected: PASS (2 files, 15 tests).
+Expected: PASS (2 files, 20 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -9293,6 +9488,8 @@ git commit -m "feat(web-ui): DeskBridge: /rpc with the session secret, /push wit
 
 These mirror `renderer/router.ts` (`useRoute`, `navigate`, `replaceRoute`), `renderer/store.ts` (`useStore`) and `renderer/state/global.ts` (`startGlobalSync`, `useGlobal`). The route is parsed from `location.hash` by the shared `parseRoute`, so links and deep links are the same in both UIs; `navigate` updates the signal at once rather than waiting for `hashchange`.
 
+**Deviation (review fix):** the case "navigates with a history entry and replaces without one" first checked only the second half. It now records `history.length` before `navigate()` and expects one more entry after it (and still one more after `replace()`).
+
 - [ ] **Step 1: Write the failing tests**
 
 Create `apps/web-ui/src/app/core/route.service.spec.ts`:
@@ -9316,12 +9513,13 @@ describe('RouteService', () => {
 
   it('navigates with a history entry and replaces without one', () => {
     const routes = TestBed.inject(RouteService);
+    const depth = history.length;
     routes.navigate({ name: 'attention', item: 'a1' });
+    expect(history.length).toBe(depth + 1);
     expect(window.location.hash).toBe('#/attention?item=a1');
     expect(routes.route()).toEqual({ name: 'attention', item: 'a1' });
-    const depth = history.length;
     routes.replace('#/skills/weekly-report');
-    expect(history.length).toBe(depth);
+    expect(history.length).toBe(depth + 1);
     expect(window.location.hash).toBe('#/skills/weekly-report');
     expect(routes.route()).toEqual({ name: 'skills', skill: 'weekly-report' });
   });
@@ -9554,6 +9752,8 @@ git commit -m "feat(web-ui): hash routes as a signal, ui-core stores as signals,
 
 They mirror `renderer/state/{now,lastProject,unread,media,width}.ts` and the flag in `renderer/screens/Onboarding.tsx`, with the same `localStorage` keys (the web UI has its own origin, so its values are its own). The two `inject*` helpers are the hooks' counterparts: call them in a field initializer (an injection context); they clean up with the component.
 
+**Deviation (review fix):** two fixes. (1) `markSeen` first wrote this tab's map, loaded once, over `localStorage`, so two desk web tabs erased each other's marks and a reload brought the other tab's unread dots back (the desktop has one window and never hits this). It now merges what is stored, keeping the later mark for each project, before it writes, and `Unread` follows a `storage` event on `desk.seen` the same way (the listener goes with the root injector's `DestroyRef`). (2) `injectMediaQuery` took `DestroyRef` only where `matchMedia` exists, so a call outside an injection context passed under jsdom but threw NG0203 in a browser, after adding a listener it could then never remove; `inject(DestroyRef)` is now its first line. Three spec cases cover them (6 files, 12 tests).
+
 - [ ] **Step 1: Write the failing tests**
 
 Create `apps/web-ui/src/app/core/now.service.spec.ts`:
@@ -9636,6 +9836,31 @@ describe('unread', () => {
     expect(JSON.parse(localStorage.getItem('desk.seen')!)).toEqual({ p: '2026-09-24T11:00:00.000Z' });
     expect(unread.isUnread(summary(['2026-09-24T10:00:00.000Z']))).toBe(false);
   });
+
+  it("keeps the visits other tabs stored since it loaded, the later one for each project", () => {
+    const unread = TestBed.inject(Unread);
+    localStorage.setItem('desk.seen', JSON.stringify({ a: '2026-09-24T09:00:00.000Z', p: '2026-09-24T12:00:00.000Z' }));
+    unread.markSeen('b', '2026-09-24T10:00:00.000Z');
+    unread.markSeen('p', '2026-09-24T11:00:00.000Z');
+    const all = { a: '2026-09-24T09:00:00.000Z', p: '2026-09-24T12:00:00.000Z', b: '2026-09-24T10:00:00.000Z' };
+    expect(JSON.parse(localStorage.getItem('desk.seen')!)).toEqual(all);
+    expect(unread.seen()).toEqual(all);
+  });
+
+  it("follows other tabs' visits through storage events, until it is destroyed", () => {
+    const unread = TestBed.inject(Unread);
+    unread.markSeen('p', '2026-09-24T11:00:00.000Z');
+    const before = unread.seen();
+    const stored = (value: Record<string, string>, key = 'desk.seen') => window.dispatchEvent(new StorageEvent('storage', { key, newValue: JSON.stringify(value) }));
+    stored({ p: '2026-09-24T10:00:00.000Z' });
+    stored({ q: '2026-09-24T13:00:00.000Z' }, 'desk.lastProject');
+    expect(unread.seen()).toBe(before);
+    stored({ p: '2026-09-24T12:00:00.000Z', q: '2026-09-24T13:00:00.000Z' });
+    expect(unread.seen()).toEqual({ p: '2026-09-24T12:00:00.000Z', q: '2026-09-24T13:00:00.000Z' });
+    TestBed.resetTestingModule();
+    stored({ r: '2026-09-24T14:00:00.000Z' });
+    expect(unread.seen()).toEqual({ p: '2026-09-24T12:00:00.000Z', q: '2026-09-24T13:00:00.000Z' });
+  });
 });
 ```
 
@@ -9676,6 +9901,10 @@ describe('injectMediaQuery', () => {
   it('is false where matchMedia is missing (jsdom)', async () => {
     const view = await render(Probe);
     expect(view.container.textContent).toBe('false');
+  });
+
+  it('needs an injection context, also where matchMedia is missing', () => {
+    expect(() => injectMediaQuery('(max-width: 1279px)')).toThrow(/NG0203/);
   });
 
   it('follows the query until the component goes away', async () => {
@@ -9820,18 +10049,37 @@ export class LastProject {
 Create `apps/web-ui/src/app/core/unread.ts`:
 
 ```ts
-import { Injectable, signal, type Signal } from '@angular/core';
+import { DestroyRef, Injectable, inject, signal, type Signal } from '@angular/core';
 import type { ProjectSummary } from '@desk/protocol';
 
 const KEY = 'desk.seen';
 
-function load(): Record<string, string> {
+function parse(raw: string | null): Record<string, string> {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? '{}') as unknown;
+    const v = JSON.parse(raw ?? '{}') as unknown;
     return v && typeof v === 'object' ? (v as Record<string, string>) : {};
   } catch {
     return {};
   }
+}
+
+function load(): Record<string, string> {
+  try {
+    return parse(localStorage.getItem(KEY));
+  } catch {
+    return {};
+  }
+}
+
+/** `base` with each of `more`'s marks that is later than its own; `base` itself when none is. */
+function later(base: Record<string, string>, more: Record<string, string>): Record<string, string> {
+  let out = base;
+  for (const [id, at] of Object.entries(more)) {
+    if (typeof at !== 'string' || (Object.hasOwn(out, id) && out[id]! >= at)) continue;
+    if (out === base) out = { ...base };
+    out[id] = at;
+  }
+  return out;
 }
 
 /** The latest thing that happened in a project (a report or any thread change). */
@@ -9847,17 +10095,29 @@ export function unreadIn(p: ProjectSummary, seen: Record<string, string>): boole
   return !at || last > at;
 }
 
-/** When the user last saw each project (its conversation was open). Local to this browser. */
+/**
+ * When the user last saw each project (its conversation was open). Local to this browser and shared by its tabs: marking
+ * keeps what other tabs stored (the later mark for each project), and a `storage` event brings their marks in.
+ */
 @Injectable({ providedIn: 'root' })
 export class Unread {
   private readonly value = signal<Record<string, string>>(load());
-  /** The whole last-seen map (a new object only when something is marked seen). */
+  /** The whole last-seen map (a new object only when a mark changes). */
   readonly seen: Signal<Record<string, string>> = this.value.asReadonly();
 
+  constructor() {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === KEY) this.value.update((all) => later(all, parse(e.newValue)));
+    };
+    window.addEventListener('storage', onStorage);
+    inject(DestroyRef).onDestroy(() => window.removeEventListener('storage', onStorage));
+  }
+
   markSeen(projectId: string, at: string = new Date().toISOString()): void {
-    this.value.update((all) => ({ ...all, [projectId]: at }));
+    const next = later(later(this.value(), load()), { [projectId]: at });
+    this.value.set(next);
     try {
-      localStorage.setItem(KEY, JSON.stringify(this.value()));
+      localStorage.setItem(KEY, JSON.stringify(next));
     } catch {
       // A convenience only.
     }
@@ -9904,12 +10164,14 @@ import { DestroyRef, inject, signal, type Signal } from '@angular/core';
 
 /** Whether a CSS media query matches, following changes (false where matchMedia is missing, e.g. jsdom). Injection context. */
 export function injectMediaQuery(query: string): Signal<boolean> {
+  // First, so a call outside an injection context fails here too, and before a listener that could not be removed.
+  const destroyRef = inject(DestroyRef);
   if (typeof window.matchMedia !== 'function') return signal(false).asReadonly();
   const mql = window.matchMedia(query);
   const matches = signal(mql.matches);
   const onChange = () => matches.set(mql.matches);
   mql.addEventListener('change', onChange);
-  inject(DestroyRef).onDestroy(() => mql.removeEventListener('change', onChange));
+  destroyRef.onDestroy(() => mql.removeEventListener('change', onChange));
   return matches.asReadonly();
 }
 ```
@@ -9948,7 +10210,7 @@ export function injectWidth(target: () => HTMLElement | null | undefined, fallba
 - [ ] **Step 4: Run the tests**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/core/now.service.spec.ts --include src/app/core/last-project.spec.ts --include src/app/core/unread.spec.ts --include src/app/core/onboarded.spec.ts --include src/app/core/media.spec.ts --include src/app/core/width.spec.ts)`
-Expected: PASS (6 files, 9 tests).
+Expected: PASS (6 files, 12 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -9967,14 +10229,16 @@ git commit -m "feat(web-ui): the clock, last project, unread marks, onboarding f
 - Test: `apps/web-ui/src/app/core/session.service.spec.ts` (ported from `apps/desktop/src/renderer/state/session.test.tsx`, plus the re-watch after a reconnect)
 
 **Interfaces:**
-- Consumes: the `@desk/client` reducers and state types; `StoredEvent`, `EphemeralEvent` from `@desk/protocol`; `createStore`, `Store` from `@desk/ui-core`; `DeskBridge`, `DeskCallError` (W0c.3); `fromStore` (W0c.4).
+- Consumes: the `@desk/client` reducers and state types; `GlobalState` (and `ConnectionStatus`, `initialGlobalState` in the spec) from `@desk/bff/contract`; `StoredEvent`, `EphemeralEvent` from `@desk/protocol`; `createStore`, `Store` from `@desk/ui-core`; `DeskBridge`, `DeskCallError` (W0c.3); `fromStore` (W0c.4).
 - Produces: `SessionState` (the renderer's type, unchanged), `SessionService` (`acquire(projectId)`, `release(projectId)`, `state(projectId): Signal<SessionState>`, `transcript(projectId, agentId): Signal<TranscriptState>`), `SESSION_RELEASE_DELAY` (`InjectionToken<number>`, default 30 000 ms), `injectSession(projectId: () => string): Signal<SessionState>`, `transcriptOf(events, stream, projectId, agentId)`.
 
 A port of `renderer/state/session.ts`, same logic and same reducers: the first viewer loads `projects.get`, then `broker.watch` from 0; the backfill (pushed before the watch's ack) and the overview become visible in one update; later events are batched per microtask into one store update per burst, deduplicated by id; `assistant.delta` pushes build the live stream until the agent's `assistant.message` or `run.finished` lands; the last viewer's release unwatches after the keep-warm delay. Differences, all Angular-shaped:
 - `startSessionRouting()` becomes the service's constructor (it subscribes to `desk:event`, `desk:events` and `desk:ephemeral` once, when first injected); `resetSessions()` and `setReleaseDelay()` become a fresh TestBed and the `SESSION_RELEASE_DELAY` token.
 - `useSession(projectId)` becomes `injectSession(projectId)`: an effect acquires the session for the current id and releases it on change or destroy; the returned signal follows the id.
 - `useTranscript(s, projectId, agentId)` becomes `transcript(projectId, agentId)`: a signal cached per agent that recomputes only when the event log or that agent's stream changes (the hook's `useMemo` dependencies).
-- New (spec §5): when `/push` signs in again (`DeskBridge.onReconnect`), every loaded session, warm ones included, sends `broker.watch` again from the highest event id it has received, since the new socket is a new broker sender.
+- New (spec §5): when `/push` signs in again (`DeskBridge.onReconnect`), every loaded session, warm ones included, sends `broker.watch` again from the highest event id it has received, since the new socket is a new broker sender. A rewatch that fails (deskd offline: the broker cannot register it) is sent again on the next reconnect and when `desk:global` reports the connection `live` again.
+
+**Deviation (review fix):** the plan's `rewatch()` first dropped a failure (`.catch(() => {})`). If `/push` reconnects while deskd is offline, `Broker.watch` throws `DaemonNotRunning` before it registers the watch (the new socket's sender has none, and `Broker.rewatch()` only renews registered ones), so the session stayed `ready` but got no more events until a reload. A session now remembers a failed rewatch (`watchFailed`; only the latest rewatch's outcome counts) and `retryWatch()` sends it again; `SessionService` listens on `desk:global` too and calls `retryWatch()` on every session when the connection turns `live`. Three spec cases were added: that retry, `injectSession` following an id change (the old session unwatched, the new one loaded from 0, the signal showing the new one) and a warm session (last viewer gone, release pending) rewatched on reconnect (7 tests).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -9984,6 +10248,7 @@ Create `apps/web-ui/src/app/core/session.service.spec.ts`:
 import { Component, computed, inject, input } from '@angular/core';
 import { render, screen, waitFor } from '@testing-library/angular';
 import { describe, expect, it } from 'vitest';
+import { initialGlobalState, type ConnectionStatus } from '@desk/bff/contract';
 import { agentTitle, answeringOf, waitingOn, type ProjectOverview } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import type { StoredEvent } from '@desk/protocol';
@@ -10000,7 +10265,9 @@ const overview = (): ProjectOverview => ({
   last_seq: 2,
 });
 
-const providers = (bridge: FakeDeskBridge) => [...bridge.providers, { provide: SESSION_RELEASE_DELAY, useValue: 0 }];
+const providers = (bridge: FakeDeskBridge, releaseDelay = 0) => [...bridge.providers, { provide: SESSION_RELEASE_DELAY, useValue: releaseDelay }];
+const watches = (bridge: FakeDeskBridge) => bridge.calls.filter((c) => c.channel === 'broker.watch').map((c) => c.input);
+const connection = (bridge: FakeDeskBridge, status: ConnectionStatus) => bridge.emit('desk:global', { ...initialGlobalState(), connection: { status } });
 
 /** The desktop test's Probe: status | chat kinds | lanes | threads | the agent's transcript | Desk's live text. */
 @Component({ selector: 'desk-probe', template: '<p data-testid="probe">{{ line() }}</p>' })
@@ -10071,10 +10338,98 @@ describe('project session', () => {
     events.push(ev(3, 'message.user', { text: 'Kick off' }, { agent: 'd' }));
     bridge.reconnect();
     await waitFor(() => expect(screen.getByTestId('probe').textContent?.split('|')[1]).toBe('user'));
-    expect(bridge.calls.filter((c) => c.channel === 'broker.watch').map((c) => c.input)).toEqual([
+    expect(watches(bridge)).toEqual([
       { projectId: 'p', afterSeq: 0 },
       { projectId: 'p', afterSeq: 2 },
     ]);
+  });
+
+  it('watches again when a watch after a reconnect failed: on the next reconnect, and once deskd is live again', async () => {
+    const events: StoredEvent[] = [ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' })];
+    let deskd = true;
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': ({ afterSeq }: { afterSeq: number }) => {
+        if (!deskd) throw { code: 'daemon_not_running', message: 'deskd is not running' };
+        for (const e of events) if (e.id > afterSeq) bridge.emit('desk:event', e);
+        return { ok: true };
+      },
+    });
+    await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.startsWith('ready|')).toBe(true));
+    // /push comes back while deskd is down: the broker cannot register the watch.
+    deskd = false;
+    connection(bridge, 'offline');
+    bridge.reconnect();
+    await waitFor(() => expect(watches(bridge)).toHaveLength(2));
+    bridge.reconnect();
+    await waitFor(() => expect(watches(bridge)).toHaveLength(3));
+    deskd = true;
+    events.push(ev(2, 'message.user', { text: 'Kick off' }, { agent: 'd' }));
+    connection(bridge, 'connecting');
+    await Promise.resolve();
+    expect(watches(bridge)).toHaveLength(3);
+    connection(bridge, 'live');
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.split('|')[1]).toBe('user'));
+    expect(watches(bridge)).toEqual([
+      { projectId: 'p', afterSeq: 0 },
+      { projectId: 'p', afterSeq: 1 },
+      { projectId: 'p', afterSeq: 1 },
+      { projectId: 'p', afterSeq: 1 },
+    ]);
+    // That watch held: later pushes of a live deskd watch nothing again.
+    connection(bridge, 'offline');
+    connection(bridge, 'live');
+    await Promise.resolve();
+    expect(watches(bridge)).toHaveLength(4);
+  });
+
+  it('follows the project id: releases the old session and loads the new one', async () => {
+    const qThread = { ...overview().desk!, id: 'qt', role: 'thread' as const, title: 'Q work', parent_id: 'd' };
+    const bridge = new FakeDeskBridge({
+      'projects.get': ({ id }: { id: string }) => (id === 'q' ? { ...overview(), threads: [qThread] } : overview()),
+      'broker.watch': () => ({ ok: true }),
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    const view = await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready||0|0||'));
+    view.fixture.componentRef.setInput('id', 'q');
+    // The signal follows the id: q's overview has one thread.
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready||0|1||'));
+    await waitFor(() => expect(bridge.calls.some((c) => c.channel === 'broker.unwatch')).toBe(true));
+    const calls = bridge.calls.map((c) => [c.channel, c.input]);
+    expect(calls.slice(0, 2)).toEqual([
+      ['projects.get', { id: 'p' }],
+      ['broker.watch', { projectId: 'p', afterSeq: 0 }],
+    ]);
+    expect(calls.slice(2)).toHaveLength(3);
+    expect(calls.slice(2)).toEqual(
+      expect.arrayContaining([
+        ['projects.get', { id: 'q' }],
+        ['broker.watch', { projectId: 'q', afterSeq: 0 }],
+        ['broker.unwatch', { projectId: 'p' }],
+      ]),
+    );
+  });
+
+  it('watches a warm session again when /push reconnects (its last viewer gone, the release still pending)', async () => {
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': () => {
+        bridge.emit('desk:event', ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' }));
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    const view = await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge, 60_000) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.startsWith('ready|')).toBe(true));
+    view.fixture.destroy();
+    bridge.reconnect();
+    await waitFor(() => expect(watches(bridge)).toEqual([
+      { projectId: 'p', afterSeq: 0 },
+      { projectId: 'p', afterSeq: 1 },
+    ]));
+    expect(bridge.calls.some((c) => c.channel === 'broker.unwatch')).toBe(false);
   });
 });
 
@@ -10150,6 +10505,7 @@ import {
   type TimelineState,
   type TranscriptState,
 } from '@desk/client';
+import type { GlobalState } from '@desk/bff/contract';
 import type { EphemeralEvent, StoredEvent } from '@desk/protocol';
 import { createStore, type Store } from '@desk/ui-core';
 import { DeskBridge, DeskCallError } from './desk-bridge';
@@ -10210,6 +10566,10 @@ class ProjectSession {
   /** The highest event id received: where a watch after a reconnect resumes. */
   private cursor = 0;
   private base: Pick<SessionState, 'project' | 'chat' | 'timeline' | 'messages'> | null = null;
+  /** Set while a watch after a reconnect has failed (deskd was offline): `retryWatch` tries again. */
+  private watchFailed = false;
+  /** Counts rewatches, so only the latest one's outcome sets or clears `watchFailed`. */
+  private watches = 0;
 
   constructor(
     readonly projectId: string,
@@ -10238,10 +10598,26 @@ class ProjectSession {
     clearTimeout(this.releaseTimer);
   }
 
-  /** After /push reconnects (a new broker sender), watch again from the last event this session received. */
+  /**
+   * After /push reconnects (a new broker sender), watch again from the last event this session received. The broker cannot
+   * register a watch while deskd is offline, so a failed one is remembered for `retryWatch`.
+   */
   rewatch(): void {
     if (!this.synced) return;
-    void this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: this.cursor }).catch(() => {});
+    const n = ++this.watches;
+    this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: this.cursor }).then(
+      () => {
+        if (n === this.watches) this.watchFailed = false;
+      },
+      () => {
+        if (n === this.watches) this.watchFailed = true;
+      },
+    );
+  }
+
+  /** Watches again if the last rewatch failed (called when deskd is live again). */
+  retryWatch(): void {
+    if (this.watchFailed) this.rewatch();
   }
 
   transcript(agentId: string): Signal<TranscriptState> {
@@ -10338,6 +10714,7 @@ export class SessionService {
   private readonly bridge = inject(DeskBridge);
   private readonly releaseDelayMs = inject(SESSION_RELEASE_DELAY);
   private readonly sessions = new Map<string, ProjectSession>();
+  private connection: GlobalState['connection']['status'] | null = null;
 
   constructor() {
     const offs = [
@@ -10349,6 +10726,12 @@ export class SessionService {
       this.bridge.onPush<EphemeralEvent>('desk:ephemeral', (e) => this.sessions.get(e.project_id)?.onDelta(e)),
       this.bridge.onReconnect(() => {
         for (const s of this.sessions.values()) s.rewatch();
+      }),
+      // A rewatch fails while deskd is offline; once desk:global reports deskd live again, those sessions watch again.
+      this.bridge.onPush<GlobalState>('desk:global', (g) => {
+        const was = this.connection;
+        this.connection = g.connection.status;
+        if (this.connection === 'live' && was !== 'live') for (const s of this.sessions.values()) s.retryWatch();
       }),
     ];
     inject(DestroyRef).onDestroy(() => {
@@ -10405,7 +10788,7 @@ export function injectSession(projectId: () => string): Signal<SessionState> {
 - [ ] **Step 4: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/core/session.service.spec.ts)`
-Expected: PASS (4 tests).
+Expected: PASS (7 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -13191,14 +13574,16 @@ git commit -m "feat(web-ui): the shell: sign-in page, onboarding redirect, title
 
 **Files:**
 - Create: `apps/web-ui/src/app/core/notifications.ts`
-- Modify: `apps/web-ui/src/app/app.ts`, `apps/web-ui/src/app/app.spec.ts`
+- Modify: `apps/web-ui/src/app/app.ts`, `apps/web-ui/src/app/app.spec.ts`, `apps/web-ui/src/app/core/desk-bridge.ts` (exports `notificationPermission`)
 - Test: `apps/web-ui/src/app/core/notifications.spec.ts`
 
 **Interfaces:**
-- Consumes: `WebNotice` (`{ tag; title; body; route }`, the `desk:notify` payload is `WebNotice[]`) and `NotifyPermission` from `@desk/web-server/contract`; `DeskBridge.onPush`, `DeskBridge.setNotifyPermission` (W0c.3); `RouteService.navigate` (W0c.4); `FakeDeskBridge.notifyPermissions` (W0c.3).
+- Consumes: `WebNotice` (`{ tag; title; body; route }`, the `desk:notify` payload is `WebNotice[]`) and `NotifyPermission` from `@desk/web-server/contract`; `DeskBridge.onPush`, `DeskBridge.setNotifyPermission` and the module's `notificationPermission()` (W0c.3; exported here); `RouteService.navigate` (W0c.4); `FakeDeskBridge.notifyPermissions` (W0c.3).
 - Produces: `WebNotifications` (`permission: Signal<NotifyPermission>`, `start(): () => void`, `request(): Promise<NotifyPermission>`). `App` starts it. `request()` is for a click handler: browsers only show the permission prompt from a user gesture, so the section that ports the notifications setting (System) calls it from its button; nothing in W0c asks for permission.
 
 Spec §5, the client half. desk web sends new attention items on `desk:notify` to every signed-in tab. A tab shows them only while it is in the background, as Electron skips a focused window, and tags each notification with the item id, so several tabs in the background show one notification per item. Clicking one brings the tab forward and opens the item's route (`#/attention?item=…`). desk web claims notifications from deskd only while some tab reports `granted` (`DeskBridge` sends `Notification.permission` on every sign-in), so the service reports every change: the answer to `request()`, and a change the user made in the browser's site settings, which it notices when the window regains focus.
+
+**Deviation (review fix):** the spec now stubs `window.focus` in `beforeEach` (jsdom does not implement it and printed "Not implemented: Window's focus() method") and checks that a click on a notification calls it once, so the "brings the tab forward" half of a click is tested. `notifications.ts` reads the permission with `desk-bridge.ts`'s `notificationPermission()`, which Step 3 exports, instead of its own copy `browserPermission()` with the same body.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -13253,6 +13638,8 @@ beforeEach(() => {
   FakeNotification.requestPermission.mockClear();
   vi.stubGlobal('Notification', FakeNotification);
   vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
+  // jsdom has no window.focus(); a click on a notification brings the tab forward with it.
+  vi.spyOn(window, 'focus').mockImplementation(() => {});
 });
 afterEach(() => {
   stop();
@@ -13271,6 +13658,7 @@ describe('WebNotifications', () => {
       ['Launch: approve a command', 'npm publish', 'approval:2'],
     ]);
     FakeNotification.shown[0]!.onclick?.();
+    expect(window.focus).toHaveBeenCalledTimes(1);
     expect(window.location.hash).toBe('#/attention?item=question%3A1');
     expect(FakeNotification.shown[0]!.closed).toBe(true);
   });
@@ -13367,12 +13755,8 @@ Create `apps/web-ui/src/app/core/notifications.ts`:
 ```ts
 import { Injectable, inject, signal, type Signal } from '@angular/core';
 import type { NotifyPermission, WebNotice } from '@desk/web-server/contract';
-import { DeskBridge } from './desk-bridge';
+import { DeskBridge, notificationPermission } from './desk-bridge';
 import { RouteService } from './route.service';
-
-function browserPermission(): NotifyPermission {
-  return typeof Notification === 'undefined' ? 'denied' : Notification.permission;
-}
 
 /**
  * Browser notifications for new attention (spec §5). desk web pushes `desk:notify` to every signed-in tab; a tab shows the
@@ -13383,7 +13767,7 @@ function browserPermission(): NotifyPermission {
 export class WebNotifications {
   private readonly bridge = inject(DeskBridge);
   private readonly routes = inject(RouteService);
-  private readonly value = signal<NotifyPermission>(browserPermission());
+  private readonly value = signal<NotifyPermission>(notificationPermission());
   /** What this browser allows the page: `default` until the user answers the prompt. */
   readonly permission: Signal<NotifyPermission> = this.value.asReadonly();
 
@@ -13393,7 +13777,7 @@ export class WebNotifications {
    */
   start(): () => void {
     const off = this.bridge.onPush<WebNotice[]>('desk:notify', (notices) => this.show(notices));
-    const recheck = () => this.report(browserPermission());
+    const recheck = () => this.report(notificationPermission());
     window.addEventListener('focus', recheck);
     return () => {
       off();
@@ -13416,7 +13800,7 @@ export class WebNotifications {
   }
 
   private show(notices: WebNotice[]): void {
-    if (browserPermission() !== 'granted' || document.hasFocus()) return;
+    if (notificationPermission() !== 'granted' || document.hasFocus()) return;
     for (const notice of notices) {
       const shown = new Notification(notice.title, { body: notice.body, tag: notice.tag });
       shown.onclick = () => {
@@ -13427,6 +13811,19 @@ export class WebNotifications {
     }
   }
 }
+```
+
+In `apps/web-ui/src/app/core/desk-bridge.ts`, before:
+
+```ts
+function notificationPermission(): NotifyPermission {
+```
+
+after:
+
+```ts
+/** What this browser lets the page do with notifications (`denied` where it has none); WebNotifications reads it too. */
+export function notificationPermission(): NotifyPermission {
 ```
 
 In `apps/web-ui/src/app/app.ts`, before:
@@ -13479,7 +13876,7 @@ Expected: exit 0.
 - [ ] **Step 5: Commit**
 
 ```sh
-git add apps/web-ui/src/app/core/notifications.ts apps/web-ui/src/app/core/notifications.spec.ts apps/web-ui/src/app/app.ts apps/web-ui/src/app/app.spec.ts
+git add apps/web-ui/src/app/core/notifications.ts apps/web-ui/src/app/core/notifications.spec.ts apps/web-ui/src/app/core/desk-bridge.ts apps/web-ui/src/app/app.ts apps/web-ui/src/app/app.spec.ts
 git commit -m "feat(web-ui): browser notifications for desk:notify while the tab is in the background, and the permission reported to desk web" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -13491,28 +13888,34 @@ git commit -m "feat(web-ui): browser notifications for desk:notify while the tab
 - Test: `scripts/web-dev.test.ts`
 
 **Interfaces:**
-- Consumes: `scripts/ng.mjs` (W0c.1); the web-ui `watch` configuration (W0c.2, `ng build --watch --configuration development`); `desk web [--port <n>] [--no-open] [--dev]` (W0b.13), whose `--dev` serves `apps/web-ui/dist/browser` and reloads the page through `/__dev/reload.js` after each rebuild (W0b.9).
-- Produces: the root script `web` (`node scripts/web-dev.mjs`); `scripts/web-dev.mjs` exports `webDevCommands(root, args?)` (the two commands: `{ name, args, cwd, stdio }`) and `runTogether(commands, { log? }?)` (`{ done: Promise<number>; stop(): void }`: when one process exits the others get SIGTERM, and `done` resolves with the first exit code, or 0 after `stop()`).
+- Consumes: `scripts/ng.mjs` (W0c.1) and its `isMain(url)`; the web-ui `watch` configuration (W0c.2, `ng build --watch --configuration development`); `desk web [--port <n>] [--no-open] [--dev]` (W0b.13), whose `--dev` serves `apps/web-ui/dist/browser` and reloads the page through `/__dev/reload.js` after each rebuild (W0b.9).
+- Produces: the root script `web` (`node scripts/web-dev.mjs`); `scripts/web-dev.mjs` exports `webDevCommands(root, args?)` (the two commands: `{ name, args, cwd, stdio }`), `runTogether(commands, { log? }?)` (`{ done: Promise<number>; stop(): void }`: when one process exits the others are stopped with `stopChild`, and `done` resolves with the first exit code, or 0 after `stop()`) and `stopChild(child, platform?, run?)` (SIGTERM; on Windows `taskkill /pid <pid> /T /F`, run through `run`, which defaults to `spawnSync`).
 
 Spec §9: `pnpm web` runs `ng build --watch` for `apps/web-ui` and `desk web --dev`. Both run under Node without a shell, so it works on Windows too: the build through `scripts/ng.mjs` (which picks a Node Angular accepts), `desk web` through the repo's `tsx` loader like `pnpm desk`. Extra arguments go to `desk web` (`pnpm web --port 7500 --no-open`). The build's stdin is ignored, so Enter in the terminal reaches `desk web`, which prints a new login link. Until the first build lands, `desk web` answers `/` with its 503 page naming the build command; the reload script then loads the app.
+
+**Deviation (review fix):** three fixes. (1) The entry guard is W0c.1's `isMain`, imported from `ng.mjs`: the plan's copy of `ng.mjs`'s old guard exited 0 without running anything when called through a symlinked folder. (2) On Windows `child.kill()` ends only that process, at once, so `ng.mjs`'s signal forwarding never runs and Windows does not end the Angular CLI child with its parent: when desk web stopped on its own (port taken, a crash), `pnpm web` exited and `ng build --watch` kept running. `runTogether` now stops each child with `stopChild`, which runs `taskkill /pid <pid> /T /F` on win32 (the whole tree) and sends SIGTERM elsewhere; a spec case checks the choice with a fake `run`, without running taskkill (6 tests). (3) The dev-loop smoke (Step 5, and W3b.8 Step 6, updated the same way) first edited `main.ts` as soon as the first "Application bundle generation complete" appeared, which Angular logs before it sets up its watcher, so the edit could land unseen and the rebuild count stay at 1; it now also waits for the first "Output location" (logged once the watcher exists) and one more second. Its `pgrep -f 'ng.mjs build --watch'` matched only the `ng.mjs` wrapper, so an orphaned Angular watcher would still print "build stopped"; `'build --watch --configuration development'` matches the wrapper and the Angular CLI child.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `scripts/web-dev.test.ts`:
 
 ```ts
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 type Command = { name: string; args: string[]; cwd: string; stdio?: unknown };
 type WebDev = {
   webDevCommands(root: string, args?: string[]): Command[];
   runTogether(commands: Command[], o?: { log?(line: string): void }): { done: Promise<number>; stop(): void };
+  stopChild(child: { pid?: number; kill(signal: string): void }, platform?: string, run?: (...args: unknown[]) => unknown): void;
 };
 
-const dev = (await import(new URL('./web-dev.mjs', import.meta.url).href)) as WebDev;
+const url = new URL('./web-dev.mjs', import.meta.url).href;
+const dev = (await import(url)) as WebDev;
+const { isMain } = (await import(new URL('./ng.mjs', import.meta.url).href)) as { isMain(url: string, argv1?: string): boolean };
 const root = fileURLToPath(new URL('..', import.meta.url));
 const node = (code: string, name = 'child'): Command => ({ name, args: ['-e', code], cwd: root, stdio: 'ignore' });
 
@@ -13553,6 +13956,33 @@ describe('pnpm web', () => {
     expect(await run.done).toBe(0);
     expect(lines).toEqual([]);
   });
+
+  it('stops a child with SIGTERM, and on Windows its whole tree with taskkill', () => {
+    const calls: unknown[][] = [];
+    const run = (...args: unknown[]) => calls.push(args);
+    const child = { pid: 4242, kill: vi.fn() };
+    dev.stopChild(child, 'win32', run);
+    expect(calls).toEqual([['taskkill', ['/pid', '4242', '/T', '/F'], { stdio: 'ignore', windowsHide: true }]]);
+    expect(child.kill).not.toHaveBeenCalled();
+    dev.stopChild(child, 'darwin', run);
+    dev.stopChild(child, 'linux', run);
+    // A child that never started has no tree to end.
+    dev.stopChild({ kill: child.kill }, 'win32', run);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGTERM'], ['SIGTERM']]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('starts only as the script Node runs, also through a symlinked folder', () => {
+    expect(readFileSync(fileURLToPath(url), 'utf8')).toContain('\nif (isMain(import.meta.url)) main(process.argv.slice(2));\n');
+    const dir = mkdtempSync(join(tmpdir(), 'desk-web-dev-'));
+    try {
+      symlinkSync(join(root, 'scripts'), join(dir, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+      expect(isMain(url, join(dir, 'linked', 'web-dev.mjs'))).toBe(true);
+      expect(isMain(url, join(dir, 'linked', 'ng.mjs'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 ```
 
@@ -13570,9 +14000,10 @@ Create `scripts/web-dev.mjs`:
 // `pnpm web` (spec §9): rebuilds apps/web-ui on every change (ng build --watch, development) and runs `desk web --dev`,
 // which serves apps/web-ui/dist/browser and reloads the page after each rebuild. Extra arguments go to desk web
 // (`pnpm web --port 7500 --no-open`). Ctrl-C stops both; if either stops on its own, the other is stopped too.
-import { spawn } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn, spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isMain } from './ng.mjs';
 
 /** The two processes `pnpm web` runs, as arguments to this Node (no shell, so Windows works too). */
 export function webDevCommands(root, args = []) {
@@ -13594,7 +14025,17 @@ export function webDevCommands(root, args = []) {
 }
 
 /**
- * Runs the commands with this Node until one exits, then stops the others with SIGTERM. `done` resolves once all have
+ * Stops a child and whatever it started. Elsewhere that is SIGTERM, which ng.mjs passes on to the Angular CLI. On Windows
+ * kill() ends only the child, at once, so ng.mjs could not pass anything on and `ng build --watch` would keep running:
+ * `taskkill /T /F` ends the whole tree. `run` is spawnSync (a spec passes its own).
+ */
+export function stopChild(child, platform = process.platform, run = spawnSync) {
+  if (platform === 'win32' && child.pid !== undefined) run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  else child.kill('SIGTERM');
+}
+
+/**
+ * Runs the commands with this Node until one exits, then stops the others (`stopChild`). `done` resolves once all have
  * exited: with the first exit code (1 for a signal or a spawn error), or with 0 after `stop()`.
  */
 export function runTogether(commands, o = {}) {
@@ -13603,7 +14044,7 @@ export function runTogether(commands, o = {}) {
   let first = null;
   const running = commands.map((c) => ({ c, child: spawn(process.execPath, c.args, { cwd: c.cwd, stdio: c.stdio ?? 'inherit', env: process.env }) }));
   const stopAll = () => {
-    for (const { child } of running) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    for (const { child } of running) if (child.exitCode === null && child.signalCode === null) stopChild(child);
   };
   const exits = running.map(
     ({ c, child }) =>
@@ -13638,7 +14079,7 @@ function main(args) {
   });
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) main(process.argv.slice(2));
+if (isMain(import.meta.url)) main(process.argv.slice(2));
 ```
 
 In `package.json` (root), `scripts`, before:
@@ -13657,7 +14098,7 @@ after:
 - [ ] **Step 4: Run it again**
 
 Run: `pnpm vitest run scripts/web-dev.test.ts scripts/ng.test.ts --maxWorkers=2`
-Expected: PASS (4 tests in `web-dev.test.ts`, and `ng.test.ts` unchanged).
+Expected: PASS (6 tests in `web-dev.test.ts`, and `ng.test.ts`'s 8 unchanged).
 
 - [ ] **Step 5: Smoke the dev loop**
 
@@ -13668,7 +14109,9 @@ SMOKE=$(mktemp -d)
 built() { grep -c 'Application bundle generation complete' "$SMOKE/out.log"; }
 DESK_DATA_DIR="$SMOKE" node scripts/web-dev.mjs --no-open --port 7599 > "$SMOKE/out.log" 2>&1 &
 WEB=$!
-for i in $(seq 1 240); do [ "$(built)" -ge 1 ] && grep -q 'Ctrl-C to stop' "$SMOKE/out.log" && break; sleep 0.5; done
+# "bundle generation complete" is logged before Angular's watcher exists; the first "Output location" after it.
+for i in $(seq 1 240); do [ "$(built)" -ge 1 ] && grep -q 'Output location' "$SMOKE/out.log" && grep -q 'Ctrl-C to stop' "$SMOKE/out.log" && break; sleep 0.5; done
+sleep 1
 curl -s http://127.0.0.1:7599/healthz; echo
 curl -s http://127.0.0.1:7599/ | grep -c '/__dev/reload.js'
 echo '// smoke' >> apps/web-ui/src/main.ts
@@ -13676,12 +14119,12 @@ for i in $(seq 1 120); do [ "$(built)" -ge 2 ] && break; sleep 0.5; done
 built
 git checkout -- apps/web-ui/src/main.ts
 kill $WEB; wait $WEB; echo "exit $?"
-sleep 1; pgrep -f 'ng.mjs build --watch' || echo "build stopped"
+sleep 1; pgrep -f 'build --watch --configuration development' || echo "build stopped"
 cat "$SMOKE/out.log" | head -n 20
 rm -rf "$SMOKE"
 ```
 
-Expected: `{"ok":true}`; `1` (the dev reload script is in the served `index.html`); `2` or more (the edit to `main.ts` rebuilt the app); `exit 0` (SIGTERM stops both processes, as Ctrl-C does); `build stopped`; and the log starts with `Desk is at http://127.0.0.1:7599`, a `/login?code=` link and `Press Ctrl-C to stop.`, mixed with the Angular build output. `git status --short` shows no change to `apps/web-ui/src/main.ts`.
+Expected: `{"ok":true}`; `1` (the dev reload script is in the served `index.html`); `2` or more (the edit to `main.ts` rebuilt the app); `exit 0` (SIGTERM stops both processes, as Ctrl-C does); `build stopped` (neither `ng.mjs` nor its Angular CLI child is left); and the log starts with `Desk is at http://127.0.0.1:7599`, a `/login?code=` link and `Press Ctrl-C to stop.`, mixed with the Angular build output. `git status --short` shows no change to `apps/web-ui/src/main.ts`.
 
 - [ ] **Step 6: Tell the next sessions (`CLAUDE.md`)**
 
@@ -13805,9 +14248,9 @@ Expected: PASS. It includes `scripts/ng.test.ts` and `scripts/web-dev.test.ts`, 
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false)`
-Expected: PASS: 31 spec files, 92 tests. `pnpm test` runs Step 2 and this step in that order; running them separately keeps `--maxWorkers=2` on the root suite.
+Expected: PASS: 32 spec files, 106 tests. `pnpm test` runs Step 2 and this step in that order; running them separately keeps `--maxWorkers=2` on the root suite.
 
-The files, as a checklist (all under `apps/web-ui/src`): `build-config.spec.ts`; `app/app.spec.ts` (7); `app/security.spec.ts`; `app/screen-for.spec.ts`; `app/testing/fake-bridge.spec.ts`; `app/core/`: `desk-bridge`, `route.service`, `store-signal`, `global.store`, `now.service`, `last-project`, `unread`, `onboarded`, `media`, `width`, `session.service`, `notifications`; `app/components/`: `button`, `field`, `empty-state`, `status-chip`, `code-block`, `sheet`, `confirm-dialog`, `toast`, `markdown`, `safe-markdown`, `error-boundary`, `title-bar`, `project-nav`, `connection-overlay`.
+The files, as a checklist (all under `apps/web-ui/src`): `build-config.spec.ts`; `app/app.spec.ts` (7); `app/app.config.spec.ts`; `app/security.spec.ts`; `app/screen-for.spec.ts`; `app/testing/fake-bridge.spec.ts`; `app/core/`: `desk-bridge`, `route.service`, `store-signal`, `global.store`, `now.service`, `last-project`, `unread`, `onboarded`, `media`, `width`, `session.service`, `notifications`; `app/components/`: `button`, `field`, `empty-state`, `status-chip`, `code-block`, `sheet`, `confirm-dialog`, `toast`, `markdown`, `safe-markdown`, `error-boundary`, `title-bar`, `project-nav`, `connection-overlay`.
 
 - [ ] **Step 4: The production build and its CSP checks**
 
@@ -36198,14 +36641,16 @@ Expected: the production build succeeds with no template or budget warnings; the
 
 - [ ] **Step 6: `pnpm web`, the dev loop (spec §9)**
 
-This starts one Angular watch build and one `desk web --dev` on a spare port with a throwaway data dir (no deskd there, so the page would show the offline overlay). It runs `node scripts/web-dev.mjs`, which is what `pnpm web` runs, so the `kill` reaches the script itself. The development build it writes to `apps/web-ui/dist/browser` replaces Step 5's production build, which is why this step comes after it.
+This starts one Angular watch build and one `desk web --dev` on a spare port with a throwaway data dir (no deskd there, so the page would show the offline overlay). It runs `node scripts/web-dev.mjs`, which is what `pnpm web` runs, so the `kill` reaches the script itself. The development build it writes to `apps/web-ui/dist/browser` replaces Step 5's production build, which is why this step comes after it. The first wait and the `pgrep` pattern are W0c.16's (see its review fix): the edit waits for Angular's watcher, and `pgrep` also matches the Angular CLI child.
 
 ```sh
 SMOKE=$(mktemp -d)
 built() { grep -c 'Application bundle generation complete' "$SMOKE/out.log"; }
 DESK_DATA_DIR="$SMOKE" node scripts/web-dev.mjs --no-open --port 7599 > "$SMOKE/out.log" 2>&1 &
 WEB=$!
-for i in $(seq 1 240); do [ "$(built)" -ge 1 ] && grep -q 'Ctrl-C to stop' "$SMOKE/out.log" && break; sleep 0.5; done
+# "bundle generation complete" is logged before Angular's watcher exists; the first "Output location" after it.
+for i in $(seq 1 240); do [ "$(built)" -ge 1 ] && grep -q 'Output location' "$SMOKE/out.log" && grep -q 'Ctrl-C to stop' "$SMOKE/out.log" && break; sleep 0.5; done
+sleep 1
 curl -s http://127.0.0.1:7599/healthz; echo
 curl -s http://127.0.0.1:7599/ | grep -c '/__dev/reload.js'
 echo '// smoke' >> apps/web-ui/src/main.ts
@@ -36213,7 +36658,7 @@ for i in $(seq 1 120); do [ "$(built)" -ge 2 ] && break; sleep 0.5; done
 built
 git checkout -- apps/web-ui/src/main.ts
 kill $WEB; wait $WEB; echo "exit $?"
-sleep 1; pgrep -f 'ng.mjs build --watch' || echo "build stopped"
+sleep 1; pgrep -f 'build --watch --configuration development' || echo "build stopped"
 rm -rf "$SMOKE"
 ```
 
