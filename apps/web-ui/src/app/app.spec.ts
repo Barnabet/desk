@@ -1,16 +1,18 @@
 import { TestBed } from '@angular/core/testing';
-import { render, screen, waitFor } from '@testing-library/angular';
+import { render, screen, waitFor, within } from '@testing-library/angular';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
+import { ev } from '@desk/client/testing';
 import type { AttentionItem } from '@desk/protocol';
 import { App } from './app';
 import { ErrorBoundaries, provideErrorBoundaries } from './components/error-boundary';
+import { LineDiagram } from './conversation/line-diagram';
 import { FakeDeskBridge } from './testing/fake-bridge';
 
 const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
 const go = (hash: string) => history.replaceState(null, '', hash);
 /** The element the screen boundary renders: the screen's host while healthy (inside the project frame on conversation and threads). */
-const screenHost = () => document.querySelector('main.screen [deskErrorBoundary] > *');
+const screenHost = () => document.querySelector('main.screen > [deskErrorBoundary] > *, main.screen .project-frame-body > [deskErrorBoundary] > *');
 /** A drag event as a browser sends it (jsdom has no DragEvent): `types` holds 'Files' when files are dragged. */
 function drag(type: 'dragover' | 'drop', types: string[], files: File[] = []): Event {
   const e = new Event(type, { bubbles: true, cancelable: true });
@@ -18,8 +20,12 @@ function drag(type: 'dragover' | 'drop', types: string[], files: File[] = []): E
   return e;
 }
 
-async function renderApp(bridge = new FakeDeskBridge()) {
-  const view = await render(App, { providers: [...bridge.providers, ...provideErrorBoundaries()] });
+/** App on a bridge; `rethrow: false` lets render errors reach DeskErrorHandler as they do in the browser. */
+async function renderApp(bridge = new FakeDeskBridge(), rethrow = true) {
+  const view = await render(App, {
+    providers: [...bridge.providers, ...provideErrorBoundaries()],
+    configureTestBed: (testBed) => testBed.configureTestingModule({ rethrowApplicationErrors: rethrow }),
+  });
   return { bridge, view };
 }
 
@@ -114,6 +120,8 @@ describe('App', () => {
     TestBed.inject(ErrorBoundaries).report(new Error('boom'));
     await view.fixture.whenStable();
     expect(screen.getByText('This screen hit an error')).toBeTruthy();
+    // The screen's boundary, not the line diagram's (which registers below it, with the frame).
+    expect(document.querySelector('.project-frame-body [role="alert"]')).not.toBeNull();
     bridge.emit('desk:navigate', '#/p/p2/threads');
     await view.fixture.whenStable();
     expect(screen.queryByText('This screen hit an error')).toBeNull();
@@ -121,6 +129,46 @@ describe('App', () => {
     await view.fixture.whenStable();
     expect(screen.queryByText('This screen hit an error')).toBeNull();
     expect(screenHost()).not.toBeNull();
+  });
+
+  it('keeps a line diagram that fails on every render off the whole page, and the screen comes back', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Each lane's fold delay is read while the diagram renders: a diagram that throws whenever it renders a lane.
+    vi.spyOn(LineDiagram.prototype as unknown as { delay(row: number): string }, 'delay').mockImplementation(() => {
+      throw new Error('diagram boom');
+    });
+    go('#/p/p/conversation');
+    const desk = { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', reasoning_effort: null, title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, archived_at: null, created_at: 't', updated_at: 't' };
+    const overview = { project: { id: 'p', name: 'P', goal: '', instructions: '', settings: {}, created_at: 't', updated_at: 't', archived_at: null }, desk, sources: [], plan: null, threads: [], approvals: [], last_seq: 0 };
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'broker.snapshot': () => ({ ...initialGlobalState(), connection: { status: 'live' } }),
+      'projects.get': () => overview,
+      'broker.watch': () => {
+        bridge.emit('desk:event', ev(1, 'agent.created', { role: 'thread', model: 'm', title: 'Signup checklist', brief: 'b', workspace_path: '/w/t', parent_id: 'd' }, { agent: 't' }));
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    const { view } = await renderApp(bridge, false);
+    // vi.waitFor and whenStable, not testing-library's waitFor or find*: those run fixture.detectChanges, whose render
+    // errors throw at the caller instead of reaching DeskErrorHandler as the app's own change detection does.
+    await vi.waitFor(() => expect(document.querySelector('.project-frame [role="alert"]')).not.toBeNull());
+    // The diagram renders again (a new event here, the 15 s "now" tick in the app) and throws again.
+    expect(logged).toHaveBeenCalledTimes(1);
+    bridge.emit('desk:event', ev(2, 'agent.status_changed', { status: 'running' }, { agent: 't' }));
+    await vi.waitFor(() => expect(logged).toHaveBeenCalledTimes(2));
+    await view.fixture.whenStable();
+    expect(screen.queryByText('Desk hit an error')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Places' })).toBeTruthy();
+    // The first error took the screen's boundary (the later one); the diagram's own holds the next in the diagram's place,
+    // and the screen comes back with Try again.
+    const frame = document.querySelector('.project-frame')!;
+    expect(frame.querySelector(':scope > [role="alert"]')!.textContent).toContain('diagram boom');
+    const screenError = frame.querySelector<HTMLElement>('.project-frame-body [role="alert"]')!;
+    within(screenError).getByRole('button', { name: 'Try again' }).click();
+    await view.fixture.whenStable();
+    await vi.waitFor(() => expect(screen.getByLabelText('Message Desk')).toBeTruthy());
+    expect(screen.queryByText('Desk hit an error')).toBeNull();
   });
 
   it('follows desk:global and desk:navigate', async () => {

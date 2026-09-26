@@ -43,6 +43,17 @@ describe('singleFlight', () => {
     expect(calls).toBe(2);
   });
 
+  it('is not stuck after a load that throws before it returns a promise: the next ask loads again', async () => {
+    let calls = 0;
+    const r = singleFlight(() => {
+      if (++calls === 1) throw new Error('no project');
+      return Promise.resolve();
+    });
+    await expect(r.run()).rejects.toThrow('no project');
+    await r.run();
+    expect(calls).toBe(2);
+  });
+
   it('loads nothing more once stopped, not even the pending rerun', async () => {
     const h = held();
     const r = singleFlight(h.load);

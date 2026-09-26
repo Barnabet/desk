@@ -133,7 +133,7 @@ describe('injectSkills', () => {
       },
       [],
     );
-    // Focus twice while the first list is still out: nothing new starts, and the ask waits for the list after it.
+    // A focus and a refresh while the first list is still out: nothing new starts, and the refresh waits for the list after it.
     window.dispatchEvent(new Event('focus'));
     let done = false;
     void skills.refresh().then(() => (done = true));

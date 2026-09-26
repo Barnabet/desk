@@ -22980,11 +22980,12 @@ The rest of the diff is ported elsewhere or needs nothing: the SVG colours as to
 - The lanes' fold is CSS (`@desk/ui-styles`' `conversation.css`): the template sets `transition-delay` per lane group (`[style.transition-delay]`), `--trunk-y` on the host (`'[style.--trunk-y]'`) and `inert` on the two `.line-fold-html` layers (`[attr.inert]`, so a spec reads it as an attribute).
 - A link's `--dy` (how far its pulse travels) is a custom property on the pulse (`[style.--dy]`).
 - `App` renders the frame around the screen's error boundary for the conversation and threads routes, keyed by project id (`@for … track f.id`), so switching between the two tabs keeps the frame and its diagram (the animation needs the same element). The screen template is one `ng-template` that both branches render.
-- React wraps the diagram in an `ErrorBoundary` of its own inside the frame. The web's boundaries are not told where an error came from: `ErrorBoundaries.report` hands it to the last registered boundary that is not failing (W0c.11), which would be the diagram's, so a screen's error would show in the diagram's slot. The frame has no boundary of its own; a diagram error lands in the screen's boundary, which is the web's rule for errors outside the screen (W0c.11).
+- React wraps the diagram in an `ErrorBoundary` of its own inside the frame, and so does the web. The web's boundaries are not told where an error came from: `ErrorBoundaries.report` hands it to the last registered boundary that is not failing (W0c.11). So the frame's `div deskErrorBoundary` sits in its template unconditionally, around the `@if`: it registers with the frame, before App's screen boundary (projected into the body), so a screen's error lands on the screen's boundary, never in the diagram's slot. A diagram error lands on the screen's boundary first (the later one); the diagram stays mounted and throws again (at the latest on the next 15 s `now` tick), and its own boundary takes that one, so a failing diagram never reaches the whole-page boundary ("Desk hit an error", which a reload would bring back on the same route), and the screen's "Try again" restores the screen. The `geometry` computed catches its own errors (logs them, returns null, and the frame renders no diagram).
+  - **Deviation (review fix):** as first landed (1a8c2b1) the frame had no boundary, and a diagram error went to the screen's boundary and then, on the next tick, to the whole page's. `app.spec.ts` has a case for it (a `LineDiagram` whose `delay` always throws; it waits with `vi.waitFor` and `whenStable`, since testing-library's `waitFor` and `find*` run `fixture.detectChanges`, whose render errors throw at the caller instead of reaching `DeskErrorHandler`), and `renderApp` takes `rethrow = false` for it.
 
 - [ ] **Step 1: Paste and drop files into the chat (master 68a8fb6)**
 
-`@desk/ui-core` gains `pastedName` (`files.ts`; the React `Composer.tsx` imports it from there and re-exports it), with a case in `files.test.ts`:
+`@desk/ui-core` gains `pastedName` (`files.ts`; the React `Composer.tsx` imports it from there; the re-export it first kept had no importer and went in the review fixes), with a case in `files.test.ts`:
 
 ```ts
   it("names a pasted screenshot after the moment it was pasted, and keeps a copied file's own name", () => {
@@ -23485,7 +23486,7 @@ describe('the timeline frame', () => {
   });
 ```
 
-`app.spec.ts`: `screenHost` finds the screen inside the frame too (`main.screen [deskErrorBoundary] > *`), and a case checks that one frame stays across the two tabs and goes on the others:
+`app.spec.ts`: `screenHost` finds the screen inside the frame too (`main.screen > [deskErrorBoundary] > *, main.screen .project-frame-body > [deskErrorBoundary] > *`, which skips the diagram's boundary), and a case checks that one frame stays across the two tabs and goes on the others:
 
 ```ts
   it("keeps one project frame across the conversation and threads tabs, and none on the project's other tabs", async () => {
@@ -23514,7 +23515,8 @@ Create `apps/web-ui/src/app/conversation/project-frame.ts`:
 
 ```ts
 import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, computed, inject, input, signal } from '@angular/core';
-import { lineGeometry } from '@desk/ui-core';
+import { lineGeometry, type LineGeometry } from '@desk/ui-core';
+import { ErrorBoundary } from '../components/error-boundary';
 import { PairSheet } from '../components/pair-sheet';
 import { GlobalStore } from '../core/global.store';
 import { NowService } from '../core/now.service';
@@ -23528,32 +23530,40 @@ import { LineDiagram, type StationG } from './line-diagram';
  * conversation shows Desk's line alone, so the chat gets the height; Threads shows every lane. App keeps the frame across
  * the two tabs (keyed by project), so switching folds the lanes into Desk's line or unfolds them out of it.
  *
- * React wraps the diagram in an error boundary of its own. The web's boundaries are not told where an error came from
- * (the innermost registered one takes it, W0c.11), so a boundary here would take the screen's errors too: a diagram error
- * lands in the screen's boundary instead.
+ * The diagram has an error boundary of its own, as in React, but the web's boundaries are not told where an error came
+ * from: the last registered one that is not showing an error takes it (W0c.11). This one sits in the frame's template
+ * unconditionally, so it registers with the frame, before App's screen boundary projected into the body: a screen error
+ * lands on the screen's boundary, never here. A diagram error lands there first too, since that boundary is the later one;
+ * the diagram stays up, throws again (at the latest on the next "now" tick) and this boundary takes that one, so a failing
+ * diagram never reaches the whole-page boundary, and the screen's "Try again" brings the screen back. The geometry catches
+ * its own errors: it logs them and the frame shows no diagram.
  */
 @Component({
   selector: 'div[deskProjectFrame]',
-  imports: [LineDiagram, PairSheet],
+  imports: [ErrorBoundary, LineDiagram, PairSheet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'project-frame' },
   template: `
     @let s = session();
-    @if (s.status === 'ready' && s.project) {
-      <section
-        deskLineDiagram
-        [g]="geometry()"
-        [project]="s.project"
-        [messages]="s.messages"
-        [attention]="projectAttention()"
-        [now]="now()"
-        [mode]="mode()"
-        [focus]="focus()"
-        (station)="onStation($event)"
-        (pair)="pairOf.set($event)"
-      ></section>
-    }
+    <div deskErrorBoundary>
+      <ng-template>
+        @if (s.status === 'ready' && s.project && geometry(); as g) {
+          <section
+            deskLineDiagram
+            [g]="g"
+            [project]="s.project"
+            [messages]="s.messages"
+            [attention]="projectAttention()"
+            [now]="now()"
+            [mode]="mode()"
+            [focus]="focus()"
+            (station)="onStation($event)"
+            (pair)="pairOf.set($event)"
+          ></section>
+        }
+      </ng-template>
+    </div>
     <div class="project-frame-body"><ng-content /></div>
     <!-- The pair sheet's two agents (design spec §8 item 8): local state, no route. -->
     @if (pairOf(); as pair) {
@@ -23585,9 +23595,15 @@ export class ProjectFrame {
   private readonly answeringRuns = computed(() => this.messages().answering);
   // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
   private readonly answeringIds = computed(() => new Set(Object.keys(this.answeringRuns())));
-  protected readonly geometry = computed(() =>
-    lineGeometry({ timeline: this.timeline(), threads: this.threads() ?? [], now: this.now(), width: this.width(), answering: this.answeringIds(), messages: this.messages() }),
-  );
+  /** The diagram's positions; null (no diagram) when lineGeometry throws, which it logs. */
+  protected readonly geometry = computed((): LineGeometry | null => {
+    try {
+      return lineGeometry({ timeline: this.timeline(), threads: this.threads() ?? [], now: this.now(), width: this.width(), answering: this.answeringIds(), messages: this.messages() });
+    } catch (err) {
+      console.error('Desk line diagram error', err);
+      return null;
+    }
+  });
 
   /** A Desk stop opens the chat at that point: in place on the conversation, as a new page from Threads (Back returns). */
   protected onStation(st: StationG): void {
@@ -32223,7 +32239,7 @@ describe('injectSkills', () => {
       },
       [],
     );
-    // Focus twice while the first list is still out: nothing new starts, and the ask waits for the list after it.
+    // A focus and a refresh while the first list is still out: nothing new starts, and the refresh waits for the list after it.
     window.dispatchEvent(new Event('focus'));
     let done = false;
     void skills.refresh().then(() => (done = true));
@@ -32401,7 +32417,7 @@ Expected: exit 0.
 
 **After the review and the merge of master (commits 0cdc815, 48d6ec0, 61baa04):** the code above is the file as it stands.
 - `whoLabel` names a `builtin:<name>` origin (a copy of one of Desk's built-in skills, from master's Plan 18) "Built into Desk", as the React `whoLabel` now does; the whoLabel case checks it.
-- Refreshes overlap (focus, the 30 s timer, a new project). The review's fix numbered the calls and let only the latest answer land, but a list slower than the timer then never landed at all. The follow-up (Plan 17's review follow-ups, `core/refresh.ts`) runs one list at a time: `singleFlight` marks an ask that comes in while a list runs, lists once more when that list ends, and hands the asker the promise that includes the rerun; `stop()` on destroy drops a pending rerun. React's `useSkills` has the same race; the port fixes it rather than copying it.
+- Refreshes overlap (focus, the 30 s timer, a new project). The review's fix numbered the calls and let only the latest answer land, but a list slower than the timer then never landed at all. The follow-up (Plan 17's review follow-ups, `core/refresh.ts`) runs one list at a time: `singleFlight` marks an ask that comes in while a list runs, lists once more when that list ends, and hands the asker the promise that includes the rerun; `stop()` on destroy drops a pending rerun. A `load` that throws before returning a promise settles the run at once, and `singleFlight` then leaves nothing `running`, so the next ask loads again (a review fix; `refresh.spec.ts` has the case). React's `useSkills` has the same race; the port fixes it rather than copying it.
 - The same follow-up moved `whoLabel` into `@desk/ui-core` (`skill-origin.ts`, with its case in `catalog.test.ts`); both UIs' `skills/data.ts` re-export it.
 - The spec gained four cases: the first case holds the global list behind a gate until it has checked `loading` (as W3a.2's does, instead of relying on a `Promise.all` outlasting render's `whenStable`); an overview push that leaves the project ids unchanged sends no list while `usedBy` follows the threads; the newest list wins when an older refresh answers last (since the follow-up: asks during a slow list start nothing and get one more list after it); and once the component is destroyed neither focus nor the 30 s timer lists (since the follow-up, nor a list asked for while one ran). 10 tests.
 

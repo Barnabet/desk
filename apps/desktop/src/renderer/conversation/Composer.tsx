@@ -4,9 +4,6 @@ import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { toastError } from '../components/Toast';
 
-/** `pastedName` moved to `@desk/ui-core` (both UIs name pasted files); re-exported for this module's users. */
-export { pastedName };
-
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 
 /** Uploads files to the Library and adds an "Attached: <path>" line per file to the draft, in order. */
