@@ -129,6 +129,13 @@ export const handlers = {
   'skills.versionFile': (i, c) => c.client().skills.versionFile(scope(i), i.name, i.version, i.path),
   'skills.runtimeRetry': (i, c) => c.client().catalog.retryRuntime(scope(i), i.name),
 
+  'builtins.list': (i, c) => c.client().builtins.list(i.projectId ? { projectId: i.projectId } : {}),
+  'builtins.get': (i, c) => c.client().builtins.get(i.name),
+  'builtins.file': (i, c) => c.client().builtins.file(i.name, i.path),
+  'builtins.setEnabled': (i, c) => c.client().builtins.setEnabled(i.name, i.enabled),
+  'builtins.duplicate': (i, c) => c.client().builtins.duplicate(i.name, i.projectId ? { scope: 'project', project_id: i.projectId } : { scope: 'global' }),
+  'builtins.retry': (i, c) => c.client().builtins.retryRuntime(i.name),
+
   'catalog.list': (_i, c) => c.client().catalog.list(),
   'catalog.prepare': (i, c) => c.client().catalog.prepare(i.id),
   'catalog.file': (i, c) => c.client().catalog.file(i.id, i.path),

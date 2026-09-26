@@ -1,15 +1,17 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { SkillSummary } from '@desk/client';
-import { clip, type ArtifactKind, type CatalogItem } from '@desk/protocol';
+import { clip, type ArtifactKind, type BuiltinSkillInfo, type CatalogItem } from '@desk/protocol';
 import { call } from '../bridge';
 import { GROUP_ORDER, rankPalette, type PaletteItem } from '../palette';
 import { href, navigate } from '../router';
 import { useGlobal } from '../state/global';
+import { toast, toastError } from './Toast';
 
 type Loaded = {
   skills: Array<{ key: string; name: string; scope: string; description: string; project: string | null }>;
   library: Array<{ projectId: string; project: string; path: string; title: string; kind: ArtifactKind }>;
   catalog: CatalogItem[];
+  builtins: BuiltinSkillInfo[];
 };
 const MAX_MEMORY_PROJECTS = 8;
 
@@ -57,14 +59,15 @@ export function CommandPalette() {
       Promise.all(projects.map((p) => call('skills.list', { projectId: p.id }).catch(() => [] as SkillSummary[]))),
       Promise.all(projects.map((p) => call('library.list', { projectId: p.id }).catch(() => []))),
       call('catalog.list', {}).catch(() => [] as CatalogItem[]),
-    ]).then(([global, perProject, libraries, catalog]) => {
+      call('builtins.list', {}).catch(() => [] as BuiltinSkillInfo[]),
+    ]).then(([global, perProject, libraries, catalog, builtins]) => {
       if (!live) return;
       const skills: Loaded['skills'] = global.map((s) => ({ key: `global:${s.name}`, name: s.name, scope: 'global', description: s.description, project: null }));
       perProject.forEach((list, i) => {
         for (const s of list) if (s.scope === 'project') skills.push({ key: `project:${projects[i]!.id}:${s.name}`, name: s.name, scope: 'project', description: s.description, project: projects[i]!.name });
       });
       const library = libraries.flatMap((list, i) => list.map((a) => ({ projectId: projects[i]!.id, project: projects[i]!.name, path: a.path, title: a.title, kind: a.kind })));
-      setLoaded({ skills, library, catalog });
+      setLoaded({ skills, library, catalog, builtins });
     });
     return () => {
       live = false;
@@ -116,6 +119,21 @@ export function CommandPalette() {
       const verb = global?.state === 'update_available' ? 'Update' : 'Install';
       all.push({ id: `catalog:${c.id}`, group: 'Catalog', title: `${verb} ${c.title}`, detail: c.summary, keywords: `${c.id} ${c.category}`, route: href({ name: 'catalog', review: c.id }) });
     }
+    for (const b of loaded?.builtins ?? []) {
+      if (b.broken) continue;
+      all.push({
+        id: `builtin:${b.name}`,
+        group: 'Built-in skills',
+        title: `${b.enabled ? 'Turn off' : 'Turn on'} ${b.title}`,
+        detail: b.summary,
+        keywords: `${b.name} built-in skill ${b.enabled ? 'disable off' : 'enable on'}`,
+        route: href({ name: 'skills', skill: `builtin:${b.name}` }),
+        run: async () => {
+          await call('builtins.setEnabled', { name: b.name, enabled: !b.enabled });
+          toast({ tone: 'info', message: `${b.enabled ? 'Turned off' : 'Turned on'} ${b.title}.` });
+        },
+      });
+    }
     for (const a of loaded?.library ?? [])
       all.push({ id: `lib:${a.projectId}:${a.path}`, group: 'Library', title: a.title, detail: `${a.project} · ${a.path}`, keywords: a.kind, route: href({ name: 'project', id: a.projectId, tab: 'library', file: a.path }) });
     return [...all, ...memory];
@@ -127,7 +145,8 @@ export function CommandPalette() {
   const go = (i: PaletteItem | undefined) => {
     if (!i) return;
     setOpen(false);
-    navigate(i.route);
+    if (i.run) void i.run().catch(toastError);
+    else navigate(i.route);
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {

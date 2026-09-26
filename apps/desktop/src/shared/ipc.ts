@@ -95,6 +95,13 @@ export const channels = {
   'skills.versionFile': z.object({ ...scope, name, version, path: relPath }),
   'skills.runtimeRetry': z.object({ ...scope, name }),
 
+  'builtins.list': z.object({ projectId: id.optional() }),
+  'builtins.get': z.object({ name }),
+  'builtins.file': z.object({ name, path: relPath }),
+  'builtins.setEnabled': z.object({ name, enabled: z.boolean() }),
+  'builtins.duplicate': z.object({ name, projectId: id.optional() }),
+  'builtins.retry': z.object({ name }),
+
   'catalog.list': none,
   'catalog.prepare': z.object({ id: name }),
   'catalog.file': z.object({ id: name, path: relPath }),

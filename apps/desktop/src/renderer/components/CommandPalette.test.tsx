@@ -5,6 +5,7 @@ import type { ProjectSummary } from '@desk/protocol';
 import { initialGlobalState } from '../../shared/state';
 import { globalStore } from '../state/global';
 import { installBridge } from '../test/bridge';
+import { builtin } from '../test/builtins';
 import { catalogItems, install } from '../test/catalog';
 import { CommandPalette } from './CommandPalette';
 
@@ -32,6 +33,8 @@ function setup() {
       projectId ? [{ name: 'brand-voice', scope: 'project', description: 'House tone', dir: '', version: 1 }] : [{ name: 'email-sequence', scope: 'global', description: 'Sequences', dir: '', version: 2 }],
     'library.list': () => [{ id: 'a', project_id: 'p1', path: 'emails/welcome.md', title: 'Welcome email draft', kind: 'report', origin: 'user', description: '', created_at: 't' }],
     'catalog.list': () => catalogItems({ 'pre-mortem': [install()] }),
+    'builtins.list': () => [builtin('pdf-toolkit', { title: 'PDF toolkit' }), builtin('images', { enabled: false }), builtin('archives', { broken: 'Damaged' })],
+    'builtins.setEnabled': ({ name, enabled }: { name: string; enabled: boolean }) => builtin(name, { enabled }),
     'memory.list': ({ q }: { q: string }) => (q.includes('email') ? [{ id: 'm1', project_id: 'p1', kind: 'decision', content: 'Send emails on Tuesdays', source: 'user', supersedes: null, superseded_by: null, created_at: 't' }] : []),
   });
 }
@@ -72,5 +75,18 @@ describe('CommandPalette', () => {
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'paper' } });
     fireEvent.click(await screen.findByText('Install Paper lookup'));
     expect(window.location.hash).toBe('#/skills/catalog/paper-lookup');
+  });
+
+  it('turns built-in skills off and on in place', async () => {
+    const bridge = setup();
+    render(<CommandPalette />);
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'turn' } });
+    await waitFor(() => expect(screen.getByText('Turn off PDF toolkit')).toBeTruthy());
+    expect(screen.getByText('Turn on Images')).toBeTruthy();
+    expect(screen.queryByText(/Archives/)).toBeNull();
+    fireEvent.click(screen.getByText('Turn off PDF toolkit'));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'builtins.setEnabled')?.input).toEqual({ name: 'pdf-toolkit', enabled: false }));
+    expect(window.location.hash).toBe('#/map');
   });
 });
