@@ -76,6 +76,11 @@ export class Scheduler {
     return running ? running.done : Promise.resolve();
   }
 
+  /** Resolves once the agent's running job's afterRun has returned, without stopping it (at once when nothing runs). */
+  waitFor(agentId: string): Promise<void> {
+    return this.running.get(agentId)?.done ?? Promise.resolve();
+  }
+
   /** Drops every queued job and aborts every running one with `reason`. Returns the dropped queued jobs. */
   stopAll(reason: unknown): Job[] {
     const dropped = this.queue;

@@ -13,11 +13,13 @@ import {
   type StepKind,
   type StepStatus,
 } from '@desk/protocol';
-import type { EventInput, Grant, PolicyRule } from '@desk/protocol';
+import type { EventInput, Grant, PolicyRule, RunFinishReason, StoredEvent } from '@desk/protocol';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { evaluatePolicy } from '../policy/evaluate';
 import type { SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
+import type { CreateStepAgentInput } from '../runtime/runtime';
+import type { AgentRow } from '../state/queries';
 import { newId } from '../ids';
 import { getProject } from '../state/queries';
 import { readAgentFile } from '../tools/agent-files';
@@ -28,7 +30,7 @@ import { evalExpr, parseExpr, type Expr } from './expr';
 import { ensureStepDir, logFile, prepareRunFolder, runDir, stepDir } from './folders';
 import { activeGrantRules, addGrant, deriveGrant } from './grants';
 import { isSettled, readiness, TERMINAL_STEP, type StepState } from './graph';
-import { getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
+import { getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepAgentOf, stepAgentsOf, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
 import { exprScope, matchUpstream, templateScope, timezoneOf } from './scope';
 import { nextClock } from './schedule';
 import { lastLine, parseStepOutput, runScript } from './script';
@@ -52,7 +54,36 @@ export type EngineHost = {
   /** Stores an `automation` message on Desk's stream (label `automation "<title>"`) and wakes Desk. */
   deliverToDesk(projectId: string, label: string, text: string): void;
   script: ScriptHost;
+  agent: AgentHost;
 };
+
+export type AgentHost = {
+  create(input: CreateStepAgentInput): Promise<string>;
+  get(agentId: string): AgentRow | undefined;
+  ending(agentId: string): { reason: RunFinishReason; detail: string | null } | null;
+  stop(agentId: string, reason: string): void;
+  archive(agentId: string): Promise<void>;
+  activeMs(agentId: string): number;
+  nudge(agentId: string, text: string): void;
+  nudges(agentId: string): number;
+  threadModel(projectId: string): string;
+};
+
+/** Time an agent spent in model runs: the sum of its run.started → run.finished spans, the open one up to `nowMs`. */
+export function activeMs(events: StoredEvent[], nowMs: number): number {
+  let total = 0;
+  let open: number | null = null;
+  for (const e of events) {
+    if (e.type === 'run.started') open = Date.parse(e.ts);
+    else if (e.type === 'run.finished' && open !== null) {
+      total += Date.parse(e.ts) - open;
+      open = null;
+    }
+  }
+  return open !== null ? total + Math.max(0, nowMs - open) : total;
+}
+
+const NUDGE = 'Call complete with your result, or fail_step with the reason. Nobody reads plain replies in an automation run.';
 
 export type ScriptHost = {
   /** A usable skill of the project (project → global → built-in), or null (missing, turned off or broken). */
@@ -107,6 +138,16 @@ export class AutomationEngine {
     this.register('ask', (ctx) => this.ask(ctx));
     this.register('script', (ctx) => this.scriptStep(ctx, false));
     this.onCancelStep((run, row) => this.scripts.get(`${run.id}/${row.step_id}`)?.abort());
+    this.register('agent', (ctx) => this.agentStep(ctx));
+    this.onCancelStep((_run, row) => {
+      if (row.agent_id) this.host.agent.stop(row.agent_id, 'Its automation run ended');
+    });
+    this.onRunFinished((run) => {
+      for (const a of stepAgentsOf(this.db, run.id)) {
+        if (!a.archived_at) void this.host.agent.archive(a.id).catch((e) => this.host.onError(e, `archiving step agent ${a.id}`));
+      }
+    });
+    this.onTick(() => this.agentTimeouts());
   }
 
   private get db() {
@@ -362,6 +403,73 @@ export class AutomationEngine {
     if (run.status !== 'running') throw new ConflictError(`Run ${runId} already ended (${run.status})`);
     this.cancelActive(run, `Run cancelled: ${reason}`);
     this.finish(getRun(this.db, runId)!, 'cancelled', `Cancelled: ${reason}`, reason);
+  }
+
+  /** An agent step (spec §4.2): a fresh step agent per attempt, linked to the step before it can run. */
+  private async agentStep({ run, def, step, attempt }: StepContext): Promise<void> {
+    if (step.kind !== 'agent') return;
+    for (const old of stepAgentsOf(this.db, run.id, step.id)) if (!old.archived_at) await this.host.agent.archive(old.id);
+    const automation = getAutomation(this.db, run.automation_id)!;
+    const brief = renderText(step.brief, templateScope({ db: this.db, dataDir: this.host.dataDir, run, def }));
+    const agentId = newId();
+    this.stepChanged(run, { step_id: step.id, attempt, status: 'running', agent_id: agentId });
+    await this.host.agent.create({
+      agentId,
+      projectId: run.project_id,
+      runId: run.id,
+      stepId: step.id,
+      title: step.title,
+      brief,
+      model: step.model ?? this.host.agent.threadModel(run.project_id),
+      ...(step.reasoning_effort ? { reasoningEffort: step.reasoning_effort } : {}),
+      skills: step.skills,
+      ...(step.git_source_id ? { gitSourceId: step.git_source_id } : {}),
+      automationName: automation.name,
+    });
+  }
+
+  /**
+   * After a step agent's run, when its step has not settled (complete and fail_step settle it at once): an approval
+   * leaves it waiting; a failure, a stop or the step limit fails it; a plain reply gets one nudge, then fails it.
+   */
+  onAgentEnded(agent: AgentRow): void {
+    const link = stepAgentOf(this.db, agent.id);
+    if (!link) return;
+    const { run, step: row } = link;
+    if (run.status !== 'running' || row.agent_id !== agent.id || TERMINAL_STEP.has(row.status)) return;
+    const fail = (error: string) => this.resolveStep(run.id, row.step_id, { status: 'failed', error });
+    const ending = this.host.agent.ending(agent.id);
+    switch (agent.status) {
+      case 'failed':
+        return fail(ending?.detail ?? 'The step agent failed');
+      case 'cancelled':
+        return fail('The step agent was stopped');
+      case 'idle': {
+        if (ending?.reason === 'max_steps') {
+          const step = this.definitionOf(run).steps.find((s) => s.id === row.step_id);
+          return fail(`Reached the step limit (${step?.kind === 'agent' ? (step.max_steps ?? 100) : 100}) without completing`);
+        }
+        if (this.host.agent.nudges(agent.id) === 0) return this.host.agent.nudge(agent.id, NUDGE);
+        return fail('Ended its turn twice without calling complete or fail_step');
+      }
+      default:
+        return; // waiting on an approval, queued or running: not ended
+    }
+  }
+
+  /** Agent steps past their active-time limit are stopped and fail (spec §3.1: waits and questions do not count). */
+  private agentTimeouts(): void {
+    for (const run of listRunningRuns(this.db)) {
+      const def = this.definitionOf(run);
+      for (const row of stepRuns(this.db, run.id)) {
+        const step = def.steps.find((s) => s.id === row.step_id);
+        if (step?.kind !== 'agent' || !row.agent_id || TERMINAL_STEP.has(row.status)) continue;
+        const limit = (step.timeout_min ?? 60) * 60_000;
+        if (this.host.agent.activeMs(row.agent_id) <= limit) continue;
+        this.host.agent.stop(row.agent_id, 'Timed out');
+        this.resolveStep(run.id, row.step_id, { status: 'failed', error: `Timed out after ${step.timeout_min ?? 60} minutes of work` });
+      }
+    }
   }
 
   /** The user's answer to an Ask me step (script gates: Task 13). */

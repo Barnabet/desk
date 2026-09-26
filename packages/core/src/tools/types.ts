@@ -105,7 +105,7 @@ export interface RuntimeServices {
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
   isStopping(agentId: string): boolean;
-  resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string }): Promise<void>;
+  resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string; remember?: boolean }): Promise<void>;
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void;
   /**
    * PATH entries and variables from Desk-managed skill runtimes: of one skill (`only`), or of every active skill of the

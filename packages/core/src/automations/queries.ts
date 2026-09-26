@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import type { EventOf } from '@desk/protocol';
 import type { Db } from '../db/open';
+import type { AgentRow } from '../state/queries';
 import { agents, automationRuns, automations, automationStepRuns, automationVersions, events, projects } from '../db/schema';
 
 export type AutomationRow = typeof automations.$inferSelect;
@@ -122,3 +123,12 @@ export function listTriggerSkips(db: Db, projectId: string, automationId: string
     .filter((e) => e.payload.automation_id === automationId)
     .map((e) => ({ trigger_index: e.payload.trigger_index, due_at: e.payload.due_at, reason: e.payload.reason, ts: e.ts }));
 }
+
+/** The step agents of a run (optionally of one step), oldest first. */
+export const stepAgentsOf = (db: Db, runId: string, stepId?: string): AgentRow[] =>
+  db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.automation_run_id, runId), stepId ? eq(agents.automation_step_id, stepId) : undefined))
+    .orderBy(asc(agents.created_at), asc(agents.id))
+    .all();

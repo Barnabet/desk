@@ -156,6 +156,18 @@ describe('Scheduler', () => {
     expect(s.isActive('a')).toBe(false);
     await expect(s.stopAndWait('a')).resolves.toBeUndefined();
   });
+
+  it('waitFor resolves once a running job has ended on its own, without stopping it', async () => {
+    const { s, started, after } = setup();
+    s.enqueue(job('a'));
+    await tick();
+    const waited = s.waitFor('a');
+    expect(started[0]!.signal.aborted).toBe(false);
+    started[0]!.release();
+    await waited;
+    expect(after).toEqual(['a']);
+    await expect(s.waitFor('a')).resolves.toBeUndefined();
+  });
 });
 
 describe('step agents', () => {

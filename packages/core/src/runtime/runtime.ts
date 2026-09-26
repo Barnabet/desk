@@ -9,6 +9,7 @@ import {
   MESSAGE_FOLD_TYPES,
   messageById,
   openFrom,
+  Grant,
   openTo,
   Outputs,
   sanitizeLabel,
@@ -82,18 +83,18 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { readAgentFile } from '../tools/agent-files';
 import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard } from '../tools/sandbox';
-import type { RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
+import type { PolicySubject, RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler, type Job } from './scheduler';
-import { AutomationEngine } from '../automations/engine';
-import { addGrant } from '../automations/grants';
+import { activeMs, AutomationEngine } from '../automations/engine';
+import { activeGrantRules, addGrant, deriveGrant } from '../automations/grants';
 import { Automations } from '../automations/service';
 import type { StepResult } from '../automations/engine';
 import { runDir, stepDir } from '../automations/folders';
 import { ancestors } from '../automations/graph';
-import { findAutomation, lastSucceededRun, stepAgentOf, stepRuns } from '../automations/queries';
+import { findAutomation, getAutomation, getRun, lastSucceededRun, stepAgentOf, stepRuns } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
 import { locateScript } from '../tools/skills';
 import { toolByName, toolsForRole } from './toolsets';
@@ -280,6 +281,27 @@ export class Runtime {
           const a = this.automations.require(automationId);
           this.automations.setGrants(a.id, addGrant(a.grants, grant), 'remembered');
         },
+      },
+      agent: {
+        create: (input) => this.createStepAgent(input),
+        get: (id) => getAgent(this.o.store.db, id),
+        ending: (id) => {
+          const fin = lastEvent(this.o.store.db, id, 'run.finished');
+          return fin?.type === 'run.finished' ? { reason: fin.payload.reason, detail: fin.payload.detail ?? null } : null;
+        },
+        stop: (id, reason) => {
+          const a = getAgent(this.o.store.db, id);
+          if (a && !TERMINAL.has(a.status)) this.stopAgent(id, { by: 'automation', reason });
+        },
+        archive: (id) => this.archiveStepAgent(id),
+        activeMs: (id) => this.stepActiveMs(id),
+        nudge: (id, text) => {
+          const a = this.requireAgent(id);
+          this.o.store.append({ project_id: a.project_id, agent_id: id, type: 'message.agent', payload: { from_agent_id: id, from_label: REMINDER_LABEL, kind: 'reminder', text } });
+          this.wake(id);
+        },
+        nudges: (id) => this.o.store.list({ agentId: id, types: ['message.agent'] }).filter((e) => e.type === 'message.agent' && e.payload.kind === 'reminder').length,
+        threadModel: (projectId) => getProject(this.o.store.db, projectId)?.settings.thread_model ?? DEFAULT_MODEL_ID,
       },
     });
     this.services = {
@@ -1270,11 +1292,30 @@ export class Runtime {
    * `tool.result` exists the agent's conversation ends in a call without a result, so `resolving` holds every wake.
    * A shutdown aborts the call; recover() records `interrupted` for one an unclean exit cut off.
    */
-  async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string } = {}): Promise<void> {
+  async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string; remember?: boolean } = {}): Promise<void> {
     const { store } = this.o;
     const ap = getApproval(store.db, approvalId);
     if (!ap) throw new NotFoundError(`Unknown approval: ${approvalId}`);
     if (ap.status !== 'pending') throw new ConflictError(`Approval ${approvalId} is already resolved (${ap.status})`);
+    if (opts.remember) {
+      if (decision !== 'approved') throw new ValidationError('Only an approval can be remembered');
+      const link = stepAgentOf(store.db, ap.agent_id);
+      if (!link) throw new ValidationError("Only an automation step's approval can be remembered");
+      const automation = this.automations.require(link.run.automation_id);
+      if (automation.grants_suspended) throw new ConflictError('Grants are suspended until you keep them; approve without remembering, or review the change first');
+      // Approvals store the model's raw arguments: parse them for the schema's defaults, as proposedGrants does.
+      const tool = toolByName(ap.tool);
+      let subject: PolicySubject = {};
+      try {
+        const raw: unknown = JSON.parse(ap.arguments);
+        const input = tool?.input.safeParse(raw);
+        const asker = getAgent(store.db, ap.agent_id);
+        subject = tool?.gate?.subject(input?.success ? input.data : raw, asker?.git_branch ? { gitBranch: asker.git_branch } : {}) ?? {};
+      } catch {}
+      const grant = Grant.safeParse(deriveGrant(ap.tool, subject, automation.name));
+      if (!grant.success) throw new ValidationError('This call is too long to remember as a grant; approve it without remembering');
+      this.automations.setGrants(automation.id, addGrant(automation.grants, grant.data), 'remembered');
+    }
     const by = opts.by ?? 'user';
     const base = { project_id: ap.project_id, agent_id: ap.agent_id };
     let recorded!: () => void;
@@ -1801,6 +1842,32 @@ export class Runtime {
     this.engine.resolveStep(link.run.id, step.id, result);
   }
 
+  /** A step agent's active time (its model runs), for the step timeout. */
+  stepActiveMs(agentId: string): number {
+    return activeMs(this.o.store.list({ agentId, types: ['run.started', 'run.finished'] }), Date.now());
+  }
+
+  /** Archives a step agent when its run ends: stops it if needed and removes a git worktree (its branch is kept). */
+  async archiveStepAgent(agentId: string): Promise<void> {
+    const a = this.requireAgent(agentId);
+    if (a.role !== 'step' || a.archived_at || this.archiving.has(a.id)) return;
+    this.archiving.add(a.id);
+    try {
+      // An agent whose own complete or fail_step ended the run is still finishing that turn: let it end as done or failed.
+      const link = stepAgentOf(this.o.store.db, a.id);
+      if (link?.step.agent_id === a.id && (link.step.status === 'succeeded' || link.step.status === 'failed')) await this.scheduler.waitFor(a.id);
+      if (!TERMINAL.has(this.requireAgent(a.id).status)) this.stopAgent(a.id, { by: 'automation', reason: 'Its automation run ended' });
+      await this.scheduler.stopAndWait(a.id);
+      if (a.git_source_id && a.workspace_path) {
+        const source = getSource(this.o.store.db, a.git_source_id);
+        await removeWorkspace({ path: a.workspace_path, gitSourcePath: source?.path ?? null });
+      }
+      this.o.store.append({ project_id: a.project_id, agent_id: a.id, type: 'agent.archived', payload: {} });
+    } finally {
+      this.archiving.delete(a.id);
+    }
+  }
+
   private readRoots(agent: AgentRow): string[] {
     const roots = listSources(this.o.store.db, agent.project_id).map((s) => s.path);
     const own = agent.workspace_path ? [agent.workspace_path] : [];
@@ -1991,8 +2058,15 @@ export class Runtime {
       };
     }
     const maxSteps = this.o.maxSteps ?? { desk: 60, thread: 200 };
-    const gate: RunDeps['gate'] = (tool, input, project, a) =>
-      evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) });
+    const gate: RunDeps['gate'] = (tool, input, project, a) => {
+      const opts = { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) };
+      if (a.role !== 'step') return evaluatePolicy(tool, input, project.settings.policy, opts);
+      // Automation steps: the automation's grants first, then the project policy; their approvals go to the user (spec §5.3).
+      const run = a.automation_run_id ? getRun(this.o.store.db, a.automation_run_id) : undefined;
+      const automation = run ? getAutomation(this.o.store.db, run.automation_id) : undefined;
+      const d = evaluatePolicy(tool, input, [...(automation ? activeGrantRules(automation) : []), ...project.settings.policy], opts);
+      return { ...d, delegateToDesk: false };
+    };
     await runAgent(
       {
         store: this.o.store,
@@ -2052,6 +2126,7 @@ export class Runtime {
       // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
       this.silentStops.delete(agent.id);
       this.remindWhatsUp(agent);
+      if (agent.role === 'step' && job.kind === 'run') this.engine.onAgentEnded(this.requireAgent(agent.id));
       this.wake(agent.id);
     } finally {
       // The stop point served this wake; from here on the `cancelled` event marks the stop.
