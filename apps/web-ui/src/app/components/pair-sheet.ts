@@ -1,11 +1,12 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, output } from '@angular/core';
 import { agentTitle, type MessagesState, type MessageView } from '@desk/client';
-import { clock, duration, href, pairView } from '@desk/ui-core';
+import { clock, duration, href, pairView, type PairEntry } from '@desk/ui-core';
 import { NowService } from '../core/now.service';
 import { Button } from './button';
 import { SafeMarkdown } from './safe-markdown';
 import { Sheet } from './sheet';
+import { TemplateOf, templateOf } from './template-of';
 
 /**
  * The messages between two agents (design spec §8 item 8), oldest first, each answer nested under its question with
@@ -14,13 +15,13 @@ import { Sheet } from './sheet';
  */
 @Component({
   selector: 'div[deskPairSheet]',
-  imports: [NgTemplateOutlet, Sheet, Button, SafeMarkdown],
+  imports: [NgTemplateOutlet, TemplateOf, Sheet, Button, SafeMarkdown],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: contents' },
   template: `
     <!-- One message: who wrote to whom, its text, a question's state, and where it shows in a transcript. -->
-    <ng-template #entry let-e>
+    <ng-template #entry let-e [deskTemplateOf]="entryType">
       <div class="pair-msg" [class.muted]="e.message.auto">
         <span class="pair-head">{{ head(e.message) }}</span>
         <div deskSafeMarkdown [className]="'pair-text'" [text]="e.message.text"></div>
@@ -77,6 +78,8 @@ export class PairSheet {
   private readonly now = inject(NowService).now;
   protected readonly view = computed(() => pairView(this.messages(), this.a(), this.b()));
   protected readonly clock = clock;
+  /** Types `let-e` in the entry template. */
+  protected readonly entryType = templateOf<PairEntry>();
 
   /** "Auth API → Frontend · question · 14:05"; a closure is the runtime's, written when the thread could not answer: never shown as an answer. */
   protected head(m: MessageView): string {
