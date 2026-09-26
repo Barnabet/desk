@@ -43,7 +43,6 @@ const SLOTS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 /** A number field's value, clamped; anything that is not a number counts as `min` (as SettingsFields.tsx does). */
 const clamp = (raw: string, min: number, max: number): number => Math.max(min, Math.min(max, Number(raw) || min));
-const val = (e: Event): string => (e.target as HTMLInputElement).value;
 
 /** A model change that also drops a reasoning level the new model does not take. */
 function withModel(
@@ -162,7 +161,7 @@ export class EffortSelect {
     </fieldset>
     <div class="field">
       <label [attr.for]="idPrefix() + '-rounds'">Review rounds</label>
-      <input [id]="idPrefix() + '-rounds'" class="input narrow" type="number" min="0" max="10" [value]="value().review_rounds" (input)="changed.emit({ review_rounds: clamp(val($event), 0, 10) })" />
+      <input [id]="idPrefix() + '-rounds'" class="input narrow" type="number" min="0" max="10" [value]="value().review_rounds" (input)="setNumber($event, 'review_rounds', 0, 10)" />
       <p class="field-hint">How many times Desk may send a thread's work back before accepting or escalating it.</p>
     </div>
     <div class="settings-models">
@@ -185,7 +184,7 @@ export class EffortSelect {
             (click)="changed.emit({ max_concurrent_threads: n })"
           ></button>
         }
-        <input class="input narrow" type="number" min="1" max="32" aria-label="Threads at once" [value]="value().max_concurrent_threads" (input)="changed.emit({ max_concurrent_threads: clamp(val($event), 1, 32) })" />
+        <input class="input narrow" type="number" min="1" max="32" aria-label="Threads at once" [value]="value().max_concurrent_threads" (input)="setNumber($event, 'max_concurrent_threads', 1, 32)" />
       </div>
     </div>
   `,
@@ -198,8 +197,18 @@ export class SettingsFields {
   protected readonly checkIn = CHECK_IN;
   protected readonly autonomy = AUTONOMY;
   protected readonly slots = SLOTS;
-  protected readonly clamp = clamp;
-  protected readonly val = val;
+
+  /**
+   * A number box's patch, clamped. The box then shows the clamped number even when the value does not change (11 typed
+   * in Review rounds at 10), which `[value]` alone would not write back; React's controlled input does.
+   */
+  protected setNumber(e: Event, key: 'review_rounds' | 'max_concurrent_threads', min: number, max: number): void {
+    const box = e.target as HTMLInputElement;
+    const n = clamp(box.value, min, max);
+    this.changed.emit(key === 'review_rounds' ? { review_rounds: n } : { max_concurrent_threads: n });
+    // React's rule for a number input: rewrite it unless its text already reads as that number ('05' stays).
+    if (box.value === '' || Number(box.value) !== n) box.value = String(n);
+  }
 
   protected modelOf(id: string): ModelInfo | undefined {
     return this.models()?.find((m) => m.id === id);

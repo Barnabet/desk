@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { fireEvent, render, screen } from '@testing-library/angular';
 import userEvent from '@testing-library/user-event';
 import type { ModelInfo } from '@desk/protocol';
@@ -63,6 +64,31 @@ describe('SettingsFields', () => {
     await user.click(screen.getByRole('button', { name: '3 threads at once' }));
     fireEvent.input(screen.getByLabelText('Threads at once'), { target: { value: '40' } });
     expect(patches).toEqual([{ max_concurrent_threads: 3 }, { max_concurrent_threads: 32 }]);
+  });
+
+  it('shows the clamped number in its box even when the value stays the same, as a controlled input does', async () => {
+    // A host that merges each patch back into value, as ProjectForm and the Settings screen do.
+    const value = signal<WorkingStyle>(DEFAULT_STYLE);
+    await render(`<div deskSettingsFields idPrefix="p" [value]="value()" [models]="null" (changed)="patch($event)"></div>`, {
+      imports: [SettingsFields],
+      componentProperties: { value, patch: (p: Partial<WorkingStyle>) => value.update((v) => ({ ...v, ...p })) },
+    });
+    const rounds = screen.getByLabelText('Review rounds') as HTMLInputElement;
+    fireEvent.input(rounds, { target: { value: '11' } });
+    fireEvent.input(rounds, { target: { value: '11' } });
+    expect(rounds.value).toBe('10');
+    fireEvent.input(rounds, { target: { value: '-3' } });
+    fireEvent.input(rounds, { target: { value: '' } });
+    expect(rounds.value).toBe('0');
+    const threads = screen.getByLabelText('Threads at once') as HTMLInputElement;
+    fireEvent.input(threads, { target: { value: '320' } });
+    fireEvent.input(threads, { target: { value: '320' } });
+    expect(threads.value).toBe('32');
+    expect(screen.getByText('Threads at once · 32')).toBeTruthy();
+    fireEvent.input(threads, { target: { value: '0' } });
+    fireEvent.input(threads, { target: { value: '' } });
+    expect(threads.value).toBe('1');
+    expect(value()).toMatchObject({ review_rounds: 0, max_concurrent_threads: 1 });
   });
 
   it('waits for the registry before offering models or levels', async () => {
