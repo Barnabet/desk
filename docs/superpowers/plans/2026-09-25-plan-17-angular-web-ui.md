@@ -25614,7 +25614,14 @@ import { DeskBridge, DeskCallError } from '../../core/desk-bridge';
 
 type State = { status: 'loading' } | { status: 'ready'; diff: ThreadDiff } | { status: 'none'; message: string } | { status: 'error'; message: string };
 
-const FILE_STATUS: Record<string, string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C' };
+/** Each file status's letter, in a `Map` so that no status finds an `Object.prototype` member. */
+const FILE_STATUS = new Map<string, string>([
+  ['added', 'A'],
+  ['modified', 'M'],
+  ['deleted', 'D'],
+  ['renamed', 'R'],
+  ['copied', 'C'],
+]);
 
 /** A patch line's colour: file headers, hunks, additions and deletions. */
 function lineClass(line: string): string | null {
@@ -25713,7 +25720,7 @@ export class DiffTab {
   }
 
   protected fileStatus(status: string): string {
-    return FILE_STATUS[status] ?? status;
+    return FILE_STATUS.get(status) ?? status;
   }
 }
 ```
@@ -26007,6 +26014,8 @@ Expected: PASS (5 files, 14 tests).
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
+
+**Deviation (W2a.1's review fix):** `DiffTab`'s `FILE_STATUS` is a `Map` (`FILE_STATUS.get(status) ?? status`), not the React file's object literal, following the prototype-lookup sweep of W2a.1's review. deskd's `DiffFileStatus` is an enum today, but the fallback shows any other status as it is, and with an object literal a `constructor` status would show `Object`'s source text. The React `DiffTab.tsx` stays as it is (nothing in `apps/desktop` changes in this task).
 
 - [ ] **Step 5: Commit**
 
