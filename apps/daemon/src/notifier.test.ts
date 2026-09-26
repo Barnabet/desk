@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { text } from '@desk/fake-model';
-import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '@desk/core/testing';
+import { askDef, automationHarness, createHarness, FAKE_MODEL, newRuntime, type Harness } from '@desk/core/testing';
 import { getDeskAgent } from '@desk/core';
 import { startNotifier, type Notification } from './notifier';
 
@@ -44,6 +44,38 @@ describe('notifier', () => {
     enabled = false;
     approval('a4', false);
     expect(posted).toHaveLength(5);
+    stop();
+  });
+
+  it('posts for automation questions, gates, failures, notify successes and turn-on requests', async () => {
+    const r = await automationHarness({ script: () => text('ok') });
+    h = r.h;
+    const { rt, projectId } = r;
+    const posted: Notification[] = [];
+    const stop = startNotifier({ store: h.store, enabled: () => true, suppressed: () => false, post: (n) => posted.push(n), onError: (e) => { throw e; } });
+    rt.saveSkill({ scope: 'project', projectId, name: 'x', description: 'test skill', instructions: 'Run', files: [{ path: 'scripts/x.py', content: 'print(1)' }] }, { projectId });
+    let fail = false;
+    rt.engine.register('script', ({ run, step }) => rt.engine.resolveStep(run.id, step.id, fail ? { status: 'failed', error: 'boom' } : { status: 'succeeded', route: null, outputs: {}, summary: 'All fetched' }));
+    const create = (name: string, def: object) => rt.automations.create(projectId, name, def, { origin: 'user', via: 'editor' }).automation.id;
+    const start = (id: string, test = false) => rt.engine.startRun(id, { trigger: test ? 'test' : 'manual', test, inputs: {}, by: 'user' });
+    const title = 'Desk · P';
+
+    const ask = create('ask', askDef({ title: 'Publish digest' }));
+    await start(ask);
+    const fetch = create('fetch', { title: 'Fetch', steps: [{ id: 's', title: 'S', kind: 'script', skill: 'x', script: 'x.py' }] });
+    await start(fetch); // after_run notify (default): posts the summary
+    create('quiet', { title: 'Quiet', after_run: 'silent', steps: [{ id: 's', title: 'S', kind: 'script', skill: 'x', script: 'x.py' }] });
+    await start(rt.automations.requireByName(projectId, 'quiet').id);
+    fail = true;
+    await start(fetch);
+    await start(fetch, true); // test runs never notify
+    rt.automations.requestEnable(fetch, 'desk-agent', 'Ready');
+    expect(posted).toEqual([
+      { title, body: 'Publish digest: Publish?' },
+      { title, body: 'Fetch: All fetched' },
+      { title, body: 'Fetch failed: s failed: boom' },
+      { title, body: 'Desk proposes turning on Fetch' },
+    ]);
     stop();
   });
 

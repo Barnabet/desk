@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, ne } from 'drizzle-orm';
 import type { EventOf } from '@desk/protocol';
 import type { Db } from '../db/open';
 import type { AgentRow } from '../state/queries';
@@ -170,3 +170,13 @@ export const runIdsOfProject = (db: Db, projectId: string): string[] =>
     .where(eq(automationRuns.project_id, projectId))
     .all()
     .map((r) => r.id);
+
+/** The latest ended top-level, non-test run of an automation (what its failure attention item is about). */
+export const latestFinishedRun = (db: Db, automationId: string): AutomationRunRow | undefined =>
+  db
+    .select()
+    .from(automationRuns)
+    .where(and(eq(automationRuns.automation_id, automationId), isNull(automationRuns.parent_run_id), eq(automationRuns.test, false), ne(automationRuns.status, 'running')))
+    .orderBy(desc(automationRuns.finished_at), desc(automationRuns.id))
+    .limit(1)
+    .get();

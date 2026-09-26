@@ -397,7 +397,7 @@ export class Runtime {
    */
   dismissAttention(itemId: string): void {
     const kind = itemId.split(':')[0];
-    if (kind === 'approval' || kind === 'question') throw new ConflictError(`${kind} items leave the list when they are answered`);
+    if (kind === 'approval' || kind === 'question' || kind === 'automation_ask') throw new ConflictError(`${kind} items leave the list when they are answered`);
     const item = listAttention(this.o.store.db).find((i) => i.id === itemId);
     if (!item) throw new NotFoundError(`No attention item ${itemId}`);
     this.o.store.append({ project_id: item.project_id, agent_id: null, type: 'attention.dismissed', payload: { item_id: itemId } });
