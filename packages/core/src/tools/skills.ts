@@ -56,7 +56,8 @@ export function renderSkill(d: SkillDetail, maxChars = Infinity, runtimeNote: st
   ].join('\n');
 }
 
-function locateScript(skill: SkillSummary, script: string, store: SkillStore): string {
+/** A skill's script file: `script` as given, or under scripts/ when given as a bare name. */
+export function locateScript(skill: SkillSummary, script: string, store: SkillStore): string {
   try {
     return store.filePath(skill, script);
   } catch (e) {

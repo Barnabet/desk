@@ -86,7 +86,11 @@ import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler, type Job } from './scheduler';
-import { toolsForRole } from './toolsets';
+import { Automations } from '../automations/service';
+import { findAutomation } from '../automations/queries';
+import type { ValidateContext } from '../automations/validate';
+import { locateScript } from '../tools/skills';
+import { toolByName, toolsForRole } from './toolsets';
 import { takeWake, wakeDecision, type Item, type Trigger, type WakeState } from './wake';
 
 export type RuntimeOptions = {
@@ -125,6 +129,8 @@ export type RuntimeOptions = {
   wakeBudget?: number;
   /** Lifecycle wakes (thread starts, notices to Desk) a project may have in a rolling hour before it pauses (default 150). */
   lifecycleBudget?: number;
+  /** The clock automations use (schedules, waits, deadlines); tests pass a fake one. */
+  now?: () => Date;
 };
 
 /** How long a skill run waits for a built-in skill's first-use environment before asking the agent to retry. */
@@ -172,6 +178,8 @@ export class Runtime {
   readonly attachments: AttachmentStore;
   /** What agents' commands and file tools may never touch; deskd adds its port with `guardPort`. */
   readonly guard: SandboxGuard;
+  /** Automation definitions and the user's switches (spec 2026-09-26-automations-design). */
+  readonly automations: Automations;
   private readonly proxy: ProxyGate | undefined;
   /** Bytes of images per request, by model, lowered after an endpoint refused a request as too large (until restart). */
   private readonly imageBudgets = new Map<string, number>();
@@ -219,8 +227,15 @@ export class Runtime {
     }
     this.skills = new SkillStore(o.dataDir, this.guard, this.builtins);
     this.attachments = new AttachmentStore(join(o.dataDir, 'attachments'));
+    this.automations = new Automations({
+      store: o.store,
+      validateContext: (projectId, name) => this.validateContext(projectId, name),
+      now: () => this.now(),
+      tools: toolByName,
+    });
     this.services = {
       store: o.store,
+      automations: this.automations,
       skills: this.skills,
       attachments: this.attachments,
       agentModel: (agentId, model) => {
@@ -1546,6 +1561,52 @@ export class Runtime {
   }
 
   /** Unknown models are assumed to see images; the endpoint answers for itself. */
+  private now(): Date {
+    return this.o.now?.() ?? new Date();
+  }
+
+  /** What automation validation checks against in this project: skills and their scripts, models, git sources, sibling automations. */
+  private validateContext(projectId: string, name: string): ValidateContext {
+    const db = this.o.store.db;
+    return {
+      projectId,
+      name,
+      now: this.now(),
+      skill: (n) => {
+        const s = this.skills.resolve(n, projectId);
+        if (s) {
+          if (s.error) return { ok: false, reason: `Skill ${n} is broken: ${s.error}` };
+          const hasScript = (p: string) => {
+            try {
+              locateScript(s, p, this.skills);
+              return true;
+            } catch {
+              return false;
+            }
+          };
+          return { ok: true, builtinOff: false, hasScript };
+        }
+        const b = this.builtins;
+        if (b?.entry(n) && !b.enabled(n)) {
+          return { ok: true, builtinOff: true, hasScript: (p) => existsSync(join(b.dir(n), p)) || existsSync(join(b.dir(n), 'scripts', p)) };
+        }
+        return { ok: false, reason: `Unknown skill: ${n}` };
+      },
+      model: (m, effort) => {
+        const id = m || getProject(db, projectId)?.settings.thread_model || DEFAULT_MODEL_ID;
+        if (!this.o.models.has(id)) return `Unknown model: ${id}`;
+        const levels = this.o.models.get(id).reasoning_efforts;
+        if (effort && !levels.includes(effort)) return `${id} does not take reasoning effort "${effort}"${levels.length ? ` (it takes: ${levels.join(', ')})` : ' (it takes none)'}`;
+        return null;
+      },
+      gitSource: (id) => {
+        const s = getSource(db, id);
+        return !!s && s.project_id === projectId && s.kind === 'git';
+      },
+      automation: (n) => findAutomation(db, projectId, n)?.definition ?? null,
+    };
+  }
+
   private modelSeesImages(model: string): boolean {
     return this.o.models.has(model) ? this.o.models.get(model).vision : true;
   }

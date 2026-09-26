@@ -102,7 +102,13 @@ export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agen
 export { runAgent, SHUTDOWN_REASON, type RunDeps, type RunOutcome } from './agent/run';
 export { Scheduler, type Job, type SchedulerOptions } from './runtime/scheduler';
 export { BUILTIN_RUNTIME_WAIT_MS, Runtime, type RuntimeOptions } from './runtime/runtime';
-export { deskToolsFor, threadToolsFor, toolsForRole } from './runtime/toolsets';
+export { deskToolsFor, threadToolsFor, toolByName, toolsForRole } from './runtime/toolsets';
+export * from './automations/queries';
+export * from './automations/views';
+export * from './automations/service';
+export * from './automations/validate';
+export * from './automations/schedule';
+export * from './automations/grants';
 export { gitCommitTool, gitDiffTool, gitPushTool, gitStatusTool, gitTools, openPrTool } from './tools/git';
 export { bashReadonlyTool } from './tools/bash';
 export { memorySearchTool, memoryTools, memoryWriteTool } from './tools/memory';

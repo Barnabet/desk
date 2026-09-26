@@ -54,3 +54,14 @@ export function threadToolsFor(agent: AgentRow): Tool[] {
 export function toolsForRole(agent: AgentRow): Tool[] {
   return agent.role === 'desk' ? deskToolsFor(agent) : threadToolsFor(agent);
 }
+
+let byName: Map<string, Tool> | undefined;
+
+/** Any tool of any role by name (grants derive their subject from an approval's call). */
+export function toolByName(name: string): Tool | undefined {
+  if (!byName) {
+    const row = { git_branch: 'desk/x' } as AgentRow;
+    byName = new Map([...deskToolsFor(row), ...threadToolsFor(row)].map((t) => [t.name, t]));
+  }
+  return byName.get(name);
+}

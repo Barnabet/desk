@@ -12,6 +12,7 @@ import type {
   ToolResultStatus,
 } from '@desk/protocol';
 import type { AttachmentStore } from '../attachments/store';
+import type { Automations } from '../automations/service';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import type { ServiceRow } from '../state/queries';
@@ -55,6 +56,8 @@ export interface RuntimeServices {
   readonly skills: SkillStore;
   /** Content-addressed images shown to models (`<data>/attachments`). */
   readonly attachments: AttachmentStore;
+  /** Automation definitions and switches (Desk's automation tools). */
+  readonly automations: Automations;
   /** The model a tool call runs under (`model`, else the agent's own), and whether it accepts images. */
   agentModel(agentId: string, model?: string): { id: string; vision: boolean };
   activateSkills(agentId: string, names: string[]): SkillSummary[];

@@ -37,12 +37,12 @@ export type Harness = {
   cleanup(): Promise<void>;
 };
 
-export async function createHarness(opts: { script?: Script | FakeReply[]; concurrency?: number } = {}): Promise<Harness> {
+export async function createHarness(opts: { script?: Script | FakeReply[]; concurrency?: number; now?: () => Date } = {}): Promise<Harness> {
   const fake = await startFakeModel(opts.script ?? []);
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'desk-test-')));
   const files = await realpath(await mkdtemp(join(tmpdir(), 'desk-test-files-')));
   const { db, close } = openDb(':memory:');
-  const store = new EventStore(db);
+  const store = new EventStore(db, opts.now);
   const models = new ModelRegistry([...SEED_MODELS, { ...FAKE_MODEL, concurrency: opts.concurrency ?? FAKE_MODEL.concurrency }]);
   const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 'test' }, models);
   return {
