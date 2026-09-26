@@ -255,6 +255,26 @@ describe('AttentionScreen', () => {
     ]);
   });
 
+  it('keeps the note and the pending decision when a global push rebuilds the selected item', async () => {
+    const bridge = await setup({ 'approvals.resolve': () => new Promise(() => {}) });
+    await waitFor(() => expect(window.location.hash).toBe('#/attention?item=approval%3Aa1'));
+    const insp = await screen.findByRole('article', { name: /clearance request/ });
+    const note = within(insp).getByLabelText('Note to the thread (optional)') as HTMLTextAreaElement;
+    fireEvent.input(note, { target: { value: 'Use npm test' } });
+    // Every desk:global push is fresh JSON: the selected item comes back as a new object with the same id.
+    const push = (extra: AttentionItem[]) => TestBed.inject(GlobalStore).set((s) => ({ ...s, attention: structuredClone([...items, ...extra]) }));
+    push([approval(2, 2)]);
+    await screen.findByText(/^4 items across 1 project/);
+    expect(note.value).toBe('Use npm test');
+    fireEvent.click(within(insp).getByRole('button', { name: /^Approve once/ }));
+    const approve = within(insp).getByRole('button', { name: /^Approve once/ });
+    await waitFor(() => expect(approve.getAttribute('aria-busy')).toBe('true'));
+    push([approval(2, 2), approval(3, 1)]);
+    await screen.findByText(/^5 items across 1 project/);
+    expect(approve.getAttribute('aria-busy')).toBe('true');
+    expect(bridge.calls.filter((c) => c.channel === 'approvals.resolve').map((c) => c.input)).toEqual([{ id: 'a1', decision: 'approved', note: 'Use npm test' }]);
+  });
+
   it('denies with ⌘⌫, and leaves J, K and ⌘⌫ to a text box', async () => {
     const bridge = await setup({ 'approvals.resolve': () => ({ ok: true }) });
     const insp = await screen.findByRole('article', { name: /clearance request/ });

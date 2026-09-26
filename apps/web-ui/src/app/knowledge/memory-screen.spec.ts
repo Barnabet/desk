@@ -94,6 +94,18 @@ describe('MemoryScreen', () => {
     expect(bridge.calls.find((c) => c.channel === 'memory.list')?.input).toEqual({ projectId: 'p', q: 'churn' });
   });
 
+  it('keeps a correction being typed when an unrelated event folds the entries again', async () => {
+    const bridge = await setup();
+    const fact = await screen.findByRole('listitem', { name: /Churn is 4%/ });
+    fireEvent.click(within(fact).getByRole('button', { name: 'Correct' }));
+    const box = within(fact).getByLabelText('Correct this entry') as HTMLTextAreaElement;
+    fireEvent.input(box, { target: { value: 'Churn is 3.5% monthly' } });
+    // A new entry elsewhere: memoryFromEvents rebuilds every entry object, this one included.
+    bridge.emit('desk:event', ev(7, 'memory.written', { memory_id: 'm5', kind: 'fact', content: 'Most users sign up on mobile', source: 'user' }));
+    await screen.findByRole('listitem', { name: /Most users sign up on mobile/ });
+    expect(box.value).toBe('Churn is 3.5% monthly');
+  });
+
   it("starts from the route's search, and keeps the route in step with the box", async () => {
     const bridge = await setup({ 'memory.list': () => [{ id: 'm2' }] }, 'launch');
     const box = (await screen.findByLabelText('Search memory')) as HTMLInputElement;

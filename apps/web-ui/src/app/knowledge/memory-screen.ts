@@ -67,8 +67,10 @@ export class Entry {
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
   protected readonly editing = signal(false);
-  /** The correction being typed; a fresh fold of the same entry keeps it. */
-  protected readonly draft = linkedSignal(() => this.m().content);
+  /** The entry's text: a fold rebuilds `m` on every project event, and only a new text should reach `draft`. */
+  private readonly content = computed(() => this.m().content);
+  /** The correction being typed; a fresh fold of the same entry keeps it (the source is the text, not the object). */
+  protected readonly draft = linkedSignal(() => this.content());
   protected readonly busy = signal<'save' | 'delete' | null>(null);
   protected readonly showChain = signal(false);
   protected readonly confirming = signal(false);

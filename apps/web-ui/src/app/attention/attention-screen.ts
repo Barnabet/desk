@@ -105,10 +105,15 @@ export class AttentionScreen {
     const s = this.selected();
     return s ? [s] : [];
   });
+  /**
+   * The selected item's id. Every desk:global push is fresh JSON, so `selected` is a new object with the same id each time;
+   * a linkedSignal reads its source inside its own node, so it must follow this computed, not `selected()?.id` directly.
+   */
+  private readonly selectedId = computed(() => this.selected()?.id);
   /** The note to the thread; cleared when the selection changes. */
-  protected readonly note = linkedSignal({ source: () => this.selected()?.id, computation: (): string => '' });
+  protected readonly note = linkedSignal({ source: this.selectedId, computation: (): string => '' });
   /** The decision, option, text or 'dismiss' on its way; cleared when the selection changes. */
-  protected readonly busy = linkedSignal<string | undefined, string | null>({ source: () => this.selected()?.id, computation: () => null });
+  protected readonly busy = linkedSignal<string | undefined, string | null>({ source: this.selectedId, computation: () => null });
   protected readonly answered = signal<ReadonlySet<string>>(new Set());
   protected readonly summary = computed(() => {
     const flat = this.rack().flat;
