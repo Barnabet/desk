@@ -34,7 +34,7 @@ export type Trigger = 'user' | 'queued' | 'lifecycle' | 'agent';
 export type Wake = { kind: 'none' } | { kind: 'run'; trigger: Trigger } | { kind: 'answer'; question: number; trigger: Trigger };
 
 /** Runtime notices about threads, a thread's start, and the runtime's What's up reminder to Desk. */
-export const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(['start', 'completed', 'failed', 'cancelled', 'approval', 'stalled', 'reminder']);
+export const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(['start', 'completed', 'failed', 'cancelled', 'approval', 'stalled', 'reminder', 'automation']);
 
 /** Statuses a thread answers from without reopening: the user's Ask to it gets an answer run instead of a run. */
 const ANSWERS_FROM: ReadonlySet<AgentStatus> = new Set<AgentStatus>(['idle', 'done', 'failed']);

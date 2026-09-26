@@ -106,6 +106,11 @@ export function runtimeLine(what: string, text: string): string {
  */
 export function senderOf(p: { from_agent_id: string; from_label: string }): { desk: boolean; title: string; label: string } {
   if (p.from_label === 'Desk') return { desk: true, title: 'Desk', label: 'Desk' };
+  const automation = /^automation "([\s\S]*)"$/.exec(p.from_label);
+  if (automation) {
+    const title = sanitizeLabel(automation[1]!);
+    return { desk: false, title, label: `automation "${title}"` };
+  }
   const title = sanitizeLabel(/^thread "([\s\S]*)" \([^()]*\)$/.exec(p.from_label)?.[1] ?? p.from_label);
   return { desk: false, title, label: `thread "${title}" (${p.from_agent_id})` };
 }

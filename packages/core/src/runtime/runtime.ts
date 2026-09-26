@@ -86,6 +86,7 @@ import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler, type Job } from './scheduler';
+import { AutomationEngine } from '../automations/engine';
 import { Automations } from '../automations/service';
 import { findAutomation } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
@@ -180,6 +181,8 @@ export class Runtime {
   readonly guard: SandboxGuard;
   /** Automation definitions and the user's switches (spec 2026-09-26-automations-design). */
   readonly automations: Automations;
+  /** Runs automations (spec §3). */
+  readonly engine: AutomationEngine;
   private readonly proxy: ProxyGate | undefined;
   /** Bytes of images per request, by model, lowered after an endpoint refused a request as too large (until restart). */
   private readonly imageBudgets = new Map<string, number>();
@@ -233,9 +236,18 @@ export class Runtime {
       now: () => this.now(),
       tools: toolByName,
     });
+    this.engine = new AutomationEngine({
+      store: o.store,
+      dataDir: o.dataDir,
+      guard: this.guard,
+      now: () => this.now(),
+      onError: (err, ctx) => this.reportError(err, ctx),
+      deliverToDesk: (projectId, label, text) => this.deliverToDesk(projectId, label, text),
+    });
     this.services = {
       store: o.store,
       automations: this.automations,
+      engine: this.engine,
       skills: this.skills,
       attachments: this.attachments,
       agentModel: (agentId, model) => {
@@ -342,6 +354,14 @@ export class Runtime {
     if (!desk) throw new NotFoundError(`Unknown project: ${projectId}`);
     this.requireOpenProject(projectId);
     this.sendMessage(desk.id, text);
+  }
+
+  /** An automation's message to Desk (Tell Desk, reviews, reports): kind `automation`, quoted like another agent's words. */
+  private deliverToDesk(projectId: string, label: string, text: string): void {
+    const desk = getDeskAgent(this.o.store.db, projectId);
+    if (!desk) return;
+    this.o.store.append({ project_id: projectId, agent_id: desk.id, type: 'message.agent', payload: { from_agent_id: desk.id, from_label: label, kind: 'automation', text } });
+    this.wake(desk.id);
   }
 
   async addSource(projectId: string, path: string, label?: string, agentWrite = true): Promise<string> {
