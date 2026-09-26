@@ -3,19 +3,34 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapCanvas, type CanvasSize } from './map-canvas';
 
+/** jsdom has no ResizeObserver: a spec that needs one stubs this in. */
+class FakeObserver {
+  static last: FakeObserver | undefined;
+  target: Element | undefined;
+  readonly disconnect = vi.fn();
+  constructor(readonly callback: () => void) {
+    FakeObserver.last = this;
+  }
+  observe(el: Element): void {
+    this.target = el;
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  FakeObserver.last = undefined;
 });
 
 async function setup() {
   const sizes: CanvasSize[] = [];
-  await render(`<div deskMapCanvas label="Projects map" (resized)="sizes.push($event)"><button type="button">Inside</button></div>`, {
+  const view = await render(`<div deskMapCanvas label="Projects map" (resized)="sizes.push($event)"><button type="button">Inside</button></div>`, {
     imports: [MapCanvas],
     componentProperties: { sizes },
   });
   const canvas = screen.getByRole('group', { name: 'Projects map' });
   const layer = canvas.querySelector<HTMLElement>('.map-layer')!;
-  return { canvas, layer, sizes, user: userEvent.setup() };
+  return { canvas, layer, sizes, user: userEvent.setup(), view };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -96,5 +111,26 @@ describe('MapCanvas', () => {
     await user.click(screen.getByRole('button', { name: 'Zoom in' }));
     await waitFor(() => expect(layer.style.transform).toBe('translate(-130px, -80px) scale(1.2)'));
     expect(sizes).toHaveLength(1);
+  });
+
+  it('follows its size with a ResizeObserver, reports only a change, and disconnects when destroyed', async () => {
+    vi.stubGlobal('ResizeObserver', FakeObserver);
+    const { canvas, layer, sizes, user, view } = await setup();
+    await view.fixture.whenStable();
+    const observer = FakeObserver.last!;
+    expect(observer.target).toBe(canvas);
+    expect(sizes).toEqual([]);
+    Object.defineProperty(canvas, 'clientWidth', { configurable: true, value: 1200 });
+    Object.defineProperty(canvas, 'clientHeight', { configurable: true, value: 600 });
+    observer.callback();
+    expect(sizes).toEqual([{ width: 1200, height: 600 }]);
+    // The same size again reports nothing.
+    observer.callback();
+    expect(sizes).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => expect(layer.style.transform).toBe('translate(-120px, -60px) scale(1.2)'));
+    expect(observer.disconnect).not.toHaveBeenCalled();
+    view.fixture.destroy();
+    expect(observer.disconnect).toHaveBeenCalledTimes(1);
   });
 });
