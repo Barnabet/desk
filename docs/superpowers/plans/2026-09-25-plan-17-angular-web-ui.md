@@ -26322,7 +26322,7 @@ git commit -m "feat(web-ui): a thread's route: numbered stops on a serpentine, m
 
 `Transcript.tsx` is the detail's aside. Narrative shows the numbered stops (the numbers match the route): a work stop's text, tool groups and message cards in place of the sends' tool rows; an answer run's stop with the question it answers ("Frontend asked: “…”"), its run, and the runtime's closure when it could not answer another agent; every other stop's own body. Every step shows each entry: status changes, full tool calls (arguments, output cut at 6,000 characters behind "Show all N characters", images), cards, and "Woke to answer message #N". Clicking an entry selects its stop; the selected stop scrolls into view, and the list follows new entries unless the user scrolled up. A card's counterpart opens the pair sheet without selecting the stop. The box under it steers a working thread, asks a done, failed or idle one (its secondary action reopens or resumes it after a confirm), or is off for an archived one; a send shows as "You · steering…" / "You · asking…" until its steer entry lands. The actions (Stop, Archive) are projected into the head. The React file has no test of its own (W2a.6 ports `ThreadsScreen.test.tsx`, which drives it through the screen); this spec is new.
 
-**Deviation (port conventions):** three changes from the first draft of this block, which the code below already has. (1) The list's `scroll` listener only sets `pinned`, which nothing renders, so it follows the port conventions' rule (W1b.7's `LogsSheet`): `addEventListener` in `afterNextRender`, removed through `DestroyRef`, instead of a template `(scroll)` that schedules change detection on every event. A seventh case (follows new entries at the bottom, stays where it was scrolled up to, and a scroll renders nothing) fails with the template listener (1 render) and with no listener (the list jumps to the bottom). (2) The five `ng-template`s (`summary`, `run`, `answer`, `stopBody`, `full`) type their context with `TemplateOf` (W1b.4), so strict templates narrow `e` by `kind` and check its fields. (3) `titleOf` looks the id up with `Object.hasOwn`, as W1b.9's does after W2a.1's review: the id is an agent's `thread_id` argument. No prototype member has a `title`, so the plain lookup was harmless here; this is for consistency.
+**Deviation (port conventions):** three changes from the first draft of this block, which the code below already has. (1) The list's `scroll` listener only sets `pinned`, which nothing renders, so it follows the port conventions' rule (W1b.7's `LogsSheet`): `addEventListener` in `afterNextRender`, removed through `DestroyRef`, instead of a template `(scroll)` that schedules change detection on every event. A seventh case (follows new entries at the bottom, stays where it was scrolled up to, and a scroll renders nothing) fails with the template listener (1 render) and with no listener (the list jumps to the bottom). It waits with `fixture.whenStable()` (after adding the render hook, and after the scrolls) rather than fixed 50 ms timeouts, so a loaded machine cannot make it flaky (W2a.4's review fix). (2) The five `ng-template`s (`summary`, `run`, `answer`, `stopBody`, `full`) type their context with `TemplateOf` (W1b.4), so strict templates narrow `e` by `kind` and check its fields. (3) `titleOf` looks the id up with `Object.hasOwn`, as W1b.9's does after W2a.1's review: the id is an agent's `thread_id` argument. No prototype member has a `title`, so the plain lookup was harmless here; this is for consistency.
 
 **Files:**
 - Create: `apps/web-ui/src/app/threads/transcript.ts`
@@ -26371,8 +26371,8 @@ async function mount(list: TranscriptEntry[], o: { selected?: number | null; dep
     onDepth: vi.fn(),
     onPair: vi.fn(),
   };
-  await render(TEMPLATE, { imports: [Transcript], componentProperties: props, providers: bridge.providers });
-  return { ...props, bridge, tr: screen.getByRole('complementary', { name: 'Transcript' }) };
+  const view = await render(TEMPLATE, { imports: [Transcript], componentProperties: props, providers: bridge.providers });
+  return { ...props, bridge, fixture: view.fixture, tr: screen.getByRole('complementary', { name: 'Transcript' }) };
 }
 
 describe('Transcript', () => {
@@ -26471,14 +26471,14 @@ describe('Transcript', () => {
     Object.defineProperty(list, 'clientHeight', { value: 100 });
     let renders = 0;
     afterEveryRender(() => renders++, { injector: TestBed.inject(Injector) });
-    await new Promise((res) => setTimeout(res, 50)); // adding a render hook schedules a render itself
+    await r.fixture.whenStable(); // adding a render hook schedules a render itself: let it run before counting
     renders = 0;
 
     // Plain DOM events: testing-library's fireEvent would run change detection itself.
     const scroll = () => list.dispatchEvent(new Event('scroll'));
     list.scrollTop = 200;
     for (let i = 0; i < 5; i++) scroll();
-    await new Promise((res) => setTimeout(res, 50));
+    await r.fixture.whenStable(); // a render a scroll scheduled (a template listener's) has run by now
     expect(renders).toBe(0);
     r.entries.set([brief, read('the brief'), result]);
     await waitFor(() => expect(r.tr.querySelectorAll('.tr-entry')).toHaveLength(3));

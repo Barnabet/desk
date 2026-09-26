@@ -32,8 +32,8 @@ async function mount(list: TranscriptEntry[], o: { selected?: number | null; dep
     onDepth: vi.fn(),
     onPair: vi.fn(),
   };
-  await render(TEMPLATE, { imports: [Transcript], componentProperties: props, providers: bridge.providers });
-  return { ...props, bridge, tr: screen.getByRole('complementary', { name: 'Transcript' }) };
+  const view = await render(TEMPLATE, { imports: [Transcript], componentProperties: props, providers: bridge.providers });
+  return { ...props, bridge, fixture: view.fixture, tr: screen.getByRole('complementary', { name: 'Transcript' }) };
 }
 
 describe('Transcript', () => {
@@ -132,14 +132,14 @@ describe('Transcript', () => {
     Object.defineProperty(list, 'clientHeight', { value: 100 });
     let renders = 0;
     afterEveryRender(() => renders++, { injector: TestBed.inject(Injector) });
-    await new Promise((res) => setTimeout(res, 50)); // adding a render hook schedules a render itself
+    await r.fixture.whenStable(); // adding a render hook schedules a render itself: let it run before counting
     renders = 0;
 
     // Plain DOM events: testing-library's fireEvent would run change detection itself.
     const scroll = () => list.dispatchEvent(new Event('scroll'));
     list.scrollTop = 200;
     for (let i = 0; i < 5; i++) scroll();
-    await new Promise((res) => setTimeout(res, 50));
+    await r.fixture.whenStable(); // a render a scroll scheduled (a template listener's) has run by now
     expect(renders).toBe(0);
     r.entries.set([brief, read('the brief'), result]);
     await waitFor(() => expect(r.tr.querySelectorAll('.tr-entry')).toHaveLength(3));
