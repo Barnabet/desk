@@ -1,4 +1,5 @@
 import type { AgentRow } from '../state/queries';
+import { deskAutomationTools } from '../tools/automations';
 import { bashReadonlyTool, bashTool } from '../tools/bash';
 import { deskCoordinationTools } from '../tools/desk';
 import { editFileTool, fileTools, globTool, grepTool, listDirTool, readFileTool, writeFileTool } from '../tools/fs';
@@ -30,6 +31,7 @@ export function deskToolsFor(_agent: AgentRow): Tool[] {
     ...libraryTools,
     ...skillUseTools,
     ...skillAuthoringTools,
+    ...deskAutomationTools,
     ...serviceTools,
     ...deskCoordinationTools,
   ];

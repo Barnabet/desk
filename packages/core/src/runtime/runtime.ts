@@ -95,7 +95,7 @@ import type { StepResult } from '../automations/engine';
 import { runDir, stepDir } from '../automations/folders';
 import { ancestors } from '../automations/graph';
 import { descendantRunDirs } from '../automations/scope';
-import { findAutomation, getAutomation, getRun, lastSucceededRun, listAutomations, listRunningRuns, stepAgentOf, stepRuns } from '../automations/queries';
+import { findAutomation, getAutomation, getRun, lastSucceededRun, listAutomations, listRunningRuns, runIdsOfProject, stepAgentOf, stepRuns } from '../automations/queries';
 import type { ValidateContext } from '../automations/validate';
 import { locateScript } from '../tools/skills';
 import { toolByName, toolsForRole } from './toolsets';
@@ -1906,6 +1906,8 @@ export class Runtime {
       const prev = link ? lastSucceededRun(db, link.run.automation_id) : undefined;
       if (prev && prev.id !== agent.automation_run_id) own.push(runDir(this.o.dataDir, prev.id), ...descendantRunDirs(db, this.o.dataDir, prev.id));
     }
+    // Desk reads its project's automation runs: report folders and Tell Desk attachments (spec §6.1).
+    if (agent.role === 'desk') own.push(...runIdsOfProject(this.o.store.db, agent.project_id).map((id) => runDir(this.o.dataDir, id)));
     return [...own, ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
   }
 

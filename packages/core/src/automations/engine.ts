@@ -52,7 +52,7 @@ import {
   type AutomationRunRow,
   type StepRunRow,
 } from './queries';
-import { runReport } from './report';
+import { runReport, tailOf } from './report';
 import { exprScope, matchIn, matchUpstream, stepResultDir, templateScope, timezoneOf } from './scope';
 import { dueTimes, localStamp, nextClock } from './schedule';
 import { lastLine, parseStepOutput, runScript } from './script';
@@ -167,6 +167,7 @@ export class AutomationEngine {
   /** Executor work still going (child starts, agent creation, script processes). */
   private readonly background = new Set<Promise<unknown>>();
   private readonly publishing = new Map<string, Set<Promise<void>>>();
+  private readonly watched = new Set<string>();
   private ticking: Promise<void> | null = null;
   private stopping = false;
 
@@ -352,6 +353,25 @@ export class AutomationEngine {
     }
   }
 
+  now(): Date {
+    return this.host.now();
+  }
+
+  report(runId: string): string {
+    return runReport(this.db, this.host.dataDir, runId, this.host.now());
+  }
+
+  /** A step's log (deskd's `<run>/logs/<step>.txt`) and its last `bytes`. */
+  stepLog(runId: string, stepId: string, bytes = 4000): { path: string; tail: string } {
+    const path = logFile(this.host.dataDir, runId, stepId);
+    return { path, tail: tailOf(path, bytes) };
+  }
+
+  /** Desk waits on this run (wait_for_run): its end and its waits are reported to Desk like a run Desk started. */
+  watch(runId: string): void {
+    this.watched.add(runId);
+  }
+
   /** The run at the top of a sub-automation chain. */
   rootOf(run: AutomationRunRow): AutomationRunRow {
     let r = run;
@@ -389,18 +409,19 @@ export class AutomationEngine {
   private async afterRun(run: AutomationRunRow): Promise<void> {
     await Promise.allSettled([...(this.publishing.get(run.id) ?? [])]);
     this.publishing.delete(run.id);
-    if (run.parent_run_id) return;
+    const watched = this.watched.delete(run.id);
+    if (run.parent_run_id && !watched) return;
     const def = this.definitionOf(run);
-    const byDesk = run.by.startsWith('agent:');
-    if (def.after_run !== 'desk_review' && !byDesk) return;
-    const why = byDesk ? '' : ' This automation asks you to review each run.';
-    this.host.deliverToDesk(run.project_id, `automation "${def.title}"`, `Run ${run.id} ${run.status}.${why}\n\n${runReport(this.db, this.host.dataDir, run.id, this.host.now())}`);
+    const byDesk = !run.parent_run_id && run.by.startsWith('agent:');
+    if (def.after_run !== 'desk_review' && !byDesk && !watched) return;
+    const why = byDesk || watched ? '' : ' This automation asks you to review each run.';
+    this.host.deliverToDesk(run.project_id, `automation "${def.title}"`, `Run ${run.id} ${run.status}.${why}\n\n${this.report(run.id)}`);
   }
 
   /** A step of a run Desk started now waits on the user: Desk hears it once (the report comes at the end). */
   private noticeWaiting(run: AutomationRunRow, stepId: string): void {
     const root = this.rootOf(run);
-    if (!root.by.startsWith('agent:')) return;
+    if (!root.by.startsWith('agent:') && !this.watched.has(root.id)) return;
     const def = this.definitionOf(run);
     const step = def.steps.find((s) => s.id === stepId);
     const row = getStepRun(this.db, run.id, stepId);

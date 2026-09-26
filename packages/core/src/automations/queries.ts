@@ -162,3 +162,11 @@ export function protectedRuns(db: Db, projectId: string): Set<string> {
   }
   return out;
 }
+
+export const runIdsOfProject = (db: Db, projectId: string): string[] =>
+  db
+    .select({ id: automationRuns.id })
+    .from(automationRuns)
+    .where(eq(automationRuns.project_id, projectId))
+    .all()
+    .map((r) => r.id);
