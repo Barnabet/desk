@@ -4,6 +4,7 @@ import { AttentionScreen } from './attention/attention-screen';
 import { MapScreen } from './map/map-screen';
 import { ConversationScreen } from './conversation/conversation-screen';
 import { NotYet } from './screens/not-yet';
+import { SettingsScreen } from './settings/settings-screen';
 import { MemoryScreen } from './knowledge/memory-screen';
 import { LibraryScreen } from './knowledge/library-screen';
 import { ThreadsScreen } from './threads/threads-screen';
@@ -51,7 +52,7 @@ export function screenFor(route: Route): ScreenView | null {
         case 'memory':
           return { component: MemoryScreen, inputs: { projectId: route.id, q: route.q } };
         case 'settings':
-          return notYet('Project settings');
+          return { component: SettingsScreen, inputs: { projectId: route.id } };
       }
   }
 }

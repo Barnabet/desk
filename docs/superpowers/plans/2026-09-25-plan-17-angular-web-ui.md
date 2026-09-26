@@ -28944,7 +28944,7 @@ Note: W2a.1's review fix (`fix(desktop): a nameless path saves as 'file', …`, 
 | W2b.1 | `LibraryScreen`; `#/p/<id>/library[?file=]` shows it | `library-screen.spec.ts` (`LibraryScreen.test.tsx` ported case for case, plus drop and the 25 MB refusal, and the route) |
 | W2b.2 | `MemoryScreen` and `Entry`; `#/p/<id>/memory[?q=]` shows it | `memory-screen.spec.ts` (`MemoryScreen.test.tsx` ported case for case, plus the route's search and the route); `screen-for.spec.ts` updated |
 | W2b.3 | `PolicyEditor`, `sameRules` | `policy-editor.spec.ts` (new: `PolicyEditor.tsx` has no test of its own) |
-| W2b.4 | `SettingsScreen`; `#/p/<id>/settings` shows it | `settings-screen.spec.ts` (`SettingsScreen.test.tsx` ported case for case, plus a source kept as deskd has it and a refused folder, and the route) |
+| W2b.4 | `SettingsScreen`; `#/p/<id>/settings` shows it | `settings-screen.spec.ts` (`SettingsScreen.test.tsx` ported case for case, plus a source kept as deskd has it and a refused folder, a source added through the folder browser, drafts kept across a same-value push, and the route) |
 | W2b.5 | the W2 knowledge e2e | `apps/web-ui/e2e/knowledge.e2e.test.ts` (3 tests) |
 | W2b.6 | verify: the W2 exit check | `pnpm typecheck`, root Vitest, every web-ui spec, `pnpm test:web-e2e` (built UI check, smoke, flows with W2a's threads, knowledge) |
 
@@ -30235,6 +30235,8 @@ git commit -m "feat(web-ui): PolicyEditor, the ordered policy with the risky pat
 
 A port of `SettingsScreen.tsx` (with its `useSaver`). Five cards: About this project (name, goal, standing instructions; Save when changed and named), Sources (each folder with its kind, label and path, "Agents can write here", Remove; "Add folder…" asks `app.pickFolder`, which on the web opens the W0 folder browser, and deskd checks the folder it gets), How Desk works (W0d.1's `SettingsFields` over the model registry; Save, Discard changes), Policy (`PolicyEditor`; Save policy when changed and every rule names a tool; Discard changes), and Archive (after a confirm; then the map). Drafts start from the live project and follow it when it changes underneath (after a save, or from another client). Every write shows its button busy and a toast when it fails; the saves that React confirms ("Saved.", "Policy saved.") toast the same.
 
+**Deviation (spec):** two cases beyond the plan's six, so the port covers the web's own paths. (1) "adds a folder chosen in the folder browser, and lists it with its own write switch once deskd has it": the spec renders `SettingsScreen` beside W0d.5's `FolderBrowser` the way `App` does (`@if (bridge.folderRequest(); as request)`, `(picked)="bridge.answerFolder($event)"`), with no `app.pickFolder` handler, so `FakeDeskBridge` opens a real folder request. Cancel adds nothing; choosing `code` sends `projects.addSource` with `/Users/me/code`; after deskd's `source.added` the list has two items, the new one with its `git` chip (`chip chip-run`), its label and path separated by one space (the `&ngsp;`), "Remove code" and its own "Agents can write here" box, which stays as deskd has it after a click. (2) "keeps every draft when a push rebuilds the project with the same values": a `project.updated` with the same instructions rebuilds the project and its settings as new objects; the typed goal, a check-in choice and an added policy rule survive (it fails if `liveAbout` and `liveSettings` lose their value equality, the port's Signals rule). The component matches the plan's code, plus a comment on that rule. The PolicyEditor case already types the added rule's tool and pattern with `fireEvent.input` (the port convention; React used `fireEvent.change`). 8 tests.
+
 **Files:**
 - Create: `apps/web-ui/src/app/settings/settings-screen.ts`
 - Modify: `apps/web-ui/src/app/screen-for.ts` (W0c.11)
@@ -30249,6 +30251,7 @@ A port of `SettingsScreen.tsx` (with its `useSaver`). Five cards: About this pro
 Create `apps/web-ui/src/app/settings/settings-screen.spec.ts`:
 
 ```ts
+import { Component, inject } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -30256,7 +30259,10 @@ import { initialGlobalState } from '@desk/bff/contract';
 import type { ProjectOverview } from '@desk/client';
 import { ev } from '@desk/client/testing';
 import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, type StoredEvent } from '@desk/protocol';
+import type { DirListing } from '@desk/web-server/contract';
+import { FolderBrowser } from '../components/folder-browser';
 import { ToastService } from '../components/toast';
+import { DeskBridge } from '../core/desk-bridge';
 import { SESSION_RELEASE_DELAY } from '../core/session.service';
 import { screenFor } from '../screen-for';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
@@ -30284,7 +30290,23 @@ const levels: Record<string, { reasoning_efforts: string[]; default_reasoning_ef
 };
 const models = Object.entries(levels).map(([id, l]) => ({ id, family: 'claude', context_window: 1, max_output_tokens: 1, ...l, concurrency: 1 }));
 
-async function setup(extra: FakeHandlers = {}, events: StoredEvent[] = []) {
+/** fs.listDirs over a home with one folder in it, as desk web answers it (W0b.7). */
+const HOME: DirListing = { path: '/Users/me', parent: null, dirs: [{ name: 'code', path: '/Users/me/code' }] };
+const CODE: DirListing = { path: '/Users/me/code', parent: '/Users/me', dirs: [] };
+const listDirs = (input: { path?: string }): DirListing => (input.path === '/Users/me/code' ? CODE : HOME);
+
+/** SettingsScreen with the folder browser beside it, as App shows it over every screen while app.pickFolder is open (W0d.7). */
+@Component({
+  selector: 'desk-with-folders',
+  imports: [SettingsScreen, FolderBrowser],
+  template: `<div deskSettingsScreen projectId="p"></div>
+    @if (bridge.folderRequest(); as request) {<div deskFolderBrowser [purpose]="request.purpose" (picked)="bridge.answerFolder($event)"></div>}`,
+})
+class WithFolderBrowser {
+  protected readonly bridge = inject(DeskBridge);
+}
+
+async function setup(extra: FakeHandlers = {}, events: StoredEvent[] = [], withFolders = false) {
   const bridge: FakeDeskBridge = new FakeDeskBridge({
     'projects.get': () => overview(),
     'broker.watch': () => {
@@ -30296,10 +30318,9 @@ async function setup(extra: FakeHandlers = {}, events: StoredEvent[] = []) {
     'projects.update': () => ({}),
     ...extra,
   });
-  await render(SettingsScreen, {
-    inputs: { projectId: 'p' },
-    providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' } }), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
-  });
+  const providers = [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' } }), { provide: SESSION_RELEASE_DELAY, useValue: 0 }];
+  if (withFolders) await render(WithFolderBrowser, { providers });
+  else await render(SettingsScreen, { inputs: { projectId: 'p' }, providers });
   return bridge;
 }
 
@@ -30412,6 +30433,62 @@ describe('SettingsScreen', () => {
     await waitFor(() => expect(TestBed.inject(ToastService).list().map((t) => t.message)).toEqual(['A project source cannot be your home folder: /Users/me']));
     expect(within(sources).getAllByRole('listitem')).toHaveLength(1);
     expect((within(sources).getByRole('button', { name: 'Add folder…' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('adds a folder chosen in the folder browser, and lists it with its own write switch once deskd has it', async () => {
+    const bridge = await setup({ 'fs.listDirs': listDirs, 'projects.addSource': () => ({}), 'projects.setSourceWrite': () => ({}) }, [], true);
+    const sources = await screen.findByRole('region', { name: 'Sources' });
+    const added = () => bridge.calls.filter((c) => c.channel === 'projects.addSource').map((c) => c.input);
+
+    // Cancelling the browser adds nothing.
+    fireEvent.click(within(sources).getByRole('button', { name: 'Add folder…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Choose a folder' })).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(added()).toEqual([]);
+
+    // app.pickFolder asks with purpose source; the browser opens home, then code, and chooses it.
+    fireEvent.click(within(sources).getByRole('button', { name: 'Add folder…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Choose a folder' });
+    expect(bridge.calls.filter((c) => c.channel === 'app.pickFolder').map((c) => c.input)).toEqual([{ purpose: 'source' }, { purpose: 'source' }]);
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'code' }));
+    await within(dialog).findByText('No folders here.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose this folder' }));
+    await waitFor(() => expect(added()).toEqual([{ id: 'p', source: { path: '/Users/me/code' } }]));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // The list follows deskd's event: the git source, writable by default, with its own switch.
+    expect(within(sources).getAllByRole('listitem')).toHaveLength(1);
+    bridge.emit('desk:event', ev(1, 'source.added', { source_id: 's2', path: '/Users/me/code', kind: 'git', label: 'code' }));
+    await waitFor(() => expect(within(sources).getAllByRole('listitem')).toHaveLength(2));
+    const code = within(sources).getAllByRole('listitem')[1]!;
+    expect(within(code).getByText('git').className).toBe('chip chip-run');
+    expect(within(code).getByText('/Users/me/code').className).toBe('mono small muted');
+    expect(code.querySelector('.grow')!.textContent).toBe('code /Users/me/code');
+    expect(within(code).getByRole('button', { name: 'Remove code' })).toBeTruthy();
+    const write = within(code).getByLabelText('Agents can write here') as HTMLInputElement;
+    expect(write.checked).toBe(true);
+    fireEvent.click(write);
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'projects.setSourceWrite')?.input).toEqual({ id: 'p', sourceId: 's2', agentWrite: false }));
+    expect((within(sources).getAllByLabelText('Agents can write here') as HTMLInputElement[]).map((b) => b.checked)).toEqual([true, true]);
+  });
+
+  it('keeps every draft when a push rebuilds the project with the same values', async () => {
+    const bridge = await setup();
+    const goal = (await screen.findByLabelText('Goal')) as HTMLTextAreaElement;
+    fireEvent.input(goal, { target: { value: 'File by April' } });
+    const style = screen.getByRole('region', { name: 'How Desk works' });
+    fireEvent.click(within(style).getByLabelText(/Detailed/));
+    const policy = screen.getByRole('region', { name: 'Policy' });
+    fireEvent.click(within(policy).getByRole('button', { name: 'Add rule' }));
+    // Another client saves the same instructions: the project and its settings come back as new objects with the same values.
+    // A source event after it shows when both have landed.
+    bridge.emit('desk:event', ev(1, 'project.updated', { instructions: '' }));
+    bridge.emit('desk:event', ev(2, 'source.updated', { source_id: 's1', agent_write: false }));
+    await waitFor(() => expect((screen.getByLabelText('Agents can write here') as HTMLInputElement).checked).toBe(false));
+    expect(goal.value).toBe('File by April');
+    expect((within(style).getByLabelText(/Detailed/) as HTMLInputElement).checked).toBe(true);
+    expect(within(policy).getAllByRole('listitem')).toHaveLength(DEFAULT_POLICY.length + 1);
+    expect((within(style).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('is what #/p/<id>/settings shows', () => {
@@ -30558,7 +30635,9 @@ export class SettingsScreen {
   protected readonly busy = signal<string | null>(null);
   protected readonly confirmArchive = signal(false);
 
-  // Drafts start from the live project and reset when it changes underneath (after a save, or another client).
+  // Drafts start from the live project and reset when it changes underneath (after a save, or another client). Each
+  // linkedSignal follows a computed that compares by value (React's effect dependencies), never the project object, which
+  // every event and reload rebuilds: a push with the same values keeps what is being typed (the port's Signals rule).
   private readonly liveAbout = computed<About | null>(
     () => {
       const p = this.project();
@@ -30718,7 +30797,7 @@ If Tasks W2b.1 and W2b.2 are in, that was the last `notYet(…)` line under `cas
 - [ ] **Step 5: Run it**
 
 Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/settings/settings-screen.spec.ts --include src/app/settings/policy-editor.spec.ts --include src/app/settings/settings-fields.spec.ts --include src/app/screen-for.spec.ts)`
-Expected: PASS: the 6 settings cases, the 3 policy editor cases, W0d.1's 5 `SettingsFields` cases unchanged, and `screen-for.spec.ts`.
+Expected: PASS: the 8 settings cases, the 3 policy editor cases, W0d.1's 5 `SettingsFields` cases unchanged, and `screen-for.spec.ts`.
 
 Run: `pnpm --filter @desk/web-ui typecheck`
 Expected: exit 0.
@@ -31001,7 +31080,7 @@ Expected: PASS. This section changes nothing the root suite runs (bff, ui-core w
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (12 after W2b.1's review fix), `knowledge/memory-screen.spec.ts` (5), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (6); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
+Expected: PASS, including this section's four spec files: `knowledge/library-screen.spec.ts` (12 after W2b.1's review fix), `knowledge/memory-screen.spec.ts` (6 after W2b.2's review fix), `settings/policy-editor.spec.ts` (3), `settings/settings-screen.spec.ts` (8); W0c's `screen-for.spec.ts` with its updated memory line; W0d.1's `settings/settings-fields.spec.ts` (5) unchanged; W2a's eleven files; and W0c's `security.spec.ts` (no forbidden word in the new files).
 
 - [ ] **Step 4: The production build and the whole web e2e suite**
 
