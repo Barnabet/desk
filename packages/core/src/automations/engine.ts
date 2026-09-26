@@ -1,6 +1,7 @@
 import { lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import {
+  ENGINE_TICK_MS,
   MAX_SUB_DEPTH,
   RETRY_BACKOFF_MS,
   SUMMARY_MAX,
@@ -10,6 +11,7 @@ import {
   type InputValue,
   type Outputs,
   type RunTrigger,
+  type ScheduleTrigger,
   type Step,
   type StepGate,
   type StepKind,
@@ -32,10 +34,25 @@ import { evalExpr, parseExpr, type Expr } from './expr';
 import { ensureStepDir, logFile, prepareRunFolder, runDir, stepDir } from './folders';
 import { activeGrantRules, addGrant, deriveGrant } from './grants';
 import { isSettled, readiness, TERMINAL_STEP, type StepState } from './graph';
-import { findAutomation, getAutomation, getRun, getStepRun, getVersion, listRunningRuns, stepAgentOf, stepAgentsOf, stepRuns, type AutomationRunRow, type StepRunRow } from './queries';
+import {
+  findAutomation,
+  getAutomation,
+  getRun,
+  getStepRun,
+  getVersion,
+  listEnabledAutomations,
+  listRunningRuns,
+  runningRunOf,
+  stepAgentOf,
+  stepAgentsOf,
+  stepRuns,
+  type AutomationRow,
+  type AutomationRunRow,
+  type StepRunRow,
+} from './queries';
 import { runReport } from './report';
 import { exprScope, matchIn, matchUpstream, stepResultDir, templateScope, timezoneOf } from './scope';
-import { localStamp, nextClock } from './schedule';
+import { dueTimes, localStamp, nextClock } from './schedule';
 import { lastLine, parseStepOutput, runScript } from './script';
 import { renderArgs, renderText } from './template';
 
@@ -89,6 +106,8 @@ export function activeMs(events: StoredEvent[], nowMs: number): number {
 }
 
 export const PUBLISH_MAX_FILES = 50;
+/** A due time older than this at a tick was missed (one tick interval, plus the timer's drift). */
+export const MISSED_AFTER_MS = 2 * ENGINE_TICK_MS;
 const PARENT_ENDED = 'Its parent run ended';
 const NUDGE = 'Call complete with your result, or fail_step with the reason. Nobody reads plain replies in an automation run.';
 
@@ -145,6 +164,7 @@ export class AutomationEngine {
   /** Executor work still going (child starts, agent creation, script processes). */
   private readonly background = new Set<Promise<unknown>>();
   private readonly publishing = new Map<string, Set<Promise<void>>>();
+  private ticking: Promise<void> | null = null;
 
   constructor(private readonly host: EngineHost) {
     this.register('wait', (ctx) => this.startWait(ctx));
@@ -165,6 +185,7 @@ export class AutomationEngine {
     this.register('automation', (ctx) => this.subAutomation(ctx));
     this.onStepSucceeded((ctx) => this.publishStep(ctx));
     this.onRunFinished((run) => this.track(this.afterRun(run)));
+    this.onTick((now) => this.fireSchedules(now));
     this.onRunFinished((run) => this.childFinished(run));
     this.onCancelStep((_run, row) => {
       const child = row.child_run_id ? getRun(this.db, row.child_run_id) : undefined;
@@ -217,6 +238,39 @@ export class AutomationEngine {
   /** Whether executor work is still going. */
   get busy(): boolean {
     return this.background.size > 0;
+  }
+
+  /** Due schedules of enabled automations in live projects (spec §5.1). */
+  private async fireSchedules(now: Date): Promise<void> {
+    for (const a of listEnabledAutomations(this.db)) {
+      if (getProject(this.db, a.project_id)?.archived_at) continue;
+      for (const [index, trigger] of a.definition.triggers.entries()) {
+        try {
+          await this.fireSchedule(a, index, trigger, now);
+        } catch (e) {
+          this.host.onError(e, `schedule ${index} of automation ${a.name}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * One schedule: the latest due time since its cursor starts a run, unless a run is still going (still_running) or,
+   * with catch_up skip, the time was missed while the daemon was down (missed). Either event moves the cursor.
+   */
+  private async fireSchedule(a: AutomationRow, index: number, trigger: ScheduleTrigger, now: Date): Promise<void> {
+    const cursor = a.last_due[String(index)];
+    if (!cursor) return;
+    const times = dueTimes(trigger.cron, trigger.timezone, new Date(cursor), now);
+    const latest = times.at(-1);
+    if (!latest) return;
+    const dueAt = latest.toISOString();
+    const skip = (reason: 'still_running' | 'missed'): void =>
+      void this.host.store.append({ project_id: a.project_id, agent_id: null, type: 'automation.trigger_skipped', payload: { automation_id: a.id, trigger_index: index, due_at: dueAt, reason } });
+    if (runningRunOf(this.db, a.id)) return skip('still_running');
+    if (trigger.catch_up === 'skip' && now.getTime() - latest.getTime() > MISSED_AFTER_MS) return skip('missed');
+    const caughtUp = trigger.catch_up === 'once' ? times.length - 1 : 0;
+    await this.startRun(a.id, { trigger: 'schedule', test: false, inputs: trigger.inputs ?? {}, by: 'schedule', triggerIndex: index, dueAt, ...(caughtUp ? { caughtUp } : {}) });
   }
 
   /** The run at the top of a sub-automation chain. */
@@ -742,8 +796,16 @@ export class AutomationEngine {
     }
   }
 
+  /** Deadlines, waits, retries, then the hooks (schedules, timeouts). A call made while a tick runs joins it. */
+  tick(): Promise<void> {
+    this.ticking ??= this.tickOnce().finally(() => {
+      this.ticking = null;
+    });
+    return this.ticking;
+  }
+
   /** Deadlines, waits, question expiries and retry backoffs; then the hooks (schedules, timeouts). */
-  async tick(): Promise<void> {
+  private async tickOnce(): Promise<void> {
     const now = this.host.now();
     for (const run of listRunningRuns(this.db)) {
       try {
