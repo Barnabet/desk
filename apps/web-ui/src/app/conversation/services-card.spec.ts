@@ -1,3 +1,5 @@
+import { Injector, afterEveryRender } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
 import { describe, expect, it } from 'vitest';
 import { projectFromOverview, type ProjectOverview, type ServiceRow } from '@desk/client';
@@ -108,5 +110,35 @@ describe('ServicesCard', () => {
     expect(log.querySelector('b')).toBeNull();
     expect(bridge.calls.find((c) => c.channel === 'services.logs')?.input).toEqual({ id: 's1', lines: 500 });
     expect(screen.getByRole('dialog', { name: 'web · logs' }).textContent).toContain('npm run dev');
+  });
+
+  it('follows the log while it is at the bottom, stays where it was scrolled up to, and never renders on a scroll', async () => {
+    let text = 'one';
+    await show([svc({})], { 'services.logs': () => ({ text, truncated: false }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
+    const log = await screen.findByLabelText('web log');
+    await waitFor(() => expect(log.textContent).toBe('one'));
+    // jsdom lays nothing out: a 1000 px log in a 100 px box.
+    Object.defineProperty(log, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(log, 'clientHeight', { value: 100 });
+    let renders = 0;
+    afterEveryRender(() => renders++, { injector: TestBed.inject(Injector) });
+    await new Promise((r) => setTimeout(r, 50)); // adding a render hook schedules a render itself
+    renders = 0;
+
+    // Plain DOM events: testing-library's fireEvent would run change detection itself.
+    const scroll = () => log.dispatchEvent(new Event('scroll'));
+    log.scrollTop = 200;
+    for (let i = 0; i < 5; i++) scroll();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(renders).toBe(0);
+    text = 'one\ntwo';
+    await waitFor(() => expect(log.textContent).toBe('one\ntwo'), { timeout: 2000 });
+    expect(log.scrollTop).toBe(200);
+
+    log.scrollTop = 880;
+    scroll();
+    text = 'one\ntwo\nthree';
+    await waitFor(() => expect(log.scrollTop).toBe(1000), { timeout: 2000 });
   });
 });

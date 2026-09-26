@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, afterRenderEffect, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewEncapsulation, afterNextRender, afterRenderEffect, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import type { ProjectState, ServiceRow } from '@desk/client';
 import { ago, duration } from '@desk/ui-core';
 import { Button } from '../components/button';
@@ -60,7 +60,7 @@ const port = (url: string | null) => {
       @if (error()) {
         <p class="field-error">{{ error() }}</p>
       }
-      <pre class="service-log" #pre [attr.aria-label]="service().name + ' log'" (scroll)="onScroll(pre)">{{ text() === null ? 'Loading…' : text() || '(no output yet)' }}</pre>
+      <pre class="service-log" #pre [attr.aria-label]="service().name + ' log'">{{ text() === null ? 'Loading…' : text() || '(no output yet)' }}</pre>
       <div class="sheet-footer"><button deskButton (click)="close.emit()">Close</button></div>
     </div>
   `,
@@ -72,6 +72,7 @@ export class LogsSheet {
   protected readonly error = signal<string | null>(null);
   private readonly pre = viewChild.required<ElementRef<HTMLPreElement>>('pre');
   private readonly serviceId = computed(() => this.service().id);
+  /** Whether the log is at its bottom, so a new tail scrolls it down. Read only after a render: never rendered. */
   private pinned = true;
 
   constructor() {
@@ -102,10 +103,17 @@ export class LogsSheet {
       const el = this.pre().nativeElement;
       if (this.pinned) el.scrollTop = el.scrollHeight;
     });
-  }
-
-  protected onScroll(el: HTMLElement): void {
-    this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    // Not a template (scroll) listener: that would schedule change detection on every scroll event, for nothing.
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      const el = this.pre().nativeElement;
+      const onScroll = () => {
+        const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        if (pinned !== this.pinned) this.pinned = pinned;
+      };
+      el.addEventListener('scroll', onScroll, { passive: true });
+      destroyRef.onDestroy(() => el.removeEventListener('scroll', onScroll));
+    });
   }
 }
 
