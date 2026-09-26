@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, afterRenderEffect, computed, input, output, signal, viewChild } from '@angular/core';
 import { messageById, type MessagesState, type ProjectState } from '@desk/client';
 import type { AgentStatus, AttentionItem } from '@desk/protocol';
-import { ago, answeringLabel, clock, duration, href, linkText, waitHop, waitLabel, type LaneGeometry, type LineGeometry, type MessageLink } from '@desk/ui-core';
+import { ago, answeringLabel, clock, duration, href, linkText, plural, waitHop, waitLabel, type LaneGeometry, type LineGeometry, type MessageLink } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/answering-badge';
 
 /** A station on Desk's trunk, positioned. */
@@ -36,26 +36,37 @@ const detourPath = (x: number, y: number) => `M${x - 16} ${y} C${x - 8} ${y} ${x
 const LINK_COLOR: Record<MessageLink['kind'], string> = { question: 'var(--wait)', answer: 'var(--wait)', note: 'var(--text-min)' };
 
 /** A message link as drawn: the geometry's link with its name, tooltip, colour and the two agents it lights. */
-type LinkView = MessageLink & { key: string; name: string; title: string; color: string; dir: number; opacity: number; pair: readonly string[] };
+type LinkView = MessageLink & { key: string; name: string; title: string; color: string; dir: number; opacity: number; dim: boolean; pair: readonly string[] };
 
 /** A tracked question on its asker's lane; its state is the fold's. */
-type QuestionMark = { key: string; from: string; to: string | null; state: string; x: number; y: number; aria: string; title: string };
+type QuestionMark = { key: string; from: string; to: string | null; state: string; x: number; y: number; aria: string; title: string; dim: boolean };
+
+/** Below Desk's line when the lanes are folded away: room for the stops, the "now" line and nothing else. */
+const DESK_ONLY_BELOW = 30;
 
 /**
  * The transit diagram: Desk's trunk with stations, thread lanes forking and rejoining, trains at "now".
  * The lanes scroll sideways (older history to the left) and follow "now" unless the user has scrolled back;
- * the label column and the legend stay put. Every position comes from lineGeometry.
+ * the label column and the legend stay put. In `desk` mode (the conversation) the lanes, their labels and marks fold up
+ * into Desk's line; switching modes animates the fold both ways (CSS transitions, staggered by row). Every position comes
+ * from lineGeometry.
  */
 @Component({
   selector: 'section[deskLineDiagram]',
   imports: [AnsweringBadge],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  host: { class: 'line-diagram', 'aria-label': 'Line diagram: Desk and its threads since the brief', '[style.height.px]': 'g().height' },
+  host: {
+    class: 'line-diagram',
+    '[class.collapsed]': 'collapsed()',
+    '[attr.aria-label]': 'label()',
+    '[style.height.px]': 'height()',
+    '[style.--trunk-y]': "g().trunkY + 'px'",
+  },
   template: `
     @let geo = g();
     @let desk = project().desk;
-    <div class="line-scroll" #scroller [style.left.px]="geo.viewportLeft" [style.width.px]="geo.viewportWidth" [style.height.px]="geo.height" (scroll)="onScroll(scroller)">
+    <div class="line-scroll" #scroller [style.left.px]="geo.viewportLeft" [style.width.px]="geo.viewportWidth" [style.height.px]="height()" (scroll)="onScroll(scroller)">
       <div class="line-canvas" [style.width.px]="geo.contentWidth" [style.height.px]="geo.height">
         <svg [attr.width]="geo.contentWidth" [attr.height]="geo.height" aria-hidden="true" class="line-svg">
           @for (t of geo.ticks; track t.t) {
@@ -63,7 +74,8 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
           }
           <path [attr.d]="'M' + geo.nowX + ' 22 V' + geo.height" stroke="var(--text-min)" stroke-dasharray="3 3" />
           @for (l of geo.lanes; track l.lane.threadId) {
-            <g [attr.opacity]="l.lane.archived ? 0.45 : 1">
+            <g class="line-fold" [style.transition-delay]="delay(l.row)">
+            <g [attr.opacity]="(l.lane.archived ? 0.45 : 1) * (dimmed(l.lane.threadId) ? 0.3 : 1)">
               <path [attr.d]="l.fork" fill="none" [attr.stroke]="l.forkColor" stroke-width="4" stroke-linecap="round" />
               @for (s of l.segments; track $index) {
                 <path [attr.d]="s.d" fill="none" [attr.stroke]="s.color" stroke-width="4" stroke-linecap="round" [attr.stroke-dasharray]="s.dashed ? '3 5' : null" />
@@ -82,6 +94,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
                   </g>
                 }
               }
+            </g>
             </g>
           }
           <path [attr.d]="'M' + (geo.trunkStart - 6) + ' ' + geo.trunkY + ' H' + geo.nowX" stroke="var(--ink)" stroke-width="6" stroke-linecap="round" />
@@ -122,10 +135,12 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
           </div>
         }
 
+        <!-- Everything drawn on the lanes: folded into Desk's line, and out of reach, on the conversation. -->
+        <div class="line-fold-html" [attr.inert]="collapsed() ? '' : null">
         @for (l of geo.lanes; track l.lane.threadId) {
           @for (m of l.marks; track $index) {
             @if (m.kind === 'detour' || m.kind === 'sent_back' || m.kind === 'stalled') {
-              <span class="line-mark" [class]="'line-mark-' + m.kind" [style.left.px]="m.x" [style.top.px]="m.kind === 'detour' ? l.y + 8 : l.y - 24">
+              <span class="line-mark" [class]="'line-mark-' + m.kind" [class.line-dim]="dimmed(l.lane.threadId)" [style.left.px]="m.x" [style.top.px]="m.kind === 'detour' ? l.y + 8 : l.y - 24">
                 @switch (m.kind) {
                   @case ('detour') {
                     <span class="mono">{{ clock(m.ts) }} {{ shortModel(m.label) }}</span><span class="sr-only">: rate limited, continued on the fallback model</span>
@@ -149,6 +164,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
             class="line-link"
             [class]="'line-link-' + k.kind"
             [class.live]="k.live"
+            [class.line-dim]="k.dim"
             [style.left.px]="k.x"
             [style.top.px]="k.y1 < k.y2 ? k.y1 : k.y2"
             [style.height.px]="k.y2 > k.y1 ? k.y2 - k.y1 : k.y1 - k.y2"
@@ -167,6 +183,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
             type="button"
             class="line-q"
             [class]="'line-q-' + q.state"
+            [class.line-dim]="q.dim"
             [style.left.px]="q.x"
             [style.top.px]="q.y"
             [attr.aria-label]="q.aria"
@@ -181,12 +198,12 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
 
         @for (l of geo.lanes; track l.lane.threadId) {
           @if (l.stub; as stub) {
-            <span class="line-answering" [style.left.px]="stub.x" [style.top.px]="l.y" aria-hidden="true"><span class="live-dot"></span></span>
+            <span class="line-answering" [class.line-dim]="dimmed(l.lane.threadId)" [style.left.px]="stub.x" [style.top.px]="l.y" aria-hidden="true"><span class="live-dot"></span></span>
           }
         }
 
         @for (sig of signals(); track sig.threadId) {
-          <a class="line-signal" [style.left.px]="sig.x" [style.top.px]="sig.y" [href]="sig.href">
+          <a class="line-signal" [class.line-dim]="sig.dim" [style.left.px]="sig.x" [style.top.px]="sig.y" [href]="sig.href">
             <span class="line-signal-chip"><strong>Waiting for your approval</strong> · <span class="mono">{{ sig.label }}</span> · <span class="mono muted">{{ clock(sig.ts) }}</span></span>
             <span class="line-signal-dot" aria-hidden="true"></span>
           </a>
@@ -194,12 +211,12 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
 
         <!-- A waiting lane whose wait leads to something that needs the user ends in a vermilion dot linking to it. -->
         @for (h of hops(); track h.threadId) {
-          <a class="line-hop" [style.left.px]="geo.nowX" [style.top.px]="h.y" [href]="h.href" [attr.aria-label]="h.label" [title]="h.title"></a>
+          <a class="line-hop" [class.line-dim]="h.dim" [style.left.px]="geo.nowX" [style.top.px]="h.y" [href]="h.href" [attr.aria-label]="h.label" [title]="h.title"></a>
         }
 
         @for (l of geo.lanes; track l.lane.threadId) {
           @if (l.trainX !== null) {
-            <div>
+            <div [class.line-dim]="dimmed(l.lane.threadId)">
               @if (l.thread?.activity) {
                 <span class="line-activity" [style.left.px]="l.trainX - 18" [style.top.px]="l.y - 26">{{ l.thread.activity }}</span>
               }
@@ -213,6 +230,7 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
             <a
               class="line-lane-title"
               [class.lit]="lit().includes(l.lane.threadId)"
+              [class.line-dim]="dimmed(l.lane.threadId)"
               [style.left.px]="inline.x"
               [style.top.px]="l.y - 20"
               [style.max-width.px]="inline.width"
@@ -220,6 +238,8 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
             >{{ l.lane.title }}</a>
           }
         }
+
+        </div>
 
         @if (desk?.status === 'running') {
           <span class="line-desk-writing" [style.left.px]="geo.nowX - 10" [style.top.px]="geo.trunkY"><span class="live-dot" aria-hidden="true"></span>Desk · writing</span>
@@ -231,12 +251,18 @@ type QuestionMark = { key: string; from: string; to: string | null; state: strin
       <span class="line-label-title"><span class="line-swatch line-swatch-desk"></span>Desk</span>
       <span class="line-label-sub" [class]="'status-text-' + (desk?.status ?? 'idle')">{{ deskSub() }}</span>
     </div>
+    <div class="line-fold-html line-labels" [attr.inert]="collapsed() ? '' : null">
     @for (r of rowLabels(); track r.id) {
       <!-- An answer run keeps the thread's status: the label says it is answering (design spec §8 item 3). -->
-      <a class="line-label" [class.lit]="lit().includes(r.id)" [style.top.px]="r.y - 15" [href]="r.href">
+      <a class="line-label" [class.lit]="lit().includes(r.id)" [class.line-dim]="dimmed(r.id)" [style.top.px]="r.y - 15" [href]="r.href">
         <span class="line-label-title"><span class="line-swatch" [style.background]="r.color"></span>{{ r.title }}</span>
         <span class="line-label-sub" [class]="'status-text-' + r.tone">@if (r.answering; as answering) {<ng-container>{{ r.tone }} · </ng-container><span deskAnsweringBadge [label]="answering"></span>} @else {<ng-container>{{ r.text }}</ng-container>}</span>
       </a>
+    }
+
+    </div>
+    @if (g().lanes.length) {
+      <a class="line-threads-link" [style.top.px]="g().trunkY - 12" [href]="threadsHref()">{{ plural(g().lanes.length, 'thread') }}{{ running() ? ' · ' + running() + ' running' : '' }} <span aria-hidden="true">›</span></a>
     }
 
     <div class="line-legend" aria-hidden="true">
@@ -263,6 +289,10 @@ export class LineDiagram {
   /** The project's attention items: only a thread with one is "waiting on you". */
   readonly attention = input.required<readonly AttentionItem[]>();
   readonly now = input.required<number>();
+  /** `desk`: Desk's line and its stops only, the lanes folded into it; `full`: everything. */
+  readonly mode = input<'desk' | 'full'>('full');
+  /** A thread whose lane stays lit while the others dim (its page is open). */
+  readonly focus = input<string | null>(null);
   /** A station was pressed: the chat jumps to it. */
   readonly station = output<StationG>();
   /** Opens the pair sheet of two agents: a question mark's asker and its recipient (design spec §8 item 8). */
@@ -271,6 +301,14 @@ export class LineDiagram {
   /** The agents of the question mark or message link under the pointer or focus: their labels light up. */
   protected readonly lit = signal<readonly string[]>([]);
   protected readonly clock = clock;
+  protected readonly plural = plural;
+  protected readonly collapsed = computed(() => this.mode() === 'desk');
+  protected readonly label = computed(() => (this.collapsed() ? "Line diagram: Desk's stops since the brief" : 'Line diagram: Desk and its threads since the brief'));
+  protected readonly height = computed(() => (this.collapsed() ? this.g().trunkY + DESK_ONLY_BELOW : this.g().height));
+  /** The last lane row: lanes fold in from the bottom up and unfold from the top down. */
+  private readonly lastRow = computed(() => Math.max(0, ...this.g().lanes.map((l) => l.row)));
+  protected readonly running = computed(() => this.g().lanes.filter((l) => (l.thread?.status ?? l.lane.status) === 'running').length);
+  protected readonly threadsHref = computed(() => href({ name: 'project', id: this.project().project.id, tab: 'threads' }));
   protected readonly shortModel = shortModel;
   protected readonly detour = detourPath;
   private readonly scroller = viewChild.required<ElementRef<HTMLDivElement>>('scroller');
@@ -298,6 +336,7 @@ export class LineDiagram {
             y: l.y,
             aria: `${l.lane.title} asked ${mark.label}, ${clock(mark.ts)}`,
             title: `${l.lane.title} asked ${mark.label} · ${clock(mark.ts)} · ${state}`,
+            dim: this.dimmed(l.lane.threadId),
           };
         }),
     );
@@ -312,7 +351,8 @@ export class LineDiagram {
       key: `link-${k.ids[0]}`,
       color: LINK_COLOR[k.kind],
       dir: Math.sign(k.y2 - k.y1),
-      opacity: k.kind === 'note' ? 0.55 : 1,
+      opacity: (k.kind === 'note' ? 0.55 : 1) * (this.dimmed(k.from) && this.dimmed(k.to) ? 0.3 : 1),
+      dim: this.dimmed(k.from) && this.dimmed(k.to),
       pair: [k.from, k.to],
     }));
   });
@@ -322,7 +362,7 @@ export class LineDiagram {
     return this.g().lanes.flatMap((l) => {
       if (!l.signal) return [];
       const approval = p.approvals.find((a) => a.agent_id === l.lane.threadId && !a.delegate_to_desk);
-      return [{ threadId: l.lane.threadId, x: l.signal.x, y: l.y, label: l.signal.label, ts: l.signal.ts, href: href({ name: 'attention', ...(approval ? { item: `approval:${approval.id}` } : {}) }) }];
+      return [{ threadId: l.lane.threadId, x: l.signal.x, y: l.y, label: l.signal.label, ts: l.signal.ts, dim: this.dimmed(l.lane.threadId), href: href({ name: 'attention', ...(approval ? { item: `approval:${approval.id}` } : {}) }) }];
     });
   });
 
@@ -331,7 +371,7 @@ export class LineDiagram {
     const attention = this.attention();
     return this.g().lanes.flatMap((l) => {
       const hop = (l.thread?.status ?? l.lane.status) === 'waiting' ? waitHop(m, l.lane.threadId, attention) : null;
-      return hop ? [{ threadId: l.lane.threadId, y: l.y, href: href({ name: 'attention', item: hop.item.id }), label: hop.label, title: `${l.lane.title} waits on it: ${hop.label}` }] : [];
+      return hop ? [{ threadId: l.lane.threadId, y: l.y, dim: this.dimmed(l.lane.threadId), href: href({ name: 'attention', item: hop.item.id }), label: hop.label, title: `${l.lane.title} waits on it: ${hop.label}` }] : [];
     });
   });
 
@@ -362,6 +402,17 @@ export class LineDiagram {
       const el = this.scroller().nativeElement;
       if (this.pinned) el.scrollLeft = el.scrollWidth;
     });
+  }
+
+  /** Whether a thread's lane steps back: another thread's page is open. */
+  protected dimmed(threadId: string): boolean {
+    const focus = this.focus();
+    return focus !== null && threadId !== focus;
+  }
+
+  /** A lane's fold delay, 30 ms a row: bottom up when folding, top down when unfolding. */
+  protected delay(row: number): string {
+    return `${(this.collapsed() ? this.lastRow() - row : row) * 30}ms`;
   }
 
   protected threadHref(threadId: string): string {

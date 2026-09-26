@@ -44,7 +44,7 @@ export function screenFor(route: Route): ScreenView | null {
     case 'project':
       switch (route.tab) {
         case 'conversation':
-          return { component: ConversationScreen, inputs: { projectId: route.id } };
+          return { component: ConversationScreen, inputs: { projectId: route.id, at: route.at } };
         case 'threads':
           return { component: ThreadsScreen, inputs: { projectId: route.id, threadId: route.threadId, at: route.at } };
         case 'library':

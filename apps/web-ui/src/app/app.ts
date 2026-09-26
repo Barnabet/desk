@@ -1,7 +1,8 @@
-import { DOCUMENT, NgComponentOutlet } from '@angular/common';
+import { DOCUMENT, NgComponentOutlet, NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, untracked, ViewEncapsulation } from '@angular/core';
 import { ConnectionOverlay } from './components/connection-overlay';
 import { ErrorBoundary } from './components/error-boundary';
+import { ProjectFrame } from './conversation/project-frame';
 import { FolderBrowser } from './components/folder-browser';
 import { ProjectNav } from './components/project-nav';
 import { SignedOut } from './components/signed-out';
@@ -38,7 +39,7 @@ function guardFileDrops(doc: Document): () => void {
 /** The web UI: the signed-out page, onboarding, or the shell (title bar, project tabs, screen, connection overlay, toasts). */
 @Component({
   selector: 'desk-root',
-  imports: [NgComponentOutlet, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectNav, SignedOut, TitleBar, Toaster],
+  imports: [NgComponentOutlet, NgTemplateOutlet, ConnectionOverlay, ErrorBoundary, FolderBrowser, ProjectFrame, ProjectNav, SignedOut, TitleBar, Toaster],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { style: 'display: block; height: 100%' },
@@ -62,13 +63,15 @@ function guardFileDrops(doc: Document): () => void {
                 <nav deskProjectNav [projectId]="p.id" [tab]="p.tab"></nav>
               }
               <main class="screen">
-                <div deskErrorBoundary [resetKey]="key()">
-                  <ng-template>
-                    @for (view of screen(); track view.key) {
-                      <ng-container *ngComponentOutlet="view.component; inputs: view.inputs" />
-                    }
-                  </ng-template>
-                </div>
+                <!-- One frame for the conversation and threads tabs, outside the screen's boundary and kept while the project
+                     stays the same, so switching tabs folds or unfolds its timeline. -->
+                @for (f of frame(); track f.id) {
+                  <div deskProjectFrame [projectId]="f.id" [mode]="f.mode" [focus]="f.focus">
+                    <ng-container *ngTemplateOutlet="screenBoundary" />
+                  </div>
+                } @empty {
+                  <ng-container *ngTemplateOutlet="screenBoundary" />
+                }
                 <div deskConnectionOverlay></div>
               </main>
               <div deskToaster></div>
@@ -76,6 +79,15 @@ function guardFileDrops(doc: Document): () => void {
           }
         </ng-template>
       </div>
+      <ng-template #screenBoundary>
+        <div deskErrorBoundary [resetKey]="key()">
+          <ng-template>
+            @for (view of screen(); track view.key) {
+              <ng-container *ngComponentOutlet="view.component; inputs: view.inputs" />
+            }
+          </ng-template>
+        </div>
+      </ng-template>
       @for (request of folderRequests(); track request) {
         <div deskFolderBrowser [purpose]="request.purpose" (picked)="bridge.answerFolder($event)"></div>
       }
@@ -91,6 +103,12 @@ export class App {
     return r.name === 'project' ? r : null;
   });
   protected readonly key = computed(() => screenKey(this.route()));
+  /** The conversation's and threads' frame, as a one-item list tracked by project id (ProjectFrame, App.tsx). */
+  protected readonly frame = computed(() => {
+    const r = this.route();
+    if (r.name !== 'project' || (r.tab !== 'conversation' && r.tab !== 'threads')) return [];
+    return [{ id: r.id, mode: r.tab === 'threads' ? ('full' as const) : ('desk' as const), focus: r.threadId ?? null }];
+  });
   /** The route's screen as a one-item list keyed by screenKey, so a new key mounts a fresh screen. */
   protected readonly screen = computed(() => {
     const view = screenFor(this.route());

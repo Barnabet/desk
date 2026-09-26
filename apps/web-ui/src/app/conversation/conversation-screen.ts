@@ -16,7 +16,7 @@ import {
   viewChild,
 } from '@angular/core';
 import type { ProjectState } from '@desk/client';
-import { chatEventId, keepStable, lineGeometry, plural, rowViews, ticks, type RowView } from '@desk/ui-core';
+import { chatEventId, keepStable, plural, rowViews, ticks, type RowView } from '@desk/ui-core';
 import { EmptyState } from '../components/empty-state';
 import { PairSheet } from '../components/pair-sheet';
 import { ToastService } from '../components/toast';
@@ -25,11 +25,10 @@ import { GlobalStore } from '../core/global.store';
 import { injectMediaQuery } from '../core/media';
 import { NowService } from '../core/now.service';
 import { injectSession } from '../core/session.service';
+import { RouteService } from '../core/route.service';
 import { Unread } from '../core/unread';
-import { injectWidth } from '../core/width';
 import { ChatItemView, chatDomId } from './chat-items';
 import { Composer } from './composer';
-import { LineDiagram, type StationG } from './line-diagram';
 import { PlanPanel } from './plan-panel';
 import { ServicesCard } from './services-card';
 import { WhatsUp } from './whats-up';
@@ -50,13 +49,13 @@ function readDraft(projectId: string): string {
 }
 
 /**
- * A project's conversation: the line diagram, What's up, the chat with Desk and its composer, the plan and Desk's card,
- * the services, and the pair sheet. The host is the React screen's root: `div.conversation` once the project is loaded,
- * `div.page` while loading or when it cannot be shown.
+ * A project's conversation: What's up, the chat with Desk and its composer, the plan and Desk's card, the services, and
+ * the pair sheet of the chat's rows. The line diagram is `ProjectFrame`'s, above it. The host is the React screen's root:
+ * `div.conversation` once the project is loaded, `div.page` while loading or when it cannot be shown.
  */
 @Component({
   selector: 'div[deskConversationScreen]',
-  imports: [EmptyState, LineDiagram, WhatsUp, ServicesCard, ChatItemView, Composer, PlanPanel, PairSheet],
+  imports: [EmptyState, WhatsUp, ServicesCard, ChatItemView, Composer, PlanPanel, PairSheet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { '[class]': 'hostClass()' },
@@ -70,7 +69,6 @@ function readDraft(projectId: string): string {
       <div deskEmptyState title="Couldn't load this project" [body]="s.error"></div>
     } @else {
       @let project = s.project;
-      <section deskLineDiagram [g]="geometry()" [project]="project" [messages]="s.messages" [attention]="projectAttention()" [now]="now()" (station)="onStation($event)" (pair)="pairOf.set($event)"></section>
       <div class="conv-body" [class.plan-open]="planOpen()">
         <div class="conv-intro">
           <section deskWhatsUp [project]="project" [now]="now()"></section>
@@ -138,18 +136,18 @@ function readDraft(projectId: string): string {
 })
 export class ConversationScreen {
   readonly projectId = input.required<string>();
+  /** A Desk stop's event id to scroll the chat to (a stop clicked on the timeline); dropped from the route once done. */
+  readonly at = input<number | undefined>(undefined);
   private readonly bridge = inject(DeskBridge);
   private readonly toasts = inject(ToastService);
   private readonly global = inject(GlobalStore);
   private readonly unread = inject(Unread);
   private readonly injector = inject(Injector);
-  private readonly host: HTMLElement = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  private readonly routes = inject(RouteService);
   protected readonly session = injectSession(this.projectId);
   protected readonly now = inject(NowService).now;
   // Services sit at the bottom of the left column; on narrow windows that column collapses, so they join the plan overlay.
   protected readonly narrow = injectMediaQuery('(max-width: 1279px)');
-  /** The conversation's width, which the line diagram's geometry follows (1200 until measured, as in the desktop). */
-  private readonly width = injectWidth(() => this.host);
   /** Saved per project in this browser (`desk.draft.<id>`); drafts are a convenience. */
   protected readonly draft = linkedSignal(() => readDraft(this.projectId()));
   /** Messages sent but not yet back as events: "You · sending…". */
@@ -182,12 +180,7 @@ export class ConversationScreen {
   protected readonly projectAttention = computed(() => this.attention().filter((i) => i.project_id === this.projectId()));
   protected readonly attentionIds = computed(() => new Set(this.projectAttention().map((i) => i.id)));
   protected readonly proxyDown = computed(() => this.global.state().system.proxy === 'down');
-  private readonly timeline = computed(() => this.session().timeline);
-  private readonly threads = computed(() => this.session().project?.threads);
-  private readonly answeringRuns = computed(() => this.messages().answering);
-  // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
-  private readonly answeringIds = computed(() => new Set(Object.keys(this.answeringRuns())));
-  protected readonly geometry = computed(() => lineGeometry({ timeline: this.timeline(), threads: this.threads() ?? [], now: this.now(), width: this.width(), answering: this.answeringIds(), messages: this.messages() }));
+  private readonly status = computed(() => this.session().status);
   protected readonly start = computed(() => Math.max(0, this.items().length - this.shown()));
   protected readonly shownItems = computed(() => {
     const start = this.start();
@@ -234,6 +227,15 @@ export class ConversationScreen {
       };
       el.addEventListener('dragover', onDragOver);
       onCleanup(() => el.removeEventListener('dragover', onDragOver));
+    });
+    // A Desk stop clicked on the timeline arrives as `at`: jump there once, then drop it so the same stop can jump again.
+    effect(() => {
+      const at = this.at();
+      if (at === undefined || this.status() !== 'ready') return;
+      untracked(() => {
+        this.jumpToIndex(this.items().findIndex((i) => chatEventId(i) >= at));
+        this.routes.replace({ name: 'project', id: this.projectId(), tab: 'conversation' });
+      });
     });
     afterRenderEffect(() => {
       this.items();
@@ -307,10 +309,6 @@ export class ConversationScreen {
     const el = this.list()?.nativeElement;
     if (el) this.anchor = { height: el.scrollHeight, top: el.scrollTop };
     this.shown.update((n) => n + CHAT_PAGE);
-  }
-
-  protected onStation(st: StationG): void {
-    this.jumpToIndex(this.items().findIndex((i) => chatEventId(i) >= st.eventId));
   }
 
   protected jumpToItem(itemId: string): void {

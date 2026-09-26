@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/angular';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { initialGlobalState, type GlobalState } from '@desk/bff/contract';
 import type { ProjectOverview } from '@desk/client';
 import { ev } from '@desk/client/testing';
@@ -13,11 +13,13 @@ import { screenFor } from '../screen-for';
 import { FakeDeskBridge, provideGlobal, type FakeHandlers } from '../testing/fake-bridge';
 import { chatDomId } from './chat-items';
 import { CHAT_PAGE, ConversationScreen } from './conversation-screen';
+import { ProjectFrame } from './project-frame';
 
 beforeEach(() => {
   clearAttachmentCache();
   localStorage.clear();
 });
+afterEach(() => history.replaceState(null, '', window.location.pathname));
 
 const overview = (): ProjectOverview => ({
   project: { id: 'p', name: 'Onboarding revamp', goal: 'g', instructions: '', settings: { desk_model: 'claude-opus-5-5', thread_model: 'm', fallback_model: null, desk_reasoning_effort: null, thread_reasoning_effort: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
@@ -38,8 +40,17 @@ const events = [
   ev(6, 'question.asked', { question: 'Data source or teammate invite first?', options: ['Connect a data source', 'Invite a teammate'] }, { agent: 'd' }),
 ];
 
-/** Renders the conversation of project p with the app's global state, a bridge whose watch backfills `list`, and `extra` handlers. */
-async function mount(list: StoredEvent[], global: GlobalState, extra: FakeHandlers = {}, push: 'desk:event' | 'desk:events' = 'desk:event') {
+/**
+ * The conversation in its frame, as App renders it; `full` unfolds the timeline's lanes (the Threads tab's view) so their
+ * details can be checked. `at` is the conversation's scroll target.
+ */
+const FRAMED = `<div deskProjectFrame projectId="p" [mode]="mode"><div deskConversationScreen projectId="p" [at]="at"></div></div>`;
+
+/**
+ * Renders the conversation of project p in its frame, with the app's global state, a bridge whose watch backfills `list`,
+ * and `extra` handlers.
+ */
+async function mount(list: StoredEvent[], global: GlobalState, extra: FakeHandlers = {}, push: 'desk:event' | 'desk:events' = 'desk:event', frame: { mode?: 'desk' | 'full'; at?: number } = {}) {
   const bridge: FakeDeskBridge = new FakeDeskBridge({
     'projects.get': () => overview(),
     'broker.watch': () => {
@@ -50,16 +61,18 @@ async function mount(list: StoredEvent[], global: GlobalState, extra: FakeHandle
     'broker.unwatch': () => ({ ok: true }),
     ...extra,
   });
-  await render(ConversationScreen, {
-    inputs: { projectId: 'p' },
+  const view = await render(FRAMED, {
+    imports: [ProjectFrame, ConversationScreen],
+    componentProperties: { mode: frame.mode ?? 'full', at: frame.at },
     providers: [...bridge.providers, provideGlobal(global), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
   });
-  return bridge;
+  Object.assign(bridge, { view });
+  return bridge as FakeDeskBridge & { view: typeof view };
 }
 
-function setup(extra: FakeHandlers = {}, list: StoredEvent[] = events) {
+function setup(extra: FakeHandlers = {}, list: StoredEvent[] = events, frame: { mode?: 'desk' | 'full'; at?: number } = {}) {
   const attention: AttentionItem[] = [{ id: 'report:5:0', kind: 'needs_you', project_id: 'p', project_name: 'Onboarding revamp', agent_id: 'd', title: 'Approve installing bun', detail: '', created_at: '', ref: { event_id: 5 } }];
-  return mount(list, { ...initialGlobalState(), connection: { status: 'live' }, attention }, { 'projects.send': () => ({ ok: true }), ...extra });
+  return mount(list, { ...initialGlobalState(), connection: { status: 'live' }, attention }, { 'projects.send': () => ({ ok: true }), ...extra }, 'desk:event', frame);
 }
 
 describe('ConversationScreen', () => {
@@ -181,7 +194,8 @@ describe('ConversationScreen', () => {
   });
 
   it('is what #/p/<id>/conversation shows', () => {
-    expect(screenFor({ name: 'project', id: 'p', tab: 'conversation' })).toEqual({ component: ConversationScreen, inputs: { projectId: 'p' } });
+    expect(screenFor({ name: 'project', id: 'p', tab: 'conversation' })).toEqual({ component: ConversationScreen, inputs: { projectId: 'p', at: undefined } });
+    expect(screenFor({ name: 'project', id: 'p', tab: 'conversation', at: 7 })?.inputs).toEqual({ projectId: 'p', at: 7 });
   });
 });
 
@@ -204,9 +218,9 @@ const team = (): StoredEvent[] => [
   created(3, 'a', minutesAgo(10)),
   created(4, 'f', minutesAgo(9)),
 ];
-/** Renders the conversation over `list`, with `attention` as the app's attention list. */
-function show(list: StoredEvent[], attention: AttentionItem[] = [], extra: FakeHandlers = {}) {
-  return mount(list, { ...initialGlobalState(), connection: { status: 'live' }, attention }, extra);
+/** Renders the conversation over `list`, with `attention` as the app's attention list, in a frame showing `mode`. */
+function show(list: StoredEvent[], attention: AttentionItem[] = [], extra: FakeHandlers = {}, mode: 'desk' | 'full' = 'full') {
+  return mount(list, { ...initialGlobalState(), connection: { status: 'live' }, attention }, extra, 'desk:event', { mode });
 }
 /** The chat row of item `id` (its wrapper, which flashes when jumped to). */
 const row = (id: string) => document.getElementById(chatDomId(id));
@@ -513,5 +527,69 @@ describe('messages in the conversation', () => {
     );
     expect(await screen.findByText('waiting on Frontend · 4m → needs your approval')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Frontend needs your approval' }).getAttribute('href')).toBe('#/attention?item=approval%3Ax1');
+  });
+});
+
+describe('the timeline frame', () => {
+  it("folds the lanes into Desk's line on the conversation and unfolds them on Threads, in place", async () => {
+    const { view } = await show([...team(), ev(5, 'agent.status_changed', { status: 'running' }, { agent: 'a', ts: minutesAgo(8) })], [], {}, 'desk');
+    const diagram = await screen.findByRole('region', { name: "Line diagram: Desk's stops since the brief" });
+    expect(diagram.classList.contains('collapsed')).toBe(true);
+    // The lanes, their marks and their labels are folded away and out of reach; Desk's stops stay.
+    const folds = diagram.querySelectorAll('.line-fold-html');
+    expect(folds).toHaveLength(2);
+    for (const f of folds) expect(f.hasAttribute('inert')).toBe(true);
+    expect(within(diagram).getByRole('button', { name: /^\d\d:\d\d, 2 threads$/ })).toBeTruthy();
+    const link = within(diagram).getByRole('link', { name: /^2 threads · 1 running/ });
+    expect(link.getAttribute('href')).toBe('#/p/p/threads');
+
+    await view.rerender({ componentProperties: { mode: 'full' }, partialUpdate: true });
+    // The same diagram unfolds (so the switch animates), with its lanes back within reach.
+    expect(screen.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' })).toBe(diagram);
+    expect(diagram.classList.contains('collapsed')).toBe(false);
+    for (const f of diagram.querySelectorAll('.line-fold-html')) expect(f.hasAttribute('inert')).toBe(false);
+  });
+
+  it('opens the chat at a Desk stop from Threads as a new page', async () => {
+    window.location.hash = '#/p/p/threads';
+    await setup();
+    const stop = await screen.findByRole('button', { name: /Relaunch onboarding/ });
+    const before = history.length;
+    fireEvent.click(stop);
+    expect(window.location.hash).toBe('#/p/p/conversation?at=2');
+    // A new page: Back returns to Threads.
+    expect(history.length).toBe(before + 1);
+  });
+
+  it('opens the chat at a Desk stop in place on the conversation, once', async () => {
+    window.location.hash = '#/p/p/conversation?at=5';
+    await setup({}, events, { mode: 'desk', at: 5 });
+    const report = (await screen.findByRole('heading', { name: 'Research is in' })).closest('.chat-item')!;
+    await waitFor(() => expect(report.classList.contains('flash')).toBe(true));
+    // Handled once: the stop can be clicked again.
+    expect(window.location.hash).toBe('#/p/p/conversation');
+    // On the conversation a stop replaces the route: no page to go Back through.
+    const before = history.length;
+    fireEvent.click(screen.getByRole('button', { name: /Relaunch onboarding/ }));
+    expect(window.location.hash).toBe('#/p/p/conversation?at=2');
+    expect(history.length).toBe(before);
+  });
+
+  it("dims every lane but the open thread's", async () => {
+    const bridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': () => {
+        for (const e of team()) bridge.emit('desk:event', e);
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    await render(`<div deskProjectFrame projectId="p" mode="full" focus="a"><div></div></div>`, {
+      imports: [ProjectFrame],
+      providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' } }), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
+    });
+    const label = async (title: string) => (await screen.findByText(title, { selector: '.line-label-title' })).closest('.line-label')!;
+    expect((await label('Frontend')).classList.contains('line-dim')).toBe(true);
+    expect((await label('Auth API')).classList.contains('line-dim')).toBe(false);
   });
 });

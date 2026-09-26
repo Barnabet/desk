@@ -9,8 +9,8 @@ import { FakeDeskBridge } from './testing/fake-bridge';
 
 const item = (id: string): AttentionItem => ({ id, kind: 'approval', project_id: 'p', project_name: 'P', agent_id: null, title: 't', detail: '', created_at: '', ref: {} });
 const go = (hash: string) => history.replaceState(null, '', hash);
-/** The element the screen boundary renders: the screen's host while healthy. */
-const screenHost = () => document.querySelector('main.screen > [deskErrorBoundary] > *');
+/** The element the screen boundary renders: the screen's host while healthy (inside the project frame on conversation and threads). */
+const screenHost = () => document.querySelector('main.screen [deskErrorBoundary] > *');
 /** A drag event as a browser sends it (jsdom has no DragEvent): `types` holds 'Files' when files are dragged. */
 function drag(type: 'dragover' | 'drop', types: string[], files: File[] = []): Event {
   const e = new Event(type, { bubbles: true, cancelable: true });
@@ -86,6 +86,25 @@ describe('App', () => {
     await view.fixture.whenStable();
     expect(screenHost()).not.toBeNull();
     expect(screenHost()).not.toBe(first);
+  });
+
+  it("keeps one project frame across the conversation and threads tabs, and none on the project's other tabs", async () => {
+    go('#/p/p1/conversation');
+    const { bridge, view } = await renderApp();
+    const frame = document.querySelector('main.screen > .project-frame');
+    expect(frame).not.toBeNull();
+    expect(frame!.querySelector('.project-frame-body > [deskErrorBoundary]')).not.toBeNull();
+    bridge.emit('desk:navigate', '#/p/p1/threads/t1');
+    await view.fixture.whenStable();
+    // The same frame, so its timeline unfolds in place.
+    expect(document.querySelector('main.screen > .project-frame')).toBe(frame);
+    bridge.emit('desk:navigate', '#/p/p1/library');
+    await view.fixture.whenStable();
+    expect(document.querySelector('.project-frame')).toBeNull();
+    expect(screenHost()).not.toBeNull();
+    bridge.emit('desk:navigate', '#/p/p2/conversation');
+    await view.fixture.whenStable();
+    expect(document.querySelector('main.screen > .project-frame')).not.toBeNull();
   });
 
   it('renders a crashed screen again when the viewer comes back to it', async () => {

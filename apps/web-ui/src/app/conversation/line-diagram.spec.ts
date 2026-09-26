@@ -46,10 +46,10 @@ const messagesEvents = [
 const messages = foldMessages(messagesEvents);
 const geometry = (now = NOW, t = timeline()) => lineGeometry({ timeline: t, threads: project().threads, now, width: 1200 });
 
-const TEMPLATE = `<section deskLineDiagram [g]="g" [project]="project" [messages]="messages" [attention]="attention" [now]="now" (station)="station($event)" (pair)="pair($event)"></section>`;
+const TEMPLATE = `<section deskLineDiagram [g]="g" [project]="project" [messages]="messages" [attention]="attention" [now]="now" [mode]="mode" [focus]="focus" (station)="station($event)" (pair)="pair($event)"></section>`;
 
 async function show(o: { g?: ReturnType<typeof geometry>; project?: ProjectState; messages?: typeof messages } = {}) {
-  const props = { g: o.g ?? geometry(), project: o.project ?? project(), messages: o.messages ?? messages, attention: [] as AttentionItem[], now: NOW, station: vi.fn(), pair: vi.fn() };
+  const props = { g: o.g ?? geometry(), project: o.project ?? project(), messages: o.messages ?? messages, attention: [] as AttentionItem[], now: NOW, mode: 'full' as 'desk' | 'full', focus: null as string | null, station: vi.fn(), pair: vi.fn() };
   const view = await render(TEMPLATE, { imports: [LineDiagram], componentProperties: props, providers: new FakeDeskBridge().providers });
   // rerender's detectChanges skips afterRender hooks; the tick it schedules runs them (the scroll pinning).
   const rerender = async (next: Partial<typeof props>) => {
@@ -102,6 +102,31 @@ describe('LineDiagram', () => {
     expect(pulse.style.getPropertyValue('--dy')).toBe(`${link.y2 - link.y1}px`);
     fireEvent.click(button);
     expect(pair).toHaveBeenCalledWith(['f', 'a']);
+  });
+
+  it("folds the lanes into Desk's line in desk mode, bottom row first, and dims all but the focused lane", async () => {
+    const g = geometry();
+    const { rerender } = await show();
+    const diagram = screen.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' });
+    expect(diagram.style.getPropertyValue('--trunk-y')).toBe(`${g.trunkY}px`);
+    const folds = () => [...diagram.querySelectorAll<SVGGElement>('svg.line-svg > g.line-fold')].slice(0, 2).map((f) => f.style.transitionDelay);
+    // Unfolding runs top down.
+    expect(folds()).toEqual(['0ms', '30ms']);
+    await rerender({ mode: 'desk' });
+    expect(diagram.getAttribute('aria-label')).toBe("Line diagram: Desk's stops since the brief");
+    expect(diagram.className).toBe('line-diagram collapsed');
+    expect(diagram.style.height).toBe(`${g.trunkY + 30}px`);
+    expect(diagram.querySelector<HTMLElement>('.line-scroll')!.style.height).toBe(`${g.trunkY + 30}px`);
+    // Folding runs bottom up.
+    expect(folds()).toEqual(['30ms', '0ms']);
+    expect(screen.getByRole('link', { name: /^2 threads · 1 running/ }).getAttribute('href')).toBe('#/p/p/threads');
+
+    await rerender({ mode: 'full', focus: 'a' });
+    expect(label('Frontend').className).toBe('line-label line-dim');
+    expect(label('Auth API').className).toBe('line-label');
+    expect(screen.getByRole('button', { name: `Auth API asked Frontend, ${clock(at(4))}` }).classList.contains('line-dim')).toBe(false);
+    const lanes = [...diagram.querySelectorAll('svg.line-svg > g.line-fold > g')].map((l) => l.getAttribute('opacity'));
+    expect(lanes).toEqual(['1', '0.3']);
   });
 
   it('jumps the chat to a station', async () => {

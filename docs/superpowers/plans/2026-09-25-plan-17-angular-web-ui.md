@@ -477,7 +477,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/app.ts` | W0c.2; modify W0c.14, W0c.15, W0d.7, W3b.3 |
 | `src/app/app.spec.ts` | W0c.2; modify W0c.14, W0c.15, W0d.7, W2a.6, W3b.2, W3b.3, W3b.4 |
 | `src/app/app.onboarding.spec.ts` | W0d.7 |
-| `src/app/screen-for.ts` | W0c.11; modify W0d.7, W1b.11, W1c.4, W2a.6, W2b.1, W2b.2, W2b.4, W3a.9, W3b.2, W3b.4 |
+| `src/app/screen-for.ts` | W0c.11; modify W0d.7, W1b.11, W1b.13, W1c.4, W2a.6, W2b.1, W2b.2, W2b.4, W3a.9, W3b.2, W3b.4 |
 | `src/app/screen-for.spec.ts` | W0c.11; modify W0d.7, W2b.2, W3a.9; rewritten W3b.4 |
 | `src/app/screens/not-yet.ts` | W0c.11; deleted W3b.4 |
 | `src/app/security.spec.ts` | W0c.10 |
@@ -520,7 +520,7 @@ All files are new unless marked. Under `apps/web-ui/src/app/`, each `x.ts` liste
 | `src/app/attention/{flight-strip,strip-rack}.ts`, `attention/strip-rack.spec.ts` | W1c.1 |
 | `src/app/attention/inspector.ts` + spec | W1c.2 |
 | `src/app/attention/attention-screen.ts` + spec | W1c.3 (spec modified W1c.4) |
-| `apps/web-ui/e2e/flows.e2e.test.ts` | W1c.4; modify W2a.7 |
+| `apps/web-ui/e2e/flows.e2e.test.ts` | W1c.4; modify W2a.7, W1b.13 |
 | `src/app/components/{skill-badge,file-viewer}.ts` + specs | W2a.1 |
 | `src/app/threads/tabs/{result-tab,diff-tab,files-tab,skill-drafts-tab,usage-tab}.ts` + specs | W2a.2 |
 | `src/app/threads/route-view.ts` + spec | W2a.3 |
@@ -19056,7 +19056,7 @@ With deskd running and at least two projects (one with a running thread and an a
 | W1b.10 | `LineDiagram` | `line-diagram.spec.ts` (new) |
 | W1b.11 | `ConversationScreen`, `CHAT_PAGE`; `#/p/<id>/conversation` shows it | `conversation-screen.spec.ts` (`ConversationScreen.test.tsx` ported case for case, plus the route) |
 | W1b.12 | verify | `pnpm typecheck`, root Vitest, every web-ui spec, the production build |
-| W1b.13 | master's later conversation and threads changes: paste and drop into the chat, message links on the line diagram, `ProjectFrame` (the folded conversation line, the unfolded Threads timeline), the conversation's `at` | `conversation-screen.spec.ts` (the React cases master added, ported), `line-diagram.spec.ts`, `app.spec.ts`, `screen-for.spec.ts` |
+| W1b.13 | master's later conversation and threads changes: paste and drop into the chat, message links on the line diagram, `ProjectFrame` (the folded conversation line, the unfolded Threads timeline), the conversation's `at` | `conversation-screen.spec.ts` (the React cases master added, ported), `line-diagram.spec.ts`, `app.spec.ts`, `flows.e2e.test.ts` |
 
 **Consumes (exact names; the contract's are used as they are):**
 
@@ -22970,7 +22970,7 @@ The rest of the diff is ported elsewhere or needs nothing: the SVG colours as to
 - Modify: `packages/ui-core/src/files.ts` (`pastedName`), `packages/ui-core/src/line-geometry.ts` (`linkText`), and their tests; `apps/desktop/src/renderer/conversation/Composer.tsx` and `LineDiagram.tsx` (import those two from `@desk/ui-core`; behaviour unchanged)
 - Create: `apps/web-ui/src/app/conversation/project-frame.ts`
 - Modify: `apps/web-ui/src/app/conversation/composer.ts`, `line-diagram.ts`, `conversation-screen.ts`; `apps/web-ui/src/app/app.ts`, `screen-for.ts`
-- Test: `apps/web-ui/src/app/conversation/conversation-screen.spec.ts` (the React cases master added, ported), `line-diagram.spec.ts`, `app.spec.ts`, `screen-for.spec.ts`
+- Test: `apps/web-ui/src/app/conversation/conversation-screen.spec.ts` (the React cases master added, ported), `line-diagram.spec.ts`, `app.spec.ts`; the web e2e `apps/web-ui/e2e/flows.e2e.test.ts` (as master changed the desktop's)
 
 **Interfaces:**
 - Consumes: `pastedName(file: { name; type }, at: Date, index: number): string`, `linkText(m: MessagesState, k: MessageLink): { name: string; title: string }`, `MessageLink`, `lineGeometry({ …, messages })` (`@desk/ui-core`); `RouteService.navigate`/`replace` (W0c.4); `injectSession`, `injectWidth`, `NowService`, `GlobalStore` (W0c); `PairSheet` (W1b.4).
@@ -23354,7 +23354,372 @@ Run the specs again: PASS. Commit (`feat(web-ui): messages between agents as lin
 
 - [ ] **Step 3: `ProjectFrame`, the folded conversation line, and the `at` target (master 6221a36)**
 
-Port the React "timeline frame" cases into `conversation-screen.spec.ts` (rendering the screen inside `ProjectFrame`), write `ProjectFrame`, move the diagram out of `ConversationScreen`, give `LineDiagram` its `mode` and `focus`, give the conversation its `at`, and wire the frame in `App`. Commit (`feat(web-ui): the conversation and threads share a timeline frame that folds and unfolds`).
+The React test renders the conversation inside its frame (`framed()`); the web spec does the same from a template, so every earlier case runs with the diagram in the frame, unfolded (`full`), and `setup`, `show` and `mount` take the frame's `mode` and `at`. The `is what #/p/<id>/conversation shows` case expects `at` among the inputs. An `afterEach` resets the URL.
+
+```ts
+/**
+ * The conversation in its frame, as App renders it; `full` unfolds the timeline's lanes (the Threads tab's view) so their
+ * details can be checked. `at` is the conversation's scroll target.
+ */
+const FRAMED = `<div deskProjectFrame projectId="p" [mode]="mode"><div deskConversationScreen projectId="p" [at]="at"></div></div>`;
+
+/**
+ * Renders the conversation of project p in its frame, with the app's global state, a bridge whose watch backfills `list`,
+ * and `extra` handlers.
+ */
+async function mount(list: StoredEvent[], global: GlobalState, extra: FakeHandlers = {}, push: 'desk:event' | 'desk:events' = 'desk:event', frame: { mode?: 'desk' | 'full'; at?: number } = {}) {
+  const bridge: FakeDeskBridge = new FakeDeskBridge({
+    'projects.get': () => overview(),
+    'broker.watch': () => {
+      if (push === 'desk:events') bridge.emit('desk:events', list);
+      else for (const e of list) bridge.emit('desk:event', e);
+      return { ok: true };
+    },
+    'broker.unwatch': () => ({ ok: true }),
+    ...extra,
+  });
+  const view = await render(FRAMED, {
+    imports: [ProjectFrame, ConversationScreen],
+    componentProperties: { mode: frame.mode ?? 'full', at: frame.at },
+    providers: [...bridge.providers, provideGlobal(global), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
+  });
+  Object.assign(bridge, { view });
+  return bridge as FakeDeskBridge & { view: typeof view };
+}
+```
+
+Port the React "timeline frame" block. React's "opens the chat at a Desk stop" renders twice in one test, which `@testing-library/angular` refuses (the module is instantiated), so it is two cases here; each also checks the history (a new page from Threads, the same page on the conversation). React's first case renders once to load the session and again folded; here the frame is rendered folded at once, then `rerender`ed unfolded.
+
+```ts
+describe('the timeline frame', () => {
+  it("folds the lanes into Desk's line on the conversation and unfolds them on Threads, in place", async () => {
+    const { view } = await show([...team(), ev(5, 'agent.status_changed', { status: 'running' }, { agent: 'a', ts: minutesAgo(8) })], [], {}, 'desk');
+    const diagram = await screen.findByRole('region', { name: "Line diagram: Desk's stops since the brief" });
+    expect(diagram.classList.contains('collapsed')).toBe(true);
+    // The lanes, their marks and their labels are folded away and out of reach; Desk's stops stay.
+    const folds = diagram.querySelectorAll('.line-fold-html');
+    expect(folds).toHaveLength(2);
+    for (const f of folds) expect(f.hasAttribute('inert')).toBe(true);
+    expect(within(diagram).getByRole('button', { name: /^\d\d:\d\d, 2 threads$/ })).toBeTruthy();
+    const link = within(diagram).getByRole('link', { name: /^2 threads · 1 running/ });
+    expect(link.getAttribute('href')).toBe('#/p/p/threads');
+
+    await view.rerender({ componentProperties: { mode: 'full' }, partialUpdate: true });
+    // The same diagram unfolds (so the switch animates), with its lanes back within reach.
+    expect(screen.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' })).toBe(diagram);
+    expect(diagram.classList.contains('collapsed')).toBe(false);
+    for (const f of diagram.querySelectorAll('.line-fold-html')) expect(f.hasAttribute('inert')).toBe(false);
+  });
+
+  it('opens the chat at a Desk stop from Threads as a new page', async () => {
+    window.location.hash = '#/p/p/threads';
+    await setup();
+    const stop = await screen.findByRole('button', { name: /Relaunch onboarding/ });
+    const before = history.length;
+    fireEvent.click(stop);
+    expect(window.location.hash).toBe('#/p/p/conversation?at=2');
+    // A new page: Back returns to Threads.
+    expect(history.length).toBe(before + 1);
+  });
+
+  it('opens the chat at a Desk stop in place on the conversation, once', async () => {
+    window.location.hash = '#/p/p/conversation?at=5';
+    await setup({}, events, { mode: 'desk', at: 5 });
+    const report = (await screen.findByRole('heading', { name: 'Research is in' })).closest('.chat-item')!;
+    await waitFor(() => expect(report.classList.contains('flash')).toBe(true));
+    // Handled once: the stop can be clicked again.
+    expect(window.location.hash).toBe('#/p/p/conversation');
+    // On the conversation a stop replaces the route: no page to go Back through.
+    const before = history.length;
+    fireEvent.click(screen.getByRole('button', { name: /Relaunch onboarding/ }));
+    expect(window.location.hash).toBe('#/p/p/conversation?at=2');
+    expect(history.length).toBe(before);
+  });
+
+  it("dims every lane but the open thread's", async () => {
+    const bridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': () => {
+        for (const e of team()) bridge.emit('desk:event', e);
+        return { ok: true };
+      },
+      'broker.unwatch': () => ({ ok: true }),
+    });
+    await render(`<div deskProjectFrame projectId="p" mode="full" focus="a"><div></div></div>`, {
+      imports: [ProjectFrame],
+      providers: [...bridge.providers, provideGlobal({ ...initialGlobalState(), connection: { status: 'live' } }), { provide: SESSION_RELEASE_DELAY, useValue: 0 }],
+    });
+    const label = async (title: string) => (await screen.findByText(title, { selector: '.line-label-title' })).closest('.line-label')!;
+    expect((await label('Frontend')).classList.contains('line-dim')).toBe(true);
+    expect((await label('Auth API')).classList.contains('line-dim')).toBe(false);
+  });
+});
+```
+
+`line-diagram.spec.ts` gets `mode` and `focus` in its template (`'full'` and `null` by default) and a case for what the ported ones leave out: `--trunk-y`, the height folded, the fold's order both ways (`transition-delay`), the threads link, and the dimmed lanes and labels.
+
+```ts
+  it("folds the lanes into Desk's line in desk mode, bottom row first, and dims all but the focused lane", async () => {
+    const g = geometry();
+    const { rerender } = await show();
+    const diagram = screen.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' });
+    expect(diagram.style.getPropertyValue('--trunk-y')).toBe(`${g.trunkY}px`);
+    const folds = () => [...diagram.querySelectorAll<SVGGElement>('svg.line-svg > g.line-fold')].slice(0, 2).map((f) => f.style.transitionDelay);
+    // Unfolding runs top down.
+    expect(folds()).toEqual(['0ms', '30ms']);
+    await rerender({ mode: 'desk' });
+    expect(diagram.getAttribute('aria-label')).toBe("Line diagram: Desk's stops since the brief");
+    expect(diagram.className).toBe('line-diagram collapsed');
+    expect(diagram.style.height).toBe(`${g.trunkY + 30}px`);
+    expect(diagram.querySelector<HTMLElement>('.line-scroll')!.style.height).toBe(`${g.trunkY + 30}px`);
+    // Folding runs bottom up.
+    expect(folds()).toEqual(['30ms', '0ms']);
+    expect(screen.getByRole('link', { name: /^2 threads · 1 running/ }).getAttribute('href')).toBe('#/p/p/threads');
+
+    await rerender({ mode: 'full', focus: 'a' });
+    expect(label('Frontend').className).toBe('line-label line-dim');
+    expect(label('Auth API').className).toBe('line-label');
+    expect(screen.getByRole('button', { name: `Auth API asked Frontend, ${clock(at(4))}` }).classList.contains('line-dim')).toBe(false);
+    const lanes = [...diagram.querySelectorAll('svg.line-svg > g.line-fold > g')].map((l) => l.getAttribute('opacity'));
+    expect(lanes).toEqual(['1', '0.3']);
+  });
+```
+
+`app.spec.ts`: `screenHost` finds the screen inside the frame too (`main.screen [deskErrorBoundary] > *`), and a case checks that one frame stays across the two tabs and goes on the others:
+
+```ts
+  it("keeps one project frame across the conversation and threads tabs, and none on the project's other tabs", async () => {
+    go('#/p/p1/conversation');
+    const { bridge, view } = await renderApp();
+    const frame = document.querySelector('main.screen > .project-frame');
+    expect(frame).not.toBeNull();
+    expect(frame!.querySelector('.project-frame-body > [deskErrorBoundary]')).not.toBeNull();
+    bridge.emit('desk:navigate', '#/p/p1/threads/t1');
+    await view.fixture.whenStable();
+    // The same frame, so its timeline unfolds in place.
+    expect(document.querySelector('main.screen > .project-frame')).toBe(frame);
+    bridge.emit('desk:navigate', '#/p/p1/library');
+    await view.fixture.whenStable();
+    expect(document.querySelector('.project-frame')).toBeNull();
+    expect(screenHost()).not.toBeNull();
+    bridge.emit('desk:navigate', '#/p/p2/conversation');
+    await view.fixture.whenStable();
+    expect(document.querySelector('main.screen > .project-frame')).not.toBeNull();
+  });
+```
+
+Run: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include src/app/conversation --include src/app/app.spec.ts --include src/app/screen-for.spec.ts --include src/app/threads)` and watch them fail (`./project-frame` does not resolve).
+
+Create `apps/web-ui/src/app/conversation/project-frame.ts`:
+
+```ts
+import { ChangeDetectionStrategy, Component, ElementRef, ViewEncapsulation, computed, inject, input, signal } from '@angular/core';
+import { lineGeometry } from '@desk/ui-core';
+import { PairSheet } from '../components/pair-sheet';
+import { GlobalStore } from '../core/global.store';
+import { NowService } from '../core/now.service';
+import { RouteService } from '../core/route.service';
+import { injectSession } from '../core/session.service';
+import { injectWidth } from '../core/width';
+import { LineDiagram, type StationG } from './line-diagram';
+
+/**
+ * The Conversation and Threads tabs' shared frame (ProjectFrame.tsx): the timeline on top and the tab below. The
+ * conversation shows Desk's line alone, so the chat gets the height; Threads shows every lane. App keeps the frame across
+ * the two tabs (keyed by project), so switching folds the lanes into Desk's line or unfolds them out of it.
+ *
+ * React wraps the diagram in an error boundary of its own. The web's boundaries are not told where an error came from
+ * (the innermost registered one takes it, W0c.11), so a boundary here would take the screen's errors too: a diagram error
+ * lands in the screen's boundary instead.
+ */
+@Component({
+  selector: 'div[deskProjectFrame]',
+  imports: [LineDiagram, PairSheet],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  host: { class: 'project-frame' },
+  template: `
+    @let s = session();
+    @if (s.status === 'ready' && s.project) {
+      <section
+        deskLineDiagram
+        [g]="geometry()"
+        [project]="s.project"
+        [messages]="s.messages"
+        [attention]="projectAttention()"
+        [now]="now()"
+        [mode]="mode()"
+        [focus]="focus()"
+        (station)="onStation($event)"
+        (pair)="pairOf.set($event)"
+      ></section>
+    }
+    <div class="project-frame-body"><ng-content /></div>
+    <!-- The pair sheet's two agents (design spec §8 item 8): local state, no route. -->
+    @if (pairOf(); as pair) {
+      <div deskPairSheet [projectId]="projectId()" [messages]="s.messages" [a]="pair[0]" [b]="pair[1]" (close)="pairOf.set(null)"></div>
+    }
+  `,
+})
+export class ProjectFrame {
+  readonly projectId = input.required<string>();
+  /** `desk`: Desk's line and its stops; `full`: every lane, message link and mark. */
+  readonly mode = input.required<'desk' | 'full'>();
+  /** The thread open on the Threads tab: its lane stays lit, the others dim. */
+  readonly focus = input<string | null>(null);
+  private readonly routes = inject(RouteService);
+  private readonly global = inject(GlobalStore);
+  private readonly host: HTMLElement = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  protected readonly session = injectSession(this.projectId);
+  protected readonly now = inject(NowService).now;
+  /** The frame's width, which the diagram's geometry follows (1200 until measured, as in the desktop). */
+  private readonly width = injectWidth(() => this.host);
+  /** The pair sheet's two agents (design spec §8 item 8): local state, no route. */
+  protected readonly pairOf = signal<readonly [string, string] | null>(null);
+
+  private readonly attention = computed(() => this.global.state().attention);
+  protected readonly projectAttention = computed(() => this.attention().filter((i) => i.project_id === this.projectId()));
+  private readonly timeline = computed(() => this.session().timeline);
+  private readonly threads = computed(() => this.session().project?.threads);
+  private readonly messages = computed(() => this.session().messages);
+  private readonly answeringRuns = computed(() => this.messages().answering);
+  // A finished lane that is answering gets a stub (design spec §8 item 10); the set changes only when an answer run starts or ends.
+  private readonly answeringIds = computed(() => new Set(Object.keys(this.answeringRuns())));
+  protected readonly geometry = computed(() =>
+    lineGeometry({ timeline: this.timeline(), threads: this.threads() ?? [], now: this.now(), width: this.width(), answering: this.answeringIds(), messages: this.messages() }),
+  );
+
+  /** A Desk stop opens the chat at that point: in place on the conversation, as a new page from Threads (Back returns). */
+  protected onStation(st: StationG): void {
+    const to = { name: 'project', id: this.projectId(), tab: 'conversation', at: st.eventId } as const;
+    if (this.mode() === 'desk') this.routes.replace(to);
+    else this.routes.navigate(to);
+  }
+}
+```
+
+`LineDiagram` takes `mode` and `focus` (with defaults, so the W1b.10 spec's other cases keep their template). The host binds the fold:
+
+```ts
+  host: {
+    class: 'line-diagram',
+    '[class.collapsed]': 'collapsed()',
+    '[attr.aria-label]': 'label()',
+    '[style.height.px]': 'height()',
+    '[style.--trunk-y]': "g().trunkY + 'px'",
+  },
+```
+
+```ts
+/** Below Desk's line when the lanes are folded away: room for the stops, the "now" line and nothing else. */
+const DESK_ONLY_BELOW = 30;
+
+  /** `desk`: Desk's line and its stops only, the lanes folded into it; `full`: everything. */
+  readonly mode = input<'desk' | 'full'>('full');
+  /** A thread whose lane stays lit while the others dim (its page is open). */
+  readonly focus = input<string | null>(null);
+
+  /** Messages between agents, with their names and colours (60c8a7b). */
+  protected readonly links = computed((): LinkView[] => {
+    const m = this.messages();
+    return this.g().links.map((k) => ({
+      ...k,
+      ...linkText(m, k),
+      key: `link-${k.ids[0]}`,
+      color: LINK_COLOR[k.kind],
+      dir: Math.sign(k.y2 - k.y1),
+      opacity: (k.kind === 'note' ? 0.55 : 1) * (this.dimmed(k.from) && this.dimmed(k.to) ? 0.3 : 1),
+      dim: this.dimmed(k.from) && this.dimmed(k.to),
+      pair: [k.from, k.to],
+    }));
+  });
+
+  protected readonly collapsed = computed(() => this.mode() === 'desk');
+  protected readonly label = computed(() => (this.collapsed() ? "Line diagram: Desk's stops since the brief" : 'Line diagram: Desk and its threads since the brief'));
+  protected readonly height = computed(() => (this.collapsed() ? this.g().trunkY + DESK_ONLY_BELOW : this.g().height));
+  /** The last lane row: lanes fold in from the bottom up and unfold from the top down. */
+  private readonly lastRow = computed(() => Math.max(0, ...this.g().lanes.map((l) => l.row)));
+  protected readonly running = computed(() => this.g().lanes.filter((l) => (l.thread?.status ?? l.lane.status) === 'running').length);
+  protected readonly threadsHref = computed(() => href({ name: 'project', id: this.project().project.id, tab: 'threads' }));
+
+  /** Whether a thread's lane steps back: another thread's page is open. */
+  protected dimmed(threadId: string): boolean {
+    const focus = this.focus();
+    return focus !== null && threadId !== focus;
+  }
+
+  /** A lane's fold delay, 30 ms a row: bottom up when folding, top down when unfolding. */
+  protected delay(row: number): string {
+    return `${(this.collapsed() ? this.lastRow() - row : row) * 30}ms`;
+  }
+```
+
+Each lane's SVG sits in a `g.line-fold` with its delay (`<g class="line-fold" [style.transition-delay]="delay(l.row)"><g [attr.opacity]="(l.lane.archived ? 0.45 : 1) * (dimmed(l.lane.threadId) ? 0.3 : 1)">…</g></g>`), and a link's group is dimmed when both its ends are (`dim` in `LinkView`, also on the question marks, signals and hops). Everything drawn on the lanes (marks, link buttons, question marks, answering dots, signals, hops, trains, inline titles) goes into `<div class="line-fold-html" [attr.inert]="collapsed() ? '' : null">`, each with `[class.line-dim]` for its lane; the row labels into `<div class="line-fold-html line-labels" [attr.inert]="…">`, also dimmed. After the labels, the collapsed diagram's way to Threads:
+
+```html
+    @if (g().lanes.length) {
+      <a class="line-threads-link" [style.top.px]="g().trunkY - 12" [href]="threadsHref()">{{ plural(g().lanes.length, 'thread') }}{{ running() ? ' · ' + running() + ' running' : '' }} <span aria-hidden="true">›</span></a>
+    }
+```
+
+`ConversationScreen` loses the diagram, its geometry and its width (they are the frame's now) and gains `at`:
+
+```ts
+  /** A Desk stop's event id to scroll the chat to (a stop clicked on the timeline); dropped from the route once done. */
+  readonly at = input<number | undefined>(undefined);
+
+    // A Desk stop clicked on the timeline arrives as `at`: jump there once, then drop it so the same stop can jump again.
+    effect(() => {
+      const at = this.at();
+      if (at === undefined || this.status() !== 'ready') return;
+      untracked(() => {
+        this.jumpToIndex(this.items().findIndex((i) => chatEventId(i) >= at));
+        this.routes.replace({ name: 'project', id: this.projectId(), tab: 'conversation' });
+      });
+    });
+```
+
+`screen-for.ts` passes it: `return { component: ConversationScreen, inputs: { projectId: route.id, at: route.at } };`.
+
+`App` renders the frame around the screen's boundary on the conversation and threads routes, keyed by project, and the boundary once, as a template both branches use:
+
+```html
+              <main class="screen">
+                <!-- One frame for the conversation and threads tabs, outside the screen's boundary and kept while the project
+                     stays the same, so switching tabs folds or unfolds its timeline. -->
+                @for (f of frame(); track f.id) {
+                  <div deskProjectFrame [projectId]="f.id" [mode]="f.mode" [focus]="f.focus">
+                    <ng-container *ngTemplateOutlet="screenBoundary" />
+                  </div>
+                } @empty {
+                  <ng-container *ngTemplateOutlet="screenBoundary" />
+                }
+                <div deskConnectionOverlay></div>
+              </main>
+      …
+      <ng-template #screenBoundary>
+        <div deskErrorBoundary [resetKey]="key()">
+          <ng-template>
+            @for (view of screen(); track view.key) {
+              <ng-container *ngComponentOutlet="view.component; inputs: view.inputs" />
+            }
+          </ng-template>
+        </div>
+      </ng-template>
+```
+
+```ts
+  /** The conversation's and threads' frame, as a one-item list tracked by project id (ProjectFrame, App.tsx). */
+  protected readonly frame = computed(() => {
+    const r = this.route();
+    if (r.name !== 'project' || (r.tab !== 'conversation' && r.tab !== 'threads')) return [];
+    return [{ id: r.id, mode: r.tab === 'threads' ? ('full' as const) : ('desk' as const), focus: r.threadId ?? null }];
+  });
+```
+
+The web e2e follows the desktop's (master changed `apps/desktop/e2e/flows.e2e.test.ts` and `messaging.e2e.test.ts` the same way): in `apps/web-ui/e2e/flows.e2e.test.ts` the conversation's diagram shows "1 thread" rather than the lane; "sent back" and the roster are checked on Threads after going there from the conversation with the tab (the unfold); and the messaging scenario opens Threads for the question mark, clicks the message link (which opens the same pair sheet), and goes back to the conversation with its tab for the digest. On Threads the timeline links each lane by its title too, so the roster's cards are found as `a.thread-card` (the repository scenario's "Checkout copy" card, the core loop's "Signup checklist").
+
+Run the specs again: PASS. Commit (`feat(web-ui): the conversation and threads share a timeline frame that folds and unfolds`) with `project-frame.ts`, `line-diagram.ts`, `conversation-screen.ts`, `app.ts`, `screen-for.ts`, their specs, `apps/web-ui/e2e/flows.e2e.test.ts` and this plan.
 
 - [ ] **Step 4: Verify**
 

@@ -164,9 +164,9 @@ describe('the core loop in the browser', () => {
     await composer.press('Enter');
     await page.getByText('Relaunch onboarding: start with a signup checklist.').first().waitFor();
 
-    // The thread forks on the line diagram, and Desk's question arrives.
+    // The thread forks (the conversation's timeline keeps to Desk's line and counts it), and Desk's question arrives.
     const diagram = page.getByRole('region', { name: /Line diagram/ });
-    await diagram.getByRole('link', { name: /Signup checklist/ }).first().waitFor({ timeout: 20_000 });
+    await diagram.getByRole('link', { name: /^1 thread/ }).waitFor({ timeout: 20_000 });
     await page.getByRole('button', { name: 'Data source', exact: true }).click();
     await page.getByText('Answered').waitFor({ timeout: 15_000 });
     await e2e.shot(page, 'flows-1-conversation-forked');
@@ -188,7 +188,6 @@ describe('the core loop in the browser', () => {
     // The thread reports, Desk sends it back, it reports again, and Desk reports to you.
     await go(page, `#/p/${project.id}/conversation`);
     await page.getByRole('heading', { name: 'The signup checklist is in' }).waitFor({ timeout: 30_000 });
-    await diagram.getByText(/^sent back/).first().waitFor();
     const needsYou = page.getByRole('link', { name: 'Review the checklist copy' });
     await needsYou.waitFor();
     await e2e.shot(page, 'flows-3-conversation-report');
@@ -221,9 +220,16 @@ describe('the core loop in the browser', () => {
     // It works in a scratch workspace: Diff says so.
     await page.getByRole('tab', { name: 'Diff' }).click();
     await page.getByText('No diff for this thread').waitFor();
-    await go(page, `#/p/${project.id}/threads`);
+    // From the conversation, the Threads tab unfolds the lanes out of Desk's line: the same diagram, animated.
+    await go(page, `#/p/${project.id}/conversation`);
+    await page.getByRole('region', { name: "Line diagram: Desk's stops since the brief" }).waitFor();
+    await page.getByRole('link', { name: 'Threads', exact: true }).click();
     await page.getByRole('heading', { name: 'Threads' }).waitFor();
-    await page.getByRole('link', { name: /Signup checklist/ }).waitFor();
+    const full = page.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' });
+    await full.getByRole('link', { name: /Signup checklist/ }).first().waitFor();
+    await full.getByText(/^sent back/).first().waitFor();
+    await page.locator('a.thread-card', { hasText: 'Signup checklist' }).waitFor();
+    await page.waitForTimeout(600);
     await e2e.shot(page, 'flows-6-roster');
 
     expect(problems).toEqual([]);
@@ -245,7 +251,10 @@ describe('the core loop in the browser', () => {
     await e2e.shot(page, 'messaging-1-digest');
     const front = (await client.threads.list(project.id)).find((t) => t.title === 'Frontend')!;
 
-    // Frontend's lane marks its question to Auth API, filled once answered, and the legend explains the ring.
+    // On Threads, Frontend's lane marks its question to Auth API, filled once answered, and the legend explains the ring.
+    await page.getByRole('link', { name: 'Threads', exact: true }).click();
+    await page.getByRole('region', { name: 'Line diagram: Desk and its threads since the brief' }).waitFor();
+    await page.waitForTimeout(600);
     const mark = page.getByRole('button', { name: /^Frontend asked Auth API, \d\d:\d\d$/ });
     await expect.poll(() => mark.getAttribute('class')).toContain('line-q-answered');
     expect(await page.locator('.line-legend').textContent()).toContain('question');
@@ -260,7 +269,17 @@ describe('the core loop in the browser', () => {
     await sheet.getByRole('button', { name: 'Close' }).click();
     await sheet.waitFor({ state: 'detached' });
 
-    // The digest's pair line opens the same sheet, whose answer links to Frontend where it received it.
+    // The question and its answer, seconds apart, are one link between the two lanes; a real click opens the same sheet.
+    const link = page.getByRole('button', { name: /^2 messages between Frontend and Auth API, / });
+    await link.hover();
+    await e2e.shot(page, 'messaging-2b-link');
+    await link.click();
+    await sheet.waitFor();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await sheet.waitFor({ state: 'detached' });
+
+    // Back on the conversation, the digest's pair line opens the same sheet, whose answer links to Frontend where it received it.
+    await page.getByRole('link', { name: 'Conversation', exact: true }).click();
     await digest.click();
     await page.getByRole('button', { name: /^Frontend ⇄ Auth API · 2/ }).click();
     const inFront = sheet.getByRole('link', { name: 'show in Frontend transcript' });
@@ -319,9 +338,9 @@ describe('the core loop in the browser', () => {
     const thread = (await client.threads.list(project.id)).find((t) => t.title === 'Checkout copy')!;
     expect(thread.git_branch).toBeTruthy();
 
-    // The roster card names its branch; it opens the thread.
+    // The roster card names its branch; it opens the thread. (The timeline above the roster links the lane too.)
     await go(page, `#/p/${project.id}/threads`);
-    const card = page.getByRole('link', { name: /Checkout copy/ });
+    const card = page.locator('a.thread-card', { hasText: 'Checkout copy' });
     await card.waitFor();
     expect(await card.textContent()).toContain(thread.git_branch!);
     expect(await card.textContent()).toContain('Done');
