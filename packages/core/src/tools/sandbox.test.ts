@@ -164,6 +164,21 @@ describe('guard', () => {
     expect(existsSync(join(home, '.gitconfig'))).toBe(false);
   });
 
+  it("keeps Desk's built-in skills read-only, even under a writable source around them (the repo in development)", async (t) => {
+    if (!available) t.skip();
+    const repo = join(root, 'repo');
+    const builtins = join(repo, 'catalog', 'skills');
+    await mkdir(join(builtins, 'pdf-toolkit'), { recursive: true });
+    await writeFile(join(builtins, 'pdf-toolkit', 'SKILL.md'), 'shipped\n');
+    const sandbox: SandboxSpec = { enabled: true, writable: [work, repo], guard: sandboxGuard({ dataDir: data, secrets: [secret], readOnly: [builtins] }) };
+    const out = await bashTool.execute(
+      { command: `cd '${repo}'; echo x >> catalog/skills/pdf-toolkit/SKILL.md || echo skill-denied; touch catalog/skills/new.py || echo add-denied; echo ok > notes.txt && echo wrote`, timeout_s: 20 },
+      testToolContext(work, { sandbox }),
+    );
+    for (const word of ['skill-denied', 'add-denied', 'wrote']) expect(out).toContain(word);
+    expect(await readFile(join(builtins, 'pdf-toolkit', 'SKILL.md'), 'utf8')).toBe('shipped\n');
+  });
+
   it('runs the grep tool sandboxed', async (t) => {
     if (!available) t.skip();
     await writeFile(join(work, 'notes.md'), 'find me\n');

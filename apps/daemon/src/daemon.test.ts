@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, hang, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
-import { getAgent, SEED_MODELS } from '@desk/core';
+import { getAgent, loadBuiltinsManifest, SEED_MODELS } from '@desk/core';
 import { FAKE_MODEL } from '@desk/core/testing';
 import { startDaemon, type RunningDaemon } from './daemon';
 import { daemonPaths } from './paths';
@@ -41,7 +41,7 @@ describe('startDaemon', () => {
       expect(d.runtime.guard).toEqual({
         dataDir: dir,
         secrets: [p.daemonJson, p.db, `${p.db}-wal`, `${p.db}-shm`, `${p.db}-journal`, join(home, '.config', 'cliproxyapi.env')],
-        readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh')],
+        readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh'), join(import.meta.dirname, '..', '..', '..', 'catalog', 'skills')],
         ports: [d.port],
       });
     } finally {
@@ -62,6 +62,31 @@ describe('startDaemon', () => {
     // The catalog and skill runtimes are wired in: the shipped catalog lists, and runtimes report.
     expect((await json(api(d, '/catalog'))).length).toBe(18);
     expect(await json(api(d, '/system/runtimes'))).toEqual({ bytes: 0, envs: [] });
+  });
+
+  it("replaces an unmodified catalog copy of one of Desk's own skills with the built-in at start", async () => {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
+    const skills = join(import.meta.dirname, '..', '..', '..', 'catalog', 'skills');
+    const shipped = loadBuiltinsManifest().skills.find((s) => s.name === 'pdf-toolkit')!;
+    // The catalog as it was before Plan 18: pdf-toolkit as a builtin catalog entry.
+    const file = {
+      version: 1 as const,
+      updated: '2026-09-26',
+      entries: [
+        {
+          id: 'pdf-toolkit', title: 'PDF toolkit', category: 'files' as const, summary: shipped.summary, license: 'MIT', homepage: 'https://github.com/Barnabet/desk',
+          source: { type: 'builtin' as const, path: 'pdf-toolkit' }, digest: shipped.digest, files: shipped.files, bytes: shipped.bytes, scripts: shipped.scripts, runtime: {}, caveats: [],
+        },
+      ],
+    };
+    const first = await boot([], { catalog: { builtinRoot: skills, file }, runtimes: { uv: null } });
+    expect((await api(first, '/catalog/pdf-toolkit/install', { method: 'POST', body: '{}' })).status).toBe(201);
+    expect((await json(api(first, '/skills'))).map((s: any) => s.name)).toEqual(['pdf-toolkit']);
+    await first.stop();
+    daemons.splice(0);
+    const second = await boot([], { catalog: { builtinRoot: skills } });
+    expect(await json(api(second, '/skills'))).toEqual([]);
+    expect((await json(api(second, '/builtin-skills'))).find((b: any) => b.name === 'pdf-toolkit')).toMatchObject({ shadowed_by: null, broken: null });
   });
 
   it('refuses a second instance and takes over a stale lock', async () => {

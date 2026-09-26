@@ -91,16 +91,18 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
     if (!endpointState.config) log.info('no model endpoint configured yet; agents stay paused until one is set');
     const adapter = createSwitchableAdapter(endpointState.config, models);
     let runtimeRef: Runtime | null = null;
+    const builtinRoot = o.catalog?.builtinRoot ?? fileURLToPath(new URL('../../../catalog/skills', import.meta.url));
     const skillRuntimes = new SkillRuntimes({
       dataDir: o.dataDir,
       store,
       uv: o.runtimes?.uv !== undefined ? o.runtimes.uv : findUv(),
       nodeExec: o.runtimes?.nodeExec ?? process.execPath,
-      exists: (ref) => !!runtimeRef?.skills.get(ref.scope, ref.name, ref.projectId),
+      exists: (ref) => (ref.scope === 'builtin' ? !!runtimeRef?.builtins?.entry(ref.name) : !!runtimeRef?.skills.get(ref.scope, ref.name, ref.projectId)),
       ...(o.runtimes?.registry ? { registry: o.runtimes.registry } : {}),
     });
     const runtime = new Runtime({
       skillEnv: skillRuntimes,
+      builtins: { root: builtinRoot },
       store,
       adapter,
       models,
@@ -108,18 +110,23 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       // Off limits to agents: the token file, every project's history, and the model credentials file; and read-only,
       // the git and ssh config that deskd's own git runs with.
       secrets: [paths.daemonJson, ...['', '-wal', '-shm', '-journal'].map((x) => paths.db + x), modelCredentialsFile(home)],
-      readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh')],
+      // Desk's built-in skills are read-only too (in development they live in the repo's catalog/skills).
+      readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh'), builtinRoot],
       home,
       ...(o.sandboxAvailable !== undefined ? { sandboxAvailable: o.sandboxAvailable } : {}),
       onError: (err, ctx) => log.error(`runtime error (${ctx})`, err),
     });
     runtimeRef = runtime;
+    const interrupted = skillRuntimes.recoverInterrupted();
+    if (interrupted) log.info(`${interrupted} skill environment setup(s) were interrupted; they will be set up again when needed`);
+    const adopted = runtime.adoptBuiltins();
+    if (adopted.length) log.info(`now built into Desk, removed catalog copies: ${adopted.join(', ')}`);
     const catalog = new CatalogService({
       runtime,
       runtimes: skillRuntimes,
       store,
       dataDir: o.dataDir,
-      builtinRoot: o.catalog?.builtinRoot ?? fileURLToPath(new URL('../../../catalog/skills', import.meta.url)),
+      builtinRoot,
       ...(o.catalog?.archiveBase ? { archiveBase: o.catalog.archiveBase } : {}),
       ...(o.catalog?.fetch ? { fetch: o.catalog.fetch } : {}),
       ...(o.catalog?.file ? { catalog: o.catalog.file } : {}),
