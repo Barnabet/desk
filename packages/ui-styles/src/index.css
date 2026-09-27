@@ -4,6 +4,7 @@
 @import '@fontsource-variable/newsreader';
 @import './tokens.css';
 @import './attention.css';
+@import './automations.css';
 @import './conversation.css';
 @import './knowledge.css';
 @import './map.css';

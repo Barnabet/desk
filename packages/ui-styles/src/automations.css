@@ -1,0 +1,52 @@
+/* Automations (spec 2026-09-26-automations-design §8). Colors come from tokens only. */
+
+/* Dialogs */
+.auto-warn {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--wait-pastel);
+  color: var(--wait-text);
+  font-size: 13px;
+}
+.auto-sub {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.auto-plain {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.auto-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+.auto-quote {
+  margin: 10px 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--rule-strong);
+  color: var(--text);
+  font-size: 13px;
+}
+.auto-pick {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.auto-pick .input {
+  flex: 1;
+  min-width: 0;
+}
