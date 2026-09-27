@@ -19,6 +19,19 @@ import {
   ToolImage,
   ToolResultStatus,
 } from './domain';
+import {
+  AutomationDefinition,
+  AutomationLayout,
+  AutomationName,
+  Grant,
+  InputValue,
+  Outputs,
+  RunTrigger,
+  SaveVia,
+  StepGate,
+  StepQuestion,
+  StepStatus,
+} from './automations';
 import { ProjectSettingsPatch } from './settings';
 
 const event = <T extends string, P extends z.ZodType>(type: T, payload: P) =>
@@ -53,6 +66,8 @@ export const EventBody = z.discriminatedUnion('type', [
       git: GitInfo.nullable().optional(),
       /** Skills active from the start (their instructions are in the agent's system prompt). */
       skills: z.array(SkillName).optional(),
+      /** A step agent's run and step (role `step`). */
+      automation: z.object({ run_id: z.string(), step_id: z.string() }).optional(),
     }),
   ),
   event('source.added', z.object({ source_id: z.string(), path: z.string(), kind: SourceKind, label: z.string(), agent_write: z.boolean().optional() })),
@@ -199,7 +214,7 @@ export const EventBody = z.discriminatedUnion('type', [
       path: z.string().min(1),
       title: z.string(),
       kind: ArtifactKind,
-      origin: z.string().regex(/^(user|agent:.+)$/),
+      origin: z.string().regex(/^(user|agent:.+|automation:.+)$/),
       description: z.string(),
     }),
   ),
@@ -251,6 +266,71 @@ export const EventBody = z.discriminatedUnion('type', [
       /** The endpoint's answer, e.g. "400 Could not process image". */
       reason: z.string(),
     }),
+  ),
+  // ── automations (spec 2026-09-26-automations-design §2.3) ──
+  event(
+    'automation.saved',
+    z.object({
+      automation_id: z.string(),
+      name: AutomationName,
+      version: z.number().int().min(1),
+      definition: AutomationDefinition,
+      origin: z.string().regex(/^(user|agent:.+)$/),
+      change_note: z.string().max(2000),
+      via: SaveVia,
+    }),
+  ),
+  event('automation.layout_saved', z.object({ automation_id: z.string(), layout: AutomationLayout })),
+  event('automation.deleted', z.object({ automation_id: z.string(), origin: z.string().regex(/^(user|agent:.+)$/) })),
+  /** User only; `system` when the project is archived. */
+  event('automation.switched', z.object({ automation_id: z.string(), enabled: z.boolean(), by: z.enum(['user', 'system']) })),
+  /** User only. `remembered` keeps a suspension as it is; the other reasons end it. */
+  event('automation.grants_set', z.object({ automation_id: z.string(), grants: z.array(Grant).max(100), reason: z.enum(['edited', 'remembered', 'kept', 'enabled']) })),
+  event('automation.enable_requested', z.object({ automation_id: z.string(), note: z.string().max(2000), proposed_grants: z.array(Grant).max(100) })),
+  event(
+    'automation.run_started',
+    z.object({
+      run_id: z.string(),
+      automation_id: z.string(),
+      version: z.number().int().min(1),
+      trigger: RunTrigger,
+      test: z.boolean(),
+      inputs: z.record(z.string(), InputValue),
+      by: z.string().regex(/^(user|schedule|agent:.+)$/),
+      parent: z.object({ run_id: z.string(), step_id: z.string() }).optional(),
+      trigger_index: z.number().int().min(0).optional(),
+      due_at: z.string().datetime().optional(),
+      caught_up: z.number().int().min(0).optional(),
+      deadline_at: z.string().datetime(),
+    }),
+  ),
+  event(
+    'automation.step_changed',
+    z.object({
+      run_id: z.string(),
+      step_id: z.string(),
+      attempt: z.number().int().min(1),
+      status: StepStatus,
+      route: z.string().nullable().optional(),
+      outputs: Outputs.optional(),
+      summary: z.string().max(4000).optional(),
+      error: z.string().max(8000).optional(),
+      agent_id: z.string().optional(),
+      child_run_id: z.string().optional(),
+      resume_at: z.string().datetime().nullable().optional(),
+      gate: StepGate.nullable().optional(),
+      question: StepQuestion.nullable().optional(),
+      answered_by: z.literal('user').optional(),
+      note: z.string().max(2000).optional(),
+    }),
+  ),
+  event(
+    'automation.run_finished',
+    z.object({ run_id: z.string(), status: z.enum(['succeeded', 'failed', 'cancelled']), summary: z.string().max(4000), reason: z.string().max(4000).optional() }),
+  ),
+  event(
+    'automation.trigger_skipped',
+    z.object({ automation_id: z.string(), trigger_index: z.number().int().min(0), due_at: z.string().datetime(), reason: z.enum(['still_running', 'missed']) }),
   ),
   event(
     'usage',

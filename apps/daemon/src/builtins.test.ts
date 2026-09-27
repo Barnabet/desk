@@ -30,7 +30,7 @@ describe('built-in skills API', () => {
     const { api } = await setup();
     const list = await api('GET', '/builtin-skills');
     expect(list.status).toBe(200);
-    expect(list.body).toHaveLength(12);
+    expect(list.body).toHaveLength(13);
     expect(list.body.find((b: any) => b.name === 'pdf-toolkit')).toMatchObject({ enabled: true, broken: null, shadowed_by: null, runtime: { state: 'none', reason: null } });
     expect((await api('GET', '/skills')).body).toEqual([]);
   });

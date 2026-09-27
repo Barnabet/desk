@@ -5,7 +5,7 @@ import { projectFromOverview, reduceProject } from './project';
 
 const overview: ProjectOverview = {
   project: { id: 'p', name: 'Onboarding', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, desk_reasoning_effort: null, thread_reasoning_effort: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
-  desk: { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', reasoning_effort: null, title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, archived_at: null, created_at: 't', updated_at: 't' },
+  desk: { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', reasoning_effort: null, title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, automation_run_id: null, automation_step_id: null, archived_at: null, created_at: 't', updated_at: 't' },
   sources: [],
   plan: null,
   threads: [],
@@ -86,5 +86,12 @@ describe('reduceProject', () => {
     const s2 = [start(7, 's2', 'api'), ev(8, 'service.stopped', { service_id: 's1', by: 'user', reason: 'requested' })].reduce(reduceProject, s);
     expect(s2.services.find((x) => x.name === 'api')).toMatchObject({ status: 'running', exit_code: null, pid: 107, started_by: 'user' });
     expect(s2.services.find((x) => x.name === 'web')).toMatchObject({ status: 'stopped', stop_reason: 'requested', url: 'http://localhost:5173' });
+  });
+});
+
+describe('step agents', () => {
+  it('keeps step agents out of the thread list', () => {
+    const s = reduceProject(projectFromOverview(overview), { id: 99, ts: '2026-09-28T06:00:00.000Z', project_id: overview.project.id, agent_id: 'step1', type: 'agent.created', payload: { role: 'step', model: 'm', title: 'Summarise', brief: 'b', workspace_path: '/w', parent_id: null, automation: { run_id: 'r', step_id: 's' } } } as never);
+    expect(s.threads.map((t) => t.id)).not.toContain('step1');
   });
 });

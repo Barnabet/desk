@@ -37,7 +37,8 @@ export {
 } from './state/queries';
 export { listAttention } from './state/attention';
 export { listOverview } from './state/overview';
-export { listWorkspace, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
+export { listFolder, listWorkspace, resolveFolderFile, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
+export { readAgentFile } from './tools/agent-files';
 export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, modelCredentialsFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
 export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';
@@ -102,7 +103,16 @@ export { deskSystemPrompt, threadSystemPrompt, type PromptContext } from './agen
 export { runAgent, SHUTDOWN_REASON, type RunDeps, type RunOutcome } from './agent/run';
 export { Scheduler, type Job, type SchedulerOptions } from './runtime/scheduler';
 export { BUILTIN_RUNTIME_WAIT_MS, Runtime, type RuntimeOptions } from './runtime/runtime';
-export { deskToolsFor, threadToolsFor, toolsForRole } from './runtime/toolsets';
+export { deskToolsFor, threadToolsFor, toolByName, toolsForRole } from './runtime/toolsets';
+export * from './automations/queries';
+export * from './automations/views';
+export * from './automations/service';
+export * from './automations/validate';
+export * from './automations/schedule';
+export * from './automations/grants';
+export * from './automations/engine';
+export * from './automations/scope';
+export * from './automations/folders';
 export { gitCommitTool, gitDiffTool, gitPushTool, gitStatusTool, gitTools, openPrTool } from './tools/git';
 export { bashReadonlyTool } from './tools/bash';
 export { memorySearchTool, memoryTools, memoryWriteTool } from './tools/memory';

@@ -1,0 +1,129 @@
+<style>
+  .dk { --ground:#efeae0; --titlebar:#e6e0d4; --nav:#dad3c5; --rule:#d6cfc1; --rule-soft:#e3dfd6; --ink:#1c1b18; --text:#3d3a34; --faint:#6e6a62;
+        --run:#2f5bd3; --run-pastel:#e3e8f5; --run-ring:#c9d3ec; --wait:#a15c00; --wait-pastel:#f3e6cf; --accent:#c4441c; --ok:#2f6b4f; --card:#fff; --paper:#f7f5f0; --muted:#8a857b;
+        --serif: Newsreader, Georgia, serif; --sans: Geist, system-ui, sans-serif; --mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+        font-family: var(--sans); color: var(--text); background: var(--ground); border-radius: 14px; overflow: hidden; border: 1px solid var(--rule); }
+  .dk .tb { background: var(--titlebar); padding: 8px 14px; display:flex; gap:18px; align-items:center; font-size:13px; border-bottom:1px solid var(--rule); }
+  .dk .tb b { font-family: var(--serif); font-size:15px; color:var(--ink); font-weight:600 }
+  .dk .sub { display:flex; gap:4px; padding:6px 14px; background:var(--ground); border-bottom:1px solid var(--rule-soft); font-size:13px }
+  .dk .sub span { padding:4px 10px; border-radius:8px; color:var(--faint) }
+  .dk .sub span.on { background:var(--card); color:var(--ink); box-shadow:0 1px 0 var(--rule) }
+  .dk .hdr { display:flex; align-items:center; gap:12px; padding:14px 18px 10px; }
+  .dk .hdr h1 { font-family:var(--serif); font-size:22px; font-weight:500; color:var(--ink); margin:0 }
+  .dk .pill { font-size:11px; padding:3px 8px; border-radius:999px; background:var(--wait-pastel); color:#7a4500; font-family:var(--mono) }
+  .dk .pill.ok { background:#e6f2eb; color:var(--ok) }
+  .dk .sw { width:34px; height:20px; border-radius:999px; background:var(--ok); position:relative; display:inline-block; vertical-align:middle }
+  .dk .sw::after { content:''; position:absolute; right:2px; top:2px; width:16px; height:16px; border-radius:50%; background:#fff }
+  .dk .btn { font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid var(--rule); background:var(--card); color:var(--ink) }
+  .dk .btn.pri { background:var(--ink); color:#fff; border-color:var(--ink) }
+  .dk .tabs2 { display:flex; gap:16px; padding:0 18px; font-size:13px; border-bottom:1px solid var(--rule-soft) }
+  .dk .tabs2 span { padding:8px 0; color:var(--faint) } .dk .tabs2 span.on { color:var(--ink); border-bottom:2px solid var(--ink) }
+  .dk .body { display:flex; gap:0 }
+  .dk .canvas { position:relative; width:580px; height:680px; flex:none; background-image: radial-gradient(var(--rule) 1px, transparent 1px); background-size: 18px 18px; border-right:1px solid var(--rule-soft) }
+  .dk .node { position:absolute; width:180px; height:64px; background:var(--card); border:1px solid var(--rule); border-radius:12px; box-sizing:border-box; padding:7px 10px 7px 14px; box-shadow:0 4px 10px rgba(28,27,24,.06); overflow:hidden }
+  .dk .node::before { content:''; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--k) }
+  .dk .node .k { font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; color:var(--k); text-transform:uppercase }
+  .dk .node .t { font-family:var(--serif); font-size:14.5px; color:var(--ink); line-height:1.15; margin-top:1px }
+  .dk .node .d { font-family:var(--mono); font-size:10px; color:var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px }
+  .dk .node.sel { outline:3px solid var(--run-ring); border-color:var(--run) }
+  .dk .start { position:absolute; left:170px; top:14px; width:220px; height:44px; border-radius:999px; background:var(--ink); color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center; gap:8px }
+  .dk .elabel { position:absolute; font-family:var(--mono); font-size:10px; background:var(--ground); padding:1px 5px; border-radius:4px; color:var(--text); border:1px solid var(--rule) }
+  .dk .palette { position:absolute; left:10px; bottom:10px; right:10px; display:flex; gap:6px; flex-wrap:wrap; background:rgba(255,255,255,.75); border:1px solid var(--rule); border-radius:10px; padding:6px 8px; font-size:11px; align-items:center }
+  .dk .palette i { font-style:normal; padding:3px 8px; border-radius:6px; border:1px solid var(--rule); background:var(--card); border-left:4px solid var(--k) }
+  .dk .insp { flex:1; padding:14px 16px; font-size:12.5px; min-width:300px; background:var(--paper) }
+  .dk .insp h3 { font-family:var(--serif); font-size:17px; font-weight:500; margin:2px 0 10px; color:var(--ink) }
+  .dk .f { margin-bottom:10px } .dk .f label { display:block; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:3px }
+  .dk .in { background:var(--card); border:1px solid var(--rule); border-radius:8px; padding:6px 8px; color:var(--ink) }
+  .dk .tpl { font-family:var(--mono); font-size:11px; background:var(--run-pastel); color:#1f45a8; padding:0 4px; border-radius:4px }
+  .dk .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:var(--card); border:1px solid var(--rule); margin-right:4px }
+  .dk .row2 { display:flex; gap:8px } .dk .row2 > div { flex:1 }
+  .dk .note { font-size:11px; color:var(--faint) }
+  .dk table.list { width:100%; border-collapse:collapse; font-size:12.5px; background:var(--card) }
+  .dk table.list td, .dk table.list th { padding:9px 12px; border-bottom:1px solid var(--rule-soft); text-align:left }
+  .dk table.list th { font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:500; background:var(--paper) }
+  .dk .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px }
+</style>
+
+<h2>Automations tab: the list, then one automation's Design view</h2>
+<p class="subtitle">A new project tab between Threads and Library. The list is a page of its own, and clicking a row opens the automation at full width.</p>
+
+<div class="section">
+<div class="label">1 · The list (project → Automations)</div>
+<div class="dk">
+  <div class="tb"><b>Desk</b><span>Map</span><span style="color:var(--ink)">Acme research ▾</span><span>Skills</span><span>System</span></div>
+  <div class="sub"><span>Conversation</span><span>Threads</span><span class="on">Automations</span><span>Library</span><span>Memory</span><span>Settings</span></div>
+  <div class="hdr"><h1>Automations</h1><span style="flex:1"></span><span class="btn">Import…</span><span class="btn">Blank automation</span><span class="btn pri">Describe one to Desk</span></div>
+  <div style="padding:0 18px 16px">
+  <table class="list">
+    <tr><th>Automation</th><th>On</th><th>When</th><th>Last run</th><th>Next</th></tr>
+    <tr><td><b style="font-family:var(--serif);font-size:14px;color:var(--ink)">Weekly competitor digest</b><div class="note">v7 · untested changes</div></td><td><span class="sw"></span></td><td>Mondays 08:00</td><td><span class="dot" style="background:var(--ok)"></span>succeeded · 3 d ago</td><td>Mon 08:00</td></tr>
+    <tr><td><b style="font-family:var(--serif);font-size:14px;color:var(--ink)">Nightly dependency check</b><div class="note">v3</div></td><td><span class="sw"></span></td><td>Daily 02:00</td><td><span class="dot" style="background:var(--wait)"></span><span style="color:#7a4500">waiting on you: "Open the PR?"</span></td><td>tonight 02:00</td></tr>
+    <tr><td><b style="font-family:var(--serif);font-size:14px;color:var(--ink)">Invoice intake</b><div class="note">v2 · run now only</div></td><td><span class="sw" style="background:var(--nav)"></span></td><td>Run now (file)</td><td><span class="dot" style="background:var(--accent)"></span><span style="color:var(--accent)">failed · yesterday</span></td><td>n/a</td></tr>
+  </table>
+  </div>
+</div>
+</div>
+
+<div class="section">
+<div class="label">2 · One automation: Design (graph, top to bottom, with the inspector on the right)</div>
+<div class="dk">
+  <div class="sub"><span>Conversation</span><span>Threads</span><span class="on">Automations</span><span>Library</span><span>Memory</span><span>Settings</span></div>
+  <div class="hdr">
+    <span class="note">Automations ›</span><h1>Weekly competitor digest</h1>
+    <span class="pill">v7 · tested in v6</span>
+    <span style="flex:1"></span>
+    <span class="note">On</span><span class="sw"></span>
+    <span class="btn">Test…</span><span class="btn pri">Run now…</span>
+  </div>
+  <div class="tabs2"><span class="on">Design</span><span>Runs (14)</span><span>Versions</span><span>Grants (2)</span><span style="flex:1"></span><span style="color:var(--ok)">✓ valid · saved</span></div>
+  <div class="body">
+    <div class="canvas">
+      <svg width="580" height="680" style="position:absolute;left:0;top:0">
+        <g fill="none" stroke="#8a857b" stroke-width="1.6">
+          <path d="M280 58 L280 90"/>
+          <path d="M280 154 C280 185, 135 180, 135 210"/>
+          <path d="M280 154 C280 185, 425 180, 425 210"/>
+          <path d="M370 122 C430 122, 470 122, 520 122" stroke-dasharray="4 4"/>
+          <path d="M135 274 C135 305, 280 300, 280 330"/>
+          <path d="M425 274 C425 305, 280 300, 280 330"/>
+          <path d="M280 394 L280 450"/>
+          <path d="M280 514 C280 545, 135 540, 135 570"/>
+          <path d="M280 514 C280 545, 425 540, 425 570"/>
+        </g>
+        <circle cx="524" cy="122" r="5" fill="none" stroke="#8a857b" stroke-width="1.6"/>
+      </svg>
+      <div class="start">▶ Mondays 08:00 · or Run now</div>
+      <div class="node" style="--k:#3d3a34;left:190px;top:90px"><div class="k">script</div><div class="t">Fetch pages</div><div class="d">competitor-digest: fetch.py</div></div>
+      <div class="elabel" style="left:176px;top:176px">changed</div>
+      <div class="elabel" style="left:336px;top:176px">changed</div>
+      <div class="elabel" style="left:420px;top:100px">unchanged · ends</div>
+      <div class="node sel" style="--k:#2f5bd3;left:45px;top:210px"><div class="k">agent</div><div class="t">Summarise changes</div><div class="d">skills: web-research</div></div>
+      <div class="node" style="--k:#3d3a34;left:335px;top:210px"><div class="k">script</div><div class="t">Extract prices</div><div class="d">competitor-digest: prices.py</div></div>
+      <div class="node" style="--k:#2f5bd3;left:190px;top:330px"><div class="k">agent · join all</div><div class="t">Write the digest</div><div class="d">→ digest.md · publish</div></div>
+      <div class="node" style="--k:#a15c00;left:190px;top:450px"><div class="k">ask me</div><div class="t">Publish this week's?</div><div class="d">shows digest.md</div></div>
+      <div class="elabel" style="left:176px;top:536px">approved</div>
+      <div class="elabel" style="left:336px;top:536px">rejected</div>
+      <div class="node" style="--k:#3d3a34;left:45px;top:570px"><div class="k">script</div><div class="t">Make the .docx</div><div class="d">word-documents: convert.py</div></div>
+      <div class="node" style="--k:#c4441c;left:335px;top:570px"><div class="k">tell desk</div><div class="t">Digest rejected</div><div class="d">"see my note, revise…"</div></div>
+      <div class="palette" style="bottom:auto;top:auto;display:none"></div>
+    </div>
+    <div class="insp">
+      <div class="note" style="font-family:var(--mono);color:#1f45a8">AGENT STEP · id summarise</div>
+      <h3>Summarise changes</h3>
+      <div class="f"><label>Brief</label><div class="in" style="line-height:1.5">For each competitor, summarise what changed on their pages since last week. This week: <span class="tpl">{{steps.fetch.dir}}/pages</span>. Last week: <span class="tpl">{{previous.steps.fetch.dir}}/pages</span>. Ignore cosmetic changes.</div><div class="note">Type {{ to insert an input or an earlier step's output.</div></div>
+      <div class="f"><label>Skills</label><span class="chip">web-research ×</span><span class="chip" style="border-style:dashed">+ add</span></div>
+      <div class="row2"><div class="f"><label>Model</label><div class="in">project default</div></div><div class="f"><label>Effort</label><div class="in">medium</div></div></div>
+      <div class="f"><label>Output keys</label><div class="in"><span style="font-family:var(--mono)">headline</span>: one line, the biggest change<br><span style="font-family:var(--mono)">changed_count</span>: competitors with real changes</div></div>
+      <div class="row2"><div class="f"><label>Routes</label><div class="in note">none (always continues)</div></div><div class="f"><label>If it fails</label><div class="in">stop the run</div></div></div>
+      <div class="row2"><div class="f"><label>Timeout</label><div class="in">60 min</div></div><div class="f"><label>Publish</label><div class="in note">nothing</div></div></div>
+    </div>
+  </div>
+  <div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--rule-soft);font-size:11px;align-items:center;background:var(--paper)">
+    <span class="note">Add a step:</span>
+    <span class="chip" style="border-left:4px solid #3d3a34">Script</span><span class="chip" style="border-left:4px solid #2f5bd3">Agent</span><span class="chip" style="border-left:4px solid #a15c00">Ask me</span><span class="chip" style="border-left:4px solid #8a857b">Wait</span><span class="chip" style="border-left:4px solid #2f6b4f">Run automation</span><span class="chip" style="border-left:4px solid #c4441c">Tell Desk</span>
+    <span style="flex:1"></span><span class="note">Drag from a node's bottom edge to connect · click an edge to add a route or condition</span>
+  </div>
+</div>
+</div>
+
+<p class="subtitle" style="margin-top:14px">Clicking the Start pill edits the schedules and inputs. Validation errors mark the node in red, with the message in the inspector.</p>

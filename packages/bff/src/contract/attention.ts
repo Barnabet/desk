@@ -8,4 +8,8 @@ export const STRIP_CODE: Record<AttentionKind, 'APR' | 'ASK' | 'DOC' | 'HLD' | '
   stalled: 'HLD',
   failed: 'FLD',
   paused: 'GND',
+  automation_ask: 'ASK',
+  automation_failed: 'FLD',
+  automation_enable_request: 'DOC',
+  automation_grants_suspended: 'HLD',
 };

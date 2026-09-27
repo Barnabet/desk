@@ -50,6 +50,10 @@ const CALLOUT: Record<AttentionItem['kind'], { label: string; glyph: string }> =
   stalled: { label: 'Stalled', glyph: '' },
   failed: { label: 'Failed', glyph: '!' },
   paused: { label: 'Agents paused', glyph: '' },
+  automation_ask: { label: 'Automation question', glyph: '?' },
+  automation_failed: { label: 'Automation failed', glyph: '!' },
+  automation_enable_request: { label: 'Turn on?', glyph: '' },
+  automation_grants_suspended: { label: 'Grants suspended', glyph: '' },
 };
 
 function ProjectLabel({ p, t, items }: { p: ProjectSummary; t: Territory; items: readonly AttentionItem[] }) {

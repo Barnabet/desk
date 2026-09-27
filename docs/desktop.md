@@ -97,7 +97,7 @@ The end-to-end suite (`apps/desktop/e2e`):
 | `messaging.e2e.test.ts` | A thread asks a done thread: one "Between threads" digest; on Threads, the asker's lane mark (answered) and the digest's pair line open the pair sheet, with the answer nested under the question; the sheet's link opens the asker at the stop holding both message cards; the question and answer are one link between the two lanes, which opens the same sheet; "Answered Frontend" on the answerer's route; the user asks the done thread, which answers and stays Done |
 | `knowledge.e2e.test.ts` | Refine and restore a skill, library upload, memory correction, settings and policy, System, ⌘K |
 | `catalog.e2e.test.ts` | Browse the real catalog (18 entries, five bays), review and install Excel automation from a local stand-in (uv stand-in), Ready, panel, map mark, System → Data |
-| `builtins.e2e.test.ts` | The 12 built-in skills listed and verified, one turned off, one duplicated into a global skill that shadows it |
+| `builtins.e2e.test.ts` | The 13 built-in skills listed and verified, one turned off, one duplicated into a global skill that shadows it |
 | `packaged.e2e.test.ts` | The packaged `Desk.app` from a clean data dir. deskd runs as the LaunchAgent would, but no real LaunchAgent is installed. Skipped if there is no build. |
 
 Set `DESK_E2E_SHOTS=<dir>` to save screenshots of each screen for visual review. Add `DESK_E2E_SCHEME=dark` to take them in the dark theme.

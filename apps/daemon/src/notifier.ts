@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { WAKES_PAUSED, type StoredEvent } from '@desk/protocol';
-import { getAgent, getProject, type Db, type EventStore } from '@desk/core';
+import { getAgent, getAutomation, getProject, getRun, getVersion, stepAgentOf, type Db, type EventStore } from '@desk/core';
 
 export type Notification = { title: string; body: string };
 
@@ -13,7 +13,18 @@ export function notificationFor(ev: StoredEvent, db: Db): Notification | null {
   const title = `Desk · ${project.name}`;
   const name = (id: string | null) => {
     const a = id ? getAgent(db, id) : undefined;
+    if (a?.role === 'step') {
+      const link = stepAgentOf(db, a.id);
+      const def = link ? getVersion(db, link.run.automation_id, link.run.version)?.definition : undefined;
+      return `${def?.title ?? 'An automation'} · ${a.title ?? 'a step'}`;
+    }
     return a?.role === 'desk' ? 'Desk' : (a?.title ?? 'A thread');
+  };
+  /** The run's automation title, for a top-level run only (a child's parent reports). */
+  const runTitle = (runId: string, opts: { topLevel: boolean }) => {
+    const run = getRun(db, runId);
+    if (!run || (opts.topLevel && (run.parent_run_id || run.test))) return null;
+    return { run, def: getVersion(db, run.automation_id, run.version)?.definition };
   };
   switch (ev.type) {
     case 'approval.requested':
@@ -29,6 +40,24 @@ export function notificationFor(ev: StoredEvent, db: Db): Notification | null {
       const a = ev.agent_id ? getAgent(db, ev.agent_id) : undefined;
       if (a?.role !== 'thread') return null;
       return { title, body: truncate(`${a.title ?? 'A thread'} failed${ev.payload.reason ? `: ${ev.payload.reason}` : ''}`, 200) };
+    }
+    case 'automation.step_changed': {
+      if (ev.payload.status !== 'waiting' || (!ev.payload.question && !ev.payload.gate)) return null;
+      const r = runTitle(ev.payload.run_id, { topLevel: false });
+      const t = r?.def?.title ?? 'An automation';
+      return { title, body: truncate(ev.payload.question ? `${t}: ${ev.payload.question.text}` : `${t} wants to run ${ev.payload.gate!.subject}`, 200) };
+    }
+    case 'automation.run_finished': {
+      const r = runTitle(ev.payload.run_id, { topLevel: true });
+      if (!r) return null;
+      const t = r.def?.title ?? 'An automation';
+      if (ev.payload.status === 'failed') return { title, body: truncate(`${t} failed: ${ev.payload.reason ?? ev.payload.summary}`, 200) };
+      if (ev.payload.status === 'succeeded' && r.def?.after_run === 'notify') return { title, body: truncate(`${t}: ${ev.payload.summary}`, 200) };
+      return null;
+    }
+    case 'automation.enable_requested': {
+      const a = getAutomation(db, ev.payload.automation_id);
+      return a ? { title, body: truncate(`Desk proposes turning on ${a.title}`, 200) } : null;
     }
     case 'system.notice':
       // Appended once per pause (design spec §5.4); the other notices are not the user's to act on.

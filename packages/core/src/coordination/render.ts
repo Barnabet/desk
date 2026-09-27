@@ -106,6 +106,11 @@ export function runtimeLine(what: string, text: string): string {
  */
 export function senderOf(p: { from_agent_id: string; from_label: string }): { desk: boolean; title: string; label: string } {
   if (p.from_label === 'Desk') return { desk: true, title: 'Desk', label: 'Desk' };
+  const automation = /^automation "([\s\S]*)"$/.exec(p.from_label);
+  if (automation) {
+    const title = sanitizeLabel(automation[1]!);
+    return { desk: false, title, label: `automation "${title}"` };
+  }
   const title = sanitizeLabel(/^thread "([\s\S]*)" \([^()]*\)$/.exec(p.from_label)?.[1] ?? p.from_label);
   return { desk: false, title, label: `thread "${title}" (${p.from_agent_id})` };
 }
@@ -135,6 +140,9 @@ export function messageHeader(ev: EventOf<'message.agent'>): string {
 export function renderInboxItem(ev: EventOf<'message.user'> | EventOf<'message.agent'>): string {
   if (ev.type === 'message.user') return ev.payload.text;
   if (ev.payload.kind === 'reminder') return runtimeLine('reminder', ev.payload.text);
+  // A message an agent "sent itself" is the runtime's (a step's start, the engine's nudge), except an automation's
+  // message to Desk, which carries run outputs and is quoted like any other agent's words.
+  if (ev.payload.from_agent_id === ev.agent_id && ev.payload.kind !== 'automation') return runtimeLine(ev.payload.kind, ev.payload.text);
   return `${messageHeader(ev)}\n${quoteLines(ev.payload.text)}`;
 }
 

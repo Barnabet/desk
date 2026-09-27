@@ -28,6 +28,8 @@ const thread = (id: string, extra: Partial<ThreadView> = {}): ThreadView =>
     git_branch: null,
     git_base: null,
     git_common_dir: null,
+    automation_run_id: null,
+    automation_step_id: null,
     archived_at: null,
     created_at: at(0),
     updated_at: 't',

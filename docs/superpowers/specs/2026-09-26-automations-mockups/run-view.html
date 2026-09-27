@@ -1,0 +1,128 @@
+<style>
+  .dk { --ground:#efeae0; --titlebar:#e6e0d4; --nav:#dad3c5; --rule:#d6cfc1; --rule-soft:#e3dfd6; --ink:#1c1b18; --text:#3d3a34; --faint:#6e6a62;
+        --run:#2f5bd3; --run-pastel:#e3e8f5; --run-ring:#c9d3ec; --wait:#a15c00; --wait-pastel:#f3e6cf; --accent:#c4441c; --ok:#2f6b4f; --card:#fff; --paper:#f7f5f0; --muted:#8a857b;
+        --serif: Newsreader, Georgia, serif; --sans: Geist, system-ui, sans-serif; --mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+        font-family: var(--sans); color: var(--text); background: var(--ground); border-radius: 14px; overflow: hidden; border: 1px solid var(--rule); }
+  .dk .hdr { display:flex; align-items:center; gap:12px; padding:14px 18px 10px; }
+  .dk .hdr h1 { font-family:var(--serif); font-size:20px; font-weight:500; color:var(--ink); margin:0 }
+  .dk .btn { font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid var(--rule); background:var(--card); color:var(--ink) }
+  .dk .tabs2 { display:flex; gap:16px; padding:0 18px; font-size:13px; border-bottom:1px solid var(--rule-soft) }
+  .dk .tabs2 span { padding:8px 0; color:var(--faint) } .dk .tabs2 span.on { color:var(--ink); border-bottom:2px solid var(--ink) }
+  .dk .note { font-size:11px; color:var(--faint) }
+  .dk .body { display:flex }
+  .dk .canvas { position:relative; width:560px; height:560px; flex:none; background-image: radial-gradient(var(--rule) 1px, transparent 1px); background-size: 18px 18px; border-right:1px solid var(--rule-soft) }
+  .dk .node { position:absolute; width:176px; height:60px; background:var(--card); border:1px solid var(--rule); border-radius:12px; box-sizing:border-box; padding:6px 10px 6px 14px; overflow:hidden }
+  .dk .node::before { content:''; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--k) }
+  .dk .node .k { font-family:var(--mono); font-size:9.5px; letter-spacing:.06em; color:var(--faint); text-transform:uppercase; display:flex; justify-content:space-between }
+  .dk .node .t { font-family:var(--serif); font-size:14px; color:var(--ink); line-height:1.15; margin-top:2px }
+  .dk .node .d { font-size:10.5px; color:var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px }
+  .dk .node.ok { --k:var(--ok) } .dk .node.ok .k b { color:var(--ok) }
+  .dk .node.running { --k:var(--run); border-color:var(--run); outline:3px solid var(--run-ring) } .dk .node.running .k b { color:var(--run) }
+  .dk .node.pending { opacity:.55 }
+  .dk .node.skipped { opacity:.45; background:repeating-linear-gradient(135deg, #fff, #fff 6px, #f4f1ea 6px, #f4f1ea 12px); --k:var(--muted) }
+  .dk .start { position:absolute; left:170px; top:12px; width:220px; height:36px; border-radius:999px; background:var(--ink); color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center }
+  .dk .elabel { position:absolute; font-family:var(--mono); font-size:10px; background:var(--ground); padding:1px 5px; border-radius:4px; border:1px solid var(--rule) }
+  .dk .side { flex:1; padding:14px 16px; font-size:12.5px; background:var(--paper); min-width:300px }
+  .dk .side h3 { font-family:var(--serif); font-size:17px; font-weight:500; margin:2px 0 8px; color:var(--ink) }
+  .dk .kv { display:grid; grid-template-columns: 90px 1fr; gap:4px 10px; margin:8px 0 12px; font-size:12px }
+  .dk .kv span:nth-child(odd) { color:var(--muted) }
+  .dk .files div { font-family:var(--mono); font-size:11px; padding:3px 0; border-bottom:1px solid var(--rule-soft) }
+  .dk .live { background:var(--card); border:1px solid var(--rule); border-radius:10px; padding:8px 10px; font-size:11.5px; line-height:1.5 }
+  .dk .live .tool { font-family:var(--mono); font-size:10.5px; color:var(--faint) }
+  /* timeline */
+  .dk .tl { padding:14px 22px 18px; position:relative }
+  .dk .stop { display:flex; gap:12px; position:relative; padding-bottom:14px }
+  .dk .stop .dotc { width:14px; height:14px; border-radius:50%; border:3px solid var(--c); background:var(--card); flex:none; margin-top:3px; z-index:1 }
+  .dk .stop .line { position:absolute; left:6px; top:14px; bottom:-2px; width:3px; background:var(--rule) }
+  .dk .stop .tt { font-family:var(--serif); font-size:14.5px; color:var(--ink) }
+  .dk .stop .meta { font-family:var(--mono); font-size:10.5px; color:var(--faint) }
+  .dk .stop .sum { font-size:12px; margin-top:2px }
+  .dk .lanes { display:flex; gap:18px; margin-left:26px; padding:6px 0 10px; border-left:3px solid var(--rule); padding-left:16px; margin-bottom:10px }
+  .dk .lane { flex:1; background:var(--card); border:1px solid var(--rule); border-radius:10px; padding:8px 10px }
+  table.runs { width:100%; border-collapse:collapse; font-size:12px; background:#fff }
+  table.runs td, table.runs th { padding:7px 10px; border-bottom:1px solid #e3dfd6; text-align:left }
+  table.runs th { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:#8a857b; font-weight:500; background:#f7f5f0 }
+</style>
+
+<h2>Watching a run: which view?</h2>
+<p class="subtitle">Runs tab → a run. The same run (#14, fired Monday 08:00, 6 minutes in) shown two ways. Click the one you prefer.</p>
+
+<div class="section">
+<div class="label">Both options open from the Runs tab list</div>
+<div class="dk" style="padding:0 0 4px">
+  <div class="tabs2"><span>Design</span><span class="on">Runs (14)</span><span>Versions</span><span>Grants (2)</span></div>
+  <div style="padding:10px 18px">
+  <table class="runs">
+    <tr><th>#</th><th>Started</th><th>Trigger</th><th>Status</th><th>Took</th><th>Summary</th></tr>
+    <tr style="background:#eef2fb"><td>14</td><td>Mon 08:00</td><td>schedule</td><td style="color:#2f5bd3">● running · Summarise changes</td><td>6 min</td><td class="note">n/a</td></tr>
+    <tr><td>13</td><td>Sat 15:12</td><td>test · v6</td><td style="color:#2f6b4f">✓ succeeded</td><td>9 min</td><td>3 competitors changed; digest published</td></tr>
+    <tr><td>n/a</td><td>Mon 08:00 (last wk)</td><td>schedule</td><td class="note">skipped: previous run still going</td><td></td><td></td></tr>
+    <tr><td>12</td><td>Mon 08:00</td><td>schedule</td><td style="color:#c4441c">✗ failed at Fetch pages</td><td>40 s</td><td>fetch.py exit 1: acme.com timed out · <u>Ask Desk to fix</u></td></tr>
+  </table>
+  </div>
+</div>
+</div>
+
+<div class="options" style="display:block">
+<div class="option" data-choice="graph" onclick="toggleSelect(this)" style="display:block">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div class="letter">A</div><h3 style="margin:0">The graph, lit up: your design with each step's live state, and the selected step's detail on the right</h3></div>
+  <div class="dk">
+    <div class="hdr"><span class="note">Runs ›</span><h1>Run #14</h1><span class="note">schedule · Mon 08:00 · v7 · running 6 min</span><span style="flex:1"></span><span class="btn">Open folder</span><span class="btn">Cancel run</span></div>
+    <div class="body">
+      <div class="canvas">
+        <svg width="560" height="560" style="position:absolute;left:0;top:0">
+          <g fill="none" stroke-width="1.8">
+            <path d="M280 48 L280 70" stroke="#2f6b4f"/>
+            <path d="M280 130 C280 160, 135 155, 135 185" stroke="#2f6b4f"/>
+            <path d="M280 130 C280 160, 425 155, 425 185" stroke="#2f6b4f"/>
+            <path d="M135 245 C135 275, 280 270, 280 300" stroke="#b9b3a7" stroke-dasharray="4 4"/>
+            <path d="M425 245 C425 275, 280 270, 280 300" stroke="#2f6b4f"/>
+            <path d="M280 360 L280 400" stroke="#b9b3a7" stroke-dasharray="4 4"/>
+            <path d="M280 460 C280 490, 135 485, 135 500" stroke="#b9b3a7" stroke-dasharray="4 4"/>
+            <path d="M280 460 C280 490, 425 485, 425 500" stroke="#b9b3a7" stroke-dasharray="4 4"/>
+          </g>
+        </svg>
+        <div class="start">▶ schedule · Mon 08:00</div>
+        <div class="node ok" style="left:192px;top:70px"><div class="k"><span>script</span><b>✓ 12 s</b></div><div class="t">Fetch pages</div><div class="d">route changed · 3 of 5 sites differ</div></div>
+        <div class="node running" style="left:47px;top:185px"><div class="k"><span>agent</span><b>● 5 min</b></div><div class="t">Summarise changes</div><div class="d">reading acme/pricing.md…</div></div>
+        <div class="node ok" style="left:337px;top:185px"><div class="k"><span>script</span><b>✓ 3 s</b></div><div class="t">Extract prices</div><div class="d">outputs: price_changes = 2</div></div>
+        <div class="node pending" style="left:192px;top:300px"><div class="k"><span>agent</span><span>waiting for 1</span></div><div class="t">Write the digest</div><div class="d">join all</div></div>
+        <div class="node pending" style="left:192px;top:400px"><div class="k"><span>ask me</span><span></span></div><div class="t">Publish this week's?</div></div>
+        <div class="node pending" style="left:47px;top:500px;height:48px"><div class="k"><span>script</span></div><div class="t">Make the .docx</div></div>
+        <div class="node pending" style="left:337px;top:500px;height:48px"><div class="k"><span>tell desk</span></div><div class="t">Digest rejected</div></div>
+      </div>
+      <div class="side">
+        <div class="note" style="font-family:var(--mono);color:#1f45a8">AGENT STEP · running · attempt 1</div>
+        <h3>Summarise changes</h3>
+        <div class="live">
+          <div class="tool">▸ read_file steps/fetch/pages/acme/pricing.md</div>
+          <div class="tool">▸ read_file previous/steps/fetch/pages/acme/pricing.md</div>
+          Acme raised the Team plan from $12 to $15 and removed the free tier…<span style="color:#2f5bd3">▍</span>
+        </div>
+        <div class="kv"><span>Model</span><span>claude-opus-5-5 · medium</span><span>Tokens</span><span>41k in · 2.1k out</span><span>Folder</span><span style="font-family:var(--mono);font-size:11px">steps/summarise/</span></div>
+        <span class="btn">Open transcript</span> <span class="btn">Stop step</span>
+        <div class="note" style="margin-top:14px">A finished step shows its summary, outputs, route, files (click to preview) and log here instead. A failed step shows the error and <u>Ask Desk to fix</u>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="option" data-choice="timeline" onclick="toggleSelect(this)" style="display:block;margin-top:18px">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div class="letter">B</div><h3 style="margin:0">A transit line: steps as stops in the order they ran, parallel branches as side-by-side lanes (like the conversation's line diagram)</h3></div>
+  <div class="dk">
+    <div class="hdr"><span class="note">Runs ›</span><h1>Run #14</h1><span class="note">schedule · Mon 08:00 · v7 · running 6 min</span><span style="flex:1"></span><span class="btn">Open folder</span><span class="btn">Cancel run</span></div>
+    <div class="tl">
+      <div class="stop" style="--c:#1c1b18"><div class="line"></div><div class="dotc"></div><div><div class="tt">Started by schedule</div><div class="meta">08:00:00 · inputs: sources = sources.txt</div></div></div>
+      <div class="stop" style="--c:#2f6b4f"><div class="line"></div><div class="dotc"></div><div><div class="tt">Fetch pages <span class="meta">script · ✓ 12 s · route changed</span></div><div class="sum">3 of 5 sites differ from last week. <span class="note">pages/ (5 folders) · log</span></div></div></div>
+      <div class="lanes">
+        <div class="lane" style="border-color:#2f5bd3;box-shadow:0 0 0 3px #c9d3ec"><div class="tt" style="font-family:var(--serif);font-size:14px;color:#1c1b18">Summarise changes</div><div class="meta" style="font-family:var(--mono);font-size:10.5px;color:#2f5bd3">agent · ● 5 min · 41k tokens</div><div class="sum" style="font-size:12px;margin-top:3px">Acme raised the Team plan from $12 to $15 and…<span style="color:#2f5bd3">▍</span></div></div>
+        <div class="lane"><div class="tt" style="font-family:var(--serif);font-size:14px;color:#1c1b18">Extract prices</div><div class="meta" style="font-family:var(--mono);font-size:10.5px;color:#2f6b4f">script · ✓ 3 s</div><div class="sum" style="font-size:12px;margin-top:3px">price_changes = 2 · prices.csv</div></div>
+      </div>
+      <div class="stop" style="--c:#b9b3a7;opacity:.6"><div class="line"></div><div class="dotc"></div><div><div class="tt">Write the digest</div><div class="meta">agent · waiting for Summarise changes</div></div></div>
+      <div class="stop" style="--c:#b9b3a7;opacity:.6"><div class="dotc"></div><div><div class="tt">Publish this week's? <span class="meta">ask me</span></div><div class="meta">then Make the .docx (approved) or Digest rejected (rejected)</div></div></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<p class="subtitle" style="margin-top:14px">In either view, an Ask me step that is waiting shows its question, the attached files and Approve / Reject with a note, both here and as a card in Attention. A step agent's approval card also offers "Approve and remember for this automation".</p>

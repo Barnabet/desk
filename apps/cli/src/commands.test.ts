@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { call, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
 import { SEED_MODELS } from '@desk/core';
 import { FAKE_MODEL, seedThread } from '@desk/core/testing';
@@ -39,6 +39,52 @@ async function cli(...argv: string[]) {
 }
 
 describe('desk CLI', () => {
+  it('imports, lists, shows, runs, follows, answers, switches and exports automations', async () => {
+    const src = join(dir, '..', `${basename(dir)}-src`);
+    mkdirSync(src, { recursive: true });
+    await cli('project', 'new', 'Auto', '--goal', 'g');
+    const file = join(src, 'ask.json');
+    const definition = {
+      title: 'Ask first',
+      inputs: [{ key: 'topic', label: 'Topic', type: 'text', default: 'AI' }],
+      triggers: [{ kind: 'schedule', cron: '0 8 * * 1', timezone: 'Europe/Paris', catch_up: 'once' }],
+      steps: [{ id: 'ask', title: 'Go ahead?', kind: 'ask', question: 'Publish {{inputs.topic}}?' }],
+    };
+    writeFileSync(file, JSON.stringify({ format: 'desk-automation/1', name: 'ask', definition }));
+    expect((await cli('automation', 'import', 'Auto', file)).out).toContain('Imported ask v1');
+    expect((await cli('automations', 'Auto')).out).toContain('ask "Ask first" — off · v1 (not tested) · 0 8 * * 1 (Europe/Paris) · last: never');
+    const shown = (await cli('automation', 'show', 'Auto', 'ask')).out;
+    expect(shown).toContain('Steps:\n- ask [ask] Go ahead?');
+    expect(shown).toContain('Inputs:\n- topic (text) = AI');
+    expect((await cli('automation', 'show', 'Auto', 'nope')).err).toContain('No automation named "nope" in Auto');
+
+    const following = cli('automation', 'run', 'Auto', 'ask', '-i', 'topic=robots', '--follow');
+    let runId = '';
+    await vi.waitFor(async () => {
+      const m = /^(\S+)\s+waiting/m.exec((await cli('automation', 'runs', 'Auto', 'ask')).out);
+      expect(m).not.toBeNull();
+      runId = m![1]!;
+    });
+    expect((await cli('automation', 'answer', runId, 'ask', 'approve', 'looks', 'good')).out).toBe(`Approved ask in run ${runId}\n`);
+    const followed = await following;
+    expect(followed.code).toBe(0);
+    expect(followed.out).toContain(`Started run ${runId} of ask`);
+    expect(followed.out).toContain('? Go ahead? asks: Publish robots?');
+    expect(followed.out).toContain(`desk automation answer ${runId} ask approve|reject`);
+    expect(followed.out).toContain('• Go ahead? → succeeded');
+    expect(followed.out).toMatch(/Run \S+ succeeded/);
+
+    expect((await cli('automation', 'on', 'Auto', 'ask')).out).toBe('Turned on ask (v1 has no succeeded test run)\n');
+    expect((await cli('automations', 'Auto')).out).toContain('ask "Ask first" — on');
+    expect((await cli('automation', 'off', 'Auto', 'ask')).out).toBe('Turned off ask\n');
+    const test = (await cli('automation', 'run', 'Auto', 'ask', '--test')).out;
+    const testId = /Started test run (\S+)/.exec(test)![1]!;
+    expect((await cli('automation', 'cancel', testId)).out).toBe(`Cancelled run ${testId}\n`);
+    const exported = JSON.parse((await cli('automation', 'export', 'Auto', 'ask')).out);
+    expect(exported).toMatchObject({ format: 'desk-automation/1', name: 'ask', definition: { title: 'Ask first' } });
+    void readFileSync;
+  });
+
   it('creates, lists, shows and configures projects', async () => {
     // A source cannot be the daemon's data dir (`dir` here), so the project's folder sits beside it.
     const src = join(dir, '..', `${basename(dir)}-src`);

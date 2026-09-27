@@ -1,5 +1,5 @@
 import type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, ServiceRow, SkillDetail, SkillSummary, SourceRow, UsageRow } from '@desk/core';
-import type { StoredEvent } from '@desk/protocol';
+import type { AutomationDefinition, AutomationDetail, StoredEvent, ValidationIssue } from '@desk/protocol';
 
 export type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, ServiceRow, SkillDetail, SkillSummary, SourceRow, UsageRow };
 
@@ -34,3 +34,8 @@ export type EventPage = { events: StoredEvent[]; next_after: number };
 export type SkillHistoryEntry = { version: number; description: string; current: boolean; change_note: string; origin: string | null; ts: string | null };
 export type SkillSaveResult = { version: number; dir: string; created: boolean; description: string };
 export type ProjectUsage = { rows: UsageRow[]; totals: { prompt_tokens: number; completion_tokens: number } };
+
+/** What creating, saving and importing an automation answer. */
+export type AutomationSaved = { automation: AutomationDetail; warnings: ValidationIssue[] };
+/** One stored version of an automation's definition. */
+export type AutomationVersion = { version: number; definition: AutomationDefinition; origin: string; change_note: string; via: string; created_at: string };

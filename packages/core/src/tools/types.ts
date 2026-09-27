@@ -12,6 +12,8 @@ import type {
   ToolResultStatus,
 } from '@desk/protocol';
 import type { AttachmentStore } from '../attachments/store';
+import type { AutomationEngine, StepResult } from '../automations/engine';
+import type { Automations } from '../automations/service';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import type { ServiceRow } from '../state/queries';
@@ -55,9 +57,15 @@ export interface RuntimeServices {
   readonly skills: SkillStore;
   /** Content-addressed images shown to models (`<data>/attachments`). */
   readonly attachments: AttachmentStore;
+  /** Automation definitions and switches (Desk's automation tools). */
+  readonly automations: Automations;
+  /** Runs automations: start, cancel, answer (Desk's automation tools). */
+  readonly engine: AutomationEngine;
   /** The model a tool call runs under (`model`, else the agent's own), and whether it accepts images. */
   agentModel(agentId: string, model?: string): { id: string; vision: boolean };
   activateSkills(agentId: string, names: string[]): SkillSummary[];
+  /** An automation step agent's result (complete / fail_step): validated, then its step settles. */
+  recordStepResult(agentId: string, result: StepResult): void;
   saveSkill(
     input: SkillSaveInput,
     meta: { origin?: string; changeNote?: string; projectId?: string; agentId?: string },
@@ -97,7 +105,7 @@ export interface RuntimeServices {
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
   /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
   isStopping(agentId: string): boolean;
-  resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string }): Promise<void>;
+  resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string; remember?: boolean }): Promise<void>;
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void;
   /**
    * PATH entries and variables from Desk-managed skill runtimes: of one skill (`only`), or of every active skill of the

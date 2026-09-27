@@ -56,7 +56,8 @@ export function renderSkill(d: SkillDetail, maxChars = Infinity, runtimeNote: st
   ].join('\n');
 }
 
-function locateScript(skill: SkillSummary, script: string, store: SkillStore): string {
+/** A skill's script file: `script` as given, or under scripts/ when given as a bare name. */
+export function locateScript(skill: SkillSummary, script: string, store: SkillStore): string {
   try {
     return store.filePath(skill, script);
   } catch (e) {
@@ -65,18 +66,24 @@ function locateScript(skill: SkillSummary, script: string, store: SkillStore): s
   }
 }
 
-function commandFor(file: string): string {
+/** How to run a skill file without a shell: itself (executable with a shebang), or its extension's interpreter. */
+export function commandParts(file: string): { command: string; args: string[] } {
   let executable = false;
   try {
     accessSync(file, constants.X_OK);
     executable = true;
   } catch {}
   const shebang = readFileSync(file, { encoding: 'utf8', flag: 'r' }).startsWith('#!');
-  if (executable && shebang) return shellQuote(file);
+  if (executable && shebang) return { command: file, args: [] };
   const interpreter = INTERPRETERS[extname(file).toLowerCase()];
-  if (interpreter) return `${interpreter} ${shellQuote(file)}`;
-  if (executable) return shellQuote(file);
+  if (interpreter) return { command: interpreter, args: [file] };
+  if (executable) return { command: file, args: [] };
   throw new Error(`Cannot tell how to run ${file}: add a shebang line or use a known extension (${Object.keys(INTERPRETERS).join(' ')})`);
+}
+
+function commandFor(file: string): string {
+  const p = commandParts(file);
+  return [p.command, ...p.args].map(shellQuote).join(' ');
 }
 
 export const skillListTool = defineTool({

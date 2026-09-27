@@ -18,7 +18,7 @@ export type SchedulerOptions = {
 /** A running job. `done` settles once its afterRun has returned. */
 type Running = { job: Job; controller: AbortController; done: Promise<void> };
 
-/** Queue order: Desk first, then answer jobs (short and read-only), then thread runs. */
+/** Desk first, then answer jobs, then thread and step runs. */
 const rank = (job: Job) => (job.role === 'desk' ? 0 : job.kind === 'answer' ? 1 : 2);
 
 export class Scheduler {
@@ -76,6 +76,11 @@ export class Scheduler {
     return running ? running.done : Promise.resolve();
   }
 
+  /** Resolves once the agent's running job's afterRun has returned, without stopping it (at once when nothing runs). */
+  waitFor(agentId: string): Promise<void> {
+    return this.running.get(agentId)?.done ?? Promise.resolve();
+  }
+
   /** Drops every queued job and aborts every running one with `reason`. Returns the dropped queued jobs. */
   stopAll(reason: unknown): Job[] {
     const dropped = this.queue;
@@ -93,9 +98,10 @@ export class Scheduler {
   private canStart(job: Job): boolean {
     const active = [...this.running.values()].map((r) => r.job);
     if (active.filter((j) => j.model === job.model).length >= this.opts.modelConcurrency(job.model)) return false;
-    // Answer jobs neither count toward the project's thread cap nor wait for it (design spec §3.4).
-    if (job.role === 'thread' && job.kind === 'run') {
-      const threads = active.filter((j) => j.role === 'thread' && j.kind === 'run' && j.projectId === job.projectId).length;
+    // Answer jobs neither count toward the project's thread cap nor wait for it (design spec §3.4). Step agents count like threads.
+    const capped = (j: Job) => (j.role === 'thread' || j.role === 'step') && j.kind === 'run';
+    if (capped(job)) {
+      const threads = active.filter((j) => capped(j) && j.projectId === job.projectId).length;
       if (threads >= this.opts.projectConcurrency(job.projectId)) return false;
     }
     return true;

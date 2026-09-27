@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { call, hang, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
 import { getAgent, loadBuiltinsManifest, SEED_MODELS } from '@desk/core';
 import { FAKE_MODEL } from '@desk/core/testing';
@@ -32,6 +32,17 @@ const api = (d: RunningDaemon, path: string, init: RequestInit = {}) =>
   fetch(`http://127.0.0.1:${d.port}/v1${path}`, { ...init, headers: { authorization: `Bearer ${d.token}`, 'content-type': 'application/json', ...init.headers } });
 
 describe('startDaemon', () => {
+  it('ticks the automation engine at start and on its interval, and stops with the daemon', async () => {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
+    const d = await boot([], { automationTickMs: 20 });
+    const tick = vi.spyOn(d.runtime.engine, 'tick');
+    await vi.waitFor(() => expect(tick.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await d.stop();
+    const calls = tick.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 80));
+    expect(tick.mock.calls.length).toBe(calls);
+  });
+
   it("keeps agents off deskd's token file, its database, the model credentials file and its port, and off desk web's login files and port", async () => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-home-')));

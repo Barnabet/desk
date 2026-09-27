@@ -25,16 +25,16 @@ export type WakeState = {
 };
 
 /**
- * What a run answers to: the user, a job that was already queued, a lifecycle notice or a thread's start, or another
- * agent. The wake budgets count `agent` and `lifecycle` runs only.
+ * What a run answers to: the user, a job that was already queued, a lifecycle notice or a thread's start, another
+ * agent, or an automation starting a step agent. The wake budgets count `agent` and `lifecycle` runs only.
  */
-export type Trigger = 'user' | 'queued' | 'lifecycle' | 'agent';
+export type Trigger = 'user' | 'queued' | 'lifecycle' | 'agent' | 'automation';
 
 /** Nothing; a full run; or an answer run for one question, which never changes the agent's status (design spec §4). */
 export type Wake = { kind: 'none' } | { kind: 'run'; trigger: Trigger } | { kind: 'answer'; question: number; trigger: Trigger };
 
 /** Runtime notices about threads, a thread's start, and the runtime's What's up reminder to Desk. */
-export const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(['start', 'completed', 'failed', 'cancelled', 'approval', 'stalled', 'reminder']);
+export const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(['start', 'completed', 'failed', 'cancelled', 'approval', 'stalled', 'reminder', 'automation']);
 
 /** Statuses a thread answers from without reopening: the user's Ask to it gets an answer run instead of a run. */
 const ANSWERS_FROM: ReadonlySet<AgentStatus> = new Set<AgentStatus>(['idle', 'done', 'failed']);
@@ -64,6 +64,11 @@ export function wakeDecision(s: WakeState): Wake {
     if (agent.status === 'cancelled') return userWrote ? run('user') : NONE;
     if (!pending.length) return NONE;
     return userWrote ? run('user') : run(triggerOf(pending));
+  }
+  // 3b. A step agent runs for its start (and the engine's one nudge). Nobody else writes to it; stopped or finished is final.
+  if (agent.role === 'step') {
+    if (agent.status === 'cancelled' || agent.status === 'done' || agent.status === 'failed') return NONE;
+    return pending.length ? run('automation') : NONE;
   }
   const answersFrom = ANSWERS_FROM.has(agent.status);
   // 4.1 The user's message runs a thread whatever its status (a finished thread reopens). An Ask is a message too,

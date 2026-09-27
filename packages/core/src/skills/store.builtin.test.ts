@@ -32,7 +32,7 @@ describe('SkillStore with built-in skills', () => {
     expect(agentView.filter((s) => s.scope === 'builtin').map((s) => s.name)).not.toContain('images');
     expect(agentView.find((s) => s.name === 'archives')?.scope).toBe('global');
     expect(agentView.filter((s) => s.name === 'archives')).toHaveLength(1);
-    expect(agentView.filter((s) => s.scope === 'builtin')).toHaveLength(10);
+    expect(agentView.filter((s) => s.scope === 'builtin')).toHaveLength(11);
     expect(store.resolve('images')).toBeUndefined();
   });
 
@@ -46,7 +46,7 @@ describe('SkillStore with built-in skills', () => {
     expect(() => store.save({ scope: 'builtin', name: 'word-documents', instructions: 'x' })).toThrow(/read-only/);
     expect(() => store.delete('builtin', 'word-documents')).toThrow(/read-only/);
     expect(() => store.restore('builtin', 'word-documents', 1)).toThrow(/read-only/);
-    expect(store.listScope('builtin')).toHaveLength(12);
+    expect(store.listScope('builtin')).toHaveLength(13);
   });
 
   it('works unchanged without built-ins', () => {

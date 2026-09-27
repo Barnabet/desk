@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const AgentRole = z.enum(['desk', 'thread']);
+export const AgentRole = z.enum(['desk', 'thread', 'step']);
 export type AgentRole = z.infer<typeof AgentRole>;
 
 export const AgentStatus = z.enum(['idle', 'queued', 'running', 'waiting', 'done', 'failed', 'cancelled']);
@@ -89,6 +89,8 @@ export const AgentMessageKind = z.enum([
   'answer',
   /** Desk's first message to a thread it spawned. */
   'start',
+  /** From an automation to Desk: a Tell Desk step, a Desk review, or the report of a run Desk started. */
+  'automation',
 ]);
 export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 

@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { WAKES_PAUSED, type AttentionItem, type EventOf } from '@desk/protocol';
+import { getRun, getVersion, latestFinishedRun, listAutomations, listRunningRuns, stepAgentOf, stepRuns, type AutomationRunRow } from '../automations/queries';
 import type { Db } from '../db/open';
 import { attentionDismissals } from '../db/schema';
 import {
@@ -14,6 +15,9 @@ import {
   listThreads,
   type AgentRow,
 } from './queries';
+
+/** The definition a run started with. */
+const defOf = (db: Db, run: AutomationRunRow) => getVersion(db, run.automation_id, run.version)?.definition;
 
 const label = (agent: AgentRow | undefined) => (agent?.role === 'desk' ? 'Desk' : (agent?.title ?? 'A thread'));
 
@@ -44,15 +48,21 @@ export function listAttention(db: Db, opts: { projectId?: string } = {}): Attent
     for (const a of listApprovals(db, p.id, 'pending')) {
       if (a.delegate_to_desk) continue;
       const agent = agents.get(a.agent_id);
+      const link = agent?.role === 'step' ? stepAgentOf(db, agent.id) : undefined;
+      const def = link ? defOf(db, link.run) : undefined;
       items.push({
         ...base,
         id: `approval:${a.id}`,
         kind: 'approval',
         agent_id: a.agent_id,
-        title: `${label(agent)} wants to run ${a.tool}`,
+        title: link ? `${def?.title ?? 'An automation'} · ${agent?.title ?? link.step.step_id} wants to run ${a.tool}` : `${label(agent)} wants to run ${a.tool}`,
         detail: a.reason,
         created_at: a.created_at,
-        ref: { approval_id: a.id, ...(agent?.role === 'thread' ? { thread_id: agent.id } : {}) },
+        ref: {
+          approval_id: a.id,
+          ...(agent?.role === 'thread' ? { thread_id: agent.id } : {}),
+          ...(link ? { automation_id: link.run.automation_id, run_id: link.run.id, step_id: link.step.step_id } : {}),
+        },
       });
     }
 
@@ -111,6 +121,72 @@ export function listAttention(db: Db, opts: { projectId?: string } = {}): Attent
       const id = `stalled:${t.id}:${stall.id}`;
       if (dismissed.has(id)) continue;
       items.push({ ...base, id, kind: 'stalled', agent_id: t.id, title: `${t.title ?? 'Thread'} has stalled`, detail: stall.payload.text, created_at: stall.ts, ref: { thread_id: t.id, event_id: stall.id } });
+    }
+    // Automations (spec §4.7, §5.4): questions and script gates only the user answers, the latest failure, Desk's
+    // turn-on request, and grants an agent's version suspended.
+    for (const run of listRunningRuns(db)) {
+      if (run.project_id !== p.id) continue;
+      const def = defOf(db, run);
+      for (const row of stepRuns(db, run.id)) {
+        if (row.status !== 'waiting' || (!row.question && !row.gate)) continue;
+        const step = def?.steps.find((s) => s.id === row.step_id);
+        items.push({
+          ...base,
+          id: `automation_ask:${run.id}:${row.step_id}`,
+          kind: 'automation_ask',
+          agent_id: null,
+          title: row.question ? `${def?.title ?? 'An automation'}: ${row.question.text}` : `${def?.title ?? 'An automation'} · ${step?.title ?? row.step_id} wants to run ${row.gate!.subject}`,
+          detail: row.question ? row.question.files.join('\n') : row.gate!.reason,
+          created_at: row.started_at ?? run.started_at,
+          ref: { automation_id: run.automation_id, run_id: run.id, step_id: row.step_id },
+        });
+      }
+    }
+    for (const a of listAutomations(db, p.id)) {
+      const last = latestFinishedRun(db, a.id);
+      if (last?.status === 'failed' && !dismissed.has(`automation_failed:${last.id}`)) {
+        items.push({
+          ...base,
+          id: `automation_failed:${last.id}`,
+          kind: 'automation_failed',
+          agent_id: null,
+          title: `${a.title} failed`,
+          detail: last.reason ?? last.summary ?? '',
+          created_at: last.finished_at ?? last.started_at,
+          ref: { automation_id: a.id, run_id: last.id },
+        });
+      }
+      if (a.enable_request && !a.enabled) {
+        const id = `automation_enable:${a.id}:${a.enable_request.at}`;
+        const when = a.definition.triggers.length ? a.definition.triggers.map((t) => `${t.cron} (${t.timezone})`).join('; ') : 'Run now only';
+        if (!dismissed.has(id)) {
+          items.push({
+            ...base,
+            id,
+            kind: 'automation_enable_request',
+            agent_id: null,
+            title: `Desk proposes turning on ${a.title}`,
+            detail: `${when}; ${a.enable_request.proposed_grants.length} proposed grant(s). ${a.enable_request.note}`,
+            created_at: a.enable_request.at,
+            ref: { automation_id: a.id },
+          });
+        }
+      }
+      if (a.grants_suspended) {
+        const id = `automation_grants:${a.id}:${a.version}`;
+        if (!dismissed.has(id)) {
+          items.push({
+            ...base,
+            id,
+            kind: 'automation_grants_suspended',
+            agent_id: null,
+            title: `${a.title} changed: its grants are suspended`,
+            detail: `Desk saved v${a.version}. Review the change and keep the grants, or its runs will ask again.`,
+            created_at: a.updated_at,
+            ref: { automation_id: a.id },
+          });
+        }
+      }
     }
   }
   return items.sort((a, b) => a.created_at.localeCompare(b.created_at));

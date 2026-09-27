@@ -41,6 +41,8 @@ const agent = (id: string, extra: Record<string, unknown> = {}) => ({
   git_branch: null,
   git_base: null,
   git_common_dir: null,
+  automation_run_id: null,
+  automation_step_id: null,
   archived_at: null,
   created_at: '2026-09-24T10:18:00.000Z',
   updated_at: 't',

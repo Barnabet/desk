@@ -383,6 +383,28 @@
         "python3",
         "scripts/selftest.py"
       ]
+    },
+    {
+      "name": "automation-scripts",
+      "title": "Automation scripts",
+      "summary": "Write the scripts of automation steps: arguments, inputs, outputs, routes and dry runs on test runs, with a helper that checks results against Desk's limits. Written by Desk.",
+      "caveats": [
+        "For the threads that write an automation's scripts; the helper and those scripts use Python's standard library only."
+      ],
+      "digest": "sha256:d03ffeba4037e7fa6bd7f75c2a873e4c95e94991ed8949143ba8fc064bc97783",
+      "files": 5,
+      "bytes": 44261,
+      "scripts": 2,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": []
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
     }
   ]
 }

@@ -9,7 +9,9 @@ import {
   MESSAGE_FOLD_TYPES,
   messageById,
   openFrom,
+  Grant,
   openTo,
+  Outputs,
   sanitizeLabel,
   sentSince,
   ServiceName,
@@ -35,13 +37,13 @@ import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } 
 import { BuiltinSkills, builtinEnabled } from '../skills/builtins';
 import type { SkillRef } from '../catalog/service';
 import { AttachmentStore } from '../attachments/store';
-import { uniqueLibraryName } from '../library/library';
+import { sanitizeLibraryName, uniqueLibraryName } from '../library/library';
 import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { pendingInbox } from '../agent/inbox';
-import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
+import { deskSystemPrompt, stepSystemPrompt, threadSystemPrompt } from '../agent/prompts';
 import { answerGate, answerText, ANSWER_MAX_STEPS, closureText, WHY } from '../agent/answer';
 import { runAgent, SHUTDOWN_REASON, type RunDeps } from '../agent/run';
 import type { EventStore } from '../events/store';
@@ -81,12 +83,22 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { readAgentFile } from '../tools/agent-files';
 import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard, type SecretPattern } from '../tools/sandbox';
-import type { RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
+import type { PolicySubject, RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
 import { Scheduler, type Job } from './scheduler';
-import { toolsForRole } from './toolsets';
+import { activeMs, AutomationEngine } from '../automations/engine';
+import { activeGrantRules, addGrant, deriveGrant } from '../automations/grants';
+import { Automations } from '../automations/service';
+import type { StepResult } from '../automations/engine';
+import { runDir, stepDir } from '../automations/folders';
+import { ancestors } from '../automations/graph';
+import { descendantRunDirs } from '../automations/scope';
+import { findAutomation, getAutomation, getRun, lastSucceededRun, listAutomations, listRunningRuns, runIdsOfProject, stepAgentOf, stepRuns } from '../automations/queries';
+import type { ValidateContext } from '../automations/validate';
+import { locateScript } from '../tools/skills';
+import { toolByName, toolsForRole } from './toolsets';
 import { takeWake, wakeDecision, type Item, type Trigger, type WakeState } from './wake';
 
 export type RuntimeOptions = {
@@ -129,12 +141,30 @@ export type RuntimeOptions = {
   wakeBudget?: number;
   /** Lifecycle wakes (thread starts, notices to Desk) a project may have in a rolling hour before it pauses (default 150). */
   lifecycleBudget?: number;
+  /** The clock automations use (schedules, waits, deadlines); tests pass a fake one. */
+  now?: () => Date;
 };
 
 /** How long a skill run waits for a built-in skill's first-use environment before asking the agent to retry. */
 export const BUILTIN_RUNTIME_WAIT_MS = 5 * 60_000;
 
 /** What the send path records on a message besides its text (design spec §1.2). */
+export type CreateStepAgentInput = {
+  /** The id to use: the engine records it on the step before the agent can run, so its first complete is accepted. */
+  agentId?: string;
+  projectId: string;
+  runId: string;
+  stepId: string;
+  title: string;
+  /** The step's brief with its templates rendered. */
+  brief: string;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
+  skills: string[];
+  gitSourceId?: string;
+  automationName: string;
+};
+
 export type DeliverOptions = {
   /** The question this message answers. */
   replyTo?: number;
@@ -176,6 +206,10 @@ export class Runtime {
   readonly attachments: AttachmentStore;
   /** What agents' commands and file tools may never touch; deskd adds its port with `guardPort`. */
   readonly guard: SandboxGuard;
+  /** Automation definitions and the user's switches (spec 2026-09-26-automations-design). */
+  readonly automations: Automations;
+  /** Runs automations (spec §3). */
+  readonly engine: AutomationEngine;
   private readonly proxy: ProxyGate | undefined;
   /** Bytes of images per request, by model, lowered after an endpoint refused a request as too large (until restart). */
   private readonly imageBudgets = new Map<string, number>();
@@ -223,8 +257,64 @@ export class Runtime {
     }
     this.skills = new SkillStore(o.dataDir, this.guard, this.builtins);
     this.attachments = new AttachmentStore(join(o.dataDir, 'attachments'));
+    this.automations = new Automations({
+      store: o.store,
+      validateContext: (projectId, name) => this.validateContext(projectId, name),
+      now: () => this.now(),
+      tools: toolByName,
+      beforeDelete: (id) => this.engine.cancelRunsOf(id, 'Automation deleted'),
+    });
+    this.engine = new AutomationEngine({
+      store: o.store,
+      dataDir: o.dataDir,
+      guard: this.guard,
+      now: () => this.now(),
+      onError: (err, ctx) => this.reportError(err, ctx),
+      deliverToDesk: (projectId, label, text) => this.deliverToDesk(projectId, label, text),
+      script: {
+        resolve: (projectId, name) => {
+          const s = this.skills.resolve(name, projectId);
+          return s && !s.error ? s : null;
+        },
+        locate: (skill, script) => locateScript(skill, script, this.skills),
+        prepare: async (projectId, skill, signal) => {
+          await this.prepareSkillRuntimeFor(projectId, skill, signal);
+        },
+        env: (projectId, skill) => this.skillEnvFor(projectId, skill),
+        sandboxEnabled: () => this.sandboxAvailable(),
+        policy: (projectId) => getProject(this.o.store.db, projectId)?.settings.policy ?? [],
+        remember: (automationId, grant) => {
+          const a = this.automations.require(automationId);
+          this.automations.setGrants(a.id, addGrant(a.grants, grant), 'remembered');
+        },
+      },
+      publish: (projectId, file, relDir, meta, origin) => this.publishToLibraryAt(projectId, file, relDir, meta, origin),
+      agent: {
+        create: (input) => this.createStepAgent(input),
+        get: (id) => getAgent(this.o.store.db, id),
+        ending: (id) => {
+          const fin = lastEvent(this.o.store.db, id, 'run.finished');
+          return fin?.type === 'run.finished' ? { reason: fin.payload.reason, detail: fin.payload.detail ?? null } : null;
+        },
+        stop: (id, reason) => {
+          const a = getAgent(this.o.store.db, id);
+          if (a && !TERMINAL.has(a.status)) this.stopAgent(id, { by: 'automation', reason });
+        },
+        archive: (id) => this.archiveStepAgent(id),
+        activeMs: (id) => this.stepActiveMs(id),
+        nudge: (id, text) => {
+          const a = this.requireAgent(id);
+          this.o.store.append({ project_id: a.project_id, agent_id: id, type: 'message.agent', payload: { from_agent_id: id, from_label: REMINDER_LABEL, kind: 'reminder', text } });
+          this.wake(id);
+        },
+        nudges: (id) => this.o.store.list({ agentId: id, types: ['message.agent'] }).filter((e) => e.type === 'message.agent' && e.payload.kind === 'reminder').length,
+        threadModel: (projectId) => getProject(this.o.store.db, projectId)?.settings.thread_model ?? DEFAULT_MODEL_ID,
+      },
+    });
     this.services = {
       store: o.store,
+      automations: this.automations,
+      engine: this.engine,
       skills: this.skills,
       attachments: this.attachments,
       agentModel: (agentId, model) => {
@@ -232,6 +322,7 @@ export class Runtime {
         return { id, vision: this.modelSeesImages(id) };
       },
       activateSkills: (agentId, names) => this.activateSkills(agentId, names),
+      recordStepResult: (agentId, result) => this.recordStepResult(agentId, result),
       saveSkill: (input, meta) => this.saveSkill(input, meta),
       deleteSkill: (scope, name, projectId, meta) => this.deleteSkill(scope, name, projectId, meta),
       skillDraftDir: (projectId, path) => this.skillDraftDir(projectId, path),
@@ -310,7 +401,7 @@ export class Runtime {
    */
   dismissAttention(itemId: string): void {
     const kind = itemId.split(':')[0];
-    if (kind === 'approval' || kind === 'question') throw new ConflictError(`${kind} items leave the list when they are answered`);
+    if (kind === 'approval' || kind === 'question' || kind === 'automation_ask') throw new ConflictError(`${kind} items leave the list when they are answered`);
     const item = listAttention(this.o.store.db).find((i) => i.id === itemId);
     if (!item) throw new NotFoundError(`No attention item ${itemId}`);
     this.o.store.append({ project_id: item.project_id, agent_id: null, type: 'attention.dismissed', payload: { item_id: itemId } });
@@ -319,6 +410,11 @@ export class Runtime {
 
   projectDir(projectId: string): string {
     return join(this.o.dataDir, 'projects', projectId);
+  }
+
+  /** deskd's data folder (run folders, logs). */
+  get dataDir(): string {
+    return this.o.dataDir;
   }
 
   libraryDir(projectId: string): string {
@@ -331,6 +427,14 @@ export class Runtime {
     if (!desk) throw new NotFoundError(`Unknown project: ${projectId}`);
     this.requireOpenProject(projectId);
     this.sendMessage(desk.id, text);
+  }
+
+  /** An automation's message to Desk (Tell Desk, reviews, reports): kind `automation`, quoted like another agent's words. */
+  private deliverToDesk(projectId: string, label: string, text: string): void {
+    const desk = getDeskAgent(this.o.store.db, projectId);
+    if (!desk) return;
+    this.o.store.append({ project_id: projectId, agent_id: desk.id, type: 'message.agent', payload: { from_agent_id: desk.id, from_label: label, kind: 'automation', text } });
+    this.wake(desk.id);
   }
 
   async addSource(projectId: string, path: string, label?: string, agentWrite = true): Promise<string> {
@@ -374,12 +478,24 @@ export class Runtime {
     meta: { title: string; kind: ArtifactKind; description: string; name?: string },
     origin: string,
   ): Promise<{ id: string; path: string }> {
-    const dir = this.libraryDir(projectId);
+    return this.publishToLibraryAt(projectId, file, '', meta, origin);
+  }
+
+  /** `publishToLibrary` into a library sub-folder (automation copies: `automations/<name>/<stamp>/`), sanitized per segment. */
+  async publishToLibraryAt(
+    projectId: string,
+    file: string,
+    relDir: string,
+    meta: { title: string; kind: ArtifactKind; description: string; name?: string },
+    origin: string,
+  ): Promise<{ id: string; path: string }> {
+    const segments = relDir.split('/').filter(Boolean).map(sanitizeLibraryName);
+    const dir = join(this.libraryDir(projectId), ...segments);
     mkdirSync(dir, { recursive: true });
     const name = uniqueLibraryName(dir, meta.name ?? basename(file));
-    // `file` is an agent's: read it without following a swapped-in symlink, and never a secret.
+    // `file` is an agent's or a script's: read it without following a swapped-in symlink, and never a secret.
     writeFileSync(join(dir, name), await readAgentFile(file, this.guard));
-    return this.recordArtifact(projectId, name, meta, origin);
+    return this.recordArtifact(projectId, [...segments, name].join('/'), meta, origin);
   }
 
   /** Adds user-provided content to the library. */
@@ -540,6 +656,11 @@ export class Runtime {
   archiveProject(projectId: string): void {
     this.requireOpenProject(projectId);
     this.o.store.append({ project_id: projectId, agent_id: null, type: 'project.archived', payload: {} });
+    // Its automations: off (the only switch the system makes, spec §5.4) and their runs cancelled, before agents stop.
+    for (const a of listAutomations(this.o.store.db, projectId)) if (a.enabled) this.automations.setEnabled(a.id, false, 'system');
+    for (const run of listRunningRuns(this.o.store.db).filter((r) => r.project_id === projectId && !r.parent_run_id)) {
+      this.engine.cancelRun(run.id, 'Project archived').catch((err) => this.reportError(err, `cancelling run ${run.id}`));
+    }
     for (const agent of listAgents(this.o.store.db, projectId)) {
       if (!TERMINAL.has(agent.status) || this.scheduler.isActive(agent.id)) this.stopAgent(agent.id, { by: agent.id, reason: 'Project archived' });
     }
@@ -764,6 +885,23 @@ export class Runtime {
   }
 
   /** See RuntimeServices.skillEnv. */
+  /** One skill's runtime PATH entries and variables in a project, and why it cannot run yet (`blocked`). */
+  skillEnvFor(projectId: string, only: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null } {
+    const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null, note: null as string | null };
+    const provider = this.o.skillEnv;
+    if (!provider) return out;
+    const t = this.runtimeTarget(only, projectId);
+    const e = provider.env(t.ref, t.builtin ? this.builtins!.runtimeSpec(only.name).digest : undefined);
+    if (e.state === 'preparing') {
+      out.blocked = t.builtin
+        ? `${only.name} is still setting up its Python environment (first use only). Try again in a minute.`
+        : `${only.name}'s runtime is still being set up. Try again in a minute.`;
+    } else if (e.state === 'failed') {
+      out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
+    }
+    return { ...out, bins: e.bins, vars: e.vars, note: e.note };
+  }
+
   skillEnv(agentId: string, only?: { scope: SkillScope; name: string }): { bins: string[]; vars: Record<string, string>; blocked: string | null; note: string | null } {
     const out = { bins: [] as string[], vars: {} as Record<string, string>, blocked: null as string | null, note: null as string | null };
     const provider = this.o.skillEnv;
@@ -773,17 +911,7 @@ export class Runtime {
       const t = this.runtimeTarget(s, agent.project_id);
       return { ...provider.env(t.ref, t.builtin ? this.builtins!.runtimeSpec(s.name).digest : undefined), builtin: t.builtin };
     };
-    if (only) {
-      const e = envOf(only);
-      if (e.state === 'preparing') {
-        out.blocked = e.builtin
-          ? `${only.name} is still setting up its Python environment (first use only). Try again in a minute.`
-          : `${only.name}'s runtime is still being set up. Try again in a minute.`;
-      } else if (e.state === 'failed') {
-        out.blocked = `${only.name}'s runtime is not ready: ${e.reason ?? 'setup failed'}. Ask the user to retry it in Skills.`;
-      }
-      return { ...out, bins: e.bins, vars: e.vars, note: e.note };
-    }
+    if (only) return this.skillEnvFor(agent.project_id, only);
     for (const name of agent.active_skills) {
       const skill = this.skills.resolve(name, agent.project_id);
       if (!skill) continue;
@@ -910,11 +1038,11 @@ export class Runtime {
   }
 
   /** Before a skill run: starts a built-in's environment if needed and waits for it (up to the limit). */
-  async prepareSkillRuntime(agentId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
+  /** Before a skill run in a project: starts a built-in's environment if needed and waits for it (up to the limit). */
+  async prepareSkillRuntimeFor(projectId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
     const provider = this.o.skillEnv;
     if (!provider || !this.builtins) return { waitedMs: 0 };
-    const agent = this.requireAgent(agentId);
-    const t = this.runtimeTarget(skill, agent.project_id);
+    const t = this.runtimeTarget(skill, projectId);
     if (!t.builtin) return { waitedMs: 0 };
     const spec = this.builtins.runtimeSpec(skill.name);
     provider.ensure(t.ref, spec, this.builtins.updated);
@@ -922,6 +1050,10 @@ export class Runtime {
     const start = Date.now();
     await provider.waitFor(t.ref, this.o.builtinRuntimeWaitMs ?? BUILTIN_RUNTIME_WAIT_MS, signal);
     return { waitedMs: Date.now() - start };
+  }
+
+  async prepareSkillRuntime(agentId: string, skill: { scope: SkillScope; name: string }, signal?: AbortSignal): Promise<{ waitedMs: number }> {
+    return this.prepareSkillRuntimeFor(this.requireAgent(agentId).project_id, skill, signal);
   }
 
   /** Removes catalog copies of Desk's own skills that nobody edited, so the built-ins take over (spec §2.3). */
@@ -1189,11 +1321,30 @@ export class Runtime {
    * `tool.result` exists the agent's conversation ends in a call without a result, so `resolving` holds every wake.
    * A shutdown aborts the call; recover() records `interrupted` for one an unclean exit cut off.
    */
-  async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string } = {}): Promise<void> {
+  async resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts: { by?: 'user' | 'desk'; note?: string; remember?: boolean } = {}): Promise<void> {
     const { store } = this.o;
     const ap = getApproval(store.db, approvalId);
     if (!ap) throw new NotFoundError(`Unknown approval: ${approvalId}`);
     if (ap.status !== 'pending') throw new ConflictError(`Approval ${approvalId} is already resolved (${ap.status})`);
+    if (opts.remember) {
+      if (decision !== 'approved') throw new ValidationError('Only an approval can be remembered');
+      const link = stepAgentOf(store.db, ap.agent_id);
+      if (!link) throw new ValidationError("Only an automation step's approval can be remembered");
+      const automation = this.automations.require(link.run.automation_id);
+      if (automation.grants_suspended) throw new ConflictError('Grants are suspended until you keep them; approve without remembering, or review the change first');
+      // Approvals store the model's raw arguments: parse them for the schema's defaults, as proposedGrants does.
+      const tool = toolByName(ap.tool);
+      let subject: PolicySubject = {};
+      try {
+        const raw: unknown = JSON.parse(ap.arguments);
+        const input = tool?.input.safeParse(raw);
+        const asker = getAgent(store.db, ap.agent_id);
+        subject = tool?.gate?.subject(input?.success ? input.data : raw, asker?.git_branch ? { gitBranch: asker.git_branch } : {}) ?? {};
+      } catch {}
+      const grant = Grant.safeParse(deriveGrant(ap.tool, subject, automation.name));
+      if (!grant.success) throw new ValidationError('This call is too long to remember as a grant; approve it without remembering');
+      this.automations.setGrants(automation.id, addGrant(automation.grants, grant.data), 'remembered');
+    }
     const by = opts.by ?? 'user';
     const base = { project_id: ap.project_id, agent_id: ap.agent_id };
     let recorded!: () => void;
@@ -1249,8 +1400,12 @@ export class Runtime {
     return true;
   }
 
-  whenIdle(): Promise<void> {
-    return this.scheduler.whenIdle();
+  /** Resolves when no agent job is running or queued and no automation step work is left in the background. */
+  async whenIdle(): Promise<void> {
+    do {
+      await this.engine.settled();
+      await this.scheduler.whenIdle();
+    } while (this.engine.busy);
   }
 
   /**
@@ -1259,6 +1414,7 @@ export class Runtime {
    */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    await this.engine.shutdown();
     this.scheduler.stopAll(SHUTDOWN_REASON);
     const resolutions = [...this.resolutions];
     for (const r of resolutions) r.controller.abort(SHUTDOWN_REASON);
@@ -1312,6 +1468,8 @@ export class Runtime {
     for (const agent of listLiveAgents(this.o.store.db)) {
       if (approvalsRepaired.has(agent.id) ? this.resumeAfterApproval(agent.id) : this.wake(agent.id)) resumed.push(agent.id);
     }
+    // Automation runs after agents: agent steps re-attach to the agents just resumed (spec §3.6).
+    this.engine.recover(new Set(resumed));
     return resumed;
   }
 
@@ -1550,6 +1708,52 @@ export class Runtime {
   }
 
   /** Unknown models are assumed to see images; the endpoint answers for itself. */
+  private now(): Date {
+    return this.o.now?.() ?? new Date();
+  }
+
+  /** What automation validation checks against in this project: skills and their scripts, models, git sources, sibling automations. */
+  private validateContext(projectId: string, name: string): ValidateContext {
+    const db = this.o.store.db;
+    return {
+      projectId,
+      name,
+      now: this.now(),
+      skill: (n) => {
+        const s = this.skills.resolve(n, projectId);
+        if (s) {
+          if (s.error) return { ok: false, reason: `Skill ${n} is broken: ${s.error}` };
+          const hasScript = (p: string) => {
+            try {
+              locateScript(s, p, this.skills);
+              return true;
+            } catch {
+              return false;
+            }
+          };
+          return { ok: true, builtinOff: false, hasScript };
+        }
+        const b = this.builtins;
+        if (b?.entry(n) && !b.enabled(n)) {
+          return { ok: true, builtinOff: true, hasScript: (p) => existsSync(join(b.dir(n), p)) || existsSync(join(b.dir(n), 'scripts', p)) };
+        }
+        return { ok: false, reason: `Unknown skill: ${n}` };
+      },
+      model: (m, effort) => {
+        const id = m || getProject(db, projectId)?.settings.thread_model || DEFAULT_MODEL_ID;
+        if (!this.o.models.has(id)) return `Unknown model: ${id}`;
+        const levels = this.o.models.get(id).reasoning_efforts;
+        if (effort && !levels.includes(effort)) return `${id} does not take reasoning effort "${effort}"${levels.length ? ` (it takes: ${levels.join(', ')})` : ' (it takes none)'}`;
+        return null;
+      },
+      gitSource: (id) => {
+        const s = getSource(db, id);
+        return !!s && s.project_id === projectId && s.kind === 'git';
+      },
+      automation: (n) => findAutomation(db, projectId, n)?.definition ?? null,
+    };
+  }
+
   private modelSeesImages(model: string): boolean {
     return this.o.models.has(model) ? this.o.models.get(model).vision : true;
   }
@@ -1597,9 +1801,130 @@ export class Runtime {
     if (!this.guard.ports.includes(port)) this.guard.ports.push(port);
   }
 
+  /**
+   * An automation step's agent (spec §4.2): its workspace is the step folder (a git worktree on desk/auto-<name>-<id>
+   * with a git source), it has no parent, and it starts with the runtime's own start message.
+   */
+  async createStepAgent(input: CreateStepAgentInput): Promise<string> {
+    const project = this.requireOpenProject(input.projectId);
+    const info = this.o.models.get(input.model);
+    if (input.reasoningEffort && !info.reasoning_efforts.includes(input.reasoningEffort)) {
+      throw new ValidationError(`${input.model} does not take reasoning effort "${input.reasoningEffort}"`);
+    }
+    const skills = this.requireUsableSkills(project.id, input.skills);
+    for (const n of skills) {
+      const s = this.skills.resolve(n, project.id);
+      if (s) this.ensureRuntimeFor(s, project.id);
+    }
+    const id = input.agentId ?? newId();
+    const workspacePath = stepDir(this.o.dataDir, input.runId, input.stepId);
+    let git: { source_id: string; branch: string; base: string; common_dir: string } | null = null;
+    if (input.gitSourceId) {
+      const source = getSource(this.o.store.db, input.gitSourceId);
+      if (!source || source.project_id !== project.id || source.kind !== 'git') throw new ValidationError(`Unknown git source: ${input.gitSourceId}`);
+      // The worktree takes the step folder's place (the engine created it empty, with only .desk/).
+      await removeWorkspace({ path: workspacePath, gitSourcePath: source.path });
+      const ws = await createWorkspace({ path: workspacePath, git: { sourcePath: source.path, branch: `desk/auto-${input.automationName}-${id.slice(-6).toLowerCase()}` } });
+      mkdirSync(join(workspacePath, '.desk'), { recursive: true });
+      git = ws.git ? { source_id: source.id, ...ws.git } : null;
+    } else {
+      mkdirSync(workspacePath, { recursive: true });
+    }
+    this.o.store.append([
+      {
+        project_id: project.id,
+        agent_id: id,
+        type: 'agent.created',
+        payload: {
+          role: 'step',
+          model: input.model,
+          ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+          title: input.title,
+          brief: input.brief,
+          workspace_path: workspacePath,
+          parent_id: null,
+          git,
+          ...(skills.length ? { skills } : {}),
+          automation: { run_id: input.runId, step_id: input.stepId },
+        },
+      },
+      { project_id: project.id, agent_id: id, type: 'message.agent', payload: { from_agent_id: id, from_label: REMINDER_LABEL, kind: 'start', text: 'Begin this step.' } },
+    ]);
+    this.wake(id);
+    return id;
+  }
+
+  /** A step agent's complete or fail_step: checked against the step's output keys and routes, then settled at once. */
+  recordStepResult(agentId: string, result: StepResult): void {
+    const link = stepAgentOf(this.o.store.db, agentId);
+    if (!link) throw new Error('Only an automation step can do this');
+    if (link.step.agent_id !== agentId || link.run.status !== 'running' || (link.step.status !== 'running' && link.step.status !== 'waiting')) {
+      throw new Error('This step has already ended; stop here.');
+    }
+    const step = this.engine.definitionOf(link.run).steps.find((s) => s.id === link.step.step_id);
+    if (step?.kind !== 'agent') throw new Error('Only an agent step can do this');
+    if (result.status === 'succeeded') {
+      const declared = step.output_keys.map((o) => o.key);
+      const extra = Object.keys(result.outputs).filter((k) => !declared.includes(k));
+      if (extra.length) throw new Error(`Undeclared outputs: ${extra.join(', ')}. This step's outputs: ${declared.join(', ') || 'none'}.`);
+      const parsed = Outputs.safeParse(result.outputs);
+      if (!parsed.success) throw new Error(`Invalid outputs: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      if (result.route !== null && !step.routes.includes(result.route)) {
+        throw new Error(`"${result.route}" is not one of this step's routes (${step.routes.join(', ') || 'none'}).`);
+      }
+      this.engine.resolveStep(link.run.id, step.id, { ...result, outputs: parsed.data });
+      return;
+    }
+    this.engine.resolveStep(link.run.id, step.id, result);
+  }
+
+  /** A step agent's active time (its model runs), for the step timeout. */
+  stepActiveMs(agentId: string): number {
+    return activeMs(this.o.store.list({ agentId, types: ['run.started', 'run.finished'] }), Date.now());
+  }
+
+  /** Archives a step agent when its run ends: stops it if needed and removes a git worktree (its branch is kept). */
+  async archiveStepAgent(agentId: string): Promise<void> {
+    const a = this.requireAgent(agentId);
+    if (a.role !== 'step' || a.archived_at || this.archiving.has(a.id)) return;
+    this.archiving.add(a.id);
+    try {
+      // An agent whose own complete or fail_step ended the run is still finishing that turn: let it end as done or failed.
+      const link = stepAgentOf(this.o.store.db, a.id);
+      if (link?.step.agent_id === a.id && (link.step.status === 'succeeded' || link.step.status === 'failed')) await this.scheduler.waitFor(a.id);
+      if (!TERMINAL.has(this.requireAgent(a.id).status)) this.stopAgent(a.id, { by: 'automation', reason: 'Its automation run ended' });
+      await this.scheduler.stopAndWait(a.id);
+      if (a.git_source_id && a.workspace_path) {
+        const source = getSource(this.o.store.db, a.git_source_id);
+        await removeWorkspace({ path: a.workspace_path, gitSourcePath: source?.path ?? null });
+      }
+      this.o.store.append({ project_id: a.project_id, agent_id: a.id, type: 'agent.archived', payload: {} });
+    } finally {
+      this.archiving.delete(a.id);
+    }
+  }
+
   private readRoots(agent: AgentRow): string[] {
     const roots = listSources(this.o.store.db, agent.project_id).map((s) => s.path);
-    return [...(agent.workspace_path ? [agent.workspace_path] : []), ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
+    const own = agent.workspace_path ? [agent.workspace_path] : [];
+    // A step agent reads its whole run (earlier steps' folders, inputs) and the previous succeeded run of its automation.
+    if (agent.role === 'step' && agent.automation_run_id) {
+      const db = this.o.store.db;
+      own.push(runDir(this.o.dataDir, agent.automation_run_id), ...descendantRunDirs(db, this.o.dataDir, agent.automation_run_id));
+      const link = stepAgentOf(db, agent.id);
+      const prev = link ? lastSucceededRun(db, link.run.automation_id) : undefined;
+      if (prev && prev.id !== agent.automation_run_id) own.push(runDir(this.o.dataDir, prev.id), ...descendantRunDirs(db, this.o.dataDir, prev.id));
+    }
+    // Desk reads its project's automation runs: report folders and Tell Desk attachments (spec §6.1).
+    if (agent.role === 'desk') own.push(...runIdsOfProject(this.o.store.db, agent.project_id).map((id) => runDir(this.o.dataDir, id)));
+    return [...own, ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
+  }
+
+  /** A step agent's step limit: its step's max_steps, else 100. */
+  private stepMaxSteps(agent: AgentRow): number {
+    const link = stepAgentOf(this.o.store.db, agent.id);
+    const step = link ? this.engine.definitionOf(link.run).steps.find((s) => s.id === link.step.step_id) : undefined;
+    return step?.kind === 'agent' ? (step.max_steps ?? 100) : 100;
   }
 
   private systemPrompt(agent: AgentRow, project: ProjectRow): string {
@@ -1607,7 +1932,26 @@ export class Runtime {
     const provider = this.o.skillEnv;
     const skillNote = (s: { scope: SkillScope; name: string }) => provider?.env({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: project.id } : {}) }).note ?? null;
     const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote, messages: this.messages(project.id) };
-    return agent.role === 'desk' ? deskSystemPrompt(ctx) : threadSystemPrompt(ctx);
+    if (agent.role === 'desk') return deskSystemPrompt(ctx);
+    if (agent.role === 'step') {
+      const link = stepAgentOf(this.o.store.db, agent.id);
+      if (link) {
+        const def = this.engine.definitionOf(link.run);
+        const step = def.steps.find((s) => s.id === link.step.step_id);
+        if (step?.kind === 'agent') {
+          const up = ancestors(def, step.id);
+          const rows = new Map(stepRuns(this.o.store.db, link.run.id).map((r) => [r.step_id, r]));
+          const upstream = def.steps
+            .filter((s) => up.has(s.id))
+            .map((s) => {
+              const r = rows.get(s.id);
+              return { id: s.id, title: s.title, status: r?.status ?? 'pending', route: r?.route ?? null, summary: r?.summary ?? null, outputs: r?.outputs ?? {}, dir: stepDir(this.o.dataDir, link.run.id, s.id) };
+            });
+          return stepSystemPrompt({ ...ctx, step, def, run: link.run, upstream });
+        }
+      }
+    }
+    return threadSystemPrompt(ctx);
   }
 
   private sandboxAvailable(): Promise<boolean> {
@@ -1651,7 +1995,7 @@ export class Runtime {
    * pauses and the wake is dropped.
    */
   private admit(projectId: string, trigger: Trigger): boolean {
-    if (trigger === 'user' || trigger === 'queued') return true;
+    if (trigger === 'user' || trigger === 'queued' || trigger === 'automation') return true;
     if (this.paused.has(projectId)) return false;
     let windows = this.wakeWindows.get(projectId);
     if (!windows) this.wakeWindows.set(projectId, (windows = { agent: [], lifecycle: [] }));
@@ -1753,15 +2097,22 @@ export class Runtime {
       };
     }
     const maxSteps = this.o.maxSteps ?? { desk: 60, thread: 200 };
-    const gate: RunDeps['gate'] = (tool, input, project, a) =>
-      evaluatePolicy(tool, input, project.settings.policy, { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) });
+    const gate: RunDeps['gate'] = (tool, input, project, a) => {
+      const opts = { sandboxAvailable, ...(a.git_branch ? { gitBranch: a.git_branch } : {}) };
+      if (a.role !== 'step') return evaluatePolicy(tool, input, project.settings.policy, opts);
+      // Automation steps: the automation's grants first, then the project policy; their approvals go to the user (spec §5.3).
+      const run = a.automation_run_id ? getRun(this.o.store.db, a.automation_run_id) : undefined;
+      const automation = run ? getAutomation(this.o.store.db, run.automation_id) : undefined;
+      const d = evaluatePolicy(tool, input, [...(automation ? activeGrantRules(automation) : []), ...project.settings.policy], opts);
+      return { ...d, delegateToDesk: false };
+    };
     await runAgent(
       {
         store: this.o.store,
         adapter: this.o.adapter,
         tools: this.toolsFor(agent),
         systemPrompt: (a, p) => this.systemPrompt(a, p),
-        maxSteps: answer ? ANSWER_MAX_STEPS : agent.role === 'desk' ? maxSteps.desk : maxSteps.thread,
+        maxSteps: answer ? ANSWER_MAX_STEPS : agent.role === 'desk' ? maxSteps.desk : agent.role === 'step' ? this.stepMaxSteps(agent) : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),
         contextWindow: (model) => (this.o.models.has(model) ? this.o.models.get(model).context_window : undefined),
@@ -1814,6 +2165,7 @@ export class Runtime {
       // An entry left by a stop whose run did not end cancelled (a shutdown raced it) must not silence a later stop.
       this.silentStops.delete(agent.id);
       this.remindWhatsUp(agent);
+      if (agent.role === 'step' && job.kind === 'run') this.engine.onAgentEnded(this.requireAgent(agent.id));
       this.wake(agent.id);
     } finally {
       // The stop point served this wake; from here on the `cancelled` event marks the stop.

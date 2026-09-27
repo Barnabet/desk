@@ -19,7 +19,7 @@ import {
   type Keychain,
   type ModelConfig,
 } from '@desk/core';
-import type { CatalogFile } from '@desk/protocol';
+import { ENGINE_TICK_MS, type CatalogFile } from '@desk/protocol';
 import { createApp } from './app';
 import { loadDaemonFile, saveDaemonFile } from './config-file';
 import { startNotifier, type Notification } from './notifier';
@@ -65,6 +65,8 @@ export type DaemonOptions = {
   runtimes?: { uv?: string | null; nodeExec?: string; registry?: string };
   sandboxAvailable?: boolean;
   stallIntervalMs?: number;
+  /** How often the automation engine ticks (schedules, waits, deadlines, retries); default ENGINE_TICK_MS. */
+  automationTickMs?: number;
   now?: () => number;
   log?: Logger;
 };
@@ -206,6 +208,12 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       }
     }, o.stallIntervalMs ?? 60_000);
     stallTimer.unref();
+    const tickAutomations = () => {
+      runtime.engine.tick().catch((err) => log.error('automation tick failed', err));
+    };
+    tickAutomations(); // catches up schedules and waits that fell due while the daemon was down
+    const automationTimer = setInterval(tickAutomations, o.automationTickMs ?? ENGINE_TICK_MS);
+    automationTimer.unref();
 
     let stopped = false;
     return {
@@ -218,6 +226,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
         stopped = true;
         stopNotifier();
         clearInterval(stallTimer);
+        clearInterval(automationTimer);
         await server.close();
         await runtime.shutdown();
         close();

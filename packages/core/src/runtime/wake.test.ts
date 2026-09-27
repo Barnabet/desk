@@ -177,3 +177,16 @@ describe('takeWake', () => {
     expect(times).toEqual([]);
   });
 });
+
+describe('step agents', () => {
+  it('runs a step agent for its start, never when stopped or finished', () => {
+    const base = { projectArchived: false, pendingApprovals: 0, open: [] };
+    const start = [{ id: 5, from: 'thread' as const, kind: 'start' as const }];
+    expect(wakeDecision({ ...base, agent: { role: 'step', status: 'idle', archived: false }, pending: start })).toEqual({ kind: 'run', trigger: 'automation' });
+    expect(wakeDecision({ ...base, agent: { role: 'step', status: 'waiting', archived: false }, pending: start })).toEqual({ kind: 'run', trigger: 'automation' });
+    expect(wakeDecision({ ...base, agent: { role: 'step', status: 'idle', archived: false }, pending: [] })).toEqual({ kind: 'none' });
+    for (const status of ['cancelled', 'done', 'failed'] as const) {
+      expect(wakeDecision({ ...base, agent: { role: 'step', status, archived: false }, pending: start })).toEqual({ kind: 'none' });
+    }
+  });
+});

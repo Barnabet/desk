@@ -1,4 +1,4 @@
-import { imageLabel, type StoredEvent, type StreamServerMessage } from '@desk/protocol';
+import { imageLabel, type AutomationSummary, type RunListEntry, type StepRunInfo, type StoredEvent, type StreamServerMessage } from '@desk/protocol';
 
 const clip = (s: string, n: number) => {
   const flat = s.replace(/\s+/g, ' ').trim();
@@ -147,6 +147,16 @@ export function createRenderer(write: (s: string) => void, opts: RenderOptions):
       case 'artifact.published':
         line(`  ▣ library: ${e.payload.path} — ${e.payload.title}`);
         return;
+      case 'automation.step_changed': {
+        const p = e.payload;
+        if (p.status !== 'waiting') return;
+        if (p.question) line(`  ? automation run ${p.run_id} asks: ${clip(p.question.text, 200)} (desk automation answer ${p.run_id} ${p.step_id} approve|reject)`);
+        else if (p.gate) line(`  ! automation run ${p.run_id} wants to run ${clip(p.gate.subject, 200)} (desk automation answer ${p.run_id} ${p.step_id} approve|reject [--remember])`);
+        return;
+      }
+      case 'automation.run_finished':
+        line(`  ◼ automation run ${e.payload.run_id} ${e.payload.status}: ${clip(e.payload.summary, 200)}`);
+        return;
       default:
         return;
     }
@@ -163,4 +173,26 @@ export function createRenderer(write: (s: string) => void, opts: RenderOptions):
       write(m.event.payload.text);
     } else if (m.kind === 'error') line(`  ✗ stream error: ${m.message}`);
   };
+}
+
+/** One automation in `desk automations`. */
+export function automationLine(a: AutomationSummary): string {
+  const tested = a.tested_version === null ? 'not tested' : a.tested_version === a.version ? 'tested' : `tested in v${a.tested_version}`;
+  const when = a.schedules.length ? a.schedules.map((s) => `${s.cron} (${s.timezone})`).join('; ') : 'Run now only';
+  const last = a.last_run ? `${a.last_run.status}${a.last_run.test ? ' (test)' : ''} ${a.last_run.started_at}${a.last_run.waiting_on ? ` — ${a.last_run.waiting_on}` : ''}` : 'never';
+  const flags = [...(a.next_due ? [`next ${a.next_due}`] : []), ...(a.grants_suspended ? ['grants suspended'] : []), ...(a.enable_requested ? ['Desk asks to turn it on'] : [])];
+  return `${a.name} ${JSON.stringify(a.title)} — ${a.enabled ? 'on' : 'off'} · v${a.version} (${tested}) · ${when} · last: ${last}${flags.length ? ` · ${flags.join(' · ')}` : ''}`;
+}
+
+/** One entry of `desk automation runs`. */
+export function runLine(e: RunListEntry): string {
+  if (e.kind === 'skipped') return `—  skipped (${e.reason === 'missed' ? 'missed' : 'still running'})  ${e.due_at}`;
+  const r = e.run;
+  return `${r.id}  ${r.status}  ${r.trigger}${r.test ? ' (test)' : ''}  ${r.started_at}${r.summary ? `  ${clip(r.summary, 120)}` : ''}`;
+}
+
+/** A step's state while following a run. */
+export function stepLine(title: string, st: StepRunInfo): string {
+  const text = st.error ?? st.summary;
+  return `  • ${title} → ${st.status}${st.attempt > 1 ? ` (attempt ${st.attempt})` : ''}${st.route ? ` · route ${st.route}` : ''}${text ? `: ${clip(text, 200)}` : ''}`;
 }

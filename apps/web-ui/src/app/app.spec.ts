@@ -145,7 +145,7 @@ describe('App', () => {
       throw new Error('diagram boom');
     });
     go('#/p/p/conversation');
-    const desk = { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', reasoning_effort: null, title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, archived_at: null, created_at: 't', updated_at: 't' };
+    const desk = { id: 'd', project_id: 'p', role: 'desk', status: 'idle', model: 'm', reasoning_effort: null, title: 'Desk', brief: null, workspace_path: '/w', parent_id: null, inbox_cursor: 0, review_round: 0, result_summary: null, result_artifacts: null, active_skills: [], git_source_id: null, git_branch: null, git_base: null, git_common_dir: null, automation_run_id: null, automation_step_id: null, archived_at: null, created_at: 't', updated_at: 't' };
     const overview = { project: { id: 'p', name: 'P', goal: '', instructions: '', settings: {}, created_at: 't', updated_at: 't', archived_at: null }, desk, sources: [], plan: null, threads: [], approvals: [], last_seq: 0 };
     const bridge: FakeDeskBridge = new FakeDeskBridge({
       'broker.snapshot': () => ({ ...initialGlobalState(), connection: { status: 'live' } }),

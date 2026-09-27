@@ -41,6 +41,10 @@ const NEEDS: Record<AttentionItem['kind'], string> = {
   stalled: 'is stalled',
   failed: 'failed',
   paused: 'is paused',
+  automation_ask: 'needs your answer',
+  automation_failed: 'failed',
+  automation_enable_request: 'needs you',
+  automation_grants_suspended: 'needs you',
 };
 
 /**

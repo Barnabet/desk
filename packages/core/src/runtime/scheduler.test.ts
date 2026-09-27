@@ -156,4 +156,37 @@ describe('Scheduler', () => {
     expect(s.isActive('a')).toBe(false);
     await expect(s.stopAndWait('a')).resolves.toBeUndefined();
   });
+
+  it('waitFor resolves once a running job has ended on its own, without stopping it', async () => {
+    const { s, started, after } = setup();
+    s.enqueue(job('a'));
+    await tick();
+    const waited = s.waitFor('a');
+    expect(started[0]!.signal.aborted).toBe(false);
+    started[0]!.release();
+    await waited;
+    expect(after).toEqual(['a']);
+    await expect(s.waitFor('a')).resolves.toBeUndefined();
+  });
+});
+
+describe('step agents', () => {
+  it('counts step runs against the project thread cap', async () => {
+    const started: string[] = [];
+    const gates = new Map<string, () => void>();
+    const s = new Scheduler({
+      modelConcurrency: () => 10,
+      projectConcurrency: () => 1,
+      run: (job) => new Promise<void>((resolve) => { started.push(job.agentId); gates.set(job.agentId, resolve); }),
+      afterRun: () => {},
+      onError: () => {},
+    });
+    s.enqueue({ agentId: 'step1', projectId: 'p', model: 'm', role: 'step', kind: 'run' });
+    s.enqueue({ agentId: 'thread1', projectId: 'p', model: 'm', role: 'thread', kind: 'run' });
+    await new Promise((r) => setImmediate(r));
+    expect(started).toEqual(['step1']);
+    gates.get('step1')!();
+    await new Promise((r) => setImmediate(r));
+    expect(started).toEqual(['step1', 'thread1']);
+  });
 });
