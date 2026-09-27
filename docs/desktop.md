@@ -68,7 +68,7 @@ renderer (React, sandboxed, no Node)          main process (Node)               
     - `session.ts`: each project's event log, folded into chat, timeline, transcripts and streams.
     - `global.ts`: connection, health, overview, attention and system.
   - A hash router (`useRoute`, over `@desk/ui-core`'s `parseRoute` and `href`), and one folder per place.
-  - `automations/`: the Automations tab: the list and header, `design/` (the React Flow canvas, its nodes and the inspectors), `runs/` (the run list, the run view and the step panel), `versions/`, `grants/` and `dialogs/`. Its logic is in `@desk/ui-core`'s `automation-*.ts`, so the web UI (Plan 21) shares it.
+  - `automations/`: the Automations tab: the list and header, `design/` (the React Flow canvas, its nodes and the inspectors), `runs/` (the run list, the run view and the step panel), `versions/`, `grants/` and `dialogs/`. Its logic is in `@desk/ui-core`'s `automation-*.ts`, so the web UI shares it.
   - The logic shared with the web UI is in `@desk/ui-core` (`packages/ui-core`) and the CSS in `@desk/ui-styles` (`packages/ui-styles`), both shared with the web UI.
   - `@desk/ui-styles`' `tokens.css`: every color, with a dark value under `prefers-color-scheme: dark`, which follows the Appearance setting. Components use tokens only, including SVG fills and strokes (`var(--run)`); `tokens.test.ts` fails on a color literal anywhere else, or a token without a dark value.
 

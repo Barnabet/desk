@@ -35,6 +35,8 @@ The screens, their text and their look are the same. Both UIs load `@desk/ui-sty
 | | Desktop app | Browser |
 |---|---|---|
 | Choosing a folder | The system dialog | Desk's folder browser: folders under your home folder or a project's sources, hidden ones on request (on by default for a skill import from `~/.claude/skills`), or a typed path, which deskd checks |
+| Choosing a file (an automation's file input) | The system dialog | The same folder browser, listing files as well: click one or type a full path |
+| Design's graph (Automations) | React Flow | Desk's own canvas with the same look and keys: drag a step, drag from a handle to connect, drag the background to pan, wheel or the buttons to zoom, Delete or Backspace removes the selection |
 | Links in agent text | The system browser, after a confirmation | A new tab, after the same confirmation (`http`, `https` and `mailto` only) |
 | Agent files | Previews from the daemon's bytes | The same, except SVG, which shows as text. Images come from raster formats only. Save a copy downloads the file |
 | Notifications | macOS notifications from the app | Browser notifications (below) |
@@ -128,6 +130,7 @@ The suite lives in `apps/web-ui/e2e`, on `startWebE2E` in `harness.ts`. Each fil
 | `knowledge.e2e.test.ts` | Library upload and preview, memory, a source from the folder browser, settings and the policy, archive |
 | `catalog.e2e.test.ts` | The shipped catalog with two local stand-ins: review, install with its runtime, the skill on the map, a project install; refine and restore a skill; import from `~/.claude/skills` through the folder browser; turn a built-in skill off and duplicate one |
 | `system.e2e.test.ts` | The model registry editor (a duplicate refused, a new model saved and reloaded, a draft discarded); deskd without Repair; the notification switches; ⌘K and ⌘P |
+| `automations.e2e.test.ts` | A Blank automation built on the canvas (an input, an agent step, an Ask me step), saved, run with an input, answered in the run view, its file in the Library; a file input chosen in the folder browser |
 
 `pnpm test:web-e2e` also runs `apps/web-server/src/built-ui.e2e.test.ts`, which checks that the built `index.html` has no inline code. The files run one at a time. To run one file against the current build:
 
