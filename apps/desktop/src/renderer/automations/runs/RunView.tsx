@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { AutomationDetail, RunDetail, StepRunInfo } from '@desk/protocol';
-import { agentActivity, dayTime, focusStep, href, runGraph, runStatusText, runTook, stepLook, triggerText, type GraphSelection } from '@desk/ui-core';
+import type { AutomationDetail, RunDetail } from '@desk/protocol';
+import { agentActivity, dayTime, focusStep, href, runGraph, runStatusText, runTook, triggerText, type GraphSelection } from '@desk/ui-core';
 import { call } from '../../bridge';
 import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -10,6 +10,7 @@ import { useNow } from '../../state/now';
 import type { SessionState } from '../../state/session';
 import { useRun } from '../data';
 import { GraphCanvas } from '../design/GraphCanvas';
+import { StepPanel } from './StepPanel';
 
 /** One run (spec §8.3, view A): the graph lit with each step's state, the header's Open folder and Cancel run, and a side panel. */
 export function RunView(o: { projectId: string; s: SessionState; detail: AutomationDetail; runId: string }) {
@@ -72,7 +73,7 @@ export function RunView(o: { projectId: string; s: SessionState; detail: Automat
         </header>
         <GraphCanvas def={run.definition} layout={o.detail.layout} startLabel={triggerText(run)} selection={sel} onSelect={(x) => setPicked(x.kind === 'none' ? { kind: 'start' } : x)} run={graph} editable={false} />
       </div>
-      {sel.kind === 'step' ? <StepSide run={run} stepId={sel.id} now={now} /> : <RunSide run={run} />}
+      {sel.kind === 'step' ? <StepPanel key={sel.id} projectId={o.projectId} s={o.s} run={run} stepId={sel.id} grantsSuspended={o.detail.grants_suspended} /> : <RunSide run={run} />}
       {cancelling ? (
         <ConfirmDialog title={`Cancel run #${run.number}?`} confirmLabel="Cancel run" danger onConfirm={() => void cancel()} onCancel={() => setCancelling(false)}>
           Its running steps stop: agents are stopped and scripts are killed. Steps that finished keep their results.
@@ -103,21 +104,6 @@ function RunSide({ run }: { run: RunDetail }) {
       ) : (
         <p className="muted small">None.</p>
       )}
-    </aside>
-  );
-}
-
-/** A step, briefly (Task 15 replaces this with the full step panel). */
-function StepSide({ run, stepId, now }: { run: RunDetail; stepId: string; now: number }) {
-  const step = run.definition.steps.find((s) => s.id === stepId);
-  const row: StepRunInfo | undefined = run.steps.find((s) => s.step_id === stepId);
-  const look = stepLook(row, now);
-  return (
-    <aside className="auto-panel" aria-label={step?.title ?? stepId}>
-      <p className="eyebrow">{look.badge}</p>
-      <h2>{step?.title ?? stepId}</h2>
-      {row?.summary ? <p>{row.summary}</p> : null}
-      {row?.error ? <p className="auto-issues">{row.error}</p> : null}
     </aside>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ev } from '@desk/client/testing';
 import { runDetail, stepRun } from './testing/automations';
-import { agentActivity, askDeskText, canStopStep, firedEdges, focusStep, relRunPath, runGraph, stepLook } from './automation-run-graph';
+import { agentActivity, agentTokens, askDeskText, canStopStep, firedEdges, focusStep, outputText, relRunPath, runGraph, stepLook } from './automation-run-graph';
 
 const now = Date.parse('2026-09-28T06:06:12.000Z');
 
@@ -52,5 +52,20 @@ describe('run looks', () => {
     expect(canStopStep(live, live.steps[0]!)).toBe(false);
     expect(relRunPath('/data/automation-runs/r14/steps/sum/digest.md', 'r14')).toBe('steps/sum/digest.md');
     expect(relRunPath('/elsewhere/x.md', 'r14')).toBeNull();
+  });
+});
+
+describe('step results', () => {
+  it('counts an agent’s tokens and words outputs', () => {
+    const events = [
+      ev(1, 'usage', { run_id: 'x', model: 'm', prompt_tokens: 1000, completion_tokens: 200, estimated: false }, { agent: 'ag1' }),
+      ev(2, 'usage', { run_id: 'y', model: 'm', prompt_tokens: 250, completion_tokens: 50, estimated: false }, { agent: 'ag1' }),
+      ev(3, 'usage', { run_id: 'z', model: 'm', prompt_tokens: 9, completion_tokens: 9, estimated: false }, { agent: 'other' }),
+    ];
+    expect(agentTokens(events, 'ag1')).toBe(1500);
+    expect(outputText(['a.com', 'b.com'])).toBe('a.com\nb.com');
+    expect(outputText(3)).toBe('3');
+    expect(outputText(null)).toBe('—');
+    expect(outputText(false)).toBe('false');
   });
 });

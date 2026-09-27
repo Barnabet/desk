@@ -839,3 +839,47 @@
   color: var(--ink);
   word-break: break-word;
 }
+
+/* The step panel */
+.auto-live {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-left: 3px solid var(--run);
+  background: var(--card);
+  font-size: 13px;
+}
+.auto-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-output {
+  white-space: pre-wrap;
+}
+.auto-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.auto-log summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.auto-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auto-transcript {
+  height: 70vh;
+  display: flex;
+  min-height: 0;
+}

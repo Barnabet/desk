@@ -1,4 +1,4 @@
-import { summarizeToolArgs, type AutomationDefinition, type RunDetail, type StepRunInfo, type StoredEvent } from '@desk/protocol';
+import { summarizeToolArgs, type AutomationDefinition, type OutputValue, type RunDetail, type StepRunInfo, type StoredEvent } from '@desk/protocol';
 import type { GraphRun, NodeRunState } from './automation-graph';
 import { clock, duration } from './format';
 
@@ -89,4 +89,17 @@ export function relRunPath(path: string, runId: string): string | null {
   const marker = `/automation-runs/${runId}/`;
   const i = path.indexOf(marker);
   return i < 0 ? null : path.slice(i + marker.length);
+}
+
+/** The tokens an agent has used so far (prompt and completion, from its usage events). */
+export function agentTokens(events: readonly StoredEvent[], agentId: string): number {
+  let n = 0;
+  for (const e of events) if (e.type === 'usage' && e.agent_id === agentId) n += e.payload.prompt_tokens + e.payload.completion_tokens;
+  return n;
+}
+
+/** An output value as text: a list one item per line (as templates render it), nothing as "—". */
+export function outputText(v: OutputValue): string {
+  if (v === null) return '—';
+  return Array.isArray(v) ? v.map(String).join('\n') : String(v);
 }
