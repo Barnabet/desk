@@ -56,7 +56,7 @@ export const isAbsolutePath = (p: string): boolean => /^(?:\/|[A-Za-z]:[\\/]|\\\
       </form>
       <div class="actions">
         <button deskButton size="sm" variant="ghost" [disabled]="!listing()?.parent" (click)="up()">Up</button>
-        <label class="source-write"><input type="checkbox" [checked]="hidden()" (change)="toggleHidden($event)" /> Show hidden folders</label>
+        <label class="source-write"><input type="checkbox" [checked]="hidden()" (change)="toggleHidden($event)" /> {{ file() ? 'Show hidden files and folders' : 'Show hidden folders' }}</label>
       </div>
       @if (listing(); as l) {
         @if (l.dirs.length) {

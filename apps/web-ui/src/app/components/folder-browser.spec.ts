@@ -186,6 +186,7 @@ describe('FolderBrowser for a file', () => {
   it('lists files beside folders, puts a clicked file in the box, and chooses it', async () => {
     const { bridge, picked, dialog, user } = await setupFile();
     expect(within(dialog).getByRole('list', { name: 'Folders in /Users/me' })).toBeTruthy();
+    expect(within(dialog).getByRole('checkbox', { name: 'Show hidden files and folders' })).toBeTruthy();
     await user.click(await within(dialog).findByRole('button', { name: 'brief.pdf' }));
     expect((within(dialog).getByLabelText('Path') as HTMLInputElement).value).toBe('/Users/me/brief.pdf');
     expect(within(dialog).getByRole('button', { name: 'brief.pdf' }).getAttribute('aria-pressed')).toBe('true');
