@@ -9,6 +9,7 @@
     "./testing": "./src/testing/automations.ts"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@desk/bff": "workspace:*",
     "@desk/client": "workspace:*",
     "@desk/protocol": "workspace:*"

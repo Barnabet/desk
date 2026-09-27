@@ -1,5 +1,6 @@
 export * from './automation-format';
 export * from './automation-grants';
+export * from './automation-graph';
 export * from './automation-inputs';
 export * from './automation-live';
 export * from './automation-schedules';
