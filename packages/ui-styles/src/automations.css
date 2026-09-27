@@ -490,3 +490,88 @@
   background: var(--accent-tint);
   color: var(--accent);
 }
+
+/* The inspector (mockup 2, right) */
+.auto-inspector {
+  width: 340px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 24px;
+  border-left: 1px solid var(--rule-soft);
+  background: var(--paper);
+  overflow: auto;
+}
+.auto-inspector h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.auto-inspector fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.auto-inspector legend {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+.auto-issues {
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  border-radius: 8px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 12px;
+}
+.auto-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.auto-row > .input,
+.auto-row > .field {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.auto-row-error {
+  margin: 2px 0 0;
+}
+.auto-inline {
+  display: flex;
+  gap: 8px;
+}
+.auto-inline > .field {
+  flex: 1;
+  min-width: 0;
+}
+.auto-paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.auto-path {
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.auto-path:hover {
+  border-color: var(--run);
+  color: var(--run-text);
+}

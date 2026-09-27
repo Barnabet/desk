@@ -1,4 +1,5 @@
 export * from './automation-draft';
+export * from './automation-fields';
 export * from './automation-format';
 export * from './automation-grants';
 export * from './automation-graph';
