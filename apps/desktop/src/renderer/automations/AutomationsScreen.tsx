@@ -5,6 +5,7 @@ import { useSession, type SessionState } from '../state/session';
 import { AutomationHeader, DraftHeader } from './AutomationHeader';
 import { AutomationList } from './AutomationList';
 import { useAutomation } from './data';
+import { VersionsView } from './versions/VersionsView';
 
 /** The Automations tab (spec §8.1): the list, one automation (header, then Design, Runs, Versions or Grants), or a new draft. */
 export function AutomationsScreen(o: { projectId: string; automationId?: string; view?: AutomationView; runId?: string; draft?: string }) {
@@ -50,7 +51,7 @@ function AutomationBody(o: { projectId: string; s: SessionState; view: Automatio
     case 'runs':
       return <EmptyState title="Runs">Its runs show here.</EmptyState>;
     case 'versions':
-      return <EmptyState title="Versions">Its saved versions show here.</EmptyState>;
+      return <VersionsView detail={o.detail} onChange={o.onChange} />;
     case 'grants':
       return <EmptyState title="Grants">What its runs may do without asking shows here.</EmptyState>;
     default:

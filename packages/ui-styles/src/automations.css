@@ -586,3 +586,96 @@
   border-radius: 10px;
   background: var(--card);
 }
+
+/* Versions and diffs */
+.auto-versions {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: 20px;
+  padding: 16px 20px;
+}
+.auto-version-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.auto-version {
+  padding: 8px 10px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 10px;
+  background: var(--card);
+}
+.auto-version-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.auto-version-note {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.auto-version-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.auto-tag {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.auto-tag.added {
+  background: var(--add-bg);
+  color: var(--ok);
+}
+.auto-tag.removed {
+  background: var(--del-bg);
+  color: var(--accent);
+}
+.auto-tag.changed {
+  background: var(--wait-pastel);
+  color: var(--wait-text);
+}
+.auto-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.auto-diff-item {
+  padding: 4px 0;
+}
+.auto-diff-fields {
+  width: 100%;
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.auto-diff-fields th,
+.auto-diff-fields td {
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.auto-diff-fields th {
+  width: 120px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.auto-before {
+  background: var(--del-bg);
+}
+.auto-after {
+  background: var(--add-bg);
+}

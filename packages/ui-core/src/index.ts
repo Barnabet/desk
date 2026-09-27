@@ -1,3 +1,4 @@
+export * from './automation-diff';
 export * from './automation-draft';
 export * from './automation-fields';
 export * from './automation-format';
