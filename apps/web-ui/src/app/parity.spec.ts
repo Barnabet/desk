@@ -59,15 +59,16 @@ function withoutComments(text: string, kind: SourceKind = 'ts'): string {
 }
 
 /**
- * Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its
- * first `,` or `)`. A `call<` that does not parse so (type arguments nested deeper) comes back with an empty first
- * argument, so it is flagged rather than skipped; `call</` is a closing tag after the word, not a call.
+ * Every `call(…)` or `call?.(…)` outside comments (type arguments may nest once): the text matched and its first
+ * argument, up to its first `,` or `)`. A `call<` that does not parse so (type arguments nested deeper) comes back
+ * with an empty first argument, so it is flagged rather than skipped; `call</` is a closing tag after the word, not a
+ * call.
  */
 function callsIn(text: string, kind: SourceKind = 'ts'): Array<{ call: string; first: string }> {
   const code = withoutComments(text, kind);
-  const read = [...code.matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)];
+  const read = [...code.matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?(?:\?\.)?\(\s*([^,)]*)/g)];
   const starts = new Set(read.map((m) => m.index));
-  const unread = [...code.matchAll(/\bcall\s*<(?!\/)[^\n(]*\(?/g)].filter((m) => !starts.has(m.index));
+  const unread = [...code.matchAll(/\bcall\s*<(?!\/)[^\n(]*(?:\?\.)?\(?/g)].filter((m) => !starts.has(m.index));
   return [...read.map((m) => ({ call: m[0], first: m[1]!.trim() })), ...unread.map((m) => ({ call: m[0], first: '' }))];
 }
 
@@ -110,6 +111,7 @@ describe('parity with the desktop app (spec §6)', () => {
     expect(calledOps("await this.bridge.call(\n  'models.replace',\n  { models },\n);")).toEqual(['models.replace']);
     expect(calledOps("call<'usage'>('usage', {}); fn.call(this, 'usage'); call(op, input); call('not.an.op', {});")).toEqual(['usage']);
     expect(calledOps("call<ChannelOutput<'usage'>>('usage', {});")).toEqual(['usage']);
+    expect(calledOps("this.bridge.call?.('usage', {});")).toEqual(['usage']);
     expect(calledOps("// React: this.bridge.call('projects.archive', { id })\n/* call('projects.delete', {}) */")).toEqual([]);
     expect(calledOps("template: `<p>Archive</p>\n  <!-- React: this.bridge.call('projects.archive', { id }) -->\n`,")).toEqual([]);
     expect(calledOps('template: "<!-- call(\'projects.archive\', {}) --><b>x</b>",')).toEqual([]);
@@ -127,6 +129,7 @@ describe('parity with the desktop app (spec §6)', () => {
       "call('not.an.op', {})",
       "call<A<B<'x'>>>(op, {})",
       "call<A<B<'usage'>>>('usage', {})",
+      'this.bridge.call?.(op, {})',
     ]) {
       expect(dynamicCalls(text), text).toHaveLength(1);
     }

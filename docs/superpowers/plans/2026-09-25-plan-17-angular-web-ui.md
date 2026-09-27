@@ -40385,7 +40385,7 @@ Step 2 failed as expected: "leaves no placeholder screen behind" (`expected true
 - Consumes: `channels` (`@desk/bff/contract`), `webChannels` (`@desk/web-server/contract`), `Route`, `PROJECT_TABS` (`@desk/ui-core`), `screenFor` (W3b.4).
 - Produces: the spec §6 guard. It fails when the React renderer calls an operation the web UI never calls (except the host-only `app.openMain` and `daemon.repair`), when the web UI calls a host-only operation or the renderer stops calling one (so the list stays honest), when a `webChannels` operation goes uncalled, when either UI calls with a first argument the scan cannot read (a name built at run time, a variable, a table, a nested call, or a quoted name that is no operation), or when a route other than `tray` has no screen.
 
-"Calls" means the operation's name, quoted, in the first argument of a `call(…)` in a non-test source, comments aside (`//`, `/* */`, and the HTML comments of inline templates and `.html` files): `call('x', …)` in the renderer, `this.bridge.call('x', …)` in the web UI (type arguments may nest once, `call<Foo<'x'>>('x', …)`; a deeper nesting is flagged), and both names of a conditional between two literals (the connection overlay's Start/Restart). Any other first argument is flagged, except a declaration's first parameter (`op: C`, `op?: C`) and `this`/`null` (`fn.call(this, …)`). Tests and test helpers (`*.test.ts(x)`, `renderer/test/`, `*.spec.ts`, `src/app/testing/`) are left out, and a name counts only when `channels` or `webChannels` has it. The one name built at run time, ``call(`daemon.${what}`, {})`` in the React `SystemScreen`, becomes a choice between literal calls, as the web port already writes it (W3b.2). Operations neither UI calls (`health`, `projects.list`, …) are not the guard's concern.
+"Calls" means the operation's name, quoted, in the first argument of a `call(…)` in a non-test source, comments aside (`//`, `/* */`, and the HTML comments of inline templates and `.html` files): `call('x', …)` in the renderer, `this.bridge.call('x', …)` in the web UI (an optional call `call?.('x', …)` too; type arguments may nest once, `call<Foo<'x'>>('x', …)`; a deeper nesting is flagged), and both names of a conditional between two literals (the connection overlay's Start/Restart). Any other first argument is flagged, except a declaration's first parameter (`op: C`, `op?: C`) and `this`/`null` (`fn.call(this, …)`). Tests and test helpers (`*.test.ts(x)`, `renderer/test/`, `*.spec.ts`, `src/app/testing/`) are left out, and a name counts only when `channels` or `webChannels` has it. The one name built at run time, ``call(`daemon.${what}`, {})`` in the React `SystemScreen`, becomes a choice between literal calls, as the web port already writes it (W3b.2). Operations neither UI calls (`health`, `projects.list`, …) are not the guard's concern.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -40453,15 +40453,16 @@ function withoutComments(text: string, kind: SourceKind = 'ts'): string {
 }
 
 /**
- * Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its
- * first `,` or `)`. A `call<` that does not parse so (type arguments nested deeper) comes back with an empty first
- * argument, so it is flagged rather than skipped; `call</` is a closing tag after the word, not a call.
+ * Every `call(…)` or `call?.(…)` outside comments (type arguments may nest once): the text matched and its first
+ * argument, up to its first `,` or `)`. A `call<` that does not parse so (type arguments nested deeper) comes back
+ * with an empty first argument, so it is flagged rather than skipped; `call</` is a closing tag after the word, not a
+ * call.
  */
 function callsIn(text: string, kind: SourceKind = 'ts'): Array<{ call: string; first: string }> {
   const code = withoutComments(text, kind);
-  const read = [...code.matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)];
+  const read = [...code.matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?(?:\?\.)?\(\s*([^,)]*)/g)];
   const starts = new Set(read.map((m) => m.index));
-  const unread = [...code.matchAll(/\bcall\s*<(?!\/)[^\n(]*\(?/g)].filter((m) => !starts.has(m.index));
+  const unread = [...code.matchAll(/\bcall\s*<(?!\/)[^\n(]*(?:\?\.)?\(?/g)].filter((m) => !starts.has(m.index));
   return [...read.map((m) => ({ call: m[0], first: m[1]!.trim() })), ...unread.map((m) => ({ call: m[0], first: '' }))];
 }
 
@@ -40504,6 +40505,7 @@ describe('parity with the desktop app (spec §6)', () => {
     expect(calledOps("await this.bridge.call(\n  'models.replace',\n  { models },\n);")).toEqual(['models.replace']);
     expect(calledOps("call<'usage'>('usage', {}); fn.call(this, 'usage'); call(op, input); call('not.an.op', {});")).toEqual(['usage']);
     expect(calledOps("call<ChannelOutput<'usage'>>('usage', {});")).toEqual(['usage']);
+    expect(calledOps("this.bridge.call?.('usage', {});")).toEqual(['usage']);
     expect(calledOps("// React: this.bridge.call('projects.archive', { id })\n/* call('projects.delete', {}) */")).toEqual([]);
     expect(calledOps("template: `<p>Archive</p>\n  <!-- React: this.bridge.call('projects.archive', { id }) -->\n`,")).toEqual([]);
     expect(calledOps('template: "<!-- call(\'projects.archive\', {}) --><b>x</b>",')).toEqual([]);
@@ -40521,6 +40523,7 @@ describe('parity with the desktop app (spec §6)', () => {
       "call('not.an.op', {})",
       "call<A<B<'x'>>>(op, {})",
       "call<A<B<'usage'>>>('usage', {})",
+      'this.bridge.call?.(op, {})',
     ]) {
       expect(dynamicCalls(text), text).toHaveLength(1);
     }
@@ -40623,6 +40626,8 @@ Expected: exit 0 (the desktop `tsc` checks the new expression: every branch is a
 - **HTML comments credited operations.** `withoutComments` kept every string whole, and an Angular inline template is a string, so `<!-- React: this.bridge.call('projects.archive', { id }) -->` inside one credited `projects.archive`. The web UI writes HTML comments in its templates (`app.ts`, `pair-sheet.ts`, `thread-roster.ts`, `transcript.ts`, `line-diagram.ts`). Now every kept string loses its `<!--[\s\S]*?-->` comments. That covers template literals and also single- or double-quoted strings, because a quoted `template:` is a template too. The guard scans `.html` files as well (only `src/index.html` today), so `withoutComments` takes a `SourceKind`: for `'html'` it strips only HTML comments, and `opsIn` and the literal-names case pass each file's kind (`kindOf`).
 - **A deeper generic hid a call.** `call<A<B<'x'>>>(op, {})` did not match the one-level generic, so it was neither read nor flagged. `callsIn` now also finds every `\bcall\s*<` that the main pattern did not parse and returns it with an empty first argument, which `dynamicCalls` flags and `calledOps` skips. `call</` is left out: it is the word "call" before a closing tag (`any call</option>` in both `PolicyEditor`s).
 - The first case gains six expectations: a template literal's HTML comment, a double-quoted template's HTML comment, a `.html` file's HTML comment, a `call(op, {})` in a template's HTML comment (with `any call</option>`, which must not be flagged), and the two nested generics `call<A<B<'x'>>>(op, {})` and `call<A<B<'usage'>>>('usage', {})`, which must each be flagged. A template literal's code outside its HTML comment is still read (`<!-- old -->` before a `(click)` that calls `usage`). All six failed against the previous regexes first (seen with `expect.soft`). The case now passes, and so do the other six (7 of 7). On the committed sources the operation sets are unchanged: the renderer calls 76, the web UI 75, the renderer's only extras are `app.openMain` and `daemon.repair`, the web UI's only extra is `fs.listDirs`, and nothing is flagged.
+
+**Deviation (review follow-up):** an optional call, `this.bridge.call?.(op, {})`, was neither read nor flagged: neither pattern allowed `?.` between `call` (or its type arguments) and `(`. Both of `callsIn`'s patterns now take `(?:\?\.)?` before their `\(`. The first case gains `this.bridge.call?.('usage', {})` (read as `usage`) and `this.bridge.call?.(op, {})` (flagged); both failed against the previous patterns first (seen with `expect.soft`), and the case now passes (7 of 7). The block above is the file as fixed.
 
 - [ ] **Step 5: Commit**
 
@@ -40907,6 +40912,8 @@ Create `docs/web.md`:
 
 ## Start
 
+Build the app first with `pnpm --filter @desk/web-ui build`, or use `pnpm web`.
+
 ```sh
 bin/desk web                 # http://127.0.0.1:7434; opens the browser with a one-time login link
 bin/desk web --port 7500     # another port, remembered in <data>/web-settings.json
@@ -40942,7 +40949,7 @@ The screens, their text and their look are the same. Both UIs load `@desk/ui-sty
 ## Notifications
 
 - **System → Notifications → From the app** is desk web's switch, saved in `<data>/web-settings.json`. Turning it on asks the browser for permission. The switch saves without waiting for the answer. If the browser has not allowed Desk's notifications yet, System says so and offers **Allow notifications**. If the browser blocks them, System says to allow them in the browser's site settings for `http://127.0.0.1:<port>`.
-- A tab shows every new attention item (approvals, questions, hand-offs, and stalled, failed or paused work) while it is in the background. A tab with focus stays quiet, as a focused desktop window does. Each notification is tagged with its item, so several open tabs show it once. Clicking it opens the item in Attention.
+- A tab shows new attention items (up to three at a time, as in the desktop app) while it is in the background: approvals, questions, hand-offs, and stalled, failed or paused work. A tab with focus stays quiet, as a focused desktop window does. Each notification is tagged with its item, so several open tabs show it once. Clicking it opens the item in Attention.
 - **From deskd when the app is closed** is deskd's own switch. deskd stays quiet only while desk web can notify you: the switch above is on and a connected tab has the browser's permission. Otherwise deskd posts its own notifications, so you get each one once.
 
 ## Files desk web keeps
@@ -40966,7 +40973,7 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
    DeskBridge.onPush(ch) WebSocket /push  (secret in 1st frame)     @desk/bff broker             /v1/stream WS
 ```
 
-- **`packages/bff` (`@desk/bff`)**: the backend-for-frontend both hosts run. `@desk/bff/contract` (operation schemas, push channels, `GlobalState`) is all that browser code imports. `@desk/bff/server` holds the broker, the handlers and `DaemonManager`.
+- **`packages/bff` (`@desk/bff`)**: the backend-for-frontend both hosts run. `@desk/bff/contract` (operation schemas, push channels, `GlobalState`) is the only part of `@desk/bff` that browser code imports. `@desk/bff/server` holds the broker, the handlers and `DaemonManager`.
 - **`packages/ui-core` and `packages/ui-styles`**: the UI logic and the CSS both UIs share.
 - **`apps/web-server` (`@desk/web-server`)**: the `desk web` host. Hono on `127.0.0.1` serves:
   - the Angular build (`apps/web-ui/dist/browser`);
@@ -40987,7 +40994,7 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
 - There is no cookie. The session secret lives in this origin's `localStorage`. It travels as the `x-desk-session` header on `/rpc` and as `/push`'s first frame, and desk web compares it in constant time. A missing or wrong secret gets 401 on `/rpc` and closes `/push` with 4401. The page then shows "Open Desk from your terminal".
 - Host check: every request, the WebSocket upgrade included, must carry `Host: 127.0.0.1:<port>`. Anything else gets 421, which blocks DNS rebinding.
 - Origin check: `/rpc` and the `/push` upgrade also need `Origin: http://127.0.0.1:<port>`. Anything else gets 403. `/rpc` also takes only `application/json` (415 otherwise), up to 40 MB (413 above).
-- Every response carries strict headers: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
+- Every HTTP response carries strict headers: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
 - Agent text never becomes HTML. `SafeMarkdown` renders `marked`'s tokens with Angular templates, and `apps/web-ui` has no `innerHTML` (`security.spec.ts` fails on it).
 - Sandboxed agents cannot read desk web's one-time login files, and cannot connect to its port. deskd reads the port from `web.json` each time it builds a sandbox profile, so a command or service started before desk web took its port can reach it until it restarts. desk web still asks it for a session.
 
@@ -41007,7 +41014,7 @@ pnpm test:web-e2e                 # builds the UI, checks its index.html, then P
 
 A UI feature ships in both UIs. `apps/web-ui/src/app/parity.spec.ts` reads the operation names both UIs pass to `call(…)`, leaving comments and tests out. It fails when:
 - the React renderer calls an operation the web UI does not (only `app.openMain` and `daemon.repair` are desktop-only);
-- either UI passes an operation name it cannot read, such as a name built at run time, a variable or a nested generic;
+- either UI passes an operation name it cannot read, such as a name built at run time, a variable, or type arguments nested more than one level;
 - a desk-web-only operation (`webChannels`) goes unused;
 - a route other than the tray has no web screen.
 
@@ -41132,7 +41139,7 @@ After:
 Appended as the list's last line:
 
 ```md
-- UI features ship in both UIs. `apps/web-ui/src/app/parity.spec.ts` fails when the web UI does not call an operation the React renderer calls (only the desktop host's `app.openMain` and `daemon.repair` are exempt), when either UI passes an operation name the guard cannot read (built at run time, a variable, a nested generic), when a `webChannels` operation goes unused, or when a route other than the tray has no web screen. What only a desktop host has (the tray, native menus and windows, launch at login, LaunchAgent repair) stays out of the web UI.
+- UI features ship in both UIs. `apps/web-ui/src/app/parity.spec.ts` fails when the web UI does not call an operation the React renderer calls (only the desktop host's `app.openMain` and `daemon.repair` are exempt), when either UI passes an operation name the guard cannot read (built at run time, a variable, or type arguments nested more than one level), when a `webChannels` operation goes unused, or when a route other than the tray has no web screen. What only a desktop host has (the tray, native menus and windows, launch at login, LaunchAgent repair) stays out of the web UI.
 ```
 
 - [ ] **Step 4: Read it through**
@@ -41174,6 +41181,13 @@ Expected: `5` (W0a.6's three packages, W0b.14's `apps/web-server`, W0c.16's `app
 - **`CLAUDE.md`: add lines, don't rewrite master's.** Master's opening paragraph and its token line stay as they are, so a later merge of master conflicts as little as possible. The web UI gets its own paragraph after the opening one. W0b.14's token line (web-ui's own) now states the invariant for both UIs. The parity guard's invariant goes at the end of the list. Its wording follows the guard's review fixes: "passes an operation name the guard cannot read (built at run time, a variable, a nested generic)" in place of "builds an operation name at run time". The layout and Two UIs edits are as planned; they touch only web-ui's lines.
 - **Master's `CLAUDE.md`.** `git fetch origin master` left `origin/master` at 79b8f54, which web-ui already merged (8883229). The local `master` (99ec309) adds only Plan 19 and the automations spec, and changes neither `CLAUDE.md` nor `docs/desktop.md`. So master's built-in skills lines (`pnpm builtins:pin`, `skills/builtins.ts`, the built-in skills invariant) are already in web-ui's copy, and there was nothing more to reconcile.
 - **Step 4** printed what it expects: ` M CLAUDE.md`, ` M docs/desktop.md` and `?? docs/web.md`, and nothing for `docs/api.md`; no `NotYet`; `CLAUDE.md:2` and `docs/web.md:1`; four `ok` lines; the three command lines; and `5`.
+
+**Deviation (review follow-up):** five wording fixes, in `docs/web.md`, `CLAUDE.md`'s guard line and their copies in Steps 1 and 3 above.
+- **The guard** reads type arguments nested one level deep and flags only deeper nesting, so "a nested generic" became "type arguments nested more than one level" in `docs/web.md` and `CLAUDE.md`.
+- **Notifications:** `webNotices` (`apps/web-server/src/notices.ts`) sends at most three per batch, as the desktop's main process does, so a tab shows "new attention items (up to three at a time, as in the desktop app)", not every one.
+- **Start** says to build the app first (`pnpm --filter @desk/web-ui build`, or `pnpm web`): on a fresh checkout `desk web` answers 503 "not built yet" (`static.ts`).
+- **Architecture:** `@desk/bff/contract` is the only part of `@desk/bff` that browser code imports (it also imports `@desk/ui-core`, `@desk/protocol` and others).
+- **Security:** "Every HTTP response carries strict headers": a refused WebSocket upgrade (`upgrade.ts`) carries none.
 
 - [ ] **Step 5: Commit**
 

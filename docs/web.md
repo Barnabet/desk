@@ -9,6 +9,8 @@
 
 ## Start
 
+Build the app first with `pnpm --filter @desk/web-ui build`, or use `pnpm web`.
+
 ```sh
 bin/desk web                 # http://127.0.0.1:7434; opens the browser with a one-time login link
 bin/desk web --port 7500     # another port, remembered in <data>/web-settings.json
@@ -44,7 +46,7 @@ The screens, their text and their look are the same. Both UIs load `@desk/ui-sty
 ## Notifications
 
 - **System → Notifications → From the app** is desk web's switch, saved in `<data>/web-settings.json`. Turning it on asks the browser for permission. The switch saves without waiting for the answer. If the browser has not allowed Desk's notifications yet, System says so and offers **Allow notifications**. If the browser blocks them, System says to allow them in the browser's site settings for `http://127.0.0.1:<port>`.
-- A tab shows every new attention item (approvals, questions, hand-offs, and stalled, failed or paused work) while it is in the background. A tab with focus stays quiet, as a focused desktop window does. Each notification is tagged with its item, so several open tabs show it once. Clicking it opens the item in Attention.
+- A tab shows new attention items (up to three at a time, as in the desktop app) while it is in the background: approvals, questions, hand-offs, and stalled, failed or paused work. A tab with focus stays quiet, as a focused desktop window does. Each notification is tagged with its item, so several open tabs show it once. Clicking it opens the item in Attention.
 - **From deskd when the app is closed** is deskd's own switch. deskd stays quiet only while desk web can notify you: the switch above is on and a connected tab has the browser's permission. Otherwise deskd posts its own notifications, so you get each one once.
 
 ## Files desk web keeps
@@ -68,7 +70,7 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
    DeskBridge.onPush(ch) WebSocket /push  (secret in 1st frame)     @desk/bff broker             /v1/stream WS
 ```
 
-- **`packages/bff` (`@desk/bff`)**: the backend-for-frontend both hosts run. `@desk/bff/contract` (operation schemas, push channels, `GlobalState`) is all that browser code imports. `@desk/bff/server` holds the broker, the handlers and `DaemonManager`.
+- **`packages/bff` (`@desk/bff`)**: the backend-for-frontend both hosts run. `@desk/bff/contract` (operation schemas, push channels, `GlobalState`) is the only part of `@desk/bff` that browser code imports. `@desk/bff/server` holds the broker, the handlers and `DaemonManager`.
 - **`packages/ui-core` and `packages/ui-styles`**: the UI logic and the CSS both UIs share.
 - **`apps/web-server` (`@desk/web-server`)**: the `desk web` host. Hono on `127.0.0.1` serves:
   - the Angular build (`apps/web-ui/dist/browser`);
@@ -89,7 +91,7 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
 - There is no cookie. The session secret lives in this origin's `localStorage`. It travels as the `x-desk-session` header on `/rpc` and as `/push`'s first frame, and desk web compares it in constant time. A missing or wrong secret gets 401 on `/rpc` and closes `/push` with 4401. The page then shows "Open Desk from your terminal".
 - Host check: every request, the WebSocket upgrade included, must carry `Host: 127.0.0.1:<port>`. Anything else gets 421, which blocks DNS rebinding.
 - Origin check: `/rpc` and the `/push` upgrade also need `Origin: http://127.0.0.1:<port>`. Anything else gets 403. `/rpc` also takes only `application/json` (415 otherwise), up to 40 MB (413 above).
-- Every response carries strict headers: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
+- Every HTTP response carries strict headers: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
 - Agent text never becomes HTML. `SafeMarkdown` renders `marked`'s tokens with Angular templates, and `apps/web-ui` has no `innerHTML` (`security.spec.ts` fails on it).
 - Sandboxed agents cannot read desk web's one-time login files, and cannot connect to its port. deskd reads the port from `web.json` each time it builds a sandbox profile, so a command or service started before desk web took its port can reach it until it restarts. desk web still asks it for a session.
 
@@ -109,7 +111,7 @@ pnpm test:web-e2e                 # builds the UI, checks its index.html, then P
 
 A UI feature ships in both UIs. `apps/web-ui/src/app/parity.spec.ts` reads the operation names both UIs pass to `call(…)`, leaving comments and tests out. It fails when:
 - the React renderer calls an operation the web UI does not (only `app.openMain` and `daemon.repair` are desktop-only);
-- either UI passes an operation name it cannot read, such as a name built at run time, a variable or a nested generic;
+- either UI passes an operation name it cannot read, such as a name built at run time, a variable, or type arguments nested more than one level;
 - a desk-web-only operation (`webChannels`) goes unused;
 - a route other than the tray has no web screen.
 
