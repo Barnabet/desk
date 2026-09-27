@@ -14067,3 +14067,22 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Deviations found while executing (2026-09-27)
+
+Committed code wins over the plan text above. Found while executing inline on branch `automations`:
+
+- **Baseline:** `tools/skills.builtin.test.ts` wrote `__pycache__` into `file-inspector` through the system Python, which then failed `verify()` on a clean checkout. The two `skill_run` tests now stub `skillEnv` with `PYTHONDONTWRITEBYTECODE=1`, as built runtimes set it.
+- **Task 2:** `EventInput` is a type only; the test parses with `EventBody.safeParse({ type, payload })`. The `agents.role` enum gained `step` here (typecheck needed it). The four new attention kinds got labels in the desktop maps (`notify.ts`, `FlightStrip.tsx`, `strips.ts`, `OrbitMap.tsx`, `waits.ts`, `shared/attention.ts`).
+- **Task 3:** agent-row fixtures and the client project reducer gained `automation_run_id`/`automation_step_id`.
+- **Task 10:** the next-times test expects the 29th first: the fake clock sits at 08:00 in Paris, and next times are strictly later.
+- **Task 12:** ending a run early cancels every unfinished step, reached or not (as the `on_error: stop` test expects); the cancel test was aligned.
+- **Task 15:** the worktree test waits for the step agent before `whenIdle`. Fix: archiving a finished run's step agents stopped the agent whose own `complete`/`fail_step` ended the run, so it ended `cancelled`. `Scheduler.waitFor` (new) lets it finish its turn first.
+- **Task 16:** the engine's `background`/`track`/`settled()` (plus `busy`) and `launch` tracking came forward from Tasks 17 and 19, and `Runtime.whenIdle` also waits for engine background work. The sub-automation tests' `start` awaits `settled()`; two test mistakes fixed (skill saved before the child that uses it; the input label is "Topic"). The no-executor engine test removes the automation executor.
+- **Task 18:** `fireSchedule`'s skip helper returns `void`.
+- **Task 19:** the crashed child in the recovery test names its parent; the retention test expects the 3 oldest removed (22 old runs plus a fresh one, 20 kept).
+- **Task 22:** `store.builtin.test.ts`'s agent view expects 11 built-ins (13, minus one off and one shadowed).
+- **Task 24:** `GET /automation-runs/:rid/files` hides step folders' `.desk/`.
+
