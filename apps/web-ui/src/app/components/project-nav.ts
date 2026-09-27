@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, input, ViewEncapsulation } from '@angular/core';
 import { href, PROJECT_TABS, type ProjectTab } from '@desk/ui-core';
 
-const LABEL: Record<ProjectTab, string> = { conversation: 'Conversation', threads: 'Threads', library: 'Library', memory: 'Memory', settings: 'Settings' };
+const LABEL: Record<ProjectTab, string> = { conversation: 'Conversation', threads: 'Threads', automations: 'Automations', library: 'Library', memory: 'Memory', settings: 'Settings' };
 
 /** A project's tabs, under the title bar. */
 @Component({

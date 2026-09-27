@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PROJECT_TABS } from '@desk/ui-core';
 import { AttentionScreen } from './attention/attention-screen';
+import { AutomationsPlaceholder } from './automations/automations-placeholder';
 import { ConversationScreen } from './conversation/conversation-screen';
 import { LibraryScreen } from './knowledge/library-screen';
 import { MemoryScreen } from './knowledge/memory-screen';
@@ -29,6 +30,7 @@ describe('screenFor', () => {
     expect(screenFor({ name: 'system' })).toEqual({ component: SystemScreen, inputs: {} });
     expect(screenFor({ name: 'project', id: 'p', tab: 'conversation', at: 3 })).toEqual({ component: ConversationScreen, inputs: { projectId: 'p', at: 3 } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'threads', threadId: 't', at: 7 })).toEqual({ component: ThreadsScreen, inputs: { projectId: 'p', threadId: 't', at: 7 } });
+    expect(screenFor({ name: 'project', id: 'p', tab: 'automations', automationId: 'a1', view: 'runs' })).toEqual({ component: AutomationsPlaceholder, inputs: { projectId: 'p' } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'library', file: 'notes/a.md' })).toEqual({ component: LibraryScreen, inputs: { projectId: 'p', file: 'notes/a.md' } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'memory', q: 'auth' })).toEqual({ component: MemoryScreen, inputs: { projectId: 'p', q: 'auth' } });
     expect(screenFor({ name: 'project', id: 'p', tab: 'settings' })).toEqual({ component: SettingsScreen, inputs: { projectId: 'p' } });

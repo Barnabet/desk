@@ -13,6 +13,7 @@ import { ChatItemView, chatDomId } from './ChatItems';
 import { Composer, useAttachments, useFileDrop } from './Composer';
 import { PlanPanel } from './PlanPanel';
 import { ServicesCard } from './ServicesCard';
+import { draftKey } from './draft';
 import { WhatsUp } from './WhatsUp';
 import { useMediaQuery } from '../state/media';
 
@@ -23,7 +24,7 @@ export const CHAT_PAGE = 60;
 const ChatRow = memo(ChatItemView);
 
 function useDraft(projectId: string): [string, (v: string | ((d: string) => string)) => void] {
-  const key = `desk.draft.${projectId}`;
+  const key = draftKey(projectId);
   const [draft, setDraftState] = useState(() => {
     try {
       return localStorage.getItem(key) ?? '';

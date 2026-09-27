@@ -1,6 +1,7 @@
 import type { Type } from '@angular/core';
 import type { Route } from '@desk/ui-core';
 import { AttentionScreen } from './attention/attention-screen';
+import { AutomationsPlaceholder } from './automations/automations-placeholder';
 import { ConversationScreen } from './conversation/conversation-screen';
 import { LibraryScreen } from './knowledge/library-screen';
 import { MemoryScreen } from './knowledge/memory-screen';
@@ -47,6 +48,8 @@ export function screenFor(route: Route): ScreenView | null {
           return { component: ConversationScreen, inputs: { projectId: route.id, at: route.at } };
         case 'threads':
           return { component: ThreadsScreen, inputs: { projectId: route.id, threadId: route.threadId, at: route.at } };
+        case 'automations':
+          return { component: AutomationsPlaceholder, inputs: { projectId: route.id } };
         case 'library':
           return { component: LibraryScreen, inputs: { projectId: route.id, file: route.file } };
         case 'memory':

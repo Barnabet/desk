@@ -22,6 +22,13 @@ describe('router', () => {
       { name: 'project', id: 'p1', tab: 'settings' },
       { name: 'project', id: 'p1', tab: 'library', file: 'emails/01 welcome.md' },
       { name: 'project', id: 'p1', tab: 'memory', q: 'pricing & plans' },
+      { name: 'project', id: 'p1', tab: 'automations' },
+      { name: 'project', id: 'p1', tab: 'automations', draft: 'weekly-note' },
+      { name: 'project', id: 'p1', tab: 'automations', automationId: 'a1', view: 'design' },
+      { name: 'project', id: 'p1', tab: 'automations', automationId: 'a1', view: 'runs' },
+      { name: 'project', id: 'p1', tab: 'automations', automationId: 'a1', view: 'runs', runId: 'r9' },
+      { name: 'project', id: 'p1', tab: 'automations', automationId: 'a1', view: 'versions' },
+      { name: 'project', id: 'p1', tab: 'automations', automationId: 'a1', view: 'grants' },
     ];
     for (const r of routes) expect(parseRoute(href(r))).toEqual(r);
   });
@@ -32,5 +39,7 @@ describe('router', () => {
     expect(parseRoute('#/p')).toEqual({ name: 'map' });
     expect(parseRoute('#/p/x/bogus')).toEqual({ name: 'project', id: 'x', tab: 'conversation' });
     expect(parseRoute('#/p/x/threads/t?at=abc')).toEqual({ name: 'project', id: 'x', tab: 'threads', threadId: 't' });
+    expect(parseRoute('#/p/x/automations/new')).toEqual({ name: 'project', id: 'x', tab: 'automations' });
+    expect(parseRoute('#/p/x/automations/a1/bogus')).toEqual({ name: 'project', id: 'x', tab: 'automations', automationId: 'a1', view: 'design' });
   });
 });

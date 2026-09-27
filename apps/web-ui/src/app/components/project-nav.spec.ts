@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ProjectNav } from './project-nav';
 
 describe('ProjectNav', () => {
-  it("links the project's five tabs and marks the open one", async () => {
+  it("links the project's six tabs and marks the open one", async () => {
     await render(`<nav deskProjectNav [projectId]="'p 1'" tab="memory"></nav>`, { imports: [ProjectNav] });
     const nav = screen.getByRole('navigation', { name: 'Project' });
     expect(nav.classList.contains('subnav')).toBe(true);
@@ -11,6 +11,7 @@ describe('ProjectNav', () => {
     expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
       ['Conversation', '#/p/p%201/conversation'],
       ['Threads', '#/p/p%201/threads'],
+      ['Automations', '#/p/p%201/automations'],
       ['Library', '#/p/p%201/library'],
       ['Memory', '#/p/p%201/memory'],
       ['Settings', '#/p/p%201/settings'],

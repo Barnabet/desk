@@ -12,6 +12,7 @@ import { AttentionScreen } from './attention/AttentionScreen';
 import { ConversationScreen } from './conversation/ConversationScreen';
 import { ProjectFrame } from './conversation/ProjectFrame';
 import { LibraryScreen } from './knowledge/LibraryScreen';
+import { AutomationsScreen } from './automations/AutomationsScreen';
 import { MemoryScreen } from './knowledge/MemoryScreen';
 import { MapScreen } from './map/MapScreen';
 import { Onboarding, isOnboarded } from './screens/Onboarding';
@@ -43,6 +44,17 @@ function Screen({ route }: { route: Route }) {
       return <SystemScreen />;
     case 'project':
       if (route.tab === 'conversation') return <ConversationScreen key={route.id} projectId={route.id} {...(route.at !== undefined ? { at: route.at } : {})} />;
+      if (route.tab === 'automations')
+        return (
+          <AutomationsScreen
+            key={route.id}
+            projectId={route.id}
+            {...(route.automationId ? { automationId: route.automationId } : {})}
+            {...(route.view ? { view: route.view } : {})}
+            {...(route.runId ? { runId: route.runId } : {})}
+            {...(route.draft ? { draft: route.draft } : {})}
+          />
+        );
       if (route.tab === 'library') return <LibraryScreen key={route.id} projectId={route.id} {...(route.file ? { file: route.file } : {})} />;
       if (route.tab === 'settings') return <SettingsScreen key={route.id} projectId={route.id} />;
       if (route.tab === 'memory') return <MemoryScreen key={route.id} projectId={route.id} {...(route.q ? { q: route.q } : {})} />;

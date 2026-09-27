@@ -1,6 +1,6 @@
 import { href, PROJECT_TABS, type ProjectTab } from '@desk/ui-core';
 
-const LABEL: Record<ProjectTab, string> = { conversation: 'Conversation', threads: 'Threads', library: 'Library', memory: 'Memory', settings: 'Settings' };
+const LABEL: Record<ProjectTab, string> = { conversation: 'Conversation', threads: 'Threads', automations: 'Automations', library: 'Library', memory: 'Memory', settings: 'Settings' };
 
 export function ProjectNav({ projectId, tab }: { projectId: string; tab: ProjectTab }) {
   return (
