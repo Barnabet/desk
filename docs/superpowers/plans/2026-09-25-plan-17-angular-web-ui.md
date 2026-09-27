@@ -41224,7 +41224,7 @@ Expected: PASS, including `apps/desktop/src/renderer/system/SystemScreen.test.ts
 - [ ] **Step 3: Every web-ui spec**
 
 Run: `pnpm --filter @desk/web-ui test`
-Expected: PASS, including this section's `system/models-editor.spec.ts` (7), `system/system-screen.spec.ts` (14), `components/command-palette.spec.ts` (5), `screen-for.spec.ts` (3), `parity.spec.ts` (7), and `app.spec.ts` with its System heading, its shortcuts case and W3b.3's three ⌘K-outside-the-shell cases; W0c's `security.spec.ts` finds no forbidden word in the new files.
+Expected: PASS, including this section's `system/models-editor.spec.ts` (7), `system/system-screen.spec.ts` (14), `components/command-palette.spec.ts` (5), `screen-for.spec.ts` (3), `parity.spec.ts` (7), and `app.spec.ts` (19) with its System heading, its shortcuts case and W3b.3's four ⌘K-outside-the-shell cases (onboarding, signed out, signing out with the palette open, and the error fallback of W3b.3's second review fix); W0c's `security.spec.ts` finds no forbidden word in the new files.
 
 - [ ] **Step 4: The invariants, by grep**
 
@@ -41253,7 +41253,7 @@ Expected: no output (exit 1).
 Nothing else may run Chromium or Electron meanwhile. `pnpm test:web-e2e` builds the UI, then runs every web e2e file one at a time.
 
 Run: `pnpm test:web-e2e`
-Expected: the production build succeeds with no template or budget warnings; then every file passes: `apps/web-server/src/built-ui.e2e.test.ts` (3: the built `index.html` still has no inline code), `smoke.e2e.test.ts` (2), `flows.e2e.test.ts`, `knowledge.e2e.test.ts` and `catalog.e2e.test.ts` (2) with the counts their sections give, and `system.e2e.test.ts` (2).
+Expected: the production build succeeds with no template or budget warnings; then every file passes: `apps/web-server/src/built-ui.e2e.test.ts` (3: the built `index.html` still has no inline code), `smoke.e2e.test.ts` (2), `flows.e2e.test.ts` (3, W2a.7), `knowledge.e2e.test.ts` (3, W2b.5), `catalog.e2e.test.ts` (3, W3a.10) and `system.e2e.test.ts` (2): 6 files, 16 tests.
 
 - [ ] **Step 6: `pnpm web`, the dev loop (spec §9)**
 
@@ -41291,8 +41291,18 @@ Expected: one file, `apps/desktop/src/renderer/system/SystemScreen.tsx | 3 ++-` 
 Run: `git status --short`
 Expected: no output (`apps/web-ui/dist` and `.angular/` are ignored; the shot folder is outside the repo).
 
-Run: `git log --oneline -7`
-Expected: the seven commits of W3b.1 to W3b.7, newest first (with any fix commit from this task on top; widen the range by as many), each with the trailer: `git log -7 --format=%B | grep -c 'Co-Authored-By: Claude Opus 5.5'` prints `7`.
+Run: `git log --oneline "$(git log -1 --format=%H --grep='the model registry editor (ModelsEditor)')~1..HEAD"`
+Expected: the section's commits, newest first: the seven task commits of W3b.1 to W3b.7 with their review fixes between them (and any commit from this task on top), each with the trailer: the same range with `--format=%B | grep -c 'Co-Authored-By: Claude Opus 5.5'` prints the number of commits.
+
+**Deviation (as run, 2026-09-27):** every step passed; nothing needed a fix. First, the review follow-ups (30b6cec, W3b.5's and W3b.7's last deviations) were committed.
+- **Step 1:** `pnpm typecheck` exit 0; `ngc -p tsconfig.spec.json --noEmit` exit 0.
+- **Step 2:** 198 files, 1319 tests passed; `SystemScreen.test.tsx` 7 and `CommandPalette.test.tsx` 3; no `*.spec.ts` and no `apps/web-ui/e2e` file collected.
+- **Step 3:** 94 files, 531 tests passed: `models-editor.spec.ts` 7, `system-screen.spec.ts` 14, `command-palette.spec.ts` 5, `screen-for.spec.ts` 3, `parity.spec.ts` 7, `app.spec.ts` 19, `security.spec.ts` 3. The plan's first text said three ⌘K-outside-the-shell cases; there are four since W3b.3's second review fix (3267bce), and Step 3 now says so.
+- **Step 4:** all five greps printed nothing (exit 1).
+- **Step 5:** the production build finished with no warning (`main` 1.13 MB raw, 240.65 kB transferred); 6 files, 16 tests passed. The plan's first text gave `catalog.e2e.test.ts` 2 tests; it has 3 since W3a.10 (the built-in skills test), and Step 5 now gives every file's count.
+- **Step 6:** `{"ok":true}`, `1`, `2`, `exit 0`, `build stopped`; `main.ts` unchanged. `pnpm --filter @desk/web-ui build` put the production build back.
+- **Step 7:** `apps/desktop/src/renderer/system/SystemScreen.tsx | 3 ++-`, one file; `git status --short` empty. The plan's first text expected `git log --oneline -7` to show the seven task commits, but the section's review fixes sit between them: 92e09b8~1..30b6cec holds 14 commits (7 tasks, 6 review fixes, the follow-ups), all with the trailer. Step 7 now checks that range.
+- **The plan's status:** no plan in `docs/superpowers/plans/` carries a status line (completion goes in the spec's `**Status:**` line, as 4f40bf6 did for built-in skills), so this plan's header is unchanged.
 
 **Notes for whoever works on the UIs after Plan 17:**
 
