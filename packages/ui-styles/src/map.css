@@ -70,6 +70,8 @@
   font-size: 11px;
   cursor: pointer;
 }
+/* ui-core's layoutMap places the sun's lines, the territory labels, the moons and the callouts, and estimates their
+   boxes from the sizes below to keep them apart: change them together. */
 .orbit-sun-label {
   position: absolute;
   transform: translateX(-50%);

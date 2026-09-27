@@ -60,7 +60,7 @@ function ProjectLabel({ p, t, items }: { p: ProjectSummary; t: Territory; items:
   const unread = useUnread(p);
   const tone = TONE[projectTone(p)];
   return (
-    <div className="orbit-label" style={{ left: t.x, top: t.y - t.r + 14, color: tone.text }}>
+    <div className="orbit-label" style={{ left: t.label.x, top: t.label.y, color: tone.text }}>
       <span className="orbit-label-name">
         {p.project.name}
         {unread ? <span className="unread-dot" aria-label="unread" /> : null}
@@ -109,7 +109,7 @@ export function OrbitMap(o: {
       <button type="button" className="orbit-sun" style={{ left: o.layout.sun.x, top: o.layout.sun.y }} aria-label={o.sunAria} onClick={() => (window.location.hash = '/system')}>
         deskd
       </button>
-      <div className="orbit-sun-label" style={{ left: o.layout.sun.x, top: o.layout.sun.y + 40 }}>
+      <div className="orbit-sun-label" style={{ left: o.layout.sunLabel.x, top: o.layout.sunLabel.y }}>
         <span>{o.sunLabel[0]}</span>
         <span>{o.sunLabel[1]}</span>
       </div>
@@ -149,7 +149,7 @@ export function OrbitMap(o: {
               );
             })}
             {first ? (
-              <a className="orbit-callout" style={{ left: t.x, top: t.y - t.desk / 2 - 18 }} href={href({ name: 'attention', item: first.id })} aria-label={first.title}>
+              <a className="orbit-callout" style={{ left: t.callout.x, top: t.callout.y }} href={href({ name: 'attention', item: first.id })} aria-label={first.title}>
                 <span className="orbit-pin" aria-hidden="true">
                   {items.length > 1 ? items.length : CALLOUT[first.kind].glyph || '1'}
                 </span>

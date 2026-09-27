@@ -36,7 +36,7 @@ const CALLOUT: Record<AttentionItem['kind'], { label: string; glyph: string }> =
 
 type Spoke = { id: string; d: string; stroke: string; width: number; dash: string | null };
 type Moon = { id: string; cls: string; x: number; y: number; href: string; label: string };
-type Callout = { top: number; href: string; title: string; pin: string; kind: string };
+type Callout = { x: number; y: number; href: string; title: string; pin: string; kind: string };
 type TerritoryView = {
   id: string;
   p: ProjectSummary;
@@ -47,7 +47,7 @@ type TerritoryView = {
   desk: number;
   tone: Tone;
   colors: ToneColors;
-  labelTop: number;
+  label: { x: number; y: number };
   summary: string;
   selected: boolean;
   shadow: string;
@@ -83,14 +83,14 @@ type TerritoryView = {
     </svg>
 
     <button type="button" class="orbit-sun" [style.left.px]="layout().sun.x" [style.top.px]="layout().sun.y" [attr.aria-label]="sunAria()" (click)="openSystem()">deskd</button>
-    <div class="orbit-sun-label" [style.left.px]="layout().sun.x" [style.top.px]="layout().sun.y + 40">
+    <div class="orbit-sun-label" [style.left.px]="layout().sunLabel.x" [style.top.px]="layout().sunLabel.y">
       <span>{{ sunLabel()[0] }}</span>
       <span>{{ sunLabel()[1] }}</span>
     </div>
 
     @for (v of views(); track v.id) {
       <div>
-        <div class="orbit-label" [style.left.px]="v.x" [style.top.px]="v.labelTop" [style.color]="v.colors.text">
+        <div class="orbit-label" [style.left.px]="v.label.x" [style.top.px]="v.label.y" [style.color]="v.colors.text">
           <span class="orbit-label-name">{{ v.p.project.name }}@if (unread.isUnread(v.p)) {<span class="unread-dot" aria-label="unread"></span>}</span>
           <span class="orbit-label-sub">{{ v.summary }}</span>
         </div>
@@ -110,7 +110,7 @@ type TerritoryView = {
           <a [class]="m.cls" [style.left.px]="m.x" [style.top.px]="m.y" [href]="m.href"><span class="orbit-thread-dot" aria-hidden="true"></span>{{ m.label }}</a>
         }
         @if (v.callout; as c) {
-          <a class="orbit-callout" [style.left.px]="v.x" [style.top.px]="c.top" [href]="c.href" [attr.aria-label]="c.title">
+          <a class="orbit-callout" [style.left.px]="c.x" [style.top.px]="c.y" [href]="c.href" [attr.aria-label]="c.title">
             <span class="orbit-pin" aria-hidden="true">{{ c.pin }}</span>
             <span class="orbit-callout-card">
               <span class="orbit-callout-kind">{{ c.kind }}</span>
@@ -164,7 +164,7 @@ export class OrbitMap {
         desk: t.desk,
         tone,
         colors,
-        labelTop: t.y - t.r + 14,
+        label: t.label,
         summary: projectSummaryLine(p, items),
         selected: selected === t.id,
         shadow: selected === t.id ? `0 0 0 5px ${colors.fill}, 0 0 0 8px var(--accent)` : 'none',
@@ -189,7 +189,8 @@ export class OrbitMap {
         }),
         callout: first
           ? {
-              top: t.y - t.desk / 2 - 18,
+              x: t.callout.x,
+              y: t.callout.y,
               href: href({ name: 'attention', item: first.id }),
               title: first.title,
               pin: items.length > 1 ? String(items.length) : CALLOUT[first.kind].glyph || '1',

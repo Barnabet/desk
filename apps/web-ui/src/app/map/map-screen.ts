@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, signal, type OnInit } from '@angular/core';
-import { activityOf, layoutMap, plural } from '@desk/ui-core';
+import { activityOf, layoutMap, plural, type MapProject } from '@desk/ui-core';
 import { Button } from '../components/button';
 import { EmptyState } from '../components/empty-state';
 import { Sheet } from '../components/sheet';
@@ -10,6 +10,7 @@ import { ProjectForm } from '../screens/project-form';
 import { DEFAULT_CANVAS_SIZE, MapCanvas, type CanvasSize } from './map-canvas';
 import { OrbitMap } from './orbit-map';
 import { ProjectList } from './project-list';
+import { projectSummaryLine } from './project-summary';
 import { TerritoryInspector } from './territory-inspector';
 
 type MapView = 'map' | 'list';
@@ -126,12 +127,19 @@ export class MapScreen implements OnInit {
   });
   /** The canvas's size as MapCanvas measures it (React passed it to MapCanvas's render prop). */
   protected readonly canvasSize = signal<CanvasSize>(DEFAULT_CANVAS_SIZE);
-  private readonly mapProjects = computed(() => this.overview().map((p) => ({ id: p.project.id, activity: activityOf(p), threads: p.threads })));
+  /** Each project as the layout sees it: with its label's lines and whether a callout is pinned over its Desk. */
+  private readonly mapProjects = computed((): MapProject[] => {
+    const attention = this.attention();
+    return this.overview().map((p) => {
+      const items = attention.filter((i) => i.project_id === p.project.id);
+      return { id: p.project.id, activity: activityOf(p), threads: p.threads, label: [p.project.name, projectSummaryLine(p, items)], callout: items.length > 0 };
+    });
+  });
   /** The orbit layout; a canvas wider than 900px keeps 380px on the right for the territory inspector. */
   protected readonly orbit = computed(() => {
     const size = this.canvasSize();
     const width = size.width > 900 ? size.width - 380 : size.width;
-    return { width, height: size.height, layout: layoutMap(this.mapProjects(), width, size.height) };
+    return { width, height: size.height, layout: layoutMap(this.mapProjects(), width, size.height, this.sunLabel()) };
   });
   protected readonly sunLabel = computed((): [string, string] => {
     const { health, connection, system } = this.global.state();
