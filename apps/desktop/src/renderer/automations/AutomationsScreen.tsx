@@ -6,6 +6,7 @@ import { AutomationHeader, DraftHeader } from './AutomationHeader';
 import { AutomationList } from './AutomationList';
 import { useAutomation } from './data';
 import { DesignView } from './design/DesignView';
+import { GrantsView } from './grants/GrantsView';
 import { RunsList } from './runs/RunsList';
 import { RunView } from './runs/RunView';
 import { VersionsView } from './versions/VersionsView';
@@ -56,7 +57,7 @@ function AutomationBody(o: { projectId: string; s: SessionState; view: Automatio
     case 'versions':
       return <VersionsView detail={o.detail} onChange={o.onChange} />;
     case 'grants':
-      return <EmptyState title="Grants">What its runs may do without asking shows here.</EmptyState>;
+      return <GrantsView projectId={o.projectId} s={o.s} detail={o.detail} onChange={o.onChange} />;
     default:
       return <DesignView key={o.detail.id} projectId={o.projectId} sources={gitSources(o.s)} detail={o.detail} onChange={o.onChange} />;
   }

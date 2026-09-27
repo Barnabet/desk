@@ -1,4 +1,5 @@
-import type { Grant, StoredEvent } from '@desk/protocol';
+import type { AutomationDefinition, Grant, StoredEvent } from '@desk/protocol';
+import { dayTime } from './automation-format';
 
 /** One identity per grant: tool, action and match (a missing field and an empty match are the same). */
 export const grantKey = (g: Grant): string => JSON.stringify([g.tool, g.action, g.match?.domain ?? null, g.match?.command ?? null, g.match?.branch ?? null]);
@@ -57,4 +58,76 @@ export function grantOrigins(events: readonly StoredEvent[], automationId: strin
     }
   }
   return origins;
+}
+
+/** The tools a grant is usually for (the Grants tab's suggestions). Any tool name is accepted. */
+export const GRANT_TOOLS = ['web_fetch', 'web_search', 'skill_run', 'bash', 'bash_background', 'git_push', 'open_pr'];
+
+/** What a grant matches: every call of its tool, or one field of its `match`. */
+export type GrantMatchKind = 'any' | 'domain' | 'command' | 'branch';
+
+export const GRANT_MATCH_LABEL: Record<GrantMatchKind, string> = { any: 'Any call', domain: 'A domain', command: 'A command', branch: 'A branch' };
+
+/** The value field's label for each kind of match (the policy's domain globs, command regexes and branch globs). */
+export const GRANT_VALUE_LABEL: Record<Exclude<GrantMatchKind, 'any'>, string> = {
+  domain: 'Domain (a host, or *.example.com)',
+  command: 'Command (a regular expression)',
+  branch: 'Branch (a glob)',
+};
+
+/** A grant while the user edits it. */
+export type GrantDraft = { tool: string; action: Grant['action']; kind: GrantMatchKind; value: string };
+
+export function grantDraft(g?: Grant): GrantDraft {
+  if (!g) return { tool: '', action: 'allow', kind: 'any', value: '' };
+  const m = g.match;
+  const kind: GrantMatchKind = m?.domain ? 'domain' : m?.command ? 'command' : m?.branch ? 'branch' : 'any';
+  return { tool: g.tool, action: g.action, kind, value: m?.domain ?? m?.command ?? m?.branch ?? '' };
+}
+
+/** The protocol's limits on each match field (`Grant` in `protocol/src/automations.ts`). */
+const MATCH_MAX: Record<Exclude<GrantMatchKind, 'any'>, number> = { domain: 253, command: 1000, branch: 200 };
+
+/** The grant a draft describes, or what is wrong with it: the protocol's limits, and a command must compile as a regex. */
+export function grantFromDraft(d: GrantDraft): { grant: Grant } | { problem: string } {
+  const tool = d.tool.trim();
+  if (!tool) return { problem: 'Name a tool.' };
+  if (tool.length > 60) return { problem: 'A tool name is at most 60 characters.' };
+  if (d.kind === 'any') return { grant: { tool, action: d.action } };
+  const raw = d.value.trim();
+  const value = d.kind === 'domain' ? raw.toLowerCase() : raw;
+  if (!value) return { problem: `Say which ${d.kind}.` };
+  if (value.length > MATCH_MAX[d.kind]) return { problem: `At most ${MATCH_MAX[d.kind]} characters.` };
+  if (d.kind === 'command') {
+    try {
+      new RegExp(value);
+    } catch {
+      return { problem: 'Not a valid regular expression.' };
+    }
+  }
+  return { grant: { tool, action: d.action, match: { [d.kind]: value } } };
+}
+
+/**
+ * A web grant on an exact host widened (spec §5.3): its registrable domain and every subdomain, two grants because
+ * `*.x` does not match `x`. Null for other tools, wildcards and hosts that do not widen.
+ */
+export function widenedGrants(g: Grant): Grant[] | null {
+  const host = g.match?.domain;
+  if (!host || host.startsWith('*.') || (g.tool !== 'web_fetch' && g.tool !== 'web_search')) return null;
+  const wide = widenDomain(host);
+  return wide.length < 2 ? null : wide.map((domain) => ({ ...g, match: { domain } }));
+}
+
+/** `list` with the grant at `i` replaced by `next`: none removes it, `i === list.length` appends. Each grant stays once. */
+export function replaceGrant(list: Grant[], i: number, next: Grant[]): Grant[] {
+  return uniqueGrants([...list.slice(0, i), ...next, ...list.slice(i + 1)]);
+}
+
+/** Where a grant came from (spec §8.4), or null before the project's events have loaded. */
+export function grantOriginText(origin: GrantOrigin | undefined, def: AutomationDefinition, now: number): string | null {
+  if (!origin) return null;
+  const when = dayTime(origin.ts, now);
+  if (origin.kind === 'remembered') return `Remembered at ${def.steps.find((s) => s.id === origin.step_id)?.title ?? origin.step_id} · ${when}`;
+  return `${origin.kind === 'enabled' ? 'Set when you turned it on' : 'Added by you'} · ${when}`;
 }

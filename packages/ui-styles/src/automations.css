@@ -883,3 +883,54 @@
   display: flex;
   min-height: 0;
 }
+
+/* Grants */
+.auto-grants {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 760px;
+  padding: 16px 20px;
+}
+.auto-grant-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-grant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+}
+.auto-grant-rule {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.auto-grant-rule.deny {
+  color: var(--accent);
+}
+.auto-grant-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.auto-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--wait);
+  border-radius: 10px;
+  background: var(--wait-pastel);
+  color: var(--ink);
+}
