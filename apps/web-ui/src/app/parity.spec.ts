@@ -40,14 +40,35 @@ const webSources = () => walk(SRC, (p) => /\.(ts|html)$/.test(p) && !p.endsWith(
 /** The React renderer's modules: not its `*.test.ts(x)`, not `test/`. */
 const reactSources = () => walk(RENDERER, (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) && !p.includes(`${sep}test${sep}`));
 
-/** `text` without its comments. Strings (quoted or template) are matched first and kept, so a `//` inside one stays. */
-function withoutComments(text: string): string {
-  return text.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_comment, kept?: string) => kept ?? ' ');
+/** A TypeScript module, or an HTML file (a template). */
+type SourceKind = 'ts' | 'html';
+
+/** An HTML comment, as Angular templates write them. */
+const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+
+/**
+ * `text` without its comments. In TypeScript, strings (quoted or template) are matched first and kept, so a `//`
+ * inside one stays, but the HTML comments inside a kept string go: an inline template is a string. In HTML, only
+ * HTML comments are comments.
+ */
+function withoutComments(text: string, kind: SourceKind = 'ts'): string {
+  if (kind === 'html') return text.replace(HTML_COMMENT, ' ');
+  return text.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_comment, kept?: string) =>
+    kept === undefined ? ' ' : kept.replace(HTML_COMMENT, ' '),
+  );
 }
 
-/** Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its first `,` or `)`. */
-function callsIn(text: string): Array<{ call: string; first: string }> {
-  return [...withoutComments(text).matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)].map((m) => ({ call: m[0], first: m[1]!.trim() }));
+/**
+ * Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its
+ * first `,` or `)`. A `call<` that does not parse so (type arguments nested deeper) comes back with an empty first
+ * argument, so it is flagged rather than skipped; `call</` is a closing tag after the word, not a call.
+ */
+function callsIn(text: string, kind: SourceKind = 'ts'): Array<{ call: string; first: string }> {
+  const code = withoutComments(text, kind);
+  const read = [...code.matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)];
+  const starts = new Set(read.map((m) => m.index));
+  const unread = [...code.matchAll(/\bcall\s*<(?!\/)[^\n(]*\(?/g)].filter((m) => !starts.has(m.index));
+  return [...read.map((m) => ({ call: m[0], first: m[1]!.trim() })), ...unread.map((m) => ({ call: m[0], first: '' }))];
 }
 
 /** The names a first argument holds when the scan can read it: one quoted name, or a conditional between two; else null. */
@@ -62,9 +83,9 @@ function namesIn(first: string): string[] | null {
 const notACall = (first: string) => /^[A-Za-z_$][\w$]*\??:/.test(first) || first === 'this' || first === 'null';
 
 /** The operations a source calls: the names of every readable first argument of a `call(…)` that `channels` or `webChannels` has. */
-function calledOps(text: string): string[] {
+function calledOps(text: string, kind: SourceKind = 'ts'): string[] {
   const found = new Set<string>();
-  for (const { first } of callsIn(text)) for (const name of namesIn(first) ?? []) if (OPERATIONS.has(name)) found.add(name);
+  for (const { first } of callsIn(text, kind)) for (const name of namesIn(first) ?? []) if (OPERATIONS.has(name)) found.add(name);
   return [...found].sort();
 }
 
@@ -73,13 +94,14 @@ function calledOps(text: string): string[] {
  * conditional between two, declarations and `this`/`null` aside. A name built at run time (a template, a variable,
  * a table, a call) lands here, and so does a quoted name that is no operation.
  */
-function dynamicCalls(text: string): string[] {
-  return callsIn(text)
+function dynamicCalls(text: string, kind: SourceKind = 'ts'): string[] {
+  return callsIn(text, kind)
     .filter(({ first }) => !notACall(first) && !(namesIn(first)?.every((name) => OPERATIONS.has(name)) ?? false))
     .map(({ call }) => call);
 }
 
-const opsIn = (files: string[]) => new Set(files.flatMap((f) => calledOps(readFileSync(f, 'utf8'))));
+const kindOf = (file: string): SourceKind => (file.endsWith('.html') ? 'html' : 'ts');
+const opsIn = (files: string[]) => new Set(files.flatMap((f) => calledOps(readFileSync(f, 'utf8'), kindOf(f))));
 
 describe('parity with the desktop app (spec §6)', () => {
   it('reads operation names from calls, ignores comments, and flags any name it cannot read', () => {
@@ -89,6 +111,11 @@ describe('parity with the desktop app (spec §6)', () => {
     expect(calledOps("call<'usage'>('usage', {}); fn.call(this, 'usage'); call(op, input); call('not.an.op', {});")).toEqual(['usage']);
     expect(calledOps("call<ChannelOutput<'usage'>>('usage', {});")).toEqual(['usage']);
     expect(calledOps("// React: this.bridge.call('projects.archive', { id })\n/* call('projects.delete', {}) */")).toEqual([]);
+    expect(calledOps("template: `<p>Archive</p>\n  <!-- React: this.bridge.call('projects.archive', { id }) -->\n`,")).toEqual([]);
+    expect(calledOps('template: "<!-- call(\'projects.archive\', {}) --><b>x</b>",')).toEqual([]);
+    expect(calledOps('template: `<!-- old -->\n<button (click)="bridge.call(\'usage\', {})"></button>`,')).toEqual(['usage']);
+    expect(calledOps("<!-- this.bridge.call('projects.archive', { id }) -->\n<p>Desk</p>", 'html')).toEqual([]);
+    expect(dynamicCalls('template: `<!-- this.bridge.call(op, {}) --><option value="none">any call</option>`,')).toEqual([]);
     expect(dynamicCalls('setS(await call(`daemon.${what}`, {}));')).toEqual(['call(`daemon.${what}`']);
     expect(dynamicCalls("setS(await call('daemon.stop', {}));")).toEqual([]);
     expect(dynamicCalls("this.bridge.call(op === 'start' ? 'daemon.start' : 'daemon.restart', {})")).toEqual([]);
@@ -98,6 +125,8 @@ describe('parity with the desktop app (spec §6)', () => {
       "const f = (op: 'daemon.stop' | 'daemon.start') => call(op, {})",
       "call(isOn() ? 'daemon.stop' : 'daemon.repair', {})",
       "call('not.an.op', {})",
+      "call<A<B<'x'>>>(op, {})",
+      "call<A<B<'usage'>>>('usage', {})",
     ]) {
       expect(dynamicCalls(text), text).toHaveLength(1);
     }
@@ -138,7 +167,7 @@ describe('parity with the desktop app (spec §6)', () => {
     const found = [
       ...reactSources().map((f) => ({ root: RENDERER, f })),
       ...webSources().map((f) => ({ root: SRC, f })),
-    ].flatMap(({ root, f }) => dynamicCalls(readFileSync(f, 'utf8')).map((call) => `${rel(root, f)}: ${call}`));
+    ].flatMap(({ root, f }) => dynamicCalls(readFileSync(f, 'utf8'), kindOf(f)).map((call) => `${rel(root, f)}: ${call}`));
     expect(found).toEqual([]);
   });
 

@@ -130,7 +130,9 @@ describe('the System screen in the browser', () => {
 
     await context.grantPermissions(['notifications'], { origin: new URL(e2e.web.url).origin });
     await page.reload();
-    await expect.poll(() => fromApp.isChecked()).toBe(true);
+    // Vitest's poll gives up after 1 s: wait for the screen first, then give the switch the time a reload takes.
+    await page.getByRole('heading', { name: 'System', level: 1 }).waitFor();
+    await expect.poll(() => fromApp.isChecked(), { timeout: 10_000 }).toBe(true);
     expect(await n.getByText(/notifications from Desk/).count()).toBe(0);
     await fromApp.uncheck();
     await expect.poll(() => webSettings().notifications).toBe(false);

@@ -40385,7 +40385,7 @@ Step 2 failed as expected: "leaves no placeholder screen behind" (`expected true
 - Consumes: `channels` (`@desk/bff/contract`), `webChannels` (`@desk/web-server/contract`), `Route`, `PROJECT_TABS` (`@desk/ui-core`), `screenFor` (W3b.4).
 - Produces: the spec §6 guard. It fails when the React renderer calls an operation the web UI never calls (except the host-only `app.openMain` and `daemon.repair`), when the web UI calls a host-only operation or the renderer stops calling one (so the list stays honest), when a `webChannels` operation goes uncalled, when either UI calls with a first argument the scan cannot read (a name built at run time, a variable, a table, a nested call, or a quoted name that is no operation), or when a route other than `tray` has no screen.
 
-"Calls" means the operation's name, quoted, in the first argument of a `call(…)` in a non-test source, comments aside: `call('x', …)` in the renderer, `this.bridge.call('x', …)` in the web UI (type arguments may nest once, `call<Foo<'x'>>('x', …)`), and both names of a conditional between two literals (the connection overlay's Start/Restart). Any other first argument is flagged, except a declaration's first parameter (`op: C`, `op?: C`) and `this`/`null` (`fn.call(this, …)`). Tests and test helpers (`*.test.ts(x)`, `renderer/test/`, `*.spec.ts`, `src/app/testing/`) are left out, and a name counts only when `channels` or `webChannels` has it. The one name built at run time, ``call(`daemon.${what}`, {})`` in the React `SystemScreen`, becomes a choice between literal calls, as the web port already writes it (W3b.2). Operations neither UI calls (`health`, `projects.list`, …) are not the guard's concern.
+"Calls" means the operation's name, quoted, in the first argument of a `call(…)` in a non-test source, comments aside (`//`, `/* */`, and the HTML comments of inline templates and `.html` files): `call('x', …)` in the renderer, `this.bridge.call('x', …)` in the web UI (type arguments may nest once, `call<Foo<'x'>>('x', …)`; a deeper nesting is flagged), and both names of a conditional between two literals (the connection overlay's Start/Restart). Any other first argument is flagged, except a declaration's first parameter (`op: C`, `op?: C`) and `this`/`null` (`fn.call(this, …)`). Tests and test helpers (`*.test.ts(x)`, `renderer/test/`, `*.spec.ts`, `src/app/testing/`) are left out, and a name counts only when `channels` or `webChannels` has it. The one name built at run time, ``call(`daemon.${what}`, {})`` in the React `SystemScreen`, becomes a choice between literal calls, as the web port already writes it (W3b.2). Operations neither UI calls (`health`, `projects.list`, …) are not the guard's concern.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -40434,14 +40434,35 @@ const webSources = () => walk(SRC, (p) => /\.(ts|html)$/.test(p) && !p.endsWith(
 /** The React renderer's modules: not its `*.test.ts(x)`, not `test/`. */
 const reactSources = () => walk(RENDERER, (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) && !p.includes(`${sep}test${sep}`));
 
-/** `text` without its comments. Strings (quoted or template) are matched first and kept, so a `//` inside one stays. */
-function withoutComments(text: string): string {
-  return text.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_comment, kept?: string) => kept ?? ' ');
+/** A TypeScript module, or an HTML file (a template). */
+type SourceKind = 'ts' | 'html';
+
+/** An HTML comment, as Angular templates write them. */
+const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+
+/**
+ * `text` without its comments. In TypeScript, strings (quoted or template) are matched first and kept, so a `//`
+ * inside one stays, but the HTML comments inside a kept string go: an inline template is a string. In HTML, only
+ * HTML comments are comments.
+ */
+function withoutComments(text: string, kind: SourceKind = 'ts'): string {
+  if (kind === 'html') return text.replace(HTML_COMMENT, ' ');
+  return text.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_comment, kept?: string) =>
+    kept === undefined ? ' ' : kept.replace(HTML_COMMENT, ' '),
+  );
 }
 
-/** Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its first `,` or `)`. */
-function callsIn(text: string): Array<{ call: string; first: string }> {
-  return [...withoutComments(text).matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)].map((m) => ({ call: m[0], first: m[1]!.trim() }));
+/**
+ * Every `call(…)` outside comments (type arguments may nest once): the text matched and its first argument, up to its
+ * first `,` or `)`. A `call<` that does not parse so (type arguments nested deeper) comes back with an empty first
+ * argument, so it is flagged rather than skipped; `call</` is a closing tag after the word, not a call.
+ */
+function callsIn(text: string, kind: SourceKind = 'ts'): Array<{ call: string; first: string }> {
+  const code = withoutComments(text, kind);
+  const read = [...code.matchAll(/\bcall\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*([^,)]*)/g)];
+  const starts = new Set(read.map((m) => m.index));
+  const unread = [...code.matchAll(/\bcall\s*<(?!\/)[^\n(]*\(?/g)].filter((m) => !starts.has(m.index));
+  return [...read.map((m) => ({ call: m[0], first: m[1]!.trim() })), ...unread.map((m) => ({ call: m[0], first: '' }))];
 }
 
 /** The names a first argument holds when the scan can read it: one quoted name, or a conditional between two; else null. */
@@ -40456,9 +40477,9 @@ function namesIn(first: string): string[] | null {
 const notACall = (first: string) => /^[A-Za-z_$][\w$]*\??:/.test(first) || first === 'this' || first === 'null';
 
 /** The operations a source calls: the names of every readable first argument of a `call(…)` that `channels` or `webChannels` has. */
-function calledOps(text: string): string[] {
+function calledOps(text: string, kind: SourceKind = 'ts'): string[] {
   const found = new Set<string>();
-  for (const { first } of callsIn(text)) for (const name of namesIn(first) ?? []) if (OPERATIONS.has(name)) found.add(name);
+  for (const { first } of callsIn(text, kind)) for (const name of namesIn(first) ?? []) if (OPERATIONS.has(name)) found.add(name);
   return [...found].sort();
 }
 
@@ -40467,13 +40488,14 @@ function calledOps(text: string): string[] {
  * conditional between two, declarations and `this`/`null` aside. A name built at run time (a template, a variable,
  * a table, a call) lands here, and so does a quoted name that is no operation.
  */
-function dynamicCalls(text: string): string[] {
-  return callsIn(text)
+function dynamicCalls(text: string, kind: SourceKind = 'ts'): string[] {
+  return callsIn(text, kind)
     .filter(({ first }) => !notACall(first) && !(namesIn(first)?.every((name) => OPERATIONS.has(name)) ?? false))
     .map(({ call }) => call);
 }
 
-const opsIn = (files: string[]) => new Set(files.flatMap((f) => calledOps(readFileSync(f, 'utf8'))));
+const kindOf = (file: string): SourceKind => (file.endsWith('.html') ? 'html' : 'ts');
+const opsIn = (files: string[]) => new Set(files.flatMap((f) => calledOps(readFileSync(f, 'utf8'), kindOf(f))));
 
 describe('parity with the desktop app (spec §6)', () => {
   it('reads operation names from calls, ignores comments, and flags any name it cannot read', () => {
@@ -40483,6 +40505,11 @@ describe('parity with the desktop app (spec §6)', () => {
     expect(calledOps("call<'usage'>('usage', {}); fn.call(this, 'usage'); call(op, input); call('not.an.op', {});")).toEqual(['usage']);
     expect(calledOps("call<ChannelOutput<'usage'>>('usage', {});")).toEqual(['usage']);
     expect(calledOps("// React: this.bridge.call('projects.archive', { id })\n/* call('projects.delete', {}) */")).toEqual([]);
+    expect(calledOps("template: `<p>Archive</p>\n  <!-- React: this.bridge.call('projects.archive', { id }) -->\n`,")).toEqual([]);
+    expect(calledOps('template: "<!-- call(\'projects.archive\', {}) --><b>x</b>",')).toEqual([]);
+    expect(calledOps('template: `<!-- old -->\n<button (click)="bridge.call(\'usage\', {})"></button>`,')).toEqual(['usage']);
+    expect(calledOps("<!-- this.bridge.call('projects.archive', { id }) -->\n<p>Desk</p>", 'html')).toEqual([]);
+    expect(dynamicCalls('template: `<!-- this.bridge.call(op, {}) --><option value="none">any call</option>`,')).toEqual([]);
     expect(dynamicCalls('setS(await call(`daemon.${what}`, {}));')).toEqual(['call(`daemon.${what}`']);
     expect(dynamicCalls("setS(await call('daemon.stop', {}));")).toEqual([]);
     expect(dynamicCalls("this.bridge.call(op === 'start' ? 'daemon.start' : 'daemon.restart', {})")).toEqual([]);
@@ -40492,6 +40519,8 @@ describe('parity with the desktop app (spec §6)', () => {
       "const f = (op: 'daemon.stop' | 'daemon.start') => call(op, {})",
       "call(isOn() ? 'daemon.stop' : 'daemon.repair', {})",
       "call('not.an.op', {})",
+      "call<A<B<'x'>>>(op, {})",
+      "call<A<B<'usage'>>>('usage', {})",
     ]) {
       expect(dynamicCalls(text), text).toHaveLength(1);
     }
@@ -40532,7 +40561,7 @@ describe('parity with the desktop app (spec §6)', () => {
     const found = [
       ...reactSources().map((f) => ({ root: RENDERER, f })),
       ...webSources().map((f) => ({ root: SRC, f })),
-    ].flatMap(({ root, f }) => dynamicCalls(readFileSync(f, 'utf8')).map((call) => `${rel(root, f)}: ${call}`));
+    ].flatMap(({ root, f }) => dynamicCalls(readFileSync(f, 'utf8'), kindOf(f)).map((call) => `${rel(root, f)}: ${call}`));
     expect(found).toEqual([]);
   });
 
@@ -40585,10 +40614,15 @@ Expected: exit 0 (the desktop `tsc` checks the new expression: every branch is a
 **Deviation (as run):** `parity.spec.ts` and the `SystemScreen.tsx` edit are the blocks above, unchanged, and the anchor matched as written. Step 2 failed exactly as expected (2 of 7: `daemon.repair` in the honest-list case, ``system/SystemScreen.tsx: call(`daemon.${what}` `` in the literal-names case); Step 4 passed 7 of 7. `SystemScreen.test.tsx` has 7 cases since the merge of master (its appearance case), not 6; it is unchanged and passes. What the guard reads, after every W3a and W3b screen (built-ins, catalog, skills, system, palette): the renderer calls 76 operations once `act` is literal (`daemon.stop` and `daemon.repair` join the 74 it named before), and the web UI calls 75. The renderer's only operations the web UI does not call are `app.openMain` (the tray's) and `daemon.repair`, which is `HOST_ONLY`, as spec §3 says (`app.openExternal`, `app.pickFolder` and `app.saveFile` are called, and answered inside the web `DeskBridge`). The web UI's only operation the renderer does not call is `fs.listDirs` (the folder browser, `webChannels`' one entry). The one conditional between literals on each side is the connection overlay's Start/Restart; the only other `call(` matches with no literal are the two bridges' own `call` declarations and a doc comment in `builtin-panel.ts`. Neither UI calls `health`, `overview`, `projects.list`, `projects.chat`, `projects.usage`, `projects.events`, `threads.list`, `threads.get`, `threads.transcript`, `attention.list` or `skills.versionFile`, which the guard leaves alone (spec §6).
 
 **Deviation (review fix):** the guard flags every operation name it cannot read, ignores comments, and sees nested generics. The block above is the file as fixed. The first version flagged only a template literal with a substitution, and `calledOps` skipped any call whose first argument held no quoted name, so each of these compiled and slipped through with no operation and no flag, breaking spec §6's promise that dynamic calls "become literal names in both UIs, so the scan sees them": `const op = what === 'stop' ? 'daemon.stop' : 'daemon.repair'; call(op, {})`, `call(OPS[what], {})` over an `as const` table, `const f = (op: 'daemon.stop' | 'daemon.start') => call(op, {})`, and `call(isOn() ? 'daemon.stop' : 'daemon.repair', {})` (the capture `[^,)]*` stops at the first `)`).
-- `withoutComments` strips `//` and `/* */` comments before both rules, keeping quoted and template strings as they are, so a comment such as `// React: this.bridge.call('projects.archive', …)` credits no operation.
+- `withoutComments` strips `//` and `/* */` comments before both rules, keeping quoted and template strings, so a comment such as `// React: this.bridge.call('projects.archive', …)` credits no operation. (The second review fix below also strips HTML comments inside kept strings and in `.html` files.)
 - `dynamicCalls` flags every `call(…)` whose first argument is neither one quoted operation name nor a conditional between two (`namesIn`), a quoted name that no operation has included; declarations (`op: C`, `op?: C`: the three `DeskBridge.call` overloads and the renderer's `bridge.ts` `call`) and `this`/`null` are exempt (`notACall`). The doc comment in `builtin-panel.ts` (``Marks a call (`<name>|<what>`)``) was the only other match, and comment stripping removes it.
 - Type arguments may nest once: `(?:<(?:[^<>]|<[^<>]*>)*>)?` in place of `(?:<[^>]*>)?`, so `call<ChannelOutput<'usage'>>('usage', {})` is read.
 - The first case pins all of it: the four snippets above and `call('not.an.op', {})` must each be flagged, a line and a block comment credit nothing, the nested generic is read, and the connection overlay's conditional, two declarations and `fn.call(this | null, …)` are not flagged. Each new expectation failed against the old regexes first (7 of them, seen with `expect.soft`); the case now passes, and so do the other six. On the committed sources the operation sets are unchanged (the renderer 76, the web UI 75) and nothing is flagged.
+
+**Deviation (review fix, second round):** two more holes, both closed in the block above.
+- **HTML comments credited operations.** `withoutComments` kept every string whole, and an Angular inline template is a string, so `<!-- React: this.bridge.call('projects.archive', { id }) -->` inside one credited `projects.archive`. The web UI writes HTML comments in its templates (`app.ts`, `pair-sheet.ts`, `thread-roster.ts`, `transcript.ts`, `line-diagram.ts`). Now every kept string loses its `<!--[\s\S]*?-->` comments. That covers template literals and also single- or double-quoted strings, because a quoted `template:` is a template too. The guard scans `.html` files as well (only `src/index.html` today), so `withoutComments` takes a `SourceKind`: for `'html'` it strips only HTML comments, and `opsIn` and the literal-names case pass each file's kind (`kindOf`).
+- **A deeper generic hid a call.** `call<A<B<'x'>>>(op, {})` did not match the one-level generic, so it was neither read nor flagged. `callsIn` now also finds every `\bcall\s*<` that the main pattern did not parse and returns it with an empty first argument, which `dynamicCalls` flags and `calledOps` skips. `call</` is left out: it is the word "call" before a closing tag (`any call</option>` in both `PolicyEditor`s).
+- The first case gains six expectations: a template literal's HTML comment, a double-quoted template's HTML comment, a `.html` file's HTML comment, a `call(op, {})` in a template's HTML comment (with `any call</option>`, which must not be flagged), and the two nested generics `call<A<B<'x'>>>(op, {})` and `call<A<B<'usage'>>>('usage', {})`, which must each be flagged. A template literal's code outside its HTML comment is still read (`<!-- old -->` before a `(click)` that calls `usage`). All six failed against the previous regexes first (seen with `expect.soft`). The case now passes, and so do the other six (7 of 7). On the committed sources the operation sets are unchanged: the renderer calls 76, the web UI 75, the renderer's only extras are `app.openMain` and `daemon.repair`, the web UI's only extra is `fs.listDirs`, and nothing is flagged.
 
 - [ ] **Step 5: Commit**
 
@@ -40748,7 +40782,9 @@ describe('the System screen in the browser', () => {
 
     await context.grantPermissions(['notifications'], { origin: new URL(e2e.web.url).origin });
     await page.reload();
-    await expect.poll(() => fromApp.isChecked()).toBe(true);
+    // Vitest's poll gives up after 1 s: wait for the screen first, then give the switch the time a reload takes.
+    await page.getByRole('heading', { name: 'System', level: 1 }).waitFor();
+    await expect.poll(() => fromApp.isChecked(), { timeout: 10_000 }).toBe(true);
     expect(await n.getByText(/notifications from Desk/).count()).toBe(0);
     await fromApp.uncheck();
     await expect.poll(() => webSettings().notifications).toBe(false);
@@ -40835,6 +40871,8 @@ If a step fails, the failure is in the code the step drives (W3b.1–W3b.3, or t
 The harness gives deskd and desk web a temporary home and data dir under the system temp folder (`mkdtemp`, removed on close). `DaemonManager`'s LaunchAgent lookup reads that home, so the Mode and "Starts at login" rows say "Development (runs from this repository)" and "No. desk web starts it from this repository.", and the Data row shows the temporary data dir. The real home and Desk's data dir are never touched.
 
 Results: the file alone passed 2 of 2 (about 7 s) once these changes were in. Before the commit, `pnpm test:web-e2e` passed 6 files and 16 tests in about 33 s: `smoke` 2, `flows` 3, `knowledge` 3, `catalog` 3, `system` 2, and `built-ui` 3. `pnpm typecheck` exited 0, root Vitest passed 198 files and 1319 tests, and `pnpm --filter @desk/web-ui test` passed 94 files and 531 tests. No Chromium or deskd process was left behind.
+
+**Deviation (review fix):** after the grant, the file reloads and then polls "From the app" with `expect.poll`, whose default budget in Vitest is 1 s. A slow reload could fail there. The block above now waits for the System heading after the reload, then polls with `{ timeout: 10_000 }`. The file's other polls were checked too. Each one after `openAt` or a reload comes after a `waitFor` on the screen (the heading, "Running", `Model 4 id`) or after an action on a screen that is already shown. The hash poll after Enter in the palette waits on a hash the palette sets in its own key handler. So none of them needed the change. The file alone passed 2 of 2 again (about 8 s, on the existing production build, since nothing under `src/` changed).
 
 - [ ] **Step 4: Commit**
 
