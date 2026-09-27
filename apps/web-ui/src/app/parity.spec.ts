@@ -12,6 +12,11 @@ const SRC = existsSync(join(process.cwd(), 'src', 'app')) ? join(process.cwd(), 
 const RENDERER = join(SRC, '..', '..', 'desktop', 'src', 'renderer');
 /** What only a desktop host offers: the tray's "Open Desk" and reinstalling the LaunchAgent (spec §3, §6). */
 const HOST_ONLY = ['app.openMain', 'daemon.repair'];
+/**
+ * Automations reach the web UI in Plan 21, on the same branch, before it merges to master (Plan 20's Global Constraints).
+ * Until then the React renderer may call these without the web UI. Plan 21 deletes this list and its one use.
+ */
+const PLAN_21_OPS = (op: string) => op.startsWith('automations.') || op === 'app.pickFile' || op === 'app.revealPath';
 /** Every operation either UI can call: the bff's and desk web's own. */
 const OPERATIONS = new Set([...Object.keys(channels), ...Object.keys(webChannels)]);
 
@@ -150,7 +155,7 @@ describe('parity with the desktop app (spec §6)', () => {
 
   it('calls every operation the React renderer calls, but the desktop-only ones', () => {
     const web = opsIn(webSources());
-    const missing = [...opsIn(reactSources())].filter((op) => !web.has(op) && !HOST_ONLY.includes(op));
+    const missing = [...opsIn(reactSources())].filter((op) => !web.has(op) && !HOST_ONLY.includes(op) && !PLAN_21_OPS(op));
     expect(missing).toEqual([]);
   });
 

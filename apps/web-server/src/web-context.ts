@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DaemonStatus } from '@desk/bff/contract';
-import { UserFacingError, type Broker, type DaemonManager, type HandlerContext } from '@desk/bff/server';
+import { existingRunFolder, UserFacingError, type Broker, type DaemonManager, type HandlerContext } from '@desk/bff/server';
 import type { WebSettingsStore } from './files';
 
 /** The DaemonManager calls desk web makes (repair is not offered on the web). */
@@ -14,7 +14,7 @@ export type WebContextDeps = {
   broker: Pick<Broker, 'getClient' | 'snapshot' | 'watch' | 'unwatch' | 'reconnect'>;
   daemon: WebDaemon;
   settings: WebSettingsStore;
-  /** Opens a folder on this computer with the platform opener (app.revealLogs). */
+  /** Opens a folder on this computer with the platform opener (app.revealLogs, app.revealPath). */
   openPath(target: string): Promise<void>;
   /** The notification setting may have changed: desk web recomputes the stream hello. */
   onSettingsChange?(): void;
@@ -48,10 +48,14 @@ export function webHandlerContext(d: WebContextDeps, senderId: number): HandlerC
       info: () => ({ version: d.version, platform: d.platform, packaged: false, dataDir: d.dataDir }),
       openExternal: async () => notOffered('Opening a link'),
       pickFolder: async () => notOffered('Choosing a folder'),
+      pickFile: async () => notOffered('Choosing a file'),
       revealLogs: async () => {
         const dir = join(d.dataDir, 'logs');
         mkdirSync(dir, { recursive: true });
         await d.openPath(dir);
+      },
+      revealRun: async (runId, stepId) => {
+        await d.openPath(await existingRunFolder(d.dataDir, runId, stepId));
       },
       saveFile: async () => notOffered('Saving a file'),
       openMain: () => notOffered('Opening the main window'),

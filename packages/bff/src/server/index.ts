@@ -4,3 +4,4 @@ export * from './errors';
 export * from './handlers';
 export * from './launchd';
 export * from './notify';
+export * from './run-folder';

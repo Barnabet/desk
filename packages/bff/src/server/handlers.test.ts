@@ -3,7 +3,7 @@ import { DaemonNotRunning, DeskClient } from '@desk/client';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CatalogService, SkillRuntimes, treeDigest } from '@desk/core';
-import { createHarness, encodePng, newRuntime, type Harness } from '@desk/core/testing';
+import { automationHarness, askDef, createHarness, encodePng, newRuntime, type Harness } from '@desk/core/testing';
 import { createApp, startServer, type RunningServer } from '@desk/daemon';
 import { channels, initialGlobalState, type Channel, type ChannelOutput } from '../contract';
 import { dispatch, handlers, MAX_ATTACHMENT_BYTES, type HandlerContext } from './handlers';
@@ -35,12 +35,7 @@ function builtinCatalog(runtime: ReturnType<typeof newRuntime>) {
 
 const BUILTINS = join(import.meta.dirname, '..', '..', '..', '..', 'catalog', 'skills');
 
-async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = false) {
-  h = await createHarness();
-  const runtime = newRuntime(h, { builtins: { root: BUILTINS } });
-  const extra = withCatalog ? builtinCatalog(runtime) : {};
-  server = await startServer({ app: createApp({ runtime, store: h.store, models: h.models, token: 't', version: '1.0.0', ...extra }), store: h.store, token: 't', port: 0 });
-  const client = new DeskClient({ baseUrl: `http://127.0.0.1:${server.port}`, token: 't' });
+function makeCtx(client: DeskClient, overrides: Partial<HandlerContext> = {}) {
   const opened: string[] = [];
   const watched: Array<[number, string, number]> = [];
   const ctx: HandlerContext = {
@@ -52,7 +47,9 @@ async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = fals
       info: () => ({ version: '1.0.0', platform: 'darwin', packaged: false, dataDir: '/d' }),
       openExternal: async (url) => void opened.push(url),
       pickFolder: async () => '/picked',
+      pickFile: async () => '/picked/file.txt',
       revealLogs: async () => {},
+      revealRun: async (runId, stepId) => void opened.push(`reveal:${runId}:${stepId ?? ''}`),
       saveFile: async () => true,
       openMain: (route) => void opened.push(`main:${route ?? ''}`),
       settings: () => ({ notifications: true, appearance: 'system' }),
@@ -60,7 +57,16 @@ async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = fals
     },
     ...overrides,
   };
-  return { ctx, runtime, opened, watched };
+  return { ctx, opened, watched };
+}
+
+async function setup(overrides: Partial<HandlerContext> = {}, withCatalog = false) {
+  h = await createHarness();
+  const runtime = newRuntime(h, { builtins: { root: BUILTINS } });
+  const extra = withCatalog ? builtinCatalog(runtime) : {};
+  server = await startServer({ app: createApp({ runtime, store: h.store, models: h.models, token: 't', version: '1.0.0', ...extra }), store: h.store, token: 't', port: 0 });
+  const client = new DeskClient({ baseUrl: `http://127.0.0.1:${server.port}`, token: 't' });
+  return { ...makeCtx(client, overrides), runtime };
 }
 
 describe('IPC dispatch', () => {
@@ -197,5 +203,63 @@ describe('IPC dispatch', () => {
     expect(await dispatch('threads.send', { id: thread, text: 'Carry on.' }, ctx)).toMatchObject({ ok: true });
     expect(h.store.list({ agentId: thread, types: ['message.user'] }).map((e) => e.payload)).toEqual([{ text: 'How did you price it?', question: true }, { text: 'Carry on.' }]);
     expect(await dispatch('threads.send', { id: thread, text: 'x', question: 'yes' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
+  it('drives automations: create, validate, save (409 on a stale base), lay out, run, answer, list runs, files, grants, export, delete', async () => {
+    const r = await automationHarness();
+    h = r.h;
+    server = await startServer({ app: createApp({ runtime: r.rt, store: h.store, models: h.models, token: 't', version: '1.0.0' }), store: h.store, token: 't', port: 0 });
+    const { ctx } = makeCtx(new DeskClient({ baseUrl: `http://127.0.0.1:${server.port}`, token: 't' }));
+    const projectId = r.projectId;
+
+    const created = await dispatch('automations.create', { projectId, req: { name: 'ask', definition: askDef(), via: 'editor' } }, ctx);
+    expect(created).toMatchObject({ ok: true, value: { automation: { name: 'ask', version: 1 } } });
+    const id = (created as { value: { automation: { id: string } } }).value.automation.id;
+    expect(await dispatch('automations.list', { projectId }, ctx)).toMatchObject({ ok: true, value: [{ id, name: 'ask' }] });
+    expect(await dispatch('automations.validate', { projectId, req: { definition: { title: 'x', steps: [] } } }, ctx)).toMatchObject({ ok: true, value: { errors: [expect.objectContaining({ path: 'steps' })] } });
+    expect(await dispatch('automations.save', { id, req: { definition: askDef({ title: 'Ask 2' }), base_version: 1, via: 'editor' } }, ctx)).toMatchObject({ ok: true, value: { automation: { version: 2 } } });
+    expect(await dispatch('automations.save', { id, req: { definition: askDef(), base_version: 1 } }, ctx)).toMatchObject({ ok: false, error: { status: 409 } });
+    expect(await dispatch('automations.layout', { id, layout: { __start: { x: 0, y: 0 }, ask: { x: 10, y: 90 } } }, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('automations.get', { id }, ctx)).toMatchObject({ ok: true, value: { layout: { ask: { x: 10, y: 90 } } } });
+    expect(await dispatch('automations.versions', { id }, ctx)).toMatchObject({ ok: true, value: [{ version: 2 }, { version: 1 }] });
+    expect(await dispatch('automations.version', { id, version: 1 }, ctx)).toMatchObject({ ok: true, value: { definition: { title: 'Ask then tell' } } });
+
+    const started = await dispatch('automations.run', { id, req: { inputs: {} } }, ctx);
+    const runId = (started as { value: { run_id: string } }).value.run_id;
+    expect(await dispatch('automations.getRun', { runId }, ctx)).toMatchObject({ ok: true, value: { status: 'waiting', number: 1, at_step: 'Go ahead?' } });
+    expect(await dispatch('automations.answer', { runId, stepId: 'ask', req: { decision: 'approve', note: 'go' } }, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('automations.getRun', { runId }, ctx)).toMatchObject({ ok: true, value: { status: 'succeeded' } });
+    expect(await dispatch('automations.runs', { id, limit: 5 }, ctx)).toMatchObject({ ok: true, value: [{ kind: 'run', run: { id: runId, number: 1 } }] });
+    const files = await dispatch('automations.files', { runId }, ctx);
+    expect(files.ok && (files.value as Array<{ name: string }>).map((f) => f.name)).toContain('inputs.json');
+    const inputs = await dispatch('automations.file', { runId, path: 'inputs.json' }, ctx);
+    expect(inputs.ok && new TextDecoder().decode(inputs.value as Uint8Array)).toContain('{');
+    expect(await dispatch('automations.stopStep', { runId, stepId: 'ask' }, ctx)).toMatchObject({ ok: false, error: { status: 409 } });
+    expect(await dispatch('automations.answer', { runId, stepId: 'Not An Id', req: { decision: 'approve' } }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+
+    const grants = [{ tool: 'web_fetch', match: { domain: 'example.com' }, action: 'allow' as const }];
+    expect(await dispatch('automations.setGrants', { id, grants }, ctx)).toMatchObject({ ok: true, value: { grants } });
+    expect(await dispatch('automations.keepGrants', { id }, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('automations.setEnabled', { id, enabled: true }, ctx)).toMatchObject({ ok: true, value: { enabled: true } });
+    expect(await dispatch('automations.restore', { id, version: 1 }, ctx)).toMatchObject({ ok: true, value: { version: 3 } });
+    const exp = await dispatch('automations.export', { id }, ctx);
+    expect(exp).toMatchObject({ ok: true, value: { format: 'desk-automation/1', name: 'ask' } });
+    expect(await dispatch('automations.import', { projectId, exp: { ...(exp as { value: object }).value, name: 'ask-copy' } }, ctx)).toMatchObject({ ok: true, value: { automation: { name: 'ask-copy' } } });
+    expect(await dispatch('automations.remove', { id }, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('automations.get', { id }, ctx)).toMatchObject({ ok: false, error: { status: 404 } });
+  });
+
+  it('picks files for run inputs, reveals only run folders, and accepts remember on approvals', async () => {
+    const { ctx, opened } = await setup();
+    const runId = '01HZX3K9Q4T6V8W2Y5B7C0D1EF';
+    expect(await dispatch('app.pickFile', { purpose: 'automation-input' }, ctx)).toEqual({ ok: true, value: '/picked/file.txt' });
+    expect(await dispatch('app.pickFolder', { purpose: 'automation-input' }, ctx)).toEqual({ ok: true, value: '/picked' });
+    expect(await dispatch('app.revealPath', { runId, stepId: 'fetch' }, ctx)).toMatchObject({ ok: true });
+    expect(await dispatch('app.revealPath', { runId }, ctx)).toMatchObject({ ok: true });
+    expect(opened).toEqual([`reveal:${runId}:fetch`, `reveal:${runId}:`]);
+    for (const bad of [{ runId: '../etc' }, { runId, stepId: '../../x' }, { runId: runId.toLowerCase() }]) {
+      expect(await dispatch('app.revealPath', bad, ctx)).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    }
+    expect(channels['approvals.resolve'].safeParse({ id: 'a', decision: 'approved', remember: true }).success).toBe(true);
   });
 });

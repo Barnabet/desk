@@ -1,14 +1,23 @@
 import { z } from 'zod';
 import {
   AddSourceRequest,
+  AutomationAnswerRequest,
+  AutomationCreateRequest,
+  AutomationImportRequest,
+  AutomationLayout,
+  AutomationRunRequest,
+  AutomationSaveRequest,
+  AutomationValidateRequest,
   CreateProjectRequest,
   DaemonConfigPatch,
+  Grant,
   LibraryUploadRequest,
   MemoryUpdateRequest,
   MemoryWriteRequest,
   ModelEndpointPutRequest,
   ModelsPutRequest,
   SkillWriteRequest,
+  StepId,
   UpdateProjectRequest,
 } from '@desk/protocol';
 
@@ -21,6 +30,8 @@ const after = z.number().int().min(0).optional();
 const limit = z.number().int().min(1).max(5000).optional();
 const scope = { projectId: id.optional() };
 const none = z.object({});
+/** Run ids are ULIDs; `app.revealPath` builds a filesystem path from one, so nothing else passes. */
+const RUN_ID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** `system` follows macOS; main maps it to `nativeTheme.themeSource`, which every window's CSS sees as prefers-color-scheme. */
 export const Appearance = z.enum(['system', 'light', 'dark']);
@@ -66,10 +77,36 @@ export const channels = {
   'threads.file': z.object({ id, path: relPath }),
 
   'approvals.list': z.object({ projectId: id, status: z.enum(['pending', 'approved', 'denied']).optional() }),
-  'approvals.resolve': z.object({ id, decision: z.enum(['approved', 'denied']), note: z.string().max(2000).optional() }),
+  /** `remember` (a step agent's approval only): also adds a grant to its automation (spec §5.3). */
+  'approvals.resolve': z.object({ id, decision: z.enum(['approved', 'denied']), note: z.string().max(2000).optional(), remember: z.boolean().optional() }),
 
   'attention.list': z.object({ projectId: id.optional() }),
   'attention.dismiss': z.object({ id: z.string().min(1).max(400) }),
+
+  'automations.list': z.object({ projectId: id }),
+  'automations.create': z.object({ projectId: id, req: AutomationCreateRequest }),
+  'automations.validate': z.object({ projectId: id, req: AutomationValidateRequest }),
+  'automations.import': z.object({ projectId: id, exp: AutomationImportRequest }),
+  'automations.get': z.object({ id }),
+  'automations.save': z.object({ id, req: AutomationSaveRequest }),
+  'automations.remove': z.object({ id }),
+  'automations.layout': z.object({ id, layout: AutomationLayout }),
+  'automations.versions': z.object({ id }),
+  'automations.version': z.object({ id, version }),
+  'automations.restore': z.object({ id, version }),
+  'automations.setEnabled': z.object({ id, enabled: z.boolean() }),
+  'automations.setGrants': z.object({ id, grants: z.array(Grant).max(100), reason: z.enum(['edited', 'enabled']).optional() }),
+  'automations.keepGrants': z.object({ id }),
+  'automations.export': z.object({ id }),
+  'automations.run': z.object({ id, req: AutomationRunRequest }),
+  'automations.runs': z.object({ id, before: z.string().max(64).optional(), limit: z.number().int().min(1).max(200).optional() }),
+  'automations.getRun': z.object({ runId: id }),
+  'automations.cancelRun': z.object({ runId: id }),
+  'automations.answer': z.object({ runId: id, stepId: StepId, req: AutomationAnswerRequest }),
+  'automations.stopStep': z.object({ runId: id, stepId: StepId }),
+  'automations.log': z.object({ runId: id, stepId: StepId }),
+  'automations.files': z.object({ runId: id, path: z.string().max(4096).optional() }),
+  'automations.file': z.object({ runId: id, path: relPath }),
 
   'memory.list': z.object({ projectId: id, q: z.string().max(500).optional() }),
   'memory.add': z.object({ projectId: id, entry: MemoryWriteRequest }),
@@ -132,7 +169,11 @@ export const channels = {
 
   'app.info': none,
   'app.openExternal': z.object({ url: z.string().min(1).max(4096) }),
-  'app.pickFolder': z.object({ purpose: z.enum(['source', 'skill-import']) }),
+  'app.pickFolder': z.object({ purpose: z.enum(['source', 'skill-import', 'automation-input']) }),
+  /** A file for a Run now / Test input: deskd copies it into the run folder. desk web answers not_offered. */
+  'app.pickFile': z.object({ purpose: z.enum(['automation-input']) }),
+  /** Opens a run's folder, or one step's folder in it, with the platform opener. Nothing else can be revealed. */
+  'app.revealPath': z.object({ runId: z.string().regex(RUN_ID), stepId: StepId.optional() }),
   'app.revealLogs': none,
   /** From the tray popover: bring up the main window, optionally at a hash route. */
   'app.openMain': z.object({ route: z.string().max(512).regex(/^#\/[^\s]*$/).optional() }),

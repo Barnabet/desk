@@ -7,7 +7,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, webCont
 import { clientFromDataDir, defaultDataDir, readDaemonInfo } from '@desk/client/node';
 import type { AttentionItem } from '@desk/protocol';
 import { INVOKE_CHANNEL } from '@desk/bff/contract';
-import { attentionRoute, Broker, DaemonManager, dispatch, notificationFor, UserFacingError, type HandlerContext } from '@desk/bff/server';
+import { attentionRoute, Broker, DaemonManager, dispatch, existingRunFolder, notificationFor, UserFacingError, type HandlerContext } from '@desk/bff/server';
 import { createLog } from './log';
 import { buildAppMenu } from './menu';
 import { AppSettingsStore } from './settings';
@@ -143,11 +143,25 @@ async function start(): Promise<void> {
       pickFolder: async (purpose) => {
         const opts: Electron.OpenDialogOptions = {
           properties: ['openDirectory', 'createDirectory'],
-          ...(purpose === 'skill-import' ? { title: 'Import a skill folder', defaultPath: join(homedir(), '.claude', 'skills') } : { title: 'Add a source folder' }),
+          ...(purpose === 'skill-import'
+            ? { title: 'Import a skill folder', defaultPath: join(homedir(), '.claude', 'skills') }
+            : purpose === 'automation-input'
+              ? { title: 'Choose a folder for this run' }
+              : { title: 'Add a source folder' }),
         };
         const win = BrowserWindow.getFocusedWindow();
         const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
         return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+      pickFile: async () => {
+        const opts: Electron.OpenDialogOptions = { properties: ['openFile'], title: 'Choose a file for this run' };
+        const win = BrowserWindow.getFocusedWindow();
+        const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+        return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+      revealRun: async (runId, stepId) => {
+        const err = await shell.openPath(await existingRunFolder(dataDir, runId, stepId));
+        if (err) throw new UserFacingError('reveal_failed', err);
       },
       revealLogs: async () => {
         const dir = join(dataDir, 'logs');

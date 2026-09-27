@@ -29,8 +29,11 @@ export type HandlerContext = {
   app: {
     info(): AppInfo;
     openExternal(url: string): Promise<void>;
-    pickFolder(purpose: 'source' | 'skill-import'): Promise<string | null>;
+    pickFolder(purpose: 'source' | 'skill-import' | 'automation-input'): Promise<string | null>;
+    pickFile(purpose: 'automation-input'): Promise<string | null>;
     revealLogs(): Promise<void>;
+    /** Opens `existingRunFolder(dataDir, runId, stepId)` with the platform opener. */
+    revealRun(runId: string, stepId?: string): Promise<void>;
     saveFile(name: string, data: Uint8Array): Promise<boolean>;
     openMain(route?: string): void;
     settings(): AppSettings;
@@ -109,10 +112,35 @@ export const handlers = {
   'threads.file': (i, c) => c.client().threads.file(i.id, i.path),
 
   'approvals.list': (i, c) => c.client().approvals.list(i.projectId, i.status),
-  'approvals.resolve': (i, c) => c.client().approvals.resolve(i.id, i.decision, i.note),
+  'approvals.resolve': (i, c) => c.client().approvals.resolve(i.id, i.decision, i.note, i.remember),
 
   'attention.list': (i, c) => c.client().attention.list(i.projectId),
   'attention.dismiss': (i, c) => c.client().attention.dismiss(i.id),
+
+  'automations.list': (i, c) => c.client().automations.list(i.projectId),
+  'automations.create': (i, c) => c.client().automations.create(i.projectId, i.req),
+  'automations.validate': (i, c) => c.client().automations.validate(i.projectId, i.req),
+  'automations.import': (i, c) => c.client().automations.importInto(i.projectId, i.exp),
+  'automations.get': (i, c) => c.client().automations.get(i.id),
+  'automations.save': (i, c) => c.client().automations.save(i.id, i.req),
+  'automations.remove': (i, c) => c.client().automations.remove(i.id),
+  'automations.layout': (i, c) => c.client().automations.layout(i.id, i.layout),
+  'automations.versions': (i, c) => c.client().automations.versions(i.id),
+  'automations.version': (i, c) => c.client().automations.version(i.id, i.version),
+  'automations.restore': (i, c) => c.client().automations.restore(i.id, i.version),
+  'automations.setEnabled': (i, c) => c.client().automations.setEnabled(i.id, i.enabled),
+  'automations.setGrants': (i, c) => c.client().automations.setGrants(i.id, i.grants, i.reason ?? 'edited'),
+  'automations.keepGrants': (i, c) => c.client().automations.keepGrants(i.id),
+  'automations.export': (i, c) => c.client().automations.exportOf(i.id),
+  'automations.run': (i, c) => c.client().automations.run(i.id, i.req),
+  'automations.runs': (i, c) => c.client().automations.runs(i.id, { ...(i.before ? { before: i.before } : {}), ...(i.limit ? { limit: i.limit } : {}) }),
+  'automations.getRun': (i, c) => c.client().automations.getRun(i.runId),
+  'automations.cancelRun': (i, c) => c.client().automations.cancelRun(i.runId),
+  'automations.answer': (i, c) => c.client().automations.answer(i.runId, i.stepId, i.req),
+  'automations.stopStep': (i, c) => c.client().automations.stopStep(i.runId, i.stepId),
+  'automations.log': (i, c) => c.client().automations.log(i.runId, i.stepId),
+  'automations.files': (i, c) => c.client().automations.files(i.runId, i.path ?? ''),
+  'automations.file': (i, c) => c.client().automations.file(i.runId, i.path),
 
   'memory.list': (i, c) => c.client().memory.list(i.projectId, i.q),
   'memory.add': (i, c) => c.client().memory.add(i.projectId, i.entry),
@@ -188,6 +216,11 @@ export const handlers = {
     return ok;
   },
   'app.pickFolder': (i, c) => c.app.pickFolder(i.purpose),
+  'app.pickFile': (i, c) => c.app.pickFile(i.purpose),
+  'app.revealPath': async (i, c) => {
+    await c.app.revealRun(i.runId, i.stepId);
+    return ok;
+  },
   'app.revealLogs': async (_i, c) => {
     await c.app.revealLogs();
     return ok;

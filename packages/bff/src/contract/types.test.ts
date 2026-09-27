@@ -9,7 +9,7 @@ describe('ChannelOutput', () => {
   it('names an output for every operation and nothing else', () => {
     const exact: Equal<keyof ChannelOutputs, Channel> = true;
     expect(exact).toBe(true);
-    expect(Object.keys(channels)).toHaveLength(87);
+    expect(Object.keys(channels)).toHaveLength(113);
   });
 
   it("passes deskd's results through and names the host's", () => {
@@ -20,7 +20,9 @@ describe('ChannelOutput', () => {
       Equal<ChannelOutput<'daemon.status'>, DaemonStatus>,
       Equal<ChannelOutput<'app.pickFolder'>, string | null>,
       Equal<ChannelOutput<'attachments.get'>, string>,
-    ] = [true, true, true, true, true, true];
+      Equal<ChannelOutput<'app.pickFile'>, string | null>,
+      Equal<ChannelOutput<'automations.file'>, Uint8Array>,
+    ] = [true, true, true, true, true, true, true, true];
     expect(checks.every(Boolean)).toBe(true);
   });
 });

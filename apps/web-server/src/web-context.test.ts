@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -62,6 +62,7 @@ describe('the web HandlerContext', () => {
     const calls: Array<[string, unknown]> = [
       ['app.openExternal', { url: 'https://example.com' }],
       ['app.pickFolder', { purpose: 'source' }],
+      ['app.pickFile', { purpose: 'automation-input' }],
       ['app.saveFile', { name: 'a.txt', data: new Uint8Array([1]) }],
       ['app.openMain', {}],
       ['daemon.repair', {}],
@@ -69,6 +70,15 @@ describe('the web HandlerContext', () => {
     for (const [op, input] of calls) {
       expect(await dispatch(op, input, ctx), op).toMatchObject({ ok: false, error: { code: 'not_offered' } });
     }
+  });
+
+  it('opens a run folder with the platform opener, only while it exists', async () => {
+    const { ctx, opened } = setup();
+    const runId = '01HZX3K9Q4T6V8W2Y5B7C0D1EF';
+    expect(await dispatch('app.revealPath', { runId }, ctx)).toMatchObject({ ok: false, error: { code: 'folder_missing' } });
+    mkdirSync(join(dataDir, 'automation-runs', runId, 'steps', 'fetch'), { recursive: true });
+    expect(await dispatch('app.revealPath', { runId, stepId: 'fetch' }, ctx)).toEqual({ ok: true, value: { ok: true } });
+    expect(opened).toEqual([join(dataDir, 'automation-runs', runId, 'steps', 'fetch')]);
   });
 
   it('opens the logs folder with the platform opener', async () => {
