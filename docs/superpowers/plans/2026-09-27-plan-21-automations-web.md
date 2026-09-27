@@ -8294,3 +8294,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 Nothing merges to master until the user says so. Offer the finishing-a-development-branch options.
+
+## Deviations found while executing
+
+- Task 4: `.desk-flow` also sets `background-color: var(--xy-background-color)`: React Flow's style.css paints the canvas ground, and the plan's block left it out.
+- Task 4: `@testing-library/angular`'s `rerender` unsubscribes every output its `on` leaves out, so specs that re-render and then expect outputs pass `on` again (graph-canvas.spec's delete case).
+- Task 15: `attention/automations.spec.ts`'s Routed shows AttentionScreen only while the route is #/attention, as App does (and as `attention-screen.spec.ts`'s Routed does). The desktop test's Routed renders it on every route, which works there only because React reads the hash change after the assertion; the web route is a signal read at once, so the screen put its item back in the route after E.
+- Task 15: `describeArgs` moved from `attention/inspector.ts` to `attention/describe-args.ts` (the Inspector re-exports it). The Inspector now imports the automation cards, which import the run step panel, which imported `describeArgs` from the Inspector: an import cycle React tolerates (components are read at render) but Angular does not (`imports: [...]` is read when the class is defined), and the full `ng test` run failed with "Cannot read properties of undefined (reading 'ɵcmp')".
+- Task 17: the file-input case waits for "waiting on you · Looks right?", not "· Ask me": the run's status names the waiting step, whose title there is "Looks right?".
+- Exit check: typecheck, 252 unit and integration files (1639 tests) and 107 web spec files (585 tests) green; `pnpm test:web-e2e` green on all 7 files (18 tests). jsdom had `PointerEvent`, so the canvas spec needed no polyfill.
