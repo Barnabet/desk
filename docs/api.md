@@ -136,6 +136,41 @@ Desk's own skills (every file type, and web research) ship with the app, read-on
 
 **Environments on first use.** A built-in's Python environment (`<data>/runtimes/builtin/_global/<name>`) is built when an agent first activates the skill, or at its first `skill_run`, which waits up to 5 minutes and then asks the agent to try again; a run that waited starts with `(Set up <name>'s Python environment first: first use only, <n> s.)`. The environment is keyed by the packages it installs, so a Desk update that changes them rebuilds it on next use, and a copy of a built-in without an environment of its own uses the built-in's. At start, setups a crash cut short are recorded as removed, and unmodified catalog copies of these skills (from before they were built in) are deleted so the built-ins take over.
 
+## Automations
+
+Saved workflows of steps (script, agent, Ask me, another automation, Wait, Tell Desk) that run on schedules or on demand. The design is in `docs/superpowers/specs/2026-09-26-automations-design.md`. Every change through these routes is the user's (origin `user`); `via` in create and save bodies is `editor`, `cli` or `api` (default).
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/v1/projects/:id/automations` | | `AutomationSummary[]`, by name: switch, version, `tested_version`, schedules, `last_run` (with `waiting_on`), `next_due`, `grants_suspended`, `enable_requested` |
+| POST | `/v1/projects/:id/automations` | `{ name, definition, change_note?, via? }` | 201 `{ automation: AutomationDetail, warnings }`. 400 with `details.errors: [{ path, message }]`; 409 when the name is taken |
+| POST | `/v1/projects/:id/automations/validate` | `{ definition, name? }` | `{ errors, warnings, next_times }` (the next three times per valid schedule) |
+| POST | `/v1/projects/:id/automations/import` | `{ format: 'desk-automation/1', name, definition }` | 201, like create. Grants, the switch and layout are not imported |
+| GET | `/v1/automations/:aid` | | `AutomationDetail`: the summary plus `definition`, `layout`, `grants`, `proposed_grants`, `grants_set_version`, `enable_request` |
+| PUT | `/v1/automations/:aid` | `{ definition, base_version, change_note?, via? }` | A new version. 409 with `details.current_version` when `base_version` is stale |
+| DELETE | `/v1/automations/:aid` | | Cancels its runs, then deletes it (history kept) |
+| PUT | `/v1/automations/:aid/layout` | `{ layout: { <step>: { x, y } } }` | Positions only; no new version |
+| GET | `/v1/automations/:aid/versions` | | `AutomationVersionInfo[]`, newest first (`tested` marks versions with a succeeded test run) |
+| GET | `/v1/automations/:aid/versions/:v` | | `{ version, definition, origin, change_note, via, created_at }` |
+| POST | `/v1/automations/:aid/versions/:v/restore` | | A new version with that definition (`via: 'restore'`) |
+| PUT | `/v1/automations/:aid/enabled` | `{ enabled }` | The user's switch. Turning on starts every schedule's clock now, so nothing fires at once |
+| PUT | `/v1/automations/:aid/grants` | `{ grants, reason?: 'edited'\|'enabled' }` | Grants are policy rules (`allow`/`deny`) placed before the project policy for this automation's runs; setting them lifts a suspension |
+| POST | `/v1/automations/:aid/grants/keep` | | Keeps grants suspended by an agent's version |
+| GET | `/v1/automations/:aid/export` | | `{ format: 'desk-automation/1', name, definition }` |
+| POST | `/v1/automations/:aid/runs` | `{ inputs?, test? }` | 202 `{ run_id }`. Inputs are validated, defaults applied; file and folder inputs are local paths copied into the run folder (regular files, no final symlink, never a secret or Desk's data dir, 200 MB) |
+| GET | `/v1/automations/:aid/runs` | `?before=&limit=` | `RunListEntry[]`, newest first: `{ kind: 'run', run }` (status derived: `waiting` while a step waits on the user) and `{ kind: 'skipped', trigger_index, due_at, reason: still_running\|missed, ts }` |
+| GET | `/v1/automation-runs/:rid` | | `RunDetail`: the run, its definition and every step (`attempt`, `status`, `route`, `outputs`, `summary`, `error`, `agent_id`, `child_run_id`, `resume_at`, `gate`, `question`, `note`) |
+| POST | `/v1/automation-runs/:rid/cancel` | | Stops its step agents, kills scripts, cancels child runs |
+| POST | `/v1/automation-runs/:rid/steps/:sid/answer` | `{ decision: 'approve'\|'reject', note?, remember? }` | Ask me steps and script gates; `reject` on a gate fails the step; `remember` (gates) adds a grant. 409 when the step is not waiting |
+| GET | `/v1/automation-runs/:rid/steps/:sid/log` | | A step's full output (`text/plain`), from `<data>/automation-runs/<run>/logs/<step>.txt` |
+| GET | `/v1/automation-runs/:rid/steps/:sid/transcript` | `?after=&limit=` | `{ events, next_after }` of the step's current agent |
+| GET | `/v1/automation-runs/:rid/files` | `?path=` | The run folder (`inputs/`, `inputs.json`, `steps/<id>/`, `logs/`), like thread files |
+| GET | `/v1/automation-runs/:rid/files/raw/<path>` | | Raw file; 403 for a path or final symlink leading outside, or a refused file |
+
+**Runs.** A run's stored status is `running` until it ends (`succeeded`, `failed`, `cancelled`); `waiting` is derived. Schedules tick every 30 s: a due schedule starts a run unless a non-test run of the automation is still going (`automation.trigger_skipped still_running`); after downtime, `catch_up: once` starts one run for the latest due time (`caught_up` counts the others) and `skip` records the missed time. Run folders are kept for the last 20 runs or 30 days per automation, whichever keeps more.
+
+**Step agents** (role `step`) never appear in thread lists. Their approvals go to the user; `POST /v1/approvals/:id/resolve` takes `remember: true` for them, adding a grant derived from the call (a domain, `desk/auto-<name>-*` branches, a script with any arguments, or the exact shell command).
+
 ## Skill catalog
 
 Reviewed skills pinned to a commit and a content digest, installed only at the user's request. The design is in `docs/superpowers/specs/2026-09-24-skill-catalog-design.md`.
@@ -169,7 +204,7 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 |---|---|---|
 | GET | `/v1/overview` | One `ProjectSummary` per open project: `project`, `desk_status`, `threads` (status, `reason`, current `activity` like `bash · python3 x.py`, model, `git_branch`, `skills`, `review_round`), `latest_report`, `plan_progress { done, total }` (dropped items excluded), `attention_count` |
 | GET | `/v1/attention` | `?project_id=`. `{ items: AttentionItem[], seq }`, oldest first |
-| POST | `/v1/attention/:id/dismiss` | Only `needs_you`, `stalled`, `failed` and `paused` items (409 for `approval`/`question`, 404 if not currently listed). Appends `attention.dismissed`. Dismissing `paused` is Resume: the project's automatic wakes resume and every agent decides again |
+| POST | `/v1/attention/:id/dismiss` | Only `needs_you`, `stalled`, `failed` and `paused` items (409 for `approval`, `question` and `automation_ask`, 404 if not currently listed). Appends `attention.dismissed`. Dismissing `paused` is Resume: the project's automatic wakes resume and every agent decides again |
 | GET | `/v1/threads/:id/diff` | `{ base, branch, files: [{ path, status: added\|modified\|deleted, additions, deletions }], patch }` against the thread's base, including uncommitted and untracked files. 409 for non-git or archived threads |
 | GET | `/v1/threads/:id/files` | `?path=` a directory in the workspace. `[{ name, path, type: file\|dir, size }]`, directories first, `.git` hidden |
 | GET | `/v1/threads/:id/files/raw/<path>` | Raw file. 403 if the path (or a symlink) leads outside the workspace, 404 if missing, 409 once archived |
@@ -186,6 +221,12 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 | `stalled` | `stalled:<thread>:<event_id>` | the thread is running/waiting, its latest `stalled` notice has no thread activity after it, not dismissed | `thread_id`, `event_id` |
 | `failed` | `failed:<thread>` | the thread is `failed`, not archived, not dismissed | `thread_id` |
 | `paused` | `paused:<event_id>` | the project's latest `system.notice` `wakes_paused` (agents woke each other 60 times, or were woken by thread starts and notices 150 times, in the last hour) has no `message.user` of the project after it, not dismissed. While it holds, only the user's messages and already queued runs start anything; writing to any agent of the project or dismissing the item resumes | `event_id` |
+| `automation_ask` | `automation_ask:<run>:<step>` | a step waits on a question or a script gate (not dismissible) | `automation_id`, `run_id`, `step_id` |
+| `automation_failed` | `automation_failed:<run>` | the automation's latest finished top-level non-test run failed, not dismissed | `automation_id`, `run_id` |
+| `automation_enable_request` | `automation_enable:<automation>:<ts>` | Desk asked to turn it on and it is off, not dismissed | `automation_id` |
+| `automation_grants_suspended` | `automation_grants:<automation>:<version>` | an agent's version suspended its grants, not dismissed | `automation_id` |
+
+A step agent's `approval` item also carries `automation_id`, `run_id` and `step_id` in `ref`.
 
 ## Configuration
 
@@ -247,11 +288,12 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 | Approvals | `approval.requested`, `approval.resolved` |
 | Services | `service.started`, `service.url`, `service.exited`, `service.stopped` (reason `requested`, `restart`, `thread_archived`, `project_archived`, `daemon_shutdown` or `daemon_restart`) |
 | Knowledge | `memory.written`, `memory.deleted`, `artifact.published`, `skill.saved`, `skill.deleted` |
+| Automations | `automation.saved`, `automation.layout_saved`, `automation.deleted`, `automation.switched`, `automation.grants_set`, `automation.enable_requested`, `automation.run_started`, `automation.step_changed`, `automation.run_finished`, `automation.trigger_skipped` |
 | System | `system.notice`: `proxy_down`, `proxy_up`, `daemon_restart`, `wakes_paused`, …; `attention.dismissed` |
 
 **Agent statuses:** `idle`, `queued`, `running`, `waiting` (on a reply, an approval or threads), `done`, `failed`, `cancelled`.
 
-**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`) and `reminder` (for Desk alone). Optional fields:
+**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`), `reminder` (for Desk alone) and `automation`: messages from automation runs to Desk (Tell Desk steps, run reports, waiting notices), labelled `automation "<title>"`. Optional fields:
 
 - `tracked: true`: a question whose state the runtime follows: open, then answered, closed (the runtime wrote the answer) or withdrawn (the asker finished).
 - `reply_to`: on an `answer`, the id of the question it answers. A note or update to an agent whose question the sender has seen is stored as its answer.

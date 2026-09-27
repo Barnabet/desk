@@ -1,7 +1,7 @@
 # Desk — Automations Design
 
 - **Date:** 2026-09-26
-- **Status:** approved design, not yet implemented. Plan 19 (backend) and Plan 20 (desktop) follow.
+- **Status:** backend implemented (Plan 19); the desktop app (Plan 20) follows.
 - **Goal:** a project can hold **automations**: saved workflows that run on a schedule or on demand, built and tested by Desk, edited in a visual graph editor, and run unattended within limits the user granted. The daemon design lists this as planned work (§13, "v1.2 — scheduled/proactive Desk wakeups and recurring goals").
 - **User decisions (2026-09-26):**
   - **Steps, scripts and agents.** An automation is a graph of steps. Script steps run a skill's script with no model call. Agent steps are agents with a brief and skills. The simplest automation is one agent step.
@@ -578,3 +578,21 @@ These are added to CLAUDE.md's invariants:
 - Waking a sleeping Mac.
 - Cost in currency.
 - Automations in the Angular web UI on `web-ui` (a follow-up once that branch catches up).
+
+## 13. Clarifications made while planning (Plan 19)
+
+- A run's stored status stays `running` until it ends; `waiting` is derived on read (a step waiting on the user, none running). A sub-automation step whose child waits on the user shows `waiting` too.
+- `automation.trigger_skipped` events are read from the event log for run history; there is no fifth table. `automation.run_started` also carries `trigger_index` and `deadline_at`.
+- Script arguments are argv elements passed to the process directly (`commandInvocation`): nothing is ever parsed by a shell, which is stricter than "shell-quoted" in §3.3.
+- A step's log is at `<run>/logs/<step>.txt`, not `steps/<id>/.desk/log.txt`: a script can write its own step folder, so a symlink planted there could redirect deskd. `DESK_OUTPUT` stays in the step folder and is read through `readAgentFile`.
+- Step agents keep the thread write roots (their step folder and writable project sources).
+- Sub-automation runs inherit their parent's `by`. After-run handling, failure attention and notifications apply to top-level runs only, and test runs raise no failure attention or notification (Desk reads their reports).
+- Desk gets a report for every top-level run it started, and a notice when one of its steps waits on the user. `wait_for_run` makes the engine watch a run the user started, too.
+- `automation_save` on an existing name needs `base_version` (the user may be editing it in the app).
+- A due time is "missed" (for `catch_up: skip`) when it is more than two ticks old, allowing for timer drift.
+- The "step no start step reaches" warning cannot fire in an acyclic graph; validation warns about a step with no edges instead.
+- Approval items raised by step agents carry `ref.automation_id`, `run_id` and `step_id` rather than an `automation` object. Desk's turn-on request also notifies.
+- `open_pr`'s gate reports the branch, as `git_push`'s does, so the `desk/auto-<name>-*` grant applies to it.
+- Ending a run early (a cancel, the deadline, or a step failing with `on_error: stop`) marks every unfinished step `cancelled`, reached or not.
+- A step agent whose own `complete` or `fail_step` ends its run finishes that turn before it is archived, so it ends `done` or `failed`, not `cancelled`.
+- The run files listing hides each step folder's `.desk/` (it holds `DESK_OUTPUT`, whose outputs the run detail shows), as publishing and attachments already skip it.
