@@ -10611,3 +10611,13 @@ Plan 20 is done when:
 
    Check each in light and dark, then close the app.
 3. `git log master..automations-ui` holds only this plan's commits. The branch stays unmerged: Plan 21 ports the screens to Angular on it, removes `PLAN_21_OPS` and the placeholder, and then both merge.
+
+## Deviations found while executing
+
+- **Task 2.** Two more `HandlerContext`s exist: `apps/web-server/src/testing.ts` (the desk web test stub) and `apps/desktop/src/main/desktop.live.test.ts`. Both gained `pickFile` and `revealRun`.
+- **Task 8.** React Flow 12.12's pan-zoom reads `contentRect` from the ResizeObserver entry (`@xyflow/system`'s extent observer), so the jsdom shim in `test/reactflow.ts` passes one (800×600).
+- **Task 12.** `v7` and `v6` also appear as options in the Compare menus, so `versions.test.tsx` reads the list's `<b>` labels (`{ selector: 'b' }`). The diff region renders at once and fills in once both versions load, so the test waits for its content (`findByText`). The second fix landed with Task 17, when the suite's timing exposed the race.
+- **Task 18.**
+  - Playwright's `getByLabel` matches substrings: "Publish to the Library 1" also matched the row's "Remove Publish to the Library 1" button. The e2e passes `{ exact: true }` for list rows and the input's Label and Key.
+  - The e2e's screenshots showed a stale header ("waiting on you · New agent step" once the Ask me step was waiting): `runDetailRefetch` did not reload a run on its own step changes, so `at_step` kept the snapshot's value. It now reloads on them (debounced like every refetch). A unit test and an e2e assertion ("waiting on you · Ask me") cover it.
+- **Tasks 7 and 13, "Look at it".** These were checked through the e2e's screenshots (`DESK_E2E_SHOTS`: the editor, the waiting run, the finished run) rather than `pnpm desktop`, which runs against the real data dir.

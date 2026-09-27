@@ -1,7 +1,7 @@
 # Desk — Automations Design
 
 - **Date:** 2026-09-26
-- **Status:** backend implemented (Plan 19); the desktop app (Plan 20) follows.
+- **Status:** backend implemented (Plan 19); desktop app implemented (Plan 20, branch `automations-ui`); the web UI port (Plan 21) follows on the same branch, and both merge together.
 - **Goal:** a project can hold **automations**: saved workflows that run on a schedule or on demand, built and tested by Desk, edited in a visual graph editor, and run unattended within limits the user granted. The daemon design lists this as planned work (§13, "v1.2 — scheduled/proactive Desk wakeups and recurring goals").
 - **User decisions (2026-09-26):**
   - **Steps, scripts and agents.** An automation is a graph of steps. Script steps run a skill's script with no model call. Agent steps are agents with a brief and skills. The simplest automation is one agent step.

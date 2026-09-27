@@ -44,5 +44,8 @@ describe('live rules', () => {
     expect(refetch(ev(2, 'approval.requested', { approval_id: 'ap', run_id: 'x', tool_call_id: 't', tool: 'bash', arguments: '{}', reason: 'r', delegate_to_desk: false }, { agent: 'ag1' }), run)).toBe(true);
     expect(refetch(ev(3, 'automation.run_finished', { run_id: 'r14', status: 'succeeded', summary: 'ok' }), run)).toBe(true);
     expect(refetch(ev(4, 'automation.run_finished', { run_id: 'r1', status: 'succeeded', summary: 'ok' }), run)).toBe(false);
+    // Its own step changes reload it too, so at_step (the header's "running · <step>") follows the run.
+    expect(refetch(ev(5, 'automation.step_changed', { run_id: 'r14', step_id: 'ok', attempt: 1, status: 'waiting', question: { text: 'OK?', files: [] } }), run)).toBe(true);
+    expect(refetch(ev(6, 'automation.step_changed', { run_id: 'r1', step_id: 'ok', attempt: 1, status: 'running' }), run)).toBe(false);
   });
 });

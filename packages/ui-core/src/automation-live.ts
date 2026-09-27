@@ -44,8 +44,8 @@ export const automationRunsRefetch =
 /** Folds one event into a loaded run (its step changes and its end). */
 export const reduceRunDetail = (run: RunDetail, e: StoredEvent): RunDetail => reduceAutomations(withRunDetail(emptyAutomations(run.project_id), run), e).runs[run.id] ?? run;
 
-/** A run reloads for its agents' approvals, a child run's end and its own end. */
+/** A run reloads for its agents' approvals, a child run's end, its own step changes (for `at_step`) and its end. */
 export const runDetailRefetch =
   (runId: string) =>
   (e: StoredEvent, run: RunDetail): boolean =>
-    affectsRun(e, run) || (e.type === 'automation.run_finished' && e.payload.run_id === runId);
+    affectsRun(e, run) || ((e.type === 'automation.step_changed' || e.type === 'automation.run_finished') && e.payload.run_id === runId);
