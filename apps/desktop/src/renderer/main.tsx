@@ -1,3 +1,4 @@
+import '@xyflow/react/dist/style.css';
 import '@desk/ui-styles/index.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

@@ -11,8 +11,8 @@ const sources = (dir: string): string[] =>
   });
 
 describe('renderer styles', () => {
-  it('come from @desk/ui-styles, loaded once by main.tsx; only the tray keeps a sheet of its own', () => {
+  it('come from @desk/ui-styles and React Flow, loaded once by main.tsx; only the tray keeps a sheet of its own', () => {
     const imports = sources(root).flatMap((file) => [...readFileSync(file, 'utf8').matchAll(/^import '([^']+)';$/gm)].map((m) => `${file.slice(root.length)}: ${m[1]}`));
-    expect(imports.sort()).toEqual(['main.tsx: @desk/ui-styles/index.css', 'tray/TrayPopover.tsx: ./tray.css']);
+    expect(imports.sort()).toEqual(['main.tsx: @desk/ui-styles/index.css', 'main.tsx: @xyflow/react/dist/style.css', 'tray/TrayPopover.tsx: ./tray.css']);
   });
 });

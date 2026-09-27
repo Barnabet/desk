@@ -194,3 +194,249 @@
 .auto-loading {
   padding: 20px 28px;
 }
+
+/* The canvas (React Flow): its variables mapped to tokens */
+.auto-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.auto-canvas .react-flow {
+  --xy-background-color: var(--ground);
+  --xy-edge-stroke: var(--muted);
+  --xy-edge-stroke-selected: var(--run);
+  --xy-connectionline-stroke: var(--run);
+  --xy-handle-background-color: var(--card);
+  --xy-handle-border-color: var(--muted);
+  --xy-selection-background-color: var(--run-pastel);
+  --xy-selection-border: 1px dotted var(--run);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--highlight);
+  --xy-controls-button-color: var(--ink);
+  --xy-controls-button-color-hover: var(--ink);
+  --xy-controls-button-border-color: var(--rule-soft);
+  --xy-controls-box-shadow: none;
+  --xy-attribution-background-color: transparent;
+  background: var(--ground);
+}
+.auto-canvas .react-flow__attribution a {
+  color: var(--muted);
+}
+.auto-canvas .react-flow__controls {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.auto-canvas .react-flow__handle {
+  width: 9px;
+  height: 9px;
+  border-width: 1.5px;
+}
+.auto-canvas .react-flow__handle.valid {
+  border-color: var(--run);
+}
+.auto-canvas .auto-handle-side {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Nodes: a stripe in the kind's colour (--k) */
+.auto-node {
+  --k: var(--text);
+  position: relative;
+  width: 200px;
+  height: 64px;
+  box-sizing: border-box;
+  padding: 7px 10px 7px 14px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(var(--shadow-rgb), 0.06);
+  overflow: hidden;
+}
+.auto-node::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--k);
+}
+.auto-node.k-agent {
+  --k: var(--run);
+}
+.auto-node.k-ask {
+  --k: var(--wait);
+}
+.auto-node.k-wait {
+  --k: var(--muted);
+}
+.auto-node.k-automation {
+  --k: var(--ok);
+}
+.auto-node.k-tell {
+  --k: var(--accent);
+}
+.auto-node-kind {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--k);
+}
+.auto-node-kind b {
+  font-weight: 500;
+  color: var(--text-faint);
+}
+.auto-node-title {
+  margin-top: 1px;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.15;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auto-node-detail {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auto-node.selected {
+  border-color: var(--run);
+  outline: 3px solid var(--run-ring);
+}
+.auto-node.invalid {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+/* Run states (view A) */
+.auto-node.run-ok {
+  --k: var(--ok);
+}
+.auto-node.run-ok .auto-node-kind b {
+  color: var(--ok);
+}
+.auto-node.run-run {
+  --k: var(--run);
+  border-color: var(--run);
+  outline: 3px solid var(--run-ring);
+}
+.auto-node.run-run .auto-node-kind b {
+  color: var(--run);
+}
+.auto-node.run-wait {
+  --k: var(--wait);
+  border-color: var(--wait);
+  background: var(--wait-pastel);
+}
+.auto-node.run-wait .auto-node-kind b {
+  color: var(--wait-text);
+}
+.auto-node.run-pending {
+  opacity: 0.55;
+}
+.auto-node.run-skipped {
+  --k: var(--muted);
+  opacity: 0.45;
+  background: repeating-linear-gradient(135deg, var(--card), var(--card) 6px, var(--sunken) 6px, var(--sunken) 12px);
+}
+.auto-node.run-fail {
+  --k: var(--accent);
+  border-color: var(--accent);
+}
+.auto-node.run-fail .auto-node-kind b {
+  color: var(--accent);
+}
+.auto-node.run-idle {
+  --k: var(--muted);
+  opacity: 0.7;
+}
+.auto-start {
+  width: 240px;
+  height: 44px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font-size: 12px;
+}
+.auto-start-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auto-start.selected {
+  outline: 3px solid var(--run-ring);
+}
+.auto-start.invalid {
+  outline: 3px solid var(--accent);
+}
+.auto-stub {
+  padding: 2px 8px;
+  border: 1px dashed var(--muted-soft);
+  border-radius: 999px;
+  background: var(--ground);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Edges */
+.auto-canvas .auto-edge {
+  stroke: var(--muted);
+  stroke-width: 1.6;
+}
+.auto-canvas .auto-edge.look-stub,
+.auto-canvas .auto-edge.look-idle {
+  stroke: var(--muted-soft);
+  stroke-dasharray: 4 4;
+}
+.auto-canvas .auto-edge.look-fired {
+  stroke: var(--ok);
+  stroke-width: 1.8;
+}
+.auto-canvas .auto-edge.selected {
+  stroke: var(--run);
+  stroke-width: 2.2;
+}
+.auto-canvas .auto-edge.invalid {
+  stroke: var(--accent);
+}
+.auto-edge-label {
+  position: absolute;
+  pointer-events: none;
+  padding: 1px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.auto-edge-label.selected {
+  border-color: var(--run);
+  color: var(--run-text);
+}
+.auto-edge-label.invalid {
+  border-color: var(--accent);
+  color: var(--accent);
+}
