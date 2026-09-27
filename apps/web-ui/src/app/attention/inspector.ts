@@ -1,30 +1,15 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal, ViewEncapsulation } from '@angular/core';
 import type { AttentionItem } from '@desk/protocol';
-import { clock, href, KIND_NAME, policyReason, STRIP_CODE, waited } from '@desk/ui-core';
+import { automationTarget, clock, href, KIND_NAME, policyReason, STRIP_CODE, waited } from '@desk/ui-core';
 import { Button } from '../components/button';
 import { CodeBlock } from '../components/code-block';
 import { SafeMarkdown } from '../components/safe-markdown';
 import { injectSession, SessionService } from '../core/session.service';
+import { AutomationCard, injectAutomationItem } from './automation-cards';
+import { describeArgs } from './describe-args';
 
-const SHELL = new Set(['bash', 'bash_background', 'bash_readonly']);
-
-/** A shell command reads as `$ command`; anything else as pretty JSON. */
-export function describeArgs(tool: string, args: string): { command: string | null; pretty: string } {
-  try {
-    const v = JSON.parse(args) as Record<string, unknown>;
-    const pretty = JSON.stringify(v, null, 2);
-    const command = v['command'];
-    if (SHELL.has(tool) && typeof command === 'string') return { command, pretty };
-    const script = v['script'];
-    if (tool === 'skill_run' && typeof script === 'string') {
-      const rest = v['args'];
-      return { command: [v['skill'], script, ...(Array.isArray(rest) ? rest : [])].filter(Boolean).join(' '), pretty };
-    }
-    return { command: null, pretty };
-  } catch {
-    return { command: null, pretty: args };
-  }
-}
+// In its own module so that the run step panel can use it without importing the Inspector (which imports the panel).
+export { describeArgs };
 
 /**
  * The selected strip in full, with the controls to act on it. The screen owns the note, the pending decision and which
@@ -32,7 +17,7 @@ export function describeArgs(tool: string, args: string): { command: string | nu
  */
 @Component({
   selector: 'article[deskInspector]',
-  imports: [Button, CodeBlock, SafeMarkdown],
+  imports: [AutomationCard, Button, CodeBlock, SafeMarkdown],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'card inspector', '[attr.aria-label]': "'Selected: ' + kindName().toLowerCase()" },
@@ -59,7 +44,11 @@ export function describeArgs(tool: string, args: string): { command: string | nu
         }
         <div class="facts">
           <div class="fact"><span class="fact-label">TOOL</span><span class="mono fact-value">{{ approval()?.tool ?? '—' }}</span></div>
-          <div class="fact"><span class="fact-label">{{ agent()?.role === 'desk' ? 'ASKED BY' : 'THREAD' }}</span><span class="fact-value">@if (threadHref(); as h) {<a [href]="h">{{ agent()?.title ?? 'Thread' }}</a>} @else {<ng-container>Desk</ng-container>}</span></div>
+          @if (step() !== null) {
+            <div class="fact"><span class="fact-label">AUTOMATION</span><span class="fact-value">@if (automationLink(); as l) {<a [href]="l.href">{{ l.text }}</a>} @else {<ng-container>{{ step() }}</ng-container>}</span></div>
+          } @else {
+            <div class="fact"><span class="fact-label">{{ agent()?.role === 'desk' ? 'ASKED BY' : 'THREAD' }}</span><span class="fact-value">@if (threadHref(); as h) {<a [href]="h">{{ agent()?.title ?? 'Thread' }}</a>} @else {<ng-container>Desk</ng-container>}</span></div>
+          }
           <div class="fact"><span class="fact-label">BRANCH</span><span class="mono fact-value">{{ agent()?.git_branch ?? 'scratch workspace' }}</span></div>
           <div class="fact"><span class="fact-label">PROJECT</span><span class="fact-value"><a [href]="conversationHref()">{{ item().project_name }}</a></span></div>
           <div class="fact"><span class="fact-label">WORKDIR</span><span class="mono fact-value"><span [attr.title]="agent()?.workspace_path ?? ''">{{ workdir() }}</span></span></div>
@@ -74,7 +63,7 @@ export function describeArgs(tool: string, args: string): { command: string | nu
             </div>
           </div>
           <div class="why-row">
-            <span class="why-label">What the thread said</span>
+            <span class="why-label">{{ step() !== null ? 'What the step agent said' : 'What the thread said' }}</span>
             @if (lastWords(); as words) {<div deskSafeMarkdown [className]="'why-quote'" [text]="words"></div>} @else {<p class="muted">Nothing yet.</p>}
           </div>
         </div>
@@ -84,11 +73,14 @@ export function describeArgs(tool: string, args: string): { command: string | nu
         </div>
         <div class="inspector-actions">
           <button deskButton variant="primary" [pending]="busy() === 'approved'" [disabled]="busy() !== null" (click)="resolve.emit('approved')">Approve once <kbd>⌘⏎</kbd></button>
+          @if (step() !== null && !suspended()) {
+            <button deskButton [pending]="busy() === 'remember'" [disabled]="busy() !== null" (click)="remember.emit()">Approve and remember for this automation</button>
+          }
           <button deskButton [pending]="busy() === 'denied'" [disabled]="busy() !== null" (click)="resolve.emit('denied')">Deny <kbd>⌘⌫</kbd></button>
           <span class="grow"></span>
           <a class="small" [href]="settingsHref()">Edit policy rules</a>
         </div>
-        <p class="muted small">The thread resumes as soon as you decide. If you deny, it's told why and tries another way.</p>
+        <p class="muted small">{{ footnote() }}</p>
       }
       @case ('question') {
         <h2 class="inspector-title">{{ item().title }}</h2>
@@ -113,6 +105,18 @@ export function describeArgs(tool: string, args: string): { command: string | nu
         <div class="inspector-actions">
           <button deskButton variant="ghost" (click)="open.emit()">Open conversation <kbd>E</kbd></button>
         </div>
+      }
+      @case ('automation_ask') {
+        <div deskAutomationCard [item]="item()" [auto]="auto()" [busy]="busy()" (open)="open.emit()" (dismiss)="dismiss.emit()"></div>
+      }
+      @case ('automation_failed') {
+        <div deskAutomationCard [item]="item()" [auto]="auto()" [busy]="busy()" (open)="open.emit()" (dismiss)="dismiss.emit()"></div>
+      }
+      @case ('automation_enable_request') {
+        <div deskAutomationCard [item]="item()" [auto]="auto()" [busy]="busy()" (open)="open.emit()" (dismiss)="dismiss.emit()"></div>
+      }
+      @case ('automation_grants_suspended') {
+        <div deskAutomationCard [item]="item()" [auto]="auto()" [busy]="busy()" (open)="open.emit()" (dismiss)="dismiss.emit()"></div>
       }
       @case ('paused') {
         <h2 class="inspector-title">{{ item().title }}</h2>
@@ -152,6 +156,8 @@ export class Inspector {
   readonly answered = input(false);
   readonly noteChange = output<string>();
   readonly resolve = output<'approved' | 'denied'>();
+  /** Approve and remember for this automation: a step agent's approval, while its grants are not suspended. */
+  readonly remember = output<void>();
   readonly answer = output<string>();
   readonly dismiss = output<void>();
   readonly open = output<void>();
@@ -205,6 +211,25 @@ export class Inspector {
   protected readonly detailLabel = computed(() => {
     const kind = this.item().kind;
     return kind === 'needs_you' ? 'From the report' : kind === 'failed' ? 'Reason' : 'What the thread said';
+  });
+  protected readonly auto = injectAutomationItem(() => this.item());
+  /** A step agent's approval names its step (spec §8.4); null for any other item. */
+  protected readonly step = computed(() => {
+    const i = this.item();
+    if (i.kind !== 'approval' || !i.ref.automation_id) return null;
+    return this.auto().detail?.definition.steps.find((x) => x.id === i.ref.step_id)?.title ?? i.ref.step_id ?? 'a step';
+  });
+  protected readonly suspended = computed(() => this.auto().detail?.grants_suspended ?? true);
+  protected readonly automationLink = computed(() => {
+    const target = automationTarget(this.item());
+    const d = this.auto().detail;
+    return target && d ? { href: href(target), text: `${d.title} · ${this.step()}` } : null;
+  });
+  protected readonly footnote = computed(() => {
+    if (this.step() === null) return "The thread resumes as soon as you decide. If you deny, it's told why and tries another way.";
+    return this.auto().detail?.grants_suspended
+      ? 'The step resumes as soon as you decide. Its grants are suspended until you keep them, so nothing is remembered.'
+      : 'The step resumes as soon as you decide. Remember adds a grant, so its later runs do this without asking.';
   });
 
   protected setNote(e: Event): void {

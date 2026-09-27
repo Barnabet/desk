@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, linkedSignal, signal, untracked, ViewEncapsulation } from '@angular/core';
 import type { AttentionItem } from '@desk/protocol';
-import { href, plural, rackOrder, STRIP_CODE, waited } from '@desk/ui-core';
+import { automationTarget, href, plural, rackOrder, STRIP_CODE, waited } from '@desk/ui-core';
 import { EmptyState } from '../components/empty-state';
 import { ToastService } from '../components/toast';
 import { DeskBridge, DeskCallError } from '../core/desk-bridge';
@@ -13,8 +13,10 @@ import { StripRack } from './strip-rack';
 /** Who decided an approval first, for the 409 toast. */
 const WHO: Record<string, string> = { user: 'you, in another window', desk: 'Desk', system: 'Desk (the thread was stopped)' };
 
-/** Where E goes: the thread for approvals and stuck threads, the conversation for everything else. */
+/** Where E goes: an automation item's run, Grants tab or automation; the thread for approvals and stuck threads; the conversation otherwise. */
 function openTarget(i: AttentionItem): string {
+  const automation = automationTarget(i);
+  if (automation) return href(automation);
   if ((i.kind === 'stalled' || i.kind === 'failed' || i.kind === 'approval') && i.ref.thread_id) return href({ name: 'project', id: i.project_id, tab: 'threads', threadId: i.ref.thread_id });
   return href({ name: 'project', id: i.project_id, tab: 'conversation' });
 }
@@ -38,10 +40,10 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName
       <p class="keys mono">J K move · ⌘⏎ approve · ⌘⌫ deny · E open</p>
       <div class="strip-legend" aria-hidden="true">
         <span><span class="strip-code-badge code-approval">{{ codes.approval }}</span>Approval</span>
-        <span><span class="strip-code-badge code-question">{{ codes.question }}</span>Question from Desk</span>
-        <span><span class="strip-code-badge code-needs_you">{{ codes.needs_you }}</span>From a report</span>
-        <span><span class="strip-code-badge code-stalled">{{ codes.stalled }}</span>Stalled thread</span>
-        <span><span class="strip-code-badge code-failed">{{ codes.failed }}</span>Failed thread</span>
+        <span><span class="strip-code-badge code-question">{{ codes.question }}</span>Question (Desk or an automation)</span>
+        <span><span class="strip-code-badge code-needs_you">{{ codes.needs_you }}</span>From a report, or an automation to turn on</span>
+        <span><span class="strip-code-badge code-stalled">{{ codes.stalled }}</span>Stalled thread, or suspended grants</span>
+        <span><span class="strip-code-badge code-failed">{{ codes.failed }}</span>Failed thread or automation</span>
         <span><span class="strip-code-badge code-paused">{{ codes.paused }}</span>Paused project</span>
         <span class="muted">Bar = wait, 0–2h</span>
       </div>
@@ -59,6 +61,7 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName
           [answered]="answered().has(s.id)"
           (noteChange)="note.set($event)"
           (resolve)="resolve($event)"
+          (remember)="resolve('approved', true)"
           (answer)="answer($event)"
           (dismiss)="dismiss()"
           (open)="open()"
@@ -141,14 +144,14 @@ export class AttentionScreen {
     this.routes.replace({ name: 'attention', item: id });
   }
 
-  protected async resolve(decision: 'approved' | 'denied'): Promise<void> {
+  protected async resolve(decision: 'approved' | 'denied', remember = false): Promise<void> {
     const selected = this.selected();
     const approvalId = selected?.kind === 'approval' ? selected.ref.approval_id : undefined;
     if (!selected || !approvalId || this.busy()) return;
     const note = this.note().trim();
-    this.busy.set(decision);
+    this.busy.set(remember ? 'remember' : decision);
     try {
-      await this.bridge.call('approvals.resolve', { id: approvalId, decision, ...(note ? { note } : {}) });
+      await this.bridge.call('approvals.resolve', { id: approvalId, decision, ...(note ? { note } : {}), ...(remember ? { remember: true } : {}) });
     } catch (err) {
       if (err instanceof DeskCallError && err.status === 409) {
         const all = await this.bridge.call('approvals.list', { projectId: selected.project_id }).catch(() => null);

@@ -2,7 +2,7 @@ import { booleanAttribute, ChangeDetectionStrategy, Component, computed, effect,
 import type { ApprovalRow } from '@desk/client';
 import type { RunDetail, Step, StepRunInfo, WorkspaceEntry } from '@desk/protocol';
 import { agentActivity, agentTokens, askDeskText, canStopStep, clock, outputText, policyReason, relRunPath, STEP_KIND_LABEL, stepLook, tokens } from '@desk/ui-core';
-import { describeArgs } from '../../attention/inspector';
+import { describeArgs } from '../../attention/describe-args';
 import { Button } from '../../components/button';
 import { CodeBlock } from '../../components/code-block';
 import { ConfirmDialog } from '../../components/confirm-dialog';
