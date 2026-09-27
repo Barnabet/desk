@@ -6,6 +6,8 @@ import { AutomationHeader, DraftHeader } from './AutomationHeader';
 import { AutomationList } from './AutomationList';
 import { useAutomation } from './data';
 import { DesignView } from './design/DesignView';
+import { RunsList } from './runs/RunsList';
+import { RunView } from './runs/RunView';
 import { VersionsView } from './versions/VersionsView';
 
 /** The Automations tab (spec §8.1): the list, one automation (header, then Design, Runs, Versions or Grants), or a new draft. */
@@ -50,7 +52,7 @@ function OneAutomation(o: { projectId: string; s: SessionState; id: string; view
 function AutomationBody(o: { projectId: string; s: SessionState; view: AutomationView; runId?: string; detail: AutomationDetail; onChange(d: AutomationDetail): void }) {
   switch (o.view) {
     case 'runs':
-      return <EmptyState title="Runs">Its runs show here.</EmptyState>;
+      return o.runId ? <RunView key={o.runId} projectId={o.projectId} s={o.s} detail={o.detail} runId={o.runId} /> : <RunsList projectId={o.projectId} s={o.s} detail={o.detail} />;
     case 'versions':
       return <VersionsView detail={o.detail} onChange={o.onChange} />;
     case 'grants':
