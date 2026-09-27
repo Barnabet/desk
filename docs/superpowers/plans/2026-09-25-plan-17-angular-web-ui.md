@@ -40898,7 +40898,7 @@ Create `docs/web.md`:
 ````md
 # Desk in the browser (`desk web`)
 
-`desk web` serves Desk's second frontend, an Angular app (`apps/web-ui`), to a browser on this computer. It sits alongside the desktop app: both are clients of the same `deskd`, they show the same projects, threads and screens, and closing the tab never stops the work.
+`desk web` serves Desk's second frontend, an Angular app (`apps/web-ui`), to a browser on this computer. It sits alongside the desktop app. Both are clients of the same `deskd`, they show the same projects, threads and screens, and closing the tab never stops the work.
 
 - **Spec:** [`superpowers/specs/2026-09-25-angular-web-ui-design.md`](superpowers/specs/2026-09-25-angular-web-ui-design.md)
 - **Plan:** 17 in [`superpowers/plans/`](superpowers/plans/)
@@ -40913,32 +40913,50 @@ bin/desk web --port 7500     # another port, remembered in <data>/web-settings.j
 bin/desk web --no-open       # print the link without opening it
 ```
 
-- The link is `http://127.0.0.1:<port>/login?code=…`, valid for 2 minutes and once. It stores a session secret in this browser for this address, then opens the app. Press Enter in the terminal where `desk web` runs for a new link, for example after clearing the browser's data. A link used a second time signs out the browser it signed in, and the terminal says so.
-- Only this computer can open it: desk web listens on `127.0.0.1` and answers only `http://127.0.0.1:<port>`, not `localhost`.
-- One `desk web` per data dir (`<data>/web.json`): a second one says so and exits. If the port is taken, desk web exits and names `--port`; it never moves to another port, because what the browser keeps (the session, onboarding, drafts, the last project) belongs to the address.
+- The link is `http://127.0.0.1:<port>/login?code=…`. It works once, for 2 minutes. It stores a session secret in this browser for this address, then opens the app. Press Enter in the terminal where `desk web` runs for a new link, for example after clearing the browser's data.
+- The link desk web opens and the link it prints carry different codes, so using the printed one as well is fine. A link used a second time signs out the browser it signed in, and the terminal prints a warning.
+- Only this computer can open it. desk web listens on `127.0.0.1` only, and answers only `http://127.0.0.1:<port>`, not `localhost`.
+- One `desk web` runs per data dir (`<data>/web.json`). A second one says so and exits.
+- If the port is taken, desk web exits and names `--port`. It never moves to another port, because what the browser keeps (the session, onboarding, drafts, the last project) belongs to the address.
 - Ctrl-C stops it. Sessions live only as long as it runs: after a restart, sign in again with a new link.
-- deskd: desk web finds it through `daemon.json`, as the CLI does. When it is not running, the page shows the offline overlay with **Start Desk**. If the Desk app's LaunchAgent is installed (macOS) and runs deskd for desk web's data dir, Start, Restart and Stop in System go through `launchctl` (Start also restarts that deskd when it stopped answering); otherwise, as for desk web on another data dir through `DESK_DATA_DIR`, desk web runs this repository's deskd and stops it by its pid. Repairing the LaunchAgent stays in the desktop app.
+- deskd: desk web finds it through `daemon.json`, as the CLI does. When deskd is not running, the page shows the offline overlay with **Start Desk**.
+  - If the Desk app's LaunchAgent is installed (macOS) and runs deskd for desk web's data dir, Start, Restart and Stop in System go through `launchctl`. Start also restarts that deskd when it stopped answering. desk web never writes or removes the LaunchAgent.
+  - Otherwise, for example for desk web on another data dir through `DESK_DATA_DIR`, desk web runs this repository's deskd and stops it by its pid.
+  - Repairing the LaunchAgent stays in the desktop app.
 
 ## What differs from the desktop app
 
-The screens, their text and their look are the same: both UIs load `@desk/ui-styles` and share their logic through `@desk/ui-core` (see the desktop app's [screens](desktop.md#screens)). What a browser does differently:
+The screens, their text and their look are the same. Both UIs load `@desk/ui-styles` and share their logic through `@desk/ui-core` (see the desktop app's [screens](desktop.md#screens)). What a browser does differently:
 
 | | Desktop app | Browser |
 |---|---|---|
-| Choosing a folder | The system dialog | Desk's folder browser: folders under your home folder or a project's sources, hidden ones on request (skill import from `~/.claude/skills`), or a typed path, which deskd checks |
+| Choosing a folder | The system dialog | Desk's folder browser: folders under your home folder or a project's sources, hidden ones on request (on by default for a skill import from `~/.claude/skills`), or a typed path, which deskd checks |
 | Links in agent text | The system browser, after a confirmation | A new tab, after the same confirmation (`http`, `https` and `mailto` only) |
-| Agent files | Previews from the daemon's bytes | The same, except SVG, which shows as text; images come from raster formats only; Save a copy downloads the file |
+| Agent files | Previews from the daemon's bytes | The same, except SVG, which shows as text. Images come from raster formats only. Save a copy downloads the file |
 | Notifications | macOS notifications from the app | Browser notifications (below) |
-| Appearance | System, Light or Dark (System → Appearance) | The browser follows the system's light or dark setting; System → Appearance says so |
-| System → deskd | Start, Restart, Stop, Repair LaunchAgent | Start, Restart, Stop |
-| Menu bar, window menus, launch at login | Yes | No |
+| Appearance | System, Light or Dark (System → Appearance) | The browser follows the system's light or dark setting. System → Appearance says so, and its choices are disabled |
+| System → deskd | Start, Restart, Stop, Repair LaunchAgent | Start, Restart, Stop. No Repair and no Install LaunchAgent: desk web answers `daemon.repair` with `not_offered` |
+| The tray (menu bar popover), native menus, launch at login | Yes | No |
 | Shortcuts | ⌘K, ⌘P, ⌘1 to ⌘4, ⌘N, and Attention's keys | ⌘K / Ctrl-K (palette), ⌘P / Ctrl-P (project switcher), and Attention's J/K, ⌘⏎, ⌘⌫ and E. ⌘1 to ⌘4 and ⌘N stay with the browser, which uses them for tabs and windows |
 
 ## Notifications
 
-- **System → Notifications → From the app** is desk web's switch (`<data>/web-settings.json`). Turning it on asks the browser for permission; if the browser has not allowed or blocks Desk's notifications, System says how to allow them (the site settings of `http://127.0.0.1:<port>`).
-- A tab shows approvals, questions, hand-offs and stuck threads as they arrive, while it is in the background; a tab with focus stays quiet, as a focused desktop window does. Each notification is tagged with its item, so several open tabs show it once. Clicking it opens the item in Attention.
-- **From deskd when the app is closed** is deskd's own switch. deskd stays quiet only while desk web can notify you: the switch above is on and a connected tab has the browser's permission. Otherwise deskd posts its own notifications, so you get them once either way.
+- **System → Notifications → From the app** is desk web's switch, saved in `<data>/web-settings.json`. Turning it on asks the browser for permission. The switch saves without waiting for the answer. If the browser has not allowed Desk's notifications yet, System says so and offers **Allow notifications**. If the browser blocks them, System says to allow them in the browser's site settings for `http://127.0.0.1:<port>`.
+- A tab shows every new attention item (approvals, questions, hand-offs, and stalled, failed or paused work) while it is in the background. A tab with focus stays quiet, as a focused desktop window does. Each notification is tagged with its item, so several open tabs show it once. Clicking it opens the item in Attention.
+- **From deskd when the app is closed** is deskd's own switch. deskd stays quiet only while desk web can notify you: the switch above is on and a connected tab has the browser's permission. Otherwise deskd posts its own notifications, so you get each one once.
+
+## Files desk web keeps
+
+All in the Desk data dir, which agents cannot write outside their workspace.
+
+| File | What it holds |
+|---|---|
+| `web.json` | The running desk web's pid and port (mode 0600, no secrets). A second `desk web` reads it and exits, and deskd's sandbox guard reads the port from it. desk web removes it when it stops. |
+| `web-settings.json` | The port chosen with `--port`, and the "From the app" notifications switch. |
+| `web-login-<random>.html` | A page that redirects to a one-time login link (mode 0600). desk web opens this file instead of the link, so the code never appears on a command line. It is deleted once the code is used or expires. Agents cannot read these files. |
+| `logs/web.log` | desk web's log. |
+
+Sessions and login codes live in desk web's memory only. The browser keeps its session secret in `localStorage` for `http://127.0.0.1:<port>`.
 
 ## Architecture
 
@@ -40948,19 +40966,30 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
    DeskBridge.onPush(ch) WebSocket /push  (secret in 1st frame)     @desk/bff broker             /v1/stream WS
 ```
 
-- **`packages/bff` (`@desk/bff`)**: the backend-for-frontend both hosts run. `@desk/bff/contract` (operation schemas, push channels, `GlobalState`) is all browser code imports; `@desk/bff/server` holds the broker, the handlers and `DaemonManager`.
+- **`packages/bff` (`@desk/bff`)**: the backend-for-frontend both hosts run. `@desk/bff/contract` (operation schemas, push channels, `GlobalState`) is all that browser code imports. `@desk/bff/server` holds the broker, the handlers and `DaemonManager`.
 - **`packages/ui-core` and `packages/ui-styles`**: the UI logic and the CSS both UIs share.
-- **`apps/web-server` (`@desk/web-server`)**: the `desk web` host. Hono on `127.0.0.1`: the Angular build, `/login`, `POST /rpc/:op` (each input validated by its schema, `Uint8Array`s carried as `{ "$bytes": base64 }`), the `/push` WebSocket (one broker sender per socket; project watches are acknowledged after their backfill), and the web `HandlerContext`.
-- **`apps/web-ui` (`@desk/web-ui`)**: Angular 22, zoneless, standalone components and signals, no Angular Router (the desktop's hash routes, `#/map`, `#/p/<id>/conversation`, …). One component per React component, with the same DOM and class names. `DeskBridge` is its only way out: operations go to `/rpc`, pushes come from `/push`, and opening a link, saving a file and picking a folder happen in the browser.
+- **`apps/web-server` (`@desk/web-server`)**: the `desk web` host. Hono on `127.0.0.1` serves:
+  - the Angular build (`apps/web-ui/dist/browser`);
+  - `/login`;
+  - `POST /rpc/:op`: each input is validated by its schema, and `Uint8Array`s travel as `{ "$bytes": base64 }`;
+  - the `/push` WebSocket: one broker sender per socket, and a project watch is acknowledged after its backfill;
+  - `/healthz`.
+
+  It also supplies the web `HandlerContext` (`web-context.ts`).
+- **`apps/web-ui` (`@desk/web-ui`)**: Angular 22, zoneless, with standalone components and signals.
+  - There is no Angular Router: it uses the desktop's hash routes (`#/map`, `#/p/<id>/conversation`, …).
+  - There is one component per React component, with the same DOM and class names.
+  - `DeskBridge` is its only way out. Operations go to `/rpc`, and pushes come from `/push`. Opening a link, saving a file and picking a folder happen in the browser.
 
 ### Security rules desk web keeps
 
 - The deskd token never leaves desk web. The browser gets the same operation results the desktop renderer gets, which hold no token.
-- No cookie: the session secret lives in this origin's `localStorage` and travels as `x-desk-session` and as `/push`'s first frame, compared in constant time. A missing or wrong secret gets 401 on `/rpc` and closes `/push` with 4401, and the page shows "Open Desk from your terminal".
-- Every request must carry `Host: 127.0.0.1:<port>` (421 otherwise, which blocks DNS rebinding); `/rpc` and `/push` also need `Origin: http://127.0.0.1:<port>` (403 otherwise).
-- Strict headers on every response: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
-- Agent text never becomes HTML: `SafeMarkdown` renders `marked`'s tokens with Angular templates, and `apps/web-ui` has no `innerHTML` (a spec fails on it).
-- Sandboxed agents cannot reach desk web's port, and cannot read its one-time login files.
+- There is no cookie. The session secret lives in this origin's `localStorage`. It travels as the `x-desk-session` header on `/rpc` and as `/push`'s first frame, and desk web compares it in constant time. A missing or wrong secret gets 401 on `/rpc` and closes `/push` with 4401. The page then shows "Open Desk from your terminal".
+- Host check: every request, the WebSocket upgrade included, must carry `Host: 127.0.0.1:<port>`. Anything else gets 421, which blocks DNS rebinding.
+- Origin check: `/rpc` and the `/push` upgrade also need `Origin: http://127.0.0.1:<port>`. Anything else gets 403. `/rpc` also takes only `application/json` (415 otherwise), up to 40 MB (413 above).
+- Every response carries strict headers: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
+- Agent text never becomes HTML. `SafeMarkdown` renders `marked`'s tokens with Angular templates, and `apps/web-ui` has no `innerHTML` (`security.spec.ts` fails on it).
+- Sandboxed agents cannot read desk web's one-time login files, and cannot connect to its port. deskd reads the port from `web.json` each time it builds a sandbox profile, so a command or service started before desk web took its port can reach it until it restarts. desk web still asks it for a session.
 
 ## Development
 
@@ -40972,11 +41001,21 @@ pnpm typecheck                    # includes ngc for apps/web-ui and tsc for app
 pnpm test:web-e2e                 # builds the UI, checks its index.html, then Playwright/Chromium against an in-process deskd and desk web
 ```
 
-`apps/web-ui` needs Node `^22.22.3 || ^24.15.0 || >=26` and brings its own TypeScript 6; the rest of the repository stays on its Node and TypeScript 7. Every Angular command goes through `scripts/ng.mjs`, which picks a Node that fits from nvm when the current one is older (`node scripts/ng.mjs --which` prints it).
+`apps/web-ui` needs Node `^22.22.3 || ^24.15.0 || >=26` and brings its own TypeScript 6. The rest of the repository stays on its Node and TypeScript 7. Every Angular command goes through `scripts/ng.mjs`, which picks a Node that fits from nvm when the current one is older (`node scripts/ng.mjs --which` prints it). To run one spec: `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`.
 
-A UI feature ships in both UIs. `apps/web-ui/src/app/parity.spec.ts` fails when the React renderer calls an operation the web UI does not (only `app.openMain` and `daemon.repair` are desktop-only), when an operation name is built at run time in either UI, when a desk-web-only operation goes unused, or when a route has no web screen.
+### The parity guard
 
-The end-to-end suite (`apps/web-ui/e2e`, on `startWebE2E` in `harness.ts`):
+A UI feature ships in both UIs. `apps/web-ui/src/app/parity.spec.ts` reads the operation names both UIs pass to `call(…)`, leaving comments and tests out. It fails when:
+- the React renderer calls an operation the web UI does not (only `app.openMain` and `daemon.repair` are desktop-only);
+- either UI passes an operation name it cannot read, such as a name built at run time, a variable or a nested generic;
+- a desk-web-only operation (`webChannels`) goes unused;
+- a route other than the tray has no web screen.
+
+So call every operation by its literal name in both UIs: `call('daemon.stop', {})`, never a template string.
+
+### End-to-end tests
+
+The suite lives in `apps/web-ui/e2e`, on `startWebE2E` in `harness.ts`. Each file starts a real deskd on the fake model, inside the test process, and desk web in front of it. Both get a temporary home and data dir, so the real ones are never touched.
 
 | File | Covers |
 |---|---|
@@ -40986,13 +41025,22 @@ The end-to-end suite (`apps/web-ui/e2e`, on `startWebE2E` in `harness.ts`):
 | `catalog.e2e.test.ts` | The shipped catalog with two local stand-ins: review, install with its runtime, the skill on the map, a project install; refine and restore a skill; import from `~/.claude/skills` through the folder browser; turn a built-in skill off and duplicate one |
 | `system.e2e.test.ts` | The model registry editor (a duplicate refused, a new model saved and reloaded, a draft discarded); deskd without Repair; the notification switches; ⌘K and ⌘P |
 
+`pnpm test:web-e2e` also runs `apps/web-server/src/built-ui.e2e.test.ts`, which checks that the built `index.html` has no inline code. The files run one at a time. To run one file against the current build:
+
+```sh
+pnpm --filter @desk/web-ui build
+pnpm exec vitest run --config vitest.web-e2e.config.ts apps/web-ui/e2e/system.e2e.test.ts
+```
+
+The pages run in Playwright's Chromium. By default that is its headless shell, the lighter one. `system.e2e.test.ts` opts into the full Chromium in headless mode (`startWebE2E({ chromium: 'full' })`), because the shell reports every notification permission as denied, even a granted one. Both come from Playwright's own install.
+
 Set `DESK_E2E_SHOTS=<dir>` to save screenshots (`web-<name>.png`).
 
 ## Troubleshooting
 
-- **"Open Desk from your terminal":** this browser has no valid session (a new browser, cleared data, desk web restarted, or a login link used twice). Press Enter where `desk web` runs for a new link, or start it again with `desk web`.
-- **"Reconnecting to desk web":** the page lost desk web. It retries by itself; if desk web was stopped, run it again and sign in with the new link.
-- **"Desk isn’t running" overlay:** use Start Desk, or run `desk up`. Logs are in `<data dir>/logs/` (System → Reveal logs opens the folder).
+- **"Open Desk from your terminal":** this browser has no valid session. It may be a new browser, its data was cleared, desk web restarted, or a login link was used twice. Press Enter where `desk web` runs for a new link, or start it again with `desk web`.
+- **"Reconnecting to desk web":** the page lost desk web. It retries by itself. If desk web was stopped, run it again and sign in with the new link.
+- **"Desk isn’t running" overlay:** use Start Desk, or run `desk up`. deskd's logs are in `<data dir>/logs/` (System → Reveal logs opens the folder), next to desk web's `web.log`.
 - **The port is taken:** `desk web --port <n>`. The browser keeps a separate session, onboarding and drafts per port.
 - **No notifications:** check System → Notifications, the browser's permission for `http://127.0.0.1:<port>`, and that the Desk tab is in the background.
 ````
@@ -41014,16 +41062,22 @@ After:
 
 - [ ] **Step 3: Finish `CLAUDE.md`**
 
-The opening paragraph, before:
+The opening paragraph stays as master wrote it (a later merge of master then does not conflict on it). A new paragraph goes after it, before:
 
 ```md
 Desk is a local-first macOS daemon (`deskd`), a CLI (`desk`) and an Electron desktop app (`apps/desktop`, see `docs/desktop.md`). A per-project coordinator agent ("Desk") dispatches parallel worker agents ("threads"). It also manages shared memory, a library, and skills (instructions plus scripts). Every client goes through the API in `docs/api.md`.
+
+- **Design:** `docs/superpowers/specs/2026-09-23-desk-daemon-design.md`. §14 lists deviations from the original design.
 ```
 
 After:
 
 ```md
-Desk is a local-first macOS daemon (`deskd`), a CLI (`desk`), an Electron desktop app (`apps/desktop`, see `docs/desktop.md`) and a web UI that `desk web` serves to a browser on this computer (`apps/web-server` and `apps/web-ui`, see `docs/web.md`). A per-project coordinator agent ("Desk") dispatches parallel worker agents ("threads"). It also manages shared memory, a library, and skills (instructions plus scripts). Every client goes through the API in `docs/api.md`.
+Desk is a local-first macOS daemon (`deskd`), a CLI (`desk`) and an Electron desktop app (`apps/desktop`, see `docs/desktop.md`). A per-project coordinator agent ("Desk") dispatches parallel worker agents ("threads"). It also manages shared memory, a library, and skills (instructions plus scripts). Every client goes through the API in `docs/api.md`.
+
+Desk also has a web UI, which `desk web` serves to a browser on this computer (`apps/web-server` and `apps/web-ui`, see `docs/web.md`). Like the desktop app, it is a client of the same `deskd`.
+
+- **Design:** `docs/superpowers/specs/2026-09-23-desk-daemon-design.md`. §14 lists deviations from the original design.
 ```
 
 Layout, under `apps/web-ui` (W0c.16's bullets), before:
@@ -41063,18 +41117,22 @@ After:
 - **Two UIs.** From Plan 17 on, a UI feature ships in the Electron renderer and in the web UI together. Put its logic in `@desk/ui-core`, its styles in `@desk/ui-styles` and any new operation in `@desk/bff/contract`, so the two UIs only differ in their components. Call operations by their literal name in both (`call('daemon.stop', {})`, never a template string), so the parity guard can see them.
 ```
 
-Invariants, before (the original line and W0b.14's):
+Invariants. Master's line stays as it is. W0b.14's line, which comes after it, now states the invariant for both UIs, and the parity guard's line goes at the end of the list, after W0c.16's no-HTML line. Before (W0b.14's line):
 
 ```md
-- The desktop renderer never sees the daemon token; every IPC payload is validated in main.
 - desk web never gives the browser the daemon token either. It answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
 ```
 
 After:
 
 ```md
-- Neither UI ever sees the daemon token. The desktop renderer reaches deskd only through Electron main, which validates every IPC payload; the web UI only through desk web, which answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
-- UI features ship in both UIs. `apps/web-ui/src/app/parity.spec.ts` fails when the web UI does not call an operation the React renderer calls (only the desktop host's `app.openMain` and `daemon.repair` are exempt), when either UI builds an operation name at run time, when a `webChannels` operation goes unused, or when a route other than the tray has no web screen. What only a desktop host has (the tray, native menus and windows, launch at login, LaunchAgent repair) stays out of the web UI.
+- The web UI never sees the daemon token either, so neither UI does: desk web keeps it. desk web answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
+```
+
+Appended as the list's last line:
+
+```md
+- UI features ship in both UIs. `apps/web-ui/src/app/parity.spec.ts` fails when the web UI does not call an operation the React renderer calls (only the desktop host's `app.openMain` and `daemon.repair` are exempt), when either UI passes an operation name the guard cannot read (built at run time, a variable, a nested generic), when a `webChannels` operation goes unused, or when a route other than the tray has no web screen. What only a desktop host has (the tray, native menus and windows, launch at login, LaunchAgent repair) stays out of the web UI.
 ```
 
 - [ ] **Step 4: Read it through**
@@ -41104,6 +41162,18 @@ pnpm test:web-e2e # builds the web UI, checks its index.html, and runs the Playw
 
 Run: ``grep -cE '^- `(packages/bff|packages/ui-core|packages/ui-styles|apps/web-server|apps/web-ui)`' CLAUDE.md``
 Expected: `5` (W0a.6's three packages, W0b.14's `apps/web-server`, W0c.16's `apps/web-ui`).
+
+**Deviation (as run):** the blocks above are the files as committed. Every command, path, flag and file name in `docs/web.md` was checked against the code (`apps/cli/src/commands.ts`, `apps/web-server/src/{command,server,files,security,rpc,push,auth}.ts`, `packages/bff/src/server/{daemon,notify}.ts`, the web UI's `system-screen.ts`, `notifications.ts`, `folder-browser.ts`, `connection-overlay.ts` and `signed-out.ts`, `apps/web-ui/e2e/harness.ts`, the root and `apps/web-ui` `package.json` scripts). It differs from the plan's first text as follows.
+- **Start.** The link bullet is split into short sentences. It adds that the opened and the printed link carry different codes, and that a replay prints a warning in the terminal (`server.ts`). The deskd bullet is split into sub-bullets and adds that desk web never writes or removes the LaunchAgent.
+- **What differs.** Hidden folders are on by default for a skill import (`folder-browser.ts` sets `hidden` for `skill-import`). The Appearance row says the choices are disabled, as `AppearanceSection` renders them. The System → deskd row names the missing Install LaunchAgent and `not_offered`. "Menu bar, window menus" became "The tray (menu bar popover), native menus": the desktop's menu bar item is the tray.
+- **Notifications.** The switch saves without waiting on the browser's answer (W3b.2's second review fix), and the two hints are described as the code words them ("Allow notifications", the browser's site settings). desk web notifies every new attention item, not four kinds: `onAttentionAdded` has no filter, and `notificationFor` words all six kinds.
+- **Files desk web keeps** is a new section: `web.json`, `web-settings.json` (its schema holds `port` and `notifications` only), `web-login-<random>.html` and `logs/web.log`, with who reads each and when each goes away. The plan's text named them only in passing.
+- **Architecture and security.** The web-server bullet became a list and names `/healthz`. The Host check covers the WebSocket upgrade (`upgrade.ts`), and `/rpc` takes only JSON (415) up to 40 MB (413, `MAX_RPC_BODY`). The last security bullet carries `CLAUDE.md`'s caveat: a command or service started before desk web took its port can reach it until it restarts.
+- **Development.** It adds the one-spec command. The parity guard has its own subsection, which names what it flags since its review fixes (a variable or a nested generic, as well as a name built at run time) and the literal-name rule. The e2e subsection says what the harness starts (an in-process deskd on the fake model, desk web, a temporary home and data dir), that `pnpm test:web-e2e` also runs `built-ui.e2e.test.ts`, how to run one file, and that `system.e2e.test.ts` opts into the full Chromium (`startWebE2E({ chromium: 'full' })`, W3b.6's deviation).
+- **Troubleshooting** points at desk web's own `web.log` next to deskd's logs.
+- **`CLAUDE.md`: add lines, don't rewrite master's.** Master's opening paragraph and its token line stay as they are, so a later merge of master conflicts as little as possible. The web UI gets its own paragraph after the opening one. W0b.14's token line (web-ui's own) now states the invariant for both UIs. The parity guard's invariant goes at the end of the list. Its wording follows the guard's review fixes: "passes an operation name the guard cannot read (built at run time, a variable, a nested generic)" in place of "builds an operation name at run time". The layout and Two UIs edits are as planned; they touch only web-ui's lines.
+- **Master's `CLAUDE.md`.** `git fetch origin master` left `origin/master` at 79b8f54, which web-ui already merged (8883229). The local `master` (99ec309) adds only Plan 19 and the automations spec, and changes neither `CLAUDE.md` nor `docs/desktop.md`. So master's built-in skills lines (`pnpm builtins:pin`, `skills/builtins.ts`, the built-in skills invariant) are already in web-ui's copy, and there was nothing more to reconcile.
+- **Step 4** printed what it expects: ` M CLAUDE.md`, ` M docs/desktop.md` and `?? docs/web.md`, and nothing for `docs/api.md`; no `NotYet`; `CLAUDE.md:2` and `docs/web.md:1`; four `ok` lines; the three command lines; and `5`.
 
 - [ ] **Step 5: Commit**
 

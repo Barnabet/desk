@@ -5,6 +5,7 @@ The desktop app (`apps/desktop`) is an Electron + React client for `deskd`. It u
 - **Spec:** [`superpowers/specs/2026-09-24-desk-desktop-app-design.md`](superpowers/specs/2026-09-24-desk-desktop-app-design.md)
 - **Plans:** 7 to 12 in [`superpowers/plans/`](superpowers/plans/)
 - **API it consumes:** [`api.md`](api.md)
+- **In a browser:** the same screens, served by `desk web`: [`web.md`](web.md)
 
 ## Install
 

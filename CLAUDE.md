@@ -2,6 +2,8 @@
 
 Desk is a local-first macOS daemon (`deskd`), a CLI (`desk`) and an Electron desktop app (`apps/desktop`, see `docs/desktop.md`). A per-project coordinator agent ("Desk") dispatches parallel worker agents ("threads"). It also manages shared memory, a library, and skills (instructions plus scripts). Every client goes through the API in `docs/api.md`.
 
+Desk also has a web UI, which `desk web` serves to a browser on this computer (`apps/web-server` and `apps/web-ui`, see `docs/web.md`). Like the desktop app, it is a client of the same `deskd`.
+
 - **Design:** `docs/superpowers/specs/2026-09-23-desk-daemon-design.md`. §14 lists deviations from the original design.
 - **Plans:** `docs/superpowers/plans/`.
 - **API:** `docs/api.md`.
@@ -74,8 +76,9 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - `apps/web-ui`: `@desk/web-ui`, the Angular 22 web UI that `desk web` serves from `dist/browser` (zoneless, standalone components, signals, OnPush, no Router: the desktop's hash routes through `@desk/ui-core`).
   - `src/app/core/`: `DeskBridge`, the only way to desk web (`/rpc` with the session secret, the `/push` socket, and the host operations done in the browser), and one service per renderer state module (`GlobalStore`, `SessionService`, `RouteService`, `LastProject`, `Unread`, …), plus `WebNotifications`.
   - `src/app/components/` and one folder per place, as in the renderer: one component per React component, same file name in kebab case, same DOM and class names, the attribute selector on the React root element (`header[deskTitleBar]`), inputs named like the React props.
-  - `src/app/app.ts`: the shell. `src/app/screen-for.ts`: the component each route shows (`NotYet` until its phase lands).
+  - `src/app/app.ts`: the shell, with the ⌘K `CommandPalette` (`PaletteToggle`) and the folder browser. `src/app/screen-for.ts`: the screen each route shows, with the inputs the desktop passes. `src/app/parity.spec.ts`: the parity guard (see Invariants).
   - `src/app/testing/fake-bridge.ts`: `FakeDeskBridge` and `provideGlobal` for specs.
+  - `e2e/`: Playwright/Chromium scenarios on `startWebE2E` (`harness.ts`): `smoke`, `flows`, `knowledge`, `catalog`, `system`.
 - `test/fake-model`: a scriptable OpenAI-compatible server. Every non-live test talks to it.
 - `catalog/skills/`: Desk's built-in skills, shipped with the app and read-only (spec `2026-09-26-builtin-skills-design.md`): one per file-type group (`file-inspector`, `word-documents`, `pdf-toolkit`, `spreadsheets`, `presentations`, `images`, `audio-video`, `data-files`, `archives`, `markup-ebooks`, `email-calendar`; spec `2026-09-24-file-type-skills-design.md`) and `web-research` (spec `2026-09-24-web-research-design.md`). Each is SKILL.md + Python scripts + `packages.txt` (its pinned Python packages) with a `scripts/selftest.py` (its smoke command) and must run on Windows too (`firstparty.test.ts` lints for that). After editing one, run `pnpm builtins:pin <name>`; `skills/builtins.test.ts` fails when a digest is stale.
 - `catalog/shared/`: the source of truth for modules copied into those skills (`_common.py` CLI plumbing, `_render.py` LibreOffice/PDF/Typst/pandoc/ffmpeg helpers, `_cache.py` the content-addressed cache for big files, `_paging.py` paged listings with the exact next command, `_pandoc_safe.py` keeps pandoc inside a document's folder). Edit them here, then `pnpm catalog:sync`.
@@ -102,7 +105,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - Web e2e tests are `apps/web-ui/e2e/*.e2e.test.ts` on `startWebE2E` (`apps/web-ui/e2e/harness.ts`). They use Vitest globals and never import `vitest`: `apps/web-ui` resolves its own copy (the Angular runner's).
   - Web UI specs are `apps/web-ui/src/**/*.spec.ts` (Vitest through `@angular/build:unit-test`, jsdom), written with `@testing-library/angular` and `FakeDeskBridge`; they need no daemon or fake model. A port of a React test keeps its cases, visible text and roles. Run one with `(cd apps/web-ui && node ../../scripts/ng.mjs test --watch=false --include <spec>)`.
 - **Secrets.** The model API key comes from `DESK_OPENAI_*`, `~/.config/cliproxyapi.env`, or the macOS Keychain (written by `PUT /v1/config/model-endpoint` via `security -i` on stdin, never argv). It must never reach logs, events, `daemon.json`, `config.json`, API responses or tool environments; `scrubbedEnv` builds tool envs.
-- **Two UIs.** From Plan 17 on, a UI feature ships in the Electron renderer and in the web UI together. Put its logic in `@desk/ui-core`, its styles in `@desk/ui-styles` and any new operation in `@desk/bff/contract`, so the two UIs only differ in their components.
+- **Two UIs.** From Plan 17 on, a UI feature ships in the Electron renderer and in the web UI together. Put its logic in `@desk/ui-core`, its styles in `@desk/ui-styles` and any new operation in `@desk/bff/contract`, so the two UIs only differ in their components. Call operations by their literal name in both (`call('daemon.stop', {})`, never a template string), so the parity guard can see them.
 - **Style.** Strict TS with `noUncheckedIndexedAccess`, ESM, and short doc comments on non-obvious exports. Match the surrounding code.
 
 ## Invariants worth protecting
@@ -118,5 +121,6 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
 - Only the user installs catalog skills; every install is checked against its pinned digest, and `<data>/runtimes` is read-only to agents. Installers get a minimal environment (no secrets), npm install scripts never run, and `` !`cmd` `` blocks in skills are never executed.
 - Desk never merges branches.
 - The desktop renderer never sees the daemon token; every IPC payload is validated in main.
-- desk web never gives the browser the daemon token either. It answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
+- The web UI never sees the daemon token either, so neither UI does: desk web keeps it. desk web answers only `Host: 127.0.0.1:<port>` (421 otherwise), takes `/rpc` and `/push` only from `Origin: http://127.0.0.1:<port>` with a session secret, validates every payload by its schema, and never sets a cookie.
 - The web UI never turns text into HTML: no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `setHTMLUnsafe`, `parseHTMLUnsafe`, `DOMParser`, `DomSanitizer`, `bypassSecurityTrust*`, `srcdoc`, `eval` or `document.write` in `apps/web-ui/src` (`security.spec.ts` fails on them). Agent markdown goes through `SafeMarkdown`, which renders `marked`'s tokens with Angular templates, and links through `ExternalLink` (`safeExternalUrl`, then a confirmation).
+- UI features ship in both UIs. `apps/web-ui/src/app/parity.spec.ts` fails when the web UI does not call an operation the React renderer calls (only the desktop host's `app.openMain` and `daemon.repair` are exempt), when either UI passes an operation name the guard cannot read (built at run time, a variable, a nested generic), when a `webChannels` operation goes unused, or when a route other than the tray has no web screen. What only a desktop host has (the tray, native menus and windows, launch at login, LaunchAgent repair) stays out of the web UI.
