@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectOverview } from '@desk/client';
 import type { AutomationSummary, StoredEvent } from '@desk/protocol';
 import { initialGlobalState } from '@desk/bff/contract';
@@ -8,7 +8,10 @@ import { automationDetail, automationSummary } from '@desk/ui-core/testing';
 import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
 import { installBridge } from '../test/bridge';
+import { installReactFlowShims } from '../test/reactflow';
 import { AutomationsScreen } from './AutomationsScreen';
+
+beforeAll(installReactFlowShims);
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -126,6 +129,7 @@ describe('Automation header', () => {
     const d = automationDetail({ last_run: run({ id: 'r14', number: 14, status: 'running', finished_at: null }), grants: [{ tool: 'web_fetch', match: { domain: 'acme.com' }, action: 'allow' }] });
     const bridge = setup({
       'automations.get': () => d,
+      'automations.validate': () => ({ errors: [], warnings: [], next_times: {} }),
       'automations.setEnabled': () => ({ ...d, enabled: false }),
       'automations.export': () => ({ format: 'desk-automation/1', name: 'digest', definition: d.definition }),
       'app.saveFile': () => true,

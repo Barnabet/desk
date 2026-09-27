@@ -5,6 +5,7 @@ import { useSession, type SessionState } from '../state/session';
 import { AutomationHeader, DraftHeader } from './AutomationHeader';
 import { AutomationList } from './AutomationList';
 import { useAutomation } from './data';
+import { DesignView } from './design/DesignView';
 import { VersionsView } from './versions/VersionsView';
 
 /** The Automations tab (spec §8.1): the list, one automation (header, then Design, Runs, Versions or Grants), or a new draft. */
@@ -55,9 +56,12 @@ function AutomationBody(o: { projectId: string; s: SessionState; view: Automatio
     case 'grants':
       return <EmptyState title="Grants">What its runs may do without asking shows here.</EmptyState>;
     default:
-      return <EmptyState title="Design">The graph editor shows here.</EmptyState>;
+      return <DesignView key={o.detail.id} projectId={o.projectId} sources={gitSources(o.s)} detail={o.detail} onChange={o.onChange} />;
   }
 }
+
+/** The project's git sources, for an agent step's worktree. */
+const gitSources = (s: SessionState) => (s.project?.sources ?? []).filter((x) => x.kind === 'git').map((x) => ({ id: x.id, label: x.label }));
 
 /** A Blank automation before its first save (spec §8.1): only Design, on a local draft. */
 function DraftAutomation(o: { projectId: string; s: SessionState; name: string }) {
@@ -65,7 +69,7 @@ function DraftAutomation(o: { projectId: string; s: SessionState; name: string }
     <div className="automation">
       <DraftHeader projectId={o.projectId} name={o.name} />
       <div className="automation-body">
-        <EmptyState title="Design">The graph editor shows here.</EmptyState>
+        <DesignView key={o.name} projectId={o.projectId} sources={gitSources(o.s)} draftName={o.name} />
       </div>
     </div>
   );
