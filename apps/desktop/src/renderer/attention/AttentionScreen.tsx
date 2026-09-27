@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AttentionItem } from '@desk/protocol';
-import { href, plural, rackOrder, STRIP_CODE, waited } from '@desk/ui-core';
+import { automationTarget, href, plural, rackOrder, STRIP_CODE, waited } from '@desk/ui-core';
 import { call, DeskCallError } from '../bridge';
 import { EmptyState } from '../components/EmptyState';
 import { toast, toastError } from '../components/Toast';
@@ -13,6 +13,8 @@ import { StripRack } from './StripRack';
 const WHO: Record<string, string> = { user: 'you, in another window', desk: 'Desk', system: 'Desk (the thread was stopped)' };
 
 function openTarget(i: AttentionItem): string {
+  const automation = automationTarget(i);
+  if (automation) return href(automation);
   if ((i.kind === 'stalled' || i.kind === 'failed' || i.kind === 'approval') && i.ref.thread_id) return href({ name: 'project', id: i.project_id, tab: 'threads', threadId: i.ref.thread_id });
   return href({ name: 'project', id: i.project_id, tab: 'conversation' });
 }
@@ -54,11 +56,11 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
   const select = useCallback((id: string) => replaceRoute({ name: 'attention', item: id }), []);
 
   const resolve = useCallback(
-    async (decision: 'approved' | 'denied') => {
+    async (decision: 'approved' | 'denied', remember = false) => {
       if (!selected || selected.kind !== 'approval' || !selected.ref.approval_id || busy) return;
-      setBusy(decision);
+      setBusy(remember ? 'remember' : decision);
       try {
-        await call('approvals.resolve', { id: selected.ref.approval_id, decision, ...(note.trim() ? { note: note.trim() } : {}) });
+        await call('approvals.resolve', { id: selected.ref.approval_id, decision, ...(note.trim() ? { note: note.trim() } : {}), ...(remember ? { remember: true } : {}) });
       } catch (err) {
         if (err instanceof DeskCallError && err.status === 409) {
           const all = await call('approvals.list', { projectId: selected.project_id }).catch(() => []);
@@ -145,16 +147,16 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
             <span className="strip-code-badge code-approval">{STRIP_CODE.approval}</span>Approval
           </span>
           <span>
-            <span className="strip-code-badge code-question">{STRIP_CODE.question}</span>Question from Desk
+            <span className="strip-code-badge code-question">{STRIP_CODE.question}</span>Question (Desk or an automation)
           </span>
           <span>
-            <span className="strip-code-badge code-needs_you">{STRIP_CODE.needs_you}</span>From a report
+            <span className="strip-code-badge code-needs_you">{STRIP_CODE.needs_you}</span>From a report, or an automation to turn on
           </span>
           <span>
-            <span className="strip-code-badge code-stalled">{STRIP_CODE.stalled}</span>Stalled thread
+            <span className="strip-code-badge code-stalled">{STRIP_CODE.stalled}</span>Stalled thread, or suspended grants
           </span>
           <span>
-            <span className="strip-code-badge code-failed">{STRIP_CODE.failed}</span>Failed thread
+            <span className="strip-code-badge code-failed">{STRIP_CODE.failed}</span>Failed thread or automation
           </span>
           <span>
             <span className="strip-code-badge code-paused">{STRIP_CODE.paused}</span>Paused project
@@ -170,7 +172,7 @@ export function AttentionScreen({ itemId }: { itemId?: string }) {
             index={index}
             total={flat.length}
             now={now}
-            a={{ note, setNote, busy, answered: answered.has(selected.id), resolve: (d) => void resolve(d), answer: (t) => void answer(t), dismiss: () => void dismiss(), open }}
+            a={{ note, setNote, busy, answered: answered.has(selected.id), resolve: (d, remember) => void resolve(d, remember), answer: (t) => void answer(t), dismiss: () => void dismiss(), open }}
           />
         ) : (
           <EmptyState title="All clear" action={<a href="#/map">Back to the map</a>}>

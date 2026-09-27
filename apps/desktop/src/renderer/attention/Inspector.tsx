@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { AttentionItem } from '@desk/protocol';
-import { clock, href, KIND_NAME, policyReason, STRIP_CODE, waited } from '@desk/ui-core';
+import { automationTarget, clock, href, KIND_NAME, policyReason, STRIP_CODE, waited } from '@desk/ui-core';
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
 import { SafeMarkdown } from '../components/SafeMarkdown';
 import { useSession, useTranscript } from '../state/session';
+import { AutomationCard, useAutomationItem } from './AutomationCards';
 
 const SHELL = new Set(['bash', 'bash_background', 'bash_readonly']);
 
@@ -26,7 +27,7 @@ export type InspectorActions = {
   setNote(v: string): void;
   busy: string | null;
   answered: boolean;
-  resolve(decision: 'approved' | 'denied'): void;
+  resolve(decision: 'approved' | 'denied', remember?: boolean): void;
   answer(text: string): void;
   dismiss(): void;
   open(): void;
@@ -61,6 +62,11 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
   const threadHref = i.ref.thread_id ? href({ name: 'project', id: i.project_id, tab: 'threads', threadId: i.ref.thread_id }) : null;
   const args = approval ? describeArgs(approval.tool, approval.arguments) : null;
   const why = policyReason(i.detail || approval?.reason || '');
+  const auto = useAutomationItem(i);
+  const target = automationTarget(i);
+  /** A step agent's approval names its step (spec §8.4). */
+  const step = i.kind === 'approval' && i.ref.automation_id ? (auto.detail?.definition.steps.find((x) => x.id === i.ref.step_id)?.title ?? i.ref.step_id ?? 'a step') : null;
+  const suspended = auto.detail?.grants_suspended ?? true;
 
   return (
     <article className="card inspector" aria-label={`Selected: ${KIND_NAME[i.kind].toLowerCase()}`}>
@@ -100,7 +106,11 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
             <Fact label="TOOL" mono>
               {approval?.tool ?? '—'}
             </Fact>
-            <Fact label={agent?.role === 'desk' ? 'ASKED BY' : 'THREAD'}>{threadHref ? <a href={threadHref}>{agent?.title ?? 'Thread'}</a> : 'Desk'}</Fact>
+            {step !== null ? (
+              <Fact label="AUTOMATION">{target && auto.detail ? <a href={href(target)}>{`${auto.detail.title} · ${step}`}</a> : step}</Fact>
+            ) : (
+              <Fact label={agent?.role === 'desk' ? 'ASKED BY' : 'THREAD'}>{threadHref ? <a href={threadHref}>{agent?.title ?? 'Thread'}</a> : 'Desk'}</Fact>
+            )}
             <Fact label="BRANCH" mono>
               {agent?.git_branch ?? 'scratch workspace'}
             </Fact>
@@ -121,7 +131,7 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
               </div>
             </div>
             <div className="why-row">
-              <span className="why-label">What the thread said</span>
+              <span className="why-label">{step !== null ? 'What the step agent said' : 'What the thread said'}</span>
               {lastWords ? <SafeMarkdown className="why-quote" text={lastWords} /> : <p className="muted">Nothing yet.</p>}
             </div>
           </div>
@@ -133,6 +143,11 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
             <Button variant="primary" pending={a.busy === 'approved'} disabled={a.busy !== null} onClick={() => a.resolve('approved')}>
               Approve once <kbd>⌘⏎</kbd>
             </Button>
+            {step !== null && !suspended ? (
+              <Button pending={a.busy === 'remember'} disabled={a.busy !== null} onClick={() => a.resolve('approved', true)}>
+                Approve and remember for this automation
+              </Button>
+            ) : null}
             <Button pending={a.busy === 'denied'} disabled={a.busy !== null} onClick={() => a.resolve('denied')}>
               Deny <kbd>⌘⌫</kbd>
             </Button>
@@ -141,7 +156,13 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
               Edit policy rules
             </a>
           </div>
-          <p className="muted small">The thread resumes as soon as you decide. If you deny, it's told why and tries another way.</p>
+          <p className="muted small">
+            {step === null
+              ? "The thread resumes as soon as you decide. If you deny, it's told why and tries another way."
+              : auto.detail?.grants_suspended
+                ? 'The step resumes as soon as you decide. Its grants are suspended until you keep them, so nothing is remembered.'
+                : 'The step resumes as soon as you decide. Remember adds a grant, so its later runs do this without asking.'}
+          </p>
         </>
       ) : i.kind === 'question' ? (
         <>
@@ -182,6 +203,8 @@ export function Inspector(o: { item: AttentionItem; index: number; total: number
             </Button>
           </div>
         </>
+      ) : i.kind.startsWith('automation_') ? (
+        <AutomationCard item={i} a={a} auto={auto} />
       ) : i.kind === 'paused' ? (
         <>
           <h2 className="inspector-title">{i.title}</h2>

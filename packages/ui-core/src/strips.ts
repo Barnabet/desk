@@ -2,6 +2,7 @@ import { groupAttention, type AttentionBays } from '@desk/client';
 import type { AttentionItem } from '@desk/protocol';
 import { STRIP_CODE } from '@desk/bff/contract';
 import { duration } from './format';
+import type { Route } from './router';
 
 export const BAYS: Array<{ key: keyof AttentionBays; name: string; sub: string }> = [
   { key: 'clearance', name: 'CLEARANCE', sub: 'Approvals' },
@@ -24,11 +25,40 @@ export const gauge = (createdAt: string, now: number) => Math.min(1, Math.max(0.
 
 export const waited = (createdAt: string, now: number) => duration(Math.max(0, now - Date.parse(createdAt)));
 
+/** The automation an item is about, read from the daemon's titles (`packages/core/src/state/attention.ts`). */
+function automationName(i: AttentionItem): string {
+  switch (i.kind) {
+    case 'automation_failed':
+      return i.title.replace(/ failed$/, '');
+    case 'automation_enable_request':
+      return i.title.replace(/^Desk proposes turning on /, '');
+    case 'automation_grants_suspended':
+      return i.title.replace(/ changed: its grants are suspended$/, '');
+    default:
+      // Asks ("<title>: <question>", "<title> · <step> wants to run …") and step agents' approvals ("<title> · <step> wants to run …").
+      return /^(.*?)(?: · |: )/.exec(i.title)?.[1] ?? i.title;
+  }
+}
+
+/**
+ * Where an automation item opens (spec §8.4): the run for asks, failures and step agents' approvals, the Grants tab
+ * for suspended grants, the automation for Desk's turn-on request. Null for items about no automation.
+ */
+export function automationTarget(i: AttentionItem): Route | null {
+  const automationId = i.ref.automation_id;
+  if (!automationId) return null;
+  const at = { name: 'project' as const, id: i.project_id, tab: 'automations' as const, automationId };
+  if (i.kind === 'automation_grants_suspended') return { ...at, view: 'grants' };
+  if (i.ref.run_id && i.kind !== 'automation_enable_request') return { ...at, view: 'runs', runId: i.ref.run_id };
+  return { ...at, view: 'design' };
+}
+
 /** The strip's third column: who is involved and a short tag. */
 export function stripWho(i: AttentionItem, threadTitle: (id: string) => string | null): { label: string; name: string; tag: string } {
   switch (i.kind) {
     case 'approval': {
       const tool = /wants to run (.+)$/.exec(i.title)?.[1] ?? '';
+      if (i.ref.automation_id) return { label: 'Automation', name: automationName(i), tag: tool };
       return i.ref.thread_id ? { label: 'Thread', name: threadTitle(i.ref.thread_id) ?? 'A thread', tag: tool } : { label: 'Asked by', name: 'Desk', tag: tool };
     }
     case 'question':
@@ -37,6 +67,14 @@ export function stripWho(i: AttentionItem, threadTitle: (id: string) => string |
       return { label: 'From', name: "Desk's report", tag: 'needs_you' };
     case 'paused':
       return { label: 'Project', name: i.project_name, tag: 'paused' };
+    case 'automation_ask':
+      return { label: 'Automation', name: automationName(i), tag: / wants to run /.test(i.title) ? 'script' : 'question' };
+    case 'automation_failed':
+      return { label: 'Automation', name: automationName(i), tag: 'failed' };
+    case 'automation_enable_request':
+      return { label: 'Automation', name: automationName(i), tag: 'turn on?' };
+    case 'automation_grants_suspended':
+      return { label: 'Automation', name: automationName(i), tag: 'grants' };
     default:
       return { label: 'Thread', name: (i.ref.thread_id && threadTitle(i.ref.thread_id)) || i.title.replace(/ (has stalled|failed)$/, ''), tag: i.kind };
   }

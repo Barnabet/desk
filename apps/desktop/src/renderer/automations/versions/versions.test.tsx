@@ -31,7 +31,8 @@ describe('VersionsView', () => {
     expect((screen.getByLabelText('Compare') as HTMLSelectElement).value).toBe('6');
     expect((screen.getByLabelText('with') as HTMLSelectElement).value).toBe('7');
     const diff = await screen.findByRole('region', { name: 'Changes from v6 to v7' });
-    expect(within(diff).getByText('Publish?')).toBeTruthy();
+    // The region shows at once; its diff arrives once both versions have loaded.
+    expect(await within(diff).findByText('Publish?')).toBeTruthy();
     expect(within(diff).getByText('Summarise → Publish?')).toBeTruthy();
 
     fireEvent.click(within(v6).getByRole('button', { name: 'Restore…' }));

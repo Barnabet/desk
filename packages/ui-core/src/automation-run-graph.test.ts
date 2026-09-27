@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ev } from '@desk/client/testing';
 import { runDetail, stepRun } from './testing/automations';
-import { agentActivity, agentTokens, askDeskText, canStopStep, firedEdges, focusStep, outputText, relRunPath, runGraph, stepLook } from './automation-run-graph';
+import { agentActivity, agentTokens, askDeskText, canStopStep, firedEdges, focusStep, outputText, relRunPath, runFailure, runGraph, stepLook } from './automation-run-graph';
 
 const now = Date.parse('2026-09-28T06:06:12.000Z');
 
@@ -67,5 +67,15 @@ describe('step results', () => {
     expect(outputText(3)).toBe('3');
     expect(outputText(null)).toBe('—');
     expect(outputText(false)).toBe('false');
+  });
+});
+
+describe('runFailure', () => {
+  it('names the step that failed and its error, else the run’s reason', () => {
+    const failed = runDetail({ status: 'failed', reason: 'step fetch failed', steps: [stepRun('fetch', { status: 'failed', error: 'exit 1\nTraceback' }), ...runDetail().steps.slice(1)] });
+    expect(runFailure(failed)).toEqual({ stepTitle: 'Fetch pages', error: 'exit 1\nTraceback' });
+    const late = runDetail({ status: 'failed', at_step: 'Summarise', reason: 'past its deadline' });
+    expect(runFailure(late)).toEqual({ stepTitle: 'Summarise', error: 'past its deadline' });
+    expect(runFailure(runDetail({ status: 'failed', at_step: null, reason: null }))).toEqual({ stepTitle: 'Weekly digest', error: 'It failed.' });
   });
 });

@@ -103,3 +103,10 @@ export function outputText(v: OutputValue): string {
   if (v === null) return '—';
   return Array.isArray(v) ? v.map(String).join('\n') : String(v);
 }
+
+/** What made a run fail, for Ask Desk to fix: the step that failed and its error, else the step it was at and the run's reason. */
+export function runFailure(run: RunDetail): { stepTitle: string; error: string } {
+  const row = run.steps.find((s) => s.status === 'failed');
+  if (row) return { stepTitle: run.definition.steps.find((s) => s.id === row.step_id)?.title ?? row.step_id, error: row.error ?? run.reason ?? 'It failed.' };
+  return { stepTitle: run.at_step ?? run.automation_title, error: run.reason ?? 'It failed.' };
+}

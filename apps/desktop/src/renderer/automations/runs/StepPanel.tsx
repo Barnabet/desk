@@ -47,7 +47,7 @@ export function StepPanel(o: Props) {
   );
 }
 
-function AskAnswer({ run, row }: { run: RunDetail; row: StepRunInfo }) {
+export function AskAnswer({ run, row }: { run: RunDetail; row: StepRunInfo }) {
   const q = row.question!;
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -84,7 +84,7 @@ function AskAnswer({ run, row }: { run: RunDetail; row: StepRunInfo }) {
   );
 }
 
-function GateAnswer({ run, row, grantsSuspended }: { run: RunDetail; row: StepRunInfo; grantsSuspended: boolean }) {
+export function GateAnswer({ run, row, grantsSuspended }: { run: RunDetail; row: StepRunInfo; grantsSuspended: boolean }) {
   const gate = row.gate!;
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
