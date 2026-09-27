@@ -126,4 +126,23 @@ describe('fs.listDirs', () => {
     const { home, deps } = layout();
     await expect(listDirs({ path: join(home, 'library', 'application support', 'desk') }, deps)).rejects.toMatchObject({ code: 'not_allowed' });
   });
+
+  it('lists files too when asked, hidden ones only with hidden, and never through a link that leaves the allowed folders', async () => {
+    const { home, outside, deps } = layout();
+    writeFileSync(join(home, '.env'), 'x');
+    writeFileSync(join(outside, 'secret', 'key.txt'), 'x');
+    const l = await listDirs({ files: true }, deps);
+    expect(l.files).toEqual([{ name: 'notes.txt', path: join(home, 'notes.txt') }]);
+    expect(names(l)).toEqual(['code', 'code-link', 'Documents', 'Library']);
+    expect((await listDirs({}, deps)).files).toBeUndefined();
+    expect((await listDirs({ files: true, hidden: true }, deps)).files?.map((f) => f.name)).toEqual(['.env', 'notes.txt']);
+    // File symlinks need privileges on Windows; the confinement is the folders' own, which the tests above cover there.
+    if (process.platform !== 'win32') {
+      symlinkSync(join(outside, 'secret', 'key.txt'), join(home, 'key-link.txt'));
+      symlinkSync(join(home, 'notes.txt'), join(home, 'notes-link.txt'));
+      const linked = await listDirs({ files: true }, deps);
+      expect(linked.files?.map((f) => f.name).sort()).toEqual(['notes-link.txt', 'notes.txt']);
+      expect(linked.files?.find((f) => f.name === 'notes-link.txt')?.path).toBe(join(home, 'notes.txt'));
+    }
+  });
 });

@@ -33,8 +33,8 @@ export class DeskCallError extends Error {
 
 /** Why `app.pickFolder` asks for a folder. */
 export type FolderPurpose = ChannelInput<'app.pickFolder'>['purpose'];
-/** An open `app.pickFolder` request, shown by the folder browser. */
-export type FolderRequest = { purpose: FolderPurpose };
+/** An open `app.pickFolder` (or, with `file`, `app.pickFile`) request, shown by the folder browser. */
+export type FolderRequest = { purpose: FolderPurpose; file?: true };
 /** The /push socket: `idle` (signed out, or nothing listens yet), `connecting` (first try), `live`, `reconnecting` (lost it; retrying). */
 export type PushStatus = 'idle' | 'connecting' | 'live' | 'reconnecting';
 
@@ -76,7 +76,7 @@ export class DeskBridge {
   private readonly pushState = signal<PushStatus>('idle');
   readonly pushStatus: Signal<PushStatus> = this.pushState.asReadonly();
   private readonly folderState = signal<FolderRequest | null>(null);
-  /** The open `app.pickFolder` request, for the folder browser; `answerFolder` settles it. */
+  /** The open `app.pickFolder` or `app.pickFile` request, for the folder browser; `answerFolder` settles it. */
   readonly folderRequest: Signal<FolderRequest | null> = this.folderState.asReadonly();
   private settleFolder: ((path: string | null) => void) | null = null;
 
@@ -113,6 +113,7 @@ export class DeskBridge {
       if (op === 'app.openExternal') return Promise.resolve(this.openExternal((input as ChannelInput<'app.openExternal'>).url));
       if (op === 'app.saveFile') return Promise.resolve(this.saveFile(input as ChannelInput<'app.saveFile'>));
       if (op === 'app.pickFolder') return this.pickFolder((input as ChannelInput<'app.pickFolder'>).purpose);
+      if (op === 'app.pickFile') return this.pickFolder((input as ChannelInput<'app.pickFile'>).purpose, true);
     } catch (err) {
       return Promise.reject(err);
     }
@@ -214,11 +215,11 @@ export class DeskBridge {
     return true;
   }
 
-  private pickFolder(purpose: FolderPurpose): Promise<string | null> {
+  private pickFolder(purpose: FolderPurpose, file = false): Promise<string | null> {
     this.answerFolder(null);
     return new Promise((resolve) => {
       this.settleFolder = resolve;
-      this.folderState.set({ purpose });
+      this.folderState.set(file ? { purpose, file: true } : { purpose });
     });
   }
 

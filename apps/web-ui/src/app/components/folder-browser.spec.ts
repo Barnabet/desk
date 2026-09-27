@@ -171,3 +171,39 @@ describe('isAbsolutePath', () => {
     for (const p of ['code', '~/code', './code', '']) expect(isAbsolutePath(p), p).toBe(false);
   });
 });
+
+describe('FolderBrowser for a file', () => {
+  const withFiles = (input: ListInput & { files?: boolean }): DirListing => ({ ...listDirs(input), ...(input.files ? { files: [{ name: 'brief.pdf', path: '/Users/me/brief.pdf' }] } : {}) });
+
+  async function setupFile() {
+    const bridge = new FakeDeskBridge({ 'fs.listDirs': withFiles });
+    const picked: Array<string | null> = [];
+    await render(FolderBrowser, { inputs: { purpose: 'automation-input', file: true }, providers: bridge.providers, on: { picked: (p: string | null) => picked.push(p) } });
+    const dialog = await screen.findByRole('dialog', { name: 'Choose a file' });
+    return { bridge, picked, dialog, user: userEvent.setup() };
+  }
+
+  it('lists files beside folders, puts a clicked file in the box, and chooses it', async () => {
+    const { bridge, picked, dialog, user } = await setupFile();
+    expect(within(dialog).getByRole('list', { name: 'Folders in /Users/me' })).toBeTruthy();
+    await user.click(await within(dialog).findByRole('button', { name: 'brief.pdf' }));
+    expect((within(dialog).getByLabelText('Path') as HTMLInputElement).value).toBe('/Users/me/brief.pdf');
+    expect(within(dialog).getByRole('button', { name: 'brief.pdf' }).getAttribute('aria-pressed')).toBe('true');
+    await user.click(within(dialog).getByRole('button', { name: 'Choose this file' }));
+    expect(picked).toEqual(['/Users/me/brief.pdf']);
+    expect(bridge.calls[0]?.input).toEqual({ hidden: false, files: true });
+  });
+
+  it('asks for a file while the box holds the folder it shows, and takes a typed full path as it is', async () => {
+    const { picked, dialog, user } = await setupFile();
+    await within(dialog).findByRole('button', { name: 'brief.pdf' });
+    await user.click(within(dialog).getByRole('button', { name: 'Choose this file' }));
+    expect(within(dialog).getByRole('alert').textContent).toBe('Pick a file in the list, or type its full path.');
+    expect(picked).toEqual([]);
+    const box = within(dialog).getByLabelText('Path') as HTMLInputElement;
+    await user.clear(box);
+    await user.type(box, '/Volumes/share/brief.pdf');
+    await user.click(within(dialog).getByRole('button', { name: 'Choose this file' }));
+    expect(picked).toEqual(['/Volumes/share/brief.pdf']);
+  });
+});

@@ -93,7 +93,7 @@ function guardFileDrops(doc: Document): () => void {
         </div>
       </ng-template>
       @for (request of folderRequests(); track request) {
-        <div deskFolderBrowser [purpose]="request.purpose" (picked)="bridge.answerFolder($event)"></div>
+        <div deskFolderBrowser [purpose]="request.purpose" [file]="request.file ?? false" (picked)="bridge.answerFolder($event)"></div>
       }
     }
   `,

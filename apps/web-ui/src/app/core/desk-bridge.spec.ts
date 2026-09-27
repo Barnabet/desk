@@ -211,6 +211,16 @@ describe('DeskBridge host operations', () => {
     expect(bridge.folderRequest()).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('asks the folder browser for a file for app.pickFile', async () => {
+    const bridge = TestBed.inject(DeskBridge);
+    const picked = bridge.call('app.pickFile', { purpose: 'automation-input' });
+    expect(bridge.folderRequest()).toEqual({ purpose: 'automation-input', file: true });
+    bridge.answerFolder('/Users/me/brief.pdf');
+    await expect(picked).resolves.toBe('/Users/me/brief.pdf');
+    expect(bridge.folderRequest()).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('DeskBridge over /push', () => {

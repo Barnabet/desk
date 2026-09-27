@@ -28,10 +28,10 @@ async function real(path: string): Promise<string | null> {
 }
 
 /**
- * The folders in `path` (home by default), for the folder browser. Only under home or a registered source, never the
+ * The folders in `path` (home by default), and its files when `input.files`, for the folder browser. Only under home or a registered source, never the
  * Desk data dir, symlinks resolved. deskd still checks any path it is given (addSource refuses the data dir, home and root).
  */
-export async function listDirs(input: { path?: string | undefined; hidden?: boolean | undefined }, d: ListDirsDeps): Promise<DirListing> {
+export async function listDirs(input: { path?: string | undefined; hidden?: boolean | undefined; files?: boolean | undefined }, d: ListDirsDeps): Promise<DirListing> {
   const platform = d.platform ?? process.platform;
   // Defense in depth: realpath already gives the on-disk case, but not for a path that does not exist (a missing data dir).
   const fold = platform === 'darwin' || platform === 'win32' ? (p: string) => p.toLowerCase() : (p: string) => p;
@@ -63,15 +63,20 @@ export async function listDirs(input: { path?: string | undefined; hidden?: bool
     throw unavailable(err);
   });
   const dirs: DirListing['dirs'] = [];
+  const files: NonNullable<DirListing['files']> = [];
   for (const e of entries) {
     if (!input.hidden && e.name.startsWith('.')) continue;
-    if (!e.isDirectory() && !e.isSymbolicLink()) continue;
+    const link = e.isSymbolicLink();
+    if (!e.isDirectory() && !link && !(input.files && e.isFile())) continue;
     const path = await real(join(target, e.name));
     if (!path || !allowed(path)) continue;
-    if (e.isSymbolicLink() && !(await stat(path).catch(() => null))?.isDirectory()) continue;
-    dirs.push({ name: e.name, path });
+    const info = link ? await stat(path).catch(() => null) : null;
+    if (link ? info?.isDirectory() : e.isDirectory()) dirs.push({ name: e.name, path });
+    else if (input.files && (link ? info?.isFile() : e.isFile())) files.push({ name: e.name, path });
   }
-  dirs.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' });
+  dirs.sort(byName);
+  files.sort(byName);
   const up = dirname(target);
-  return { path: target, parent: up !== target && allowed(up) ? up : null, dirs };
+  return { path: target, parent: up !== target && allowed(up) ? up : null, dirs, ...(input.files ? { files } : {}) };
 }

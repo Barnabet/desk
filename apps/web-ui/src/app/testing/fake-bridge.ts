@@ -10,8 +10,8 @@ export type FakeHandlers = Partial<Record<Channel | WebChannel, FakeHandler>>;
 
 /**
  * DeskBridge for specs, like the desktop's `installBridge`: records every call as `{ channel, input }`, answers from its
- * handlers (an operation without one fails with `unknown_channel`; `app.pickFolder` without one opens a folder request, as the
- * real bridge does), and pushes with `emit`. Provide it with `providers: bridge.providers`.
+ * handlers (an operation without one fails with `unknown_channel`; `app.pickFolder` or `app.pickFile` without one opens a folder
+ * request, as the real bridge does), and pushes with `emit`. Provide it with `providers: bridge.providers`.
  */
 export class FakeDeskBridge implements DeskBridgeApi {
   readonly calls: Array<{ channel: string; input: unknown }> = [];
@@ -50,6 +50,7 @@ export class FakeDeskBridge implements DeskBridgeApi {
     const handler = this.handlers[op as Channel | WebChannel];
     if (!handler) {
       if (op === 'app.pickFolder') return this.pickFolder((input as { purpose: FolderPurpose }).purpose);
+      if (op === 'app.pickFile') return this.pickFolder((input as { purpose: FolderPurpose }).purpose, true);
       return Promise.reject(new DeskCallError({ code: 'unknown_channel', message: op }));
     }
     return (async () => {
@@ -107,11 +108,11 @@ export class FakeDeskBridge implements DeskBridgeApi {
     this.pushState.set(status);
   }
 
-  private pickFolder(purpose: FolderPurpose): Promise<string | null> {
+  private pickFolder(purpose: FolderPurpose, file = false): Promise<string | null> {
     this.answerFolder(null);
     return new Promise((resolve) => {
       this.settleFolder = resolve;
-      this.folderState.set({ purpose });
+      this.folderState.set(file ? { purpose, file: true } : { purpose });
     });
   }
 }
