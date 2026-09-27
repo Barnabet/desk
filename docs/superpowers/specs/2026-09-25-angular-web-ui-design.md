@@ -1,6 +1,6 @@
 # Angular web UI — design
 
-**Status:** approved by the user on 2026-09-25; revised after review (§12) and after the W0 spike (§0, §7). Branch `web-ui` (worktree `~/desk-web`), on master with inter-agent messaging (7961adb). Implementation: Plan 17.
+**Status:** implemented (Plan 17, branch `web-ui`), 2026-09-27; its exit check (W3b.8) passed. Approved by the user on 2026-09-25; revised after review (§12) and after the W0 spike (§0, §7). Branch `web-ui` (worktree `~/desk-web`), on master with inter-agent messaging (7961adb).
 
 Desk gets a second frontend: an Angular app served to the browser by a new `desk web` server on this computer. It sits alongside the Electron desktop app and reaches full parity with it in phases.
 
