@@ -575,3 +575,14 @@
   border-color: var(--run);
   color: var(--run-text);
 }
+
+.auto-card {
+  margin: 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 10px;
+  background: var(--card);
+}

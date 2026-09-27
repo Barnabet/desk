@@ -7,6 +7,7 @@ export * from './automation-inputs';
 export * from './automation-issues';
 export * from './automation-live';
 export * from './automation-schedules';
+export * from './automation-start';
 export * from './automation-templates';
 export * from './catalog';
 export * from './builtins';
