@@ -169,7 +169,7 @@ export function automationRoutes({ runtime, store }: AppDeps): Hono {
     // Each run with its derived status: `waiting` while it waits on the user (spec §2.2).
     const runs: Array<{ at: string; entry: RunListEntry }> = listRuns(db, a.id, { ...(before ? { before } : {}), limit }).map((run) => ({
       at: run.started_at,
-      entry: { kind: 'run', run: { ...runInfo(run), status: effectiveRunStatus(db, run) } },
+      entry: { kind: 'run', run: { ...runInfo(db, run), status: effectiveRunStatus(db, run) } },
     }));
     const skips = listTriggerSkips(db, a.project_id, a.id)
       .filter((s) => !before || s.ts < before)
@@ -196,6 +196,11 @@ export function automationRoutes({ runtime, store }: AppDeps): Hono {
       ...(req.note ? { note: req.note } : {}),
       ...(req.remember ? { remember: true } : {}),
     });
+    return c.json({ ok: true });
+  });
+
+  r.post('/automation-runs/:rid/steps/:sid/stop', (c) => {
+    engine.stopStep(requireRun(c.req.param('rid')).id, c.req.param('sid'));
     return c.json({ ok: true });
   });
 

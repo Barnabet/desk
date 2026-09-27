@@ -249,6 +249,7 @@ export class DeskClient {
     getRun: (runId: string) => this.get<RunDetail>(`/automation-runs/${enc(runId)}`),
     cancelRun: (runId: string) => this.post<{ ok: true }>(`/automation-runs/${enc(runId)}/cancel`),
     answer: (runId: string, stepId: string, req: AutomationAnswerRequest) => this.post<{ ok: true }>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/answer`, req),
+    stopStep: (runId: string, stepId: string) => this.post<{ ok: true }>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/stop`),
     log: (runId: string, stepId: string) => this.get<string>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/log`),
     transcript: (runId: string, stepId: string, p?: { after?: number; limit?: number }) => this.get<EventPage>(`/automation-runs/${enc(runId)}/steps/${enc(stepId)}/transcript${page(p)}`),
     files: (runId: string, path = '') => this.get<WorkspaceEntry[]>(`/automation-runs/${enc(runId)}/files${path ? `?path=${enc(path)}` : ''}`),

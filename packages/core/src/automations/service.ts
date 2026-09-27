@@ -138,10 +138,10 @@ export class Automations {
     return getAutomation(this.db, a.id)!;
   }
 
-  setGrants(automationId: string, grants: Grant[], reason: 'edited' | 'remembered' | 'kept' | 'enabled'): AutomationRow {
+  setGrants(automationId: string, grants: Grant[], reason: 'edited' | 'remembered' | 'kept' | 'enabled', source?: { run_id: string; step_id: string }): AutomationRow {
     const a = this.require(automationId);
     const list = z.array(Grant).max(100).parse(grants);
-    this.host.store.append({ project_id: a.project_id, agent_id: null, type: 'automation.grants_set', payload: { automation_id: a.id, grants: list, reason } });
+    this.host.store.append({ project_id: a.project_id, agent_id: null, type: 'automation.grants_set', payload: { automation_id: a.id, grants: list, reason, ...(source ? { source } : {}) } });
     return getAutomation(this.db, a.id)!;
   }
 

@@ -122,7 +122,7 @@ describe('automation lines', () => {
       enabled: true,
       grants_suspended: true,
       schedules: [{ cron: '0 8 * * 1', timezone: 'Europe/Paris' }],
-      last_run: { id: 'r', status: 'failed', trigger: 'schedule', test: false, started_at: '2026-09-28T06:00:00.000Z', finished_at: null, summary: null, waiting_on: null },
+      last_run: { id: 'r', number: 3, status: 'failed', trigger: 'schedule', test: false, started_at: '2026-09-28T06:00:00.000Z', finished_at: null, summary: null, waiting_on: null },
       next_due: '2026-10-05T06:00:00.000Z',
       enable_requested: false,
       updated_at: '',

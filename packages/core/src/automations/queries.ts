@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt, ne } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lt, lte, ne, or } from 'drizzle-orm';
 import type { EventOf } from '@desk/protocol';
 import type { Db } from '../db/open';
 import type { AgentRow } from '../state/queries';
@@ -58,6 +58,19 @@ export const listRuns = (db: Db, automationId: string, opts: { before?: string; 
     .orderBy(desc(automationRuns.started_at), desc(automationRuns.id))
     .limit(opts.limit ?? 50)
     .all();
+
+/** A run's number among its automation's runs, oldest first (runs started at the same time go by id). */
+export const runNumber = (db: Db, run: Pick<AutomationRunRow, 'automation_id' | 'started_at' | 'id'>): number =>
+  db
+    .select({ n: count() })
+    .from(automationRuns)
+    .where(
+      and(
+        eq(automationRuns.automation_id, run.automation_id),
+        or(lt(automationRuns.started_at, run.started_at), and(eq(automationRuns.started_at, run.started_at), lte(automationRuns.id, run.id))),
+      ),
+    )
+    .get()?.n ?? 0;
 
 export const listRunningRuns = (db: Db): AutomationRunRow[] => db.select().from(automationRuns).where(eq(automationRuns.status, 'running')).all();
 

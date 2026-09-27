@@ -133,4 +133,24 @@ describe('Automations service', () => {
     ]);
     expect(automationSummary(h.store.db, getAutomation(h.store.db, automation.id)!, clock.now()).last_run).toMatchObject({ status: 'waiting', waiting_on: 'Ask me: Ask' });
   });
+
+  it('numbers runs, oldest first, and names the step a run is at', async () => {
+    await setup();
+    const { automation } = rt.automations.create(
+      projectId,
+      'ask',
+      { title: 'Ask', steps: [{ id: 'a', title: 'Ask', kind: 'ask', question: 'OK?' }, { id: 'w', title: 'Wait', kind: 'wait', minutes: 1 }], edges: [{ from: 'a', to: 'w' }] },
+      { origin: 'user', via: 'editor' },
+    );
+    const start = (run_id: string) =>
+      h.store.append({ project_id: projectId, agent_id: null, type: 'automation.run_started', payload: { run_id, automation_id: automation.id, version: 1, trigger: 'manual', test: false, inputs: {}, by: 'user', deadline_at: '2026-09-29T06:00:00.000Z' } });
+    start('r1');
+    h.store.append({ project_id: projectId, agent_id: null, type: 'automation.step_changed', payload: { run_id: 'r1', step_id: 'a', attempt: 1, status: 'waiting', question: { text: 'OK?', files: [] } } });
+    start('r2');
+    h.store.append({ project_id: projectId, agent_id: null, type: 'automation.step_changed', payload: { run_id: 'r2', step_id: 'a', attempt: 1, status: 'failed', error: 'boom' } });
+    h.store.append({ project_id: projectId, agent_id: null, type: 'automation.run_finished', payload: { run_id: 'r2', status: 'failed', summary: 'Failed', reason: 'boom' } });
+    expect(runDetail(h.store.db, 'r1')).toMatchObject({ number: 1, status: 'waiting', at_step: 'Ask' });
+    expect(runDetail(h.store.db, 'r2')).toMatchObject({ number: 2, status: 'failed', at_step: 'Ask' });
+    expect(automationSummary(h.store.db, getAutomation(h.store.db, automation.id)!, clock.now()).last_run).toMatchObject({ id: 'r2', number: 2 });
+  });
 });

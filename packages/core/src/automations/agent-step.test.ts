@@ -114,6 +114,7 @@ describe('agent steps', () => {
     expect(runDetail(h.store.db, r).status).toBe('waiting');
     await expect(rt.resolveApproval(ap!.id, 'denied', { remember: true })).rejects.toThrow(ValidationError);
     await rt.resolveApproval(ap!.id, 'approved', { remember: true });
+    expect(h.store.list({ projectId, types: ['automation.grants_set'] }).at(-1)!.payload).toMatchObject({ reason: 'remembered', source: { run_id: r, step_id: 'sum' } });
     await rt.whenIdle();
     expect(getStepRun(h.store.db, r, 'sum')!.status).toBe('succeeded');
     expect(getAutomation(h.store.db, id)!.grants).toEqual([{ tool: 'bash', match: { command: '^echo hi$' }, action: 'allow' }]);

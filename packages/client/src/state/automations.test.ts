@@ -85,7 +85,7 @@ describe('automations state', () => {
   it('follows runs: last run, live steps, derived status, the end', () => {
     let s = withAutomationSummaries(emptyAutomations('p'), [summary()]);
     s = reduceAutomations(s, ev('automation.run_started', { run_id: 'r1', automation_id: 'a1', version: 1, trigger: 'manual', test: false, inputs: {}, by: 'user', deadline_at: '2026-09-29T06:00:00.000Z' }));
-    expect(s.list[0]!.last_run).toMatchObject({ id: 'r1', status: 'running', trigger: 'manual', test: false, finished_at: null });
+    expect(s.list[0]!.last_run).toMatchObject({ id: 'r1', number: 1, status: 'running', trigger: 'manual', test: false, finished_at: null });
     s = withRunDetail(s, detail());
     s = reduceAutomations(s, ev('automation.step_changed', { run_id: 'r1', step_id: 'ask', attempt: 1, status: 'running' }));
     expect(s.runs.r1!.steps[0]).toMatchObject({ status: 'running', attempt: 1, started_at: expect.any(String) });

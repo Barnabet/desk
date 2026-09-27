@@ -99,7 +99,10 @@ export function reduceAutomations(s: AutomationsState, e: StoredEvent): Automati
       return withSummary(s, e.payload.automation_id, (a) => ({ ...a, enable_requested: true }));
     case 'automation.run_started': {
       const p = e.payload;
-      return withSummary(s, p.automation_id, (a) => ({ ...a, last_run: { id: p.run_id, status: 'running', trigger: p.trigger, test: p.test, started_at: e.ts, finished_at: null, summary: null, waiting_on: null } }));
+      return withSummary(s, p.automation_id, (a) => ({
+        ...a,
+        last_run: { id: p.run_id, number: (a.last_run?.number ?? 0) + 1, status: 'running', trigger: p.trigger, test: p.test, started_at: e.ts, finished_at: null, summary: null, waiting_on: null },
+      }));
     }
     case 'automation.step_changed': {
       const run = s.runs[e.payload.run_id];

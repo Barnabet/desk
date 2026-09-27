@@ -116,4 +116,22 @@ describe('automation routes', () => {
     expect((await api('GET', `/automations/${id}`)).body.grants).toEqual([{ tool: 'bash', match: { command: '^echo hi$' }, action: 'allow' }]);
     expect((await api('GET', `/automation-runs/${runId}/steps/nope/transcript`)).status).toBe(404);
   });
+
+  it('stops a running agent step: its agent stops and the step fails', async () => {
+    const { api, projectId, rt } = await setup();
+    const id = (await api('POST', `/projects/${projectId}/automations`, { name: 'echo', definition: { title: 'Echo', steps: [{ id: 'say', title: 'Say hi', kind: 'agent', brief: 'Say hi.' }] } })).body.automation.id;
+    const runId = (await api('POST', `/automations/${id}/runs`, { inputs: {} })).body.run_id;
+    await rt.whenIdle();
+    // The step agent waits on its bash approval, so the run waits on the user.
+    expect((await api('GET', `/automation-runs/${runId}`)).body).toMatchObject({ number: 1, status: 'waiting', at_step: 'Say hi' });
+    expect((await api('POST', `/automation-runs/${runId}/steps/say/stop`)).status).toBe(200);
+    await rt.whenIdle();
+    const after = (await api('GET', `/automation-runs/${runId}`)).body;
+    expect(after).toMatchObject({ status: 'failed', at_step: 'Say hi' });
+    expect(after.steps[0]).toMatchObject({ step_id: 'say', status: 'failed', error: 'Stopped by the user' });
+    expect((await api('POST', `/automation-runs/${runId}/steps/say/stop`)).status).toBe(409);
+    expect((await api('POST', `/automation-runs/${runId}/steps/nope/stop`)).status).toBe(404);
+    const [entry] = (await api('GET', `/automations/${id}/runs`)).body;
+    expect(entry.run).toMatchObject({ number: 1, status: 'failed', at_step: 'Say hi' });
+  });
 });

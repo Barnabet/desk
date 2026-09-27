@@ -20,6 +20,7 @@ import {
   getVersion,
   listRuns,
   listVersions,
+  runNumber,
   stepRuns,
   testedVersion,
   type AutomationRow,
@@ -71,9 +72,22 @@ export function waitingOn(db: Db, run: AutomationRunRow): string | null {
   return null;
 }
 
+/** The title of the step a run is at: a running run's running step (else the one waiting on the user), or a failed run's failing step. */
+export function atStep(db: Db, run: AutomationRunRow): string | null {
+  if (run.status !== 'running' && run.status !== 'failed') return null;
+  const rows = stepRuns(db, run.id);
+  const row =
+    run.status === 'running'
+      ? (rows.find((r) => effectiveStepStatus(db, r) === 'running') ?? rows.find((r) => waitsOnUser(db, r)))
+      : [...rows].reverse().find((r) => r.status === 'failed' && r.route !== 'error');
+  if (!row) return null;
+  return getVersion(db, run.automation_id, run.version)?.definition.steps.find((s) => s.id === row.step_id)?.title ?? row.step_id;
+}
+
 function runSummary(db: Db, run: AutomationRunRow): RunSummary {
   return {
     id: run.id,
+    number: runNumber(db, run),
     status: effectiveRunStatus(db, run),
     trigger: run.trigger,
     test: run.test,
@@ -138,9 +152,10 @@ export function versionInfos(db: Db, automationId: string): AutomationVersionInf
   return listVersions(db, automationId).map((v) => ({ version: v.version, origin: v.origin, change_note: v.change_note, via: v.via, created_at: v.created_at, tested: tested.has(v.version) }));
 }
 
-export function runInfo(row: AutomationRunRow): RunInfo {
+export function runInfo(db: Db, row: AutomationRunRow): RunInfo {
   return {
     id: row.id,
+    number: runNumber(db, row),
     automation_id: row.automation_id,
     project_id: row.project_id,
     version: row.version,
@@ -153,6 +168,7 @@ export function runInfo(row: AutomationRunRow): RunInfo {
     due_at: row.due_at,
     caught_up: row.caught_up,
     status: row.status,
+    at_step: atStep(db, row),
     summary: row.summary,
     reason: row.reason,
     started_at: row.started_at,
@@ -194,5 +210,5 @@ export function runDetail(db: Db, runId: string): RunDetail {
       return { step_id: s.id, attempt: 0, status: 'pending', route: null, outputs: {}, summary: null, error: null, agent_id: null, child_run_id: null, resume_at: null, gate: null, question: null, note: null, started_at: null, finished_at: null };
     return { ...stepRunInfo(row), status: effectiveStepStatus(db, row) };
   });
-  return { ...runInfo(run), status: effectiveRunStatus(db, run), automation_name: automation.name, automation_title: automation.title, definition, steps };
+  return { ...runInfo(db, run), status: effectiveRunStatus(db, run), automation_name: automation.name, automation_title: automation.title, definition, steps };
 }

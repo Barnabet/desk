@@ -123,8 +123,8 @@ export type ScriptHost = {
   env(projectId: string, skill: SkillSummary): { bins: string[]; vars: Record<string, string>; blocked: string | null };
   sandboxEnabled(): Promise<boolean>;
   policy(projectId: string): PolicyRule[];
-  /** Adds a grant the user remembered (reason `remembered`). */
-  remember(automationId: string, grant: Grant): void;
+  /** Adds a grant the user remembered (reason `remembered`), with the run and step it came from. */
+  remember(automationId: string, grant: Grant, source: { run_id: string; step_id: string }): void;
 };
 
 export type StartRunOptions = {
@@ -796,6 +796,16 @@ export class AutomationEngine {
     await this.answerGate(run, row, a);
   }
 
+  /** The user's Stop step (spec §8.3): stops a running agent step's agent, and the step fails. */
+  stopStep(runId: string, stepId: string): void {
+    const run = getRun(this.db, runId);
+    const row = run ? getStepRun(this.db, runId, stepId) : undefined;
+    if (!run || !row) throw new NotFoundError(`Unknown step: ${runId}/${stepId}`);
+    if (run.status !== 'running' || !row.agent_id || TERMINAL_STEP.has(row.status)) throw new ConflictError('Only a running agent step can be stopped');
+    this.host.agent.stop(row.agent_id, 'Stopped by the user');
+    this.resolveStep(runId, stepId, { status: 'failed', error: 'Stopped by the user' });
+  }
+
   /** The user's answer to a script step's gate: run it (optionally remembering a grant), or deny it. */
   protected async answerGate(run: AutomationRunRow, row: StepRunRow, a: { decision: 'approve' | 'reject'; note?: string; remember?: boolean }): Promise<void> {
     const gate = row.gate!;
@@ -806,7 +816,7 @@ export class AutomationEngine {
     const automation = getAutomation(this.db, run.automation_id)!;
     if (a.remember) {
       if (automation.grants_suspended) throw new ConflictError('Grants are suspended until you keep them; approve without remembering, or review the change first');
-      this.host.script.remember(automation.id, deriveGrant(gate.tool, { command: gate.subject }, automation.name));
+      this.host.script.remember(automation.id, deriveGrant(gate.tool, { command: gate.subject }, automation.name), { run_id: run.id, step_id: row.step_id });
     }
     this.stepChanged(run, { step_id: row.step_id, attempt: row.attempt, status: 'running', answered_by: 'user', gate, ...(a.note ? { note: a.note } : {}) });
     const def = this.definitionOf(run);

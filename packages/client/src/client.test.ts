@@ -79,6 +79,8 @@ describe('DeskClient', () => {
     expect((await client.automations.getRun(run_id)).status).toBe('waiting');
     await client.automations.answer(run_id, 'ask', { decision: 'approve' });
     expect((await client.automations.runs(automation.id)).map((e) => (e.kind === 'run' ? e.run.status : e.kind))).toEqual(['succeeded']);
+    expect((await client.automations.runs(automation.id))[0]).toMatchObject({ kind: 'run', run: { number: 1, at_step: null } });
+    await expect(client.automations.stopStep(run_id, 'ask')).rejects.toMatchObject({ status: 409 });
     expect(await client.automations.files(run_id)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'inputs.json' })]));
     expect(new TextDecoder().decode(await client.automations.file(run_id, 'inputs.json'))).toContain('{');
     const exp = await client.automations.exportOf(automation.id);

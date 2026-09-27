@@ -158,10 +158,11 @@ Saved workflows of steps (script, agent, Ask me, another automation, Wait, Tell 
 | POST | `/v1/automations/:aid/grants/keep` | | Keeps grants suspended by an agent's version |
 | GET | `/v1/automations/:aid/export` | | `{ format: 'desk-automation/1', name, definition }` |
 | POST | `/v1/automations/:aid/runs` | `{ inputs?, test? }` | 202 `{ run_id }`. Inputs are validated, defaults applied; file and folder inputs are local paths copied into the run folder (regular files, no final symlink, never a secret or Desk's data dir, 200 MB) |
-| GET | `/v1/automations/:aid/runs` | `?before=&limit=` | `RunListEntry[]`, newest first: `{ kind: 'run', run }` (status derived: `waiting` while a step waits on the user) and `{ kind: 'skipped', trigger_index, due_at, reason: still_running\|missed, ts }` |
+| GET | `/v1/automations/:aid/runs` | `?before=&limit=` | `RunListEntry[]`, newest first: `{ kind: 'run', run }` (with `number`, 1 = the oldest, and `at_step`: the step title a running run is at, or where a failed run failed) (status derived: `waiting` while a step waits on the user) and `{ kind: 'skipped', trigger_index, due_at, reason: still_running\|missed, ts }` |
 | GET | `/v1/automation-runs/:rid` | | `RunDetail`: the run, its definition and every step (`attempt`, `status`, `route`, `outputs`, `summary`, `error`, `agent_id`, `child_run_id`, `resume_at`, `gate`, `question`, `note`) |
 | POST | `/v1/automation-runs/:rid/cancel` | | Stops its step agents, kills scripts, cancels child runs |
 | POST | `/v1/automation-runs/:rid/steps/:sid/answer` | `{ decision: 'approve'\|'reject', note?, remember? }` | Ask me steps and script gates; `reject` on a gate fails the step; `remember` (gates) adds a grant. 409 when the step is not waiting |
+| POST | `/v1/automation-runs/:rid/steps/:sid/stop` | | Stops a running agent step's agent; the step fails with "Stopped by the user". 409 unless it is an unfinished agent step of a running run |
 | GET | `/v1/automation-runs/:rid/steps/:sid/log` | | A step's full output (`text/plain`), from `<data>/automation-runs/<run>/logs/<step>.txt` |
 | GET | `/v1/automation-runs/:rid/steps/:sid/transcript` | `?after=&limit=` | `{ events, next_after }` of the step's current agent |
 | GET | `/v1/automation-runs/:rid/files` | `?path=` | The run folder (`inputs/`, `inputs.json`, `steps/<id>/`, `logs/`), like thread files |

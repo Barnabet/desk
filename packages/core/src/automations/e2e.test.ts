@@ -77,6 +77,7 @@ describe('automations end to end', () => {
     // No sandbox in the harness: the script waits on its gate, which the user approves and remembers.
     expect(getStepRun(h.store.db, run!.id, 'count')).toMatchObject({ status: 'waiting', gate: { tool: 'skill_run', subject: 'counter/count.sh robots' } });
     await rt.engine.answer(run!.id, 'count', { decision: 'approve', remember: true });
+    expect(h.store.list({ projectId, types: ['automation.grants_set'] }).at(-1)!.payload).toMatchObject({ reason: 'remembered', source: { run_id: run!.id, step_id: 'count' } });
     await settle();
 
     expect(getStepRun(h.store.db, run!.id, 'count')).toMatchObject({ status: 'succeeded', outputs: { words: 1 } });

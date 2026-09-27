@@ -285,7 +285,16 @@ export const EventBody = z.discriminatedUnion('type', [
   /** User only; `system` when the project is archived. */
   event('automation.switched', z.object({ automation_id: z.string(), enabled: z.boolean(), by: z.enum(['user', 'system']) })),
   /** User only. `remembered` keeps a suspension as it is; the other reasons end it. */
-  event('automation.grants_set', z.object({ automation_id: z.string(), grants: z.array(Grant).max(100), reason: z.enum(['edited', 'remembered', 'kept', 'enabled']) })),
+  event(
+    'automation.grants_set',
+    z.object({
+      automation_id: z.string(),
+      grants: z.array(Grant).max(100),
+      reason: z.enum(['edited', 'remembered', 'kept', 'enabled']),
+      /** The run and step whose approval a `remembered` grant came from. */
+      source: z.object({ run_id: z.string(), step_id: z.string() }).optional(),
+    }),
+  ),
   event('automation.enable_requested', z.object({ automation_id: z.string(), note: z.string().max(2000), proposed_grants: z.array(Grant).max(100) })),
   event(
     'automation.run_started',

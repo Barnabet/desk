@@ -283,9 +283,9 @@ export class Runtime {
         env: (projectId, skill) => this.skillEnvFor(projectId, skill),
         sandboxEnabled: () => this.sandboxAvailable(),
         policy: (projectId) => getProject(this.o.store.db, projectId)?.settings.policy ?? [],
-        remember: (automationId, grant) => {
+        remember: (automationId, grant, source) => {
           const a = this.automations.require(automationId);
-          this.automations.setGrants(a.id, addGrant(a.grants, grant), 'remembered');
+          this.automations.setGrants(a.id, addGrant(a.grants, grant), 'remembered', source);
         },
       },
       publish: (projectId, file, relDir, meta, origin) => this.publishToLibraryAt(projectId, file, relDir, meta, origin),
@@ -1343,7 +1343,7 @@ export class Runtime {
       } catch {}
       const grant = Grant.safeParse(deriveGrant(ap.tool, subject, automation.name));
       if (!grant.success) throw new ValidationError('This call is too long to remember as a grant; approve it without remembering');
-      this.automations.setGrants(automation.id, addGrant(automation.grants, grant.data), 'remembered');
+      this.automations.setGrants(automation.id, addGrant(automation.grants, grant.data), 'remembered', { run_id: link.run.id, step_id: link.step.step_id });
     }
     const by = opts.by ?? 'user';
     const base = { project_id: ap.project_id, agent_id: ap.agent_id };

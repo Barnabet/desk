@@ -206,7 +206,7 @@ export const Grant = z.object({
 });
 export type Grant = z.infer<typeof Grant>;
 
-/** Editor positions by step id, plus `start` for the Start pill. Not versioned. */
+/** Editor positions by step id, plus `__start` for the Start pill (a step may be called `start`). Not versioned. */
 export const AutomationLayout = z.record(z.string().max(40), z.object({ x: z.number(), y: z.number() }));
 export type AutomationLayout = z.infer<typeof AutomationLayout>;
 
@@ -251,6 +251,8 @@ export type AutomationExport = z.infer<typeof AutomationExport>;
 
 export type RunSummary = {
   id: string;
+  /** Its number among the automation's runs, oldest first (the app's "#"). */
+  number: number;
   status: RunStatus;
   trigger: RunTrigger;
   test: boolean;
@@ -294,6 +296,8 @@ export type AutomationVersionInfo = { version: number; origin: string; change_no
 
 export type RunInfo = {
   id: string;
+  /** Its number among the automation's runs, oldest first. */
+  number: number;
   automation_id: string;
   project_id: string;
   version: number;
@@ -306,6 +310,8 @@ export type RunInfo = {
   due_at: string | null;
   caught_up: number;
   status: RunStatus;
+  /** The title of the step a running run is at (running first, then waiting on the user), or of the step a failed run failed at. */
+  at_step: string | null;
   summary: string | null;
   reason: string | null;
   started_at: string;
