@@ -29,6 +29,7 @@ import { RouteService } from '../core/route.service';
 import { Unread } from '../core/unread';
 import { ChatItemView, chatDomId } from './chat-items';
 import { Composer } from './composer';
+import { draftKey } from './draft';
 import { PlanPanel } from './plan-panel';
 import { ServicesCard } from './services-card';
 import { WhatsUp } from './whats-up';
@@ -37,8 +38,6 @@ const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).inclu
 
 /** Chat items rendered at first; scrolling up renders this many more (long conversations stay fast). */
 export const CHAT_PAGE = 60;
-
-const draftKey = (projectId: string) => `desk.draft.${projectId}`;
 
 function readDraft(projectId: string): string {
   try {
