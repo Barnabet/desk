@@ -41,7 +41,8 @@ describe('RunView', () => {
     render(<RunView projectId="p" s={sessionOf()} detail={automationDetail()} runId="r14" />);
     expect(await screen.findByRole('heading', { name: 'Run #14' })).toBeTruthy();
     expect(screen.getByText('running · Summarise')).toBeTruthy();
-    expect(screen.getByTestId('node-fetch').className).toContain('run-ok');
+    // React Flow draws its nodes a tick after the canvas mounts.
+    expect((await screen.findByTestId('node-fetch')).className).toContain('run-ok');
     expect(screen.getByTestId('node-fetch').textContent).toContain('✓ 12s');
     expect(screen.getByTestId('node-sum').className).toContain('run-run');
     expect(screen.getByTestId('node-ok').className).toContain('run-pending');
