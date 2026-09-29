@@ -163,7 +163,12 @@ function skillsSections({ agent, project, skills, skillNote }: PromptContext): s
     section(
       'Available skills',
       [
-        ...(shown.length ? ['Activate a skill (skill_activate) as soon as its description matches the work; it gives you its instructions and scripts.'] : []),
+        ...(shown.length
+          ? [
+              'Activate a skill (skill_activate) as soon as its description matches the work; it gives you its instructions and scripts.',
+              "When one of Desk's built-in skills (builtin) and an installed skill both fit, prefer the built-in one unless the user asked for the other or only it does what the work needs.",
+            ]
+          : []),
         ...shown,
         ...(others.length > shown.length ? [`(${others.length - shown.length} more — use skill_list)`] : []),
       ].join('\n'),

@@ -1,6 +1,6 @@
 ---
 name: presentations
-description: Create, read, edit, render, check and convert presentations (.pptx .pptm .potx .ppsx, plus .odp .ppt and .key through LibreOffice). Use for any slide deck task. Build a designed 16:9 deck from a Markdown outline or JSON spec, with themes or the user's own template. Read slides, notes, tables and chart data. Replace text while keeping its formatting, and add, delete, duplicate, reorder or hide slides. Swap images, update tables and charts. Render slides to PNG and look at them. Lint for overflowing text, overlaps, tiny fonts and low contrast. Convert to PDF, PNG or Markdown.
+description: Create, read, edit, render, check and convert presentations (.pptx .pptm .potx .ppsx, plus .odp .ppt and .key through LibreOffice). Use for any slide deck or presentation task, including pitch decks, investor, sales and board decks, talks, lectures, reports and training slides. Build a designed 16:9 deck from a Markdown outline or JSON spec, with themes or the user's own template. Read slides, notes, tables and chart data. Replace text while keeping its formatting, and add, delete, duplicate, reorder or hide slides. Swap images, update tables and charts. Render slides to PNG and look at them. Lint for overflowing text, overlaps, tiny fonts and low contrast. Convert to PDF, PNG or Markdown.
 license: MIT
 ---
 
