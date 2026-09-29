@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-26",
+  "updated": "2026-09-29",
   "skills": [
     {
       "name": "web-research",
@@ -166,9 +166,9 @@
         "Exact slide rendering uses LibreOffice when it is installed; otherwise Desk draws a close approximation.",
         ".ppt, .odp and .key files need LibreOffice."
       ],
-      "digest": "sha256:2963f74c9a3d3f8ecab2c1f4aa9ca946cb0072b29f953840f3aaa02a8496a5ce",
+      "digest": "sha256:25f40d0ba79bb6f43ad89c69d034c1b5cd088d16d97419eed13322bb86b2808e",
       "files": 31,
-      "bytes": 711615,
+      "bytes": 711733,
       "scripts": 23,
       "runtime": {
         "python": {

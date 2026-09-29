@@ -86,16 +86,34 @@ function commandFor(file: string): string {
   return [p.command, ...p.args].map(shellQuote).join(' ');
 }
 
+/** Whether `text` (lowercase) contains `word`, or its singular for a plural like "decks". */
+const mentions = (text: string, word: string): boolean => text.includes(word) || (word.length > 3 && word.endsWith('s') && text.includes(word.slice(0, -1)));
+
+/**
+ * Skills matching a query: those whose name or description has at least one of its words, most words first, and on a
+ * tie Desk's built-in skills before installed ones, then by name. Without a query, all of them as given.
+ */
+export function rankSkills(skills: SkillSummary[], query: string | undefined): SkillSummary[] {
+  const words = [...new Set((query ?? '').toLowerCase().split(/\s+/).filter(Boolean))];
+  if (!words.length) return skills;
+  return skills
+    .map((s) => {
+      const text = `${s.name} ${s.description}`.toLowerCase();
+      return { s, score: words.filter((w) => mentions(text, w)).length };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score || Number(b.s.scope === 'builtin') - Number(a.s.scope === 'builtin') || a.s.name.localeCompare(b.s.name))
+    .map((r) => r.s);
+}
+
 export const skillListTool = defineTool({
   name: 'skill_list',
-  description: "List the skills available in this project (project skills shadow global ones, which shadow Desk's built-in skills), optionally filtered by words matched against names and descriptions.",
+  description:
+    "List the skills available in this project (project skills shadow global ones, which shadow Desk's built-in skills). With a query, only skills whose name or description has one of its words, best match first (Desk's built-in skills first on a tie).",
   input: z.object({ query: z.string().optional() }),
   async execute({ query }, ctx) {
     const active = new Set(getAgent(ctx.services.store.db, ctx.agentId)?.active_skills ?? []);
-    const words = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-    const skills = ctx.services.skills
-      .list(ctx.projectId, { builtins: true })
-      .filter((s) => words.every((w) => `${s.name} ${s.description}`.toLowerCase().includes(w)));
+    const skills = rankSkills(ctx.services.skills.list(ctx.projectId, { builtins: true }), query);
     if (!skills.length) return query ? `No skills match "${query}".` : 'No skills yet.';
     return skills.map((s) => formatSkillLine(s, active)).join('\n');
   },
