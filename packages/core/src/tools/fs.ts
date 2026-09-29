@@ -15,6 +15,21 @@ const IGNORE = ['**/node_modules/**', '**/.git/**'];
 const readable = (p: string, ctx: ToolContext) => resolveForTool(p, 'read', ctx);
 const writable = (p: string, ctx: ToolContext) => resolveForTool(p, 'write', ctx);
 
+// A turn's tool calls run concurrently, so two edits of one file would both read the original and the last write would
+// drop the other. Writes to one resolved path take turns.
+const fileQueues = new Map<string, Promise<unknown>>();
+/** Runs `fn` after every earlier write queued for `file` has settled. */
+function withFileLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+  const prev = fileQueues.get(file) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => undefined);
+  fileQueues.set(file, tail);
+  void tail.then(() => {
+    if (fileQueues.get(file) === tail) fileQueues.delete(file);
+  });
+  return run;
+}
+
 export const readFileTool = defineTool({
   name: 'read_file',
   description: 'Read a text file. Returns numbered lines (line<TAB>text). Use offset (1-based) and limit for large files.',
@@ -40,7 +55,7 @@ export const writeFileTool = defineTool({
   async execute({ path, content }, ctx) {
     const file = await writable(path, ctx);
     await mkdir(dirname(file), { recursive: true });
-    await writeAgentFile(file, content, ctx.sandbox.guard);
+    await withFileLock(file, () => writeAgentFile(file, content, ctx.sandbox.guard));
     return `Wrote ${Buffer.byteLength(content)} bytes to ${file}`;
   },
 });
@@ -57,16 +72,18 @@ export const editFileTool = defineTool({
   }),
   async execute({ path, old_string, new_string, replace_all = false }, ctx) {
     const file = await writable(path, ctx);
-    const original = (await readAgentFile(file, ctx.sandbox.guard)).toString('utf8');
-    const count = original.split(old_string).length - 1;
-    if (count === 0) throw new Error(`old_string not found in ${file}`);
-    if (count > 1 && !replace_all) {
-      throw new Error(`old_string matches ${count} times in ${file}; include more context or set replace_all`);
-    }
-    const updated = replace_all ? original.split(old_string).join(new_string) : original.replace(old_string, () => new_string);
-    await writeAgentFile(file, updated, ctx.sandbox.guard);
-    const n = replace_all ? count : 1;
-    return `Edited ${file} (${n} replacement${n === 1 ? '' : 's'})`;
+    return withFileLock(file, async () => {
+      const original = (await readAgentFile(file, ctx.sandbox.guard)).toString('utf8');
+      const count = original.split(old_string).length - 1;
+      if (count === 0) throw new Error(`old_string not found in ${file}`);
+      if (count > 1 && !replace_all) {
+        throw new Error(`old_string matches ${count} times in ${file}; include more context or set replace_all`);
+      }
+      const updated = replace_all ? original.split(old_string).join(new_string) : original.replace(old_string, () => new_string);
+      await writeAgentFile(file, updated, ctx.sandbox.guard);
+      const n = replace_all ? count : 1;
+      return `Edited ${file} (${n} replacement${n === 1 ? '' : 's'})`;
+    });
   },
 });
 

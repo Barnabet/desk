@@ -52,6 +52,17 @@ describe('write_file', () => {
 describe('edit_file', () => {
   beforeEach(async () => writeFile(join(ws, 'f.txt'), 'a b a c'));
 
+  it('keeps every edit when calls on one file run at the same time', async () => {
+    // The agent loop runs a turn's tool calls concurrently: two edits of one file must not read the same original.
+    await writeFile(join(ws, 'multi.txt'), 'one\ntwo\nthree\n');
+    await Promise.all([
+      editFileTool.execute({ path: 'multi.txt', old_string: 'one', new_string: 'ONE' }, ctx),
+      editFileTool.execute({ path: join(ws, 'multi.txt'), old_string: 'two', new_string: 'TWO' }, ctx),
+      editFileTool.execute({ path: './multi.txt', old_string: 'three', new_string: 'THREE' }, ctx),
+    ]);
+    expect(await readFile(join(ws, 'multi.txt'), 'utf8')).toBe('ONE\nTWO\nTHREE\n');
+  });
+
   it('replaces a unique match', async () => {
     await writeFile(join(ws, 'g.txt'), 'hello world');
     await editFileTool.execute({ path: 'g.txt', old_string: 'world', new_string: 'desk' }, ctx);
