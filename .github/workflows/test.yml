@@ -1,0 +1,32 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Linux: tests that need macOS's sandbox-exec skip themselves. Electron packaging and the e2e suites stay local.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Typechecking the desktop app needs Electron's types, not its binary.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Angular 22 (apps/web-ui) needs ^22.22.3 || ^24.15.0 || >=26.
+          node-version: 24
+          cache: pnpm
+      # Shell tools run commands through /bin/zsh, as on macOS.
+      - run: sudo apt-get update -q && sudo apt-get install -y -q zsh
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, startFakeModel, text, tools, type ChatRequest, type FakeModelServer } from '@desk/fake-model';
-import { SEED_MODELS } from '@desk/core';
+import { detectSandbox, SEED_MODELS } from '@desk/core';
 import { FAKE_MODEL } from '@desk/core/testing';
 import { daemonPaths } from './paths';
 
@@ -43,7 +43,8 @@ async function api(path: string, init: RequestInit = {}): Promise<any> {
   return res.json();
 }
 
-describe('real daemon crash', () => {
+// Without sandbox-exec (Linux CI) the thread's bash call waits for an approval instead of running.
+describe.skipIf(!(await detectSandbox()))('real daemon crash', () => {
   it('recovers a thread whose tool was running when deskd was SIGKILLed', async () => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-crash-')));
     writeFileSync(daemonPaths(dir).models, JSON.stringify([...SEED_MODELS, FAKE_MODEL]));
