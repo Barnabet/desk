@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { loginRedirectHtml } from './login';
@@ -8,10 +8,16 @@ const WebInfo = z.object({ pid: z.number().int().positive(), port: z.number().in
 /** `<data>/web.json`: the running desk web (deskd's sandbox guard reads its port). No secrets. */
 export type WebInfo = z.infer<typeof WebInfo>;
 
-export const WebSettings = z.object({ port: z.number().int().min(1).max(65535).optional(), notifications: z.boolean() });
-/** `<data>/web-settings.json`: the chosen port (the origin, and the browser state tied to it, depends on it) and browser notifications. */
+export const WebSettings = z.object({
+  port: z.number().int().min(1).max(65535).optional(),
+  notifications: z.boolean(),
+  /** The private https:// address paired phones use (`desk web --remote-url`), such as Tailscale Serve's. */
+  remoteUrl: z.string().max(300).optional(),
+});
+/** `<data>/web-settings.json`: the chosen port (the origin, and the browser state tied to it, depends on it), browser notifications, and the phones' address. */
 export type WebSettings = z.infer<typeof WebSettings>;
-export type WebSettingsPatch = { port?: number | undefined; notifications?: boolean | undefined };
+/** `remoteUrl: null` removes the phones' address. */
+export type WebSettingsPatch = { port?: number | undefined; notifications?: boolean | undefined; remoteUrl?: string | null | undefined };
 
 const DEFAULTS: WebSettings = { notifications: true };
 
@@ -73,7 +79,9 @@ export class WebSettingsStore {
   /** Merges onto what is on disk, not the cached value, so a change saved through another store (the CLI's port) survives. */
   update(patch: WebSettingsPatch): WebSettings {
     const defined = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    this.value = WebSettings.parse({ ...this.load(), ...defined });
+    const next: Record<string, unknown> = { ...this.load(), ...defined };
+    if (next.remoteUrl === null) delete next.remoteUrl;
+    this.value = WebSettings.parse(next);
     mkdirSync(this.dataDir, { recursive: true });
     writePrivate(webPaths(this.dataDir).settings, `${JSON.stringify(this.value, null, 2)}\n`);
     return this.get();
@@ -89,4 +97,22 @@ export function writeLoginFile(dataDir: string, link: string): string {
   writeFileSync(file, loginRedirectHtml(link), { mode: 0o600, flag: 'wx' });
   chmodSync(file, 0o600);
   return file;
+}
+
+/** Removes login redirect files older than `maxAgeMs`, such as those `desk web login` left for the browser to open. */
+export function sweepLoginFiles(dataDir: string, maxAgeMs: number, now = Date.now()): void {
+  let names: string[];
+  try {
+    names = readdirSync(dataDir).filter((n) => /^web-login-[a-f0-9]{16}\.html$/.test(n));
+  } catch {
+    return;
+  }
+  for (const n of names) {
+    const file = join(dataDir, n);
+    try {
+      if (now - statSync(file).mtimeMs > maxAgeMs) rmSync(file, { force: true });
+    } catch {
+      // Gone already.
+    }
+  }
 }

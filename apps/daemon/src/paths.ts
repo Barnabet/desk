@@ -15,6 +15,7 @@ export function daemonPaths(dataDir: string) {
     config: join(dataDir, 'config.json'),
     /** desk web's pid and port (written by `desk web`, read by the sandbox guard). */
     webJson: join(dataDir, 'web.json'),
+    webDevices: join(dataDir, 'web-devices.json'),
     logs: join(dataDir, 'logs'),
     logFile: join(dataDir, 'logs', 'deskd.log'),
   };

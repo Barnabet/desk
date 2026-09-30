@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 const dir = new URL('./', import.meta.url);
 const FONTS = ['@fontsource-variable/geist', '@fontsource-variable/geist-mono', '@fontsource-variable/newsreader'];
-/** The Electron renderer's cascade: tokens, then each screen's sheet (automations joined in Plan 20, after attention). */
-const SHEETS = ['tokens', 'attention', 'automations', 'conversation', 'knowledge', 'map', 'settings', 'skills', 'system', 'threads'];
+/** The Electron renderer's cascade: tokens, then each screen's sheet (automations joined in Plan 20, after attention), then the phone layout, which narrows them. */
+const SHEETS = ['tokens', 'attention', 'automations', 'conversation', 'knowledge', 'map', 'settings', 'skills', 'system', 'threads', 'phone'];
 
 describe('@desk/ui-styles', () => {
   it('loads the fonts, then every sheet once, in the order the renderer always had', () => {

@@ -19,6 +19,7 @@ function fake() {
   const server: WebServer = {
     port: 7500,
     url: 'http://127.0.0.1:7500',
+    remoteUrl: null,
     loginLink: () => `http://127.0.0.1:7500/login?code=c${++n}`,
     openLoginLink: async () => {
       const link = `http://127.0.0.1:7500/login?code=c${++n}`;

@@ -13,12 +13,14 @@ import { Broker, DaemonManager, type BrokerDeps } from '@desk/bff/server';
 import { createWebApp } from './app';
 import { CODE_TTL_MS, LoginCodes, Sessions } from './auth';
 import { DevReload } from './dev';
+import { DeviceStore } from './devices';
 import { processAlive, readWebInfo, removeWebInfo, WebSettingsStore, writeLoginFile, writeWebInfo, type WebInfo } from './files';
 import { listDirs } from './list-dirs';
 import { createLog } from './log';
 import { webNotices } from './notices';
 import { openPath } from './opener';
 import { PushHub } from './push';
+import { parseRemoteUrl } from './security';
 import { attachUpgrades } from './upgrade';
 import { webHandlerContext, type WebDaemon } from './web-context';
 
@@ -47,6 +49,8 @@ export type StartWebServerOptions = {
   open?: boolean;
   /** Serve /__dev/reload.js and reload the page when the build changes. */
   dev?: boolean;
+  /** The private https:// address paired phones use: web-settings.json's by default; null for none. */
+  remoteUrl?: string | null;
   /** The built Angular app: apps/web-ui/dist/browser by default. */
   uiDir?: string;
   /** How to reach deskd: daemon.json in dataDir by default; null while deskd is down. */
@@ -65,6 +69,8 @@ export type WebServer = {
   port: number;
   /** http://127.0.0.1:<port> */
   url: string;
+  /** The address paired phones use, when one is set (https://…, no trailing slash). */
+  remoteUrl: string | null;
   /** A fresh one-time login link (valid for 2 minutes). */
   loginLink(): string;
   /** Opens a fresh login link in the browser through a 0600 redirect file; returns that link. */
@@ -131,6 +137,10 @@ export async function startWebServer(o: StartWebServerOptions): Promise<WebServe
   const home = o.home ?? homedir();
   const settings = new WebSettingsStore(o.dataDir);
   const port = o.port ?? settings.get().port ?? DEFAULT_WEB_PORT;
+  const remoteText = o.remoteUrl === undefined ? settings.get().remoteUrl : o.remoteUrl;
+  const remote = remoteText ? parseRemoteUrl(remoteText) : null;
+  if (remoteText && !remote) say(`Ignoring the phones' address ${remoteText}: it must be an https:// address with no path. Set it with desk web --remote-url <url>.`);
+  const devices = new DeviceStore(o.dataDir);
   const uiDir = o.uiDir ?? DEFAULT_UI_DIR;
   const opener = o.opener ?? ((target: string) => openPath(target));
   const connect =
@@ -180,7 +190,7 @@ export async function startWebServer(o: StartWebServerOptions): Promise<WebServe
   const daemon = o.daemon ?? webDaemonManager(o.dataDir, home);
   const context = (senderId: number) =>
     webHandlerContext({ dataDir: o.dataDir, version: WEB_VERSION, platform: process.platform, broker, daemon, settings, openPath: opener, onSettingsChange: refreshClaim }, senderId);
-  hub = new PushHub({ sessions, broker, ctx: context, onGrantedChange: refreshClaim, ...(o.authTimeoutMs ? { authTimeoutMs: o.authTimeoutMs } : {}), log: fileLog });
+  hub = new PushHub({ sessions, devices, broker, ctx: context, onGrantedChange: refreshClaim, ...(o.authTimeoutMs ? { authTimeoutMs: o.authTimeoutMs } : {}), log: fileLog });
 
   const sources = async () => {
     const client = broker.getClient();
@@ -190,13 +200,17 @@ export async function startWebServer(o: StartWebServerOptions): Promise<WebServe
   };
   const app = createWebApp({
     port: () => boundPort,
+    remote: () => remote,
     sessions,
+    devices,
     codes,
+    dataDir: o.dataDir,
     uiDir,
     dev: o.dev ?? false,
     ctx: () => context(0),
     web: { 'fs.listDirs': (input) => listDirs(input, { home, dataDir: o.dataDir, sources }) },
     log: fileLog,
+    onPaired: (name) => fileLog(`paired a phone: ${name}`),
     onReplay: () =>
       say('Warning: a login link was used twice, so the session it opened was signed out. If that was not you, someone else on this computer saw the link.'),
   });
@@ -214,7 +228,7 @@ export async function startWebServer(o: StartWebServerOptions): Promise<WebServe
   const dev = o.dev ? new DevReload(uiDir) : null;
   try {
     dev?.start();
-    attachUpgrades(server, { port: () => boundPort, routes: { '/push': hub.handleUpgrade, ...(dev ? { '/__dev/reload': dev.handleUpgrade } : {}) } });
+    attachUpgrades(server, { port: () => boundPort, remote: () => remote, routes: { '/push': hub.handleUpgrade, ...(dev ? { '/__dev/reload': dev.handleUpgrade } : {}) } });
     writeWebInfo(o.dataDir, { pid: process.pid, port: boundPort });
   } catch (err) {
     // Leave nothing behind: the CLI never calls process.exit, and deskd's sandbox guard knows the port only from web.json.
@@ -252,6 +266,7 @@ export async function startWebServer(o: StartWebServerOptions): Promise<WebServe
   return {
     port: boundPort,
     url,
+    remoteUrl: remote?.origin ?? null,
     loginLink: () => issueLink().link,
     openLoginLink,
     close: async () => {

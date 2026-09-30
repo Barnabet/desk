@@ -1,0 +1,208 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { channels, initialGlobalState } from '@desk/bff/contract';
+import { createWebApp } from './app';
+import { LoginCodes, Sessions } from './auth';
+import { DeviceStore, writePendingCode } from './devices';
+import { PHONE_OPS, phoneRefusal } from './phone-policy';
+import { PushHub } from './push';
+import { contentSecurityPolicy, hostAllowed, originAllowed, parseRemoteUrl } from './security';
+import { findInlineCode } from './static';
+import { openPush, refusedUpgrade, unusedContext } from './testing';
+import { attachUpgrades } from './upgrade';
+
+const PORT = 7434;
+const REMOTE = parseRemoteUrl('https://mac.tail1234.ts.net')!;
+const PHONE = { host: REMOTE.host, origin: REMOTE.origin, 'content-type': 'application/json' };
+const dirs: string[] = [];
+let server: Server | undefined;
+let hub: PushHub | undefined;
+afterEach(async () => {
+  hub?.close();
+  hub = undefined;
+  const s = server;
+  server = undefined;
+  if (s) {
+    s.closeAllConnections();
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+function setup() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'desk-phone-'));
+  dirs.push(dataDir);
+  const uiDir = join(dataDir, 'ui');
+  const sessions = new Sessions();
+  const devices = new DeviceStore(dataDir);
+  const paired: string[] = [];
+  const app = createWebApp({
+    port: () => PORT,
+    remote: () => REMOTE,
+    sessions,
+    devices,
+    codes: new LoginCodes(sessions),
+    dataDir,
+    uiDir,
+    dev: false,
+    ctx: () => ({
+      ...unusedContext(),
+      client: () => ({ projects: { list: async () => [{ id: 'P1' }] } }) as never,
+      app: { ...unusedContext().app, info: () => ({ version: '1.0.0', platform: 'darwin', packaged: false, dataDir: '/d' }) },
+    }),
+    web: { 'fs.listDirs': async () => ({ path: '/h', parent: null, dirs: [] }) },
+    onPaired: (name) => void paired.push(name),
+  });
+  const secretOf = async (res: Response) => /<meta name="desk-session" content="([^"]+)">/.exec(await res.text())?.[1];
+  const pair = async (name = 'iPhone') => {
+    const res = await app.request(`/pair?code=${writePendingCode(dataDir, 'phone', { name })}`, { headers: { host: REMOTE.host } });
+    expect(res.status).toBe(200);
+    return (await secretOf(res))!;
+  };
+  const rpc = (op: string, secret: string, body: unknown = {}, headers: Record<string, string> = PHONE) =>
+    app.request(`/rpc/${op}`, { method: 'POST', headers: { ...headers, 'x-desk-session': secret }, body: JSON.stringify(body) });
+  return { app, dataDir, sessions, devices, paired, pair, rpc, secretOf };
+}
+
+describe('the remote address', () => {
+  it('accepts only an https:// origin with no path, query, fragment or credentials', () => {
+    expect(parseRemoteUrl('https://mac.tail1234.ts.net/')).toEqual({ host: 'mac.tail1234.ts.net', origin: 'https://mac.tail1234.ts.net' });
+    expect(parseRemoteUrl('https://mac.tail1234.ts.net:8443')).toEqual({ host: 'mac.tail1234.ts.net:8443', origin: 'https://mac.tail1234.ts.net:8443' });
+    for (const bad of ['http://mac.tail1234.ts.net', 'https://mac.ts.net/desk', 'https://u:p@mac.ts.net', 'https://mac.ts.net/?a=1', 'mac.ts.net', ''])
+      expect(parseRemoteUrl(bad), bad).toBeNull();
+  });
+
+  it('is answered besides 127.0.0.1, and the CSP lets the page open its secure socket', () => {
+    expect(hostAllowed(REMOTE.host, PORT, REMOTE)).toBe(true);
+    expect(hostAllowed(REMOTE.host, PORT, null)).toBe(false);
+    expect(hostAllowed('evil.example', PORT, REMOTE)).toBe(false);
+    expect(originAllowed(REMOTE.origin, PORT, REMOTE)).toBe(true);
+    expect(originAllowed(`http://${REMOTE.host}`, PORT, REMOTE)).toBe(false);
+    expect(contentSecurityPolicy(PORT, REMOTE)).toContain(`connect-src 'self' ws://127.0.0.1:${PORT} wss://${REMOTE.host}`);
+  });
+});
+
+describe('pairing a phone', () => {
+  it('opens a no-store page that stores the secret and skips onboarding, once', async () => {
+    const { app, dataDir, devices, paired } = setup();
+    const code = writePendingCode(dataDir, 'phone', { name: 'iPhone' });
+    const res = await app.request(`/pair?code=${code}`, { headers: { host: REMOTE.host } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('content-security-policy')).toBe(contentSecurityPolicy(PORT, REMOTE));
+    const html = await res.text();
+    expect(html).toContain('<script src="/pair.js"></script>');
+    expect(findInlineCode(html)).toEqual([]);
+    expect(devices.list().map((d) => d.name)).toEqual(['iPhone']);
+    expect(paired).toEqual(['iPhone']);
+    const js = await (await app.request('/pair.js', { headers: { host: REMOTE.host } })).text();
+    expect(js).toContain("localStorage.setItem('desk.onboarded', '1')");
+
+    const again = await app.request(`/pair?code=${code}`, { headers: { host: REMOTE.host } });
+    expect(again.status).toBe(401);
+    expect(await again.text()).toContain('desk web pair');
+    expect(devices.list()).toHaveLength(1);
+  });
+
+  it('never spends a code on HEAD, and a browser code does not pair a phone', async () => {
+    const { app, dataDir, devices } = setup();
+    const code = writePendingCode(dataDir, 'phone');
+    expect((await app.request(`/pair?code=${code}`, { method: 'HEAD', headers: { host: REMOTE.host } })).status).toBe(200);
+    expect((await app.request(`/pair?code=${writePendingCode(dataDir, 'browser')}`, { headers: { host: REMOTE.host } })).status).toBe(401);
+    expect((await app.request(`/pair?code=${code}`, { headers: { host: REMOTE.host } })).status).toBe(200);
+    expect(devices.list().map((d) => d.name)).toEqual(['Phone']);
+  });
+
+  it('signs a browser on this Mac in with a code desk web login wrote', async () => {
+    const { app, dataDir, sessions, secretOf } = setup();
+    const res = await app.request(`/login?code=${writePendingCode(dataDir, 'browser')}`, { headers: { host: `127.0.0.1:${PORT}` } });
+    expect(res.status).toBe(200);
+    expect(sessions.valid(await secretOf(res))).toBe(true);
+    expect((await app.request(`/login?code=${writePendingCode(dataDir, 'phone')}`, { headers: { host: `127.0.0.1:${PORT}` } })).status).toBe(401);
+  });
+});
+
+describe('what a paired phone may do', () => {
+  it('reads and talks, but is refused what stays on the Mac', async () => {
+    const { pair, rpc } = setup();
+    const secret = await pair();
+    const listed = await rpc('projects.list', secret);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({ ok: true, value: [{ id: 'P1' }] });
+    for (const op of ['config.patch', 'config.saveEndpoint', 'projects.update', 'projects.addSource', 'automations.setGrants', 'daemon.stop', 'skills.import', 'fs.listDirs', 'app.updateSettings']) {
+      const res = await rpc(op, secret);
+      expect(res.status, op).toBe(403);
+      expect(((await res.json()) as { error: { code: string } }).error.code, op).toBe('not_on_phone');
+    }
+    const remember = await rpc('approvals.resolve', secret, { id: 'a1', decision: 'approved', remember: true });
+    expect(remember.status).toBe(403);
+  });
+
+  it('is signed out once unpaired, and a browser session is not limited', async () => {
+    const { pair, rpc, devices, sessions } = setup();
+    const secret = await pair();
+    devices.revoke(devices.list()[0]!.id);
+    expect((await rpc('projects.list', secret)).status).toBe(401);
+    const browser = sessions.create();
+    const res = await rpc('fs.listDirs', browser, {}, { host: `127.0.0.1:${PORT}`, origin: `http://127.0.0.1:${PORT}`, 'content-type': 'application/json' });
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses a cross-origin call on the remote host', async () => {
+    const { pair, rpc } = setup();
+    const secret = await pair();
+    expect((await rpc('projects.list', secret, {}, { ...PHONE, origin: 'https://evil.example' })).status).toBe(403);
+  });
+
+  it('lists only operations that exist, and refuses every operation it does not list', () => {
+    for (const op of PHONE_OPS) expect(Object.hasOwn(channels, op), op).toBe(true);
+    for (const op of Object.keys(channels)) expect(phoneRefusal(op, {}) === null).toBe(PHONE_OPS.has(op));
+    expect(phoneRefusal('approvals.resolve', { id: 'a', decision: 'approved' })).toBeNull();
+  });
+});
+
+describe('/push for a paired phone', () => {
+  async function pushSetup() {
+    const { devices, dataDir } = setup();
+    const sessions = new Sessions();
+    const h = new PushHub({
+      sessions,
+      devices,
+      recheckMs: 60_000,
+      broker: { snapshot: () => initialGlobalState(), dropSender: () => {} },
+      ctx: (senderId) => ({ ...unusedContext(senderId), broker: { snapshot: () => initialGlobalState(), watch: async () => {}, unwatch: () => {} } }),
+    });
+    hub = h;
+    const s = createServer((_req, res) => res.writeHead(404).end());
+    server = s;
+    let port = 0;
+    attachUpgrades(s, { port: () => port, remote: () => REMOTE, routes: { '/push': h.handleUpgrade } });
+    await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', () => resolve()));
+    port = (s.address() as AddressInfo).port;
+    return { hub: h, devices, dataDir, port };
+  }
+
+  it('signs in on the remote host, and closes with 4401 once the phone is unpaired', async () => {
+    const { hub: h, devices, port } = await pushSetup();
+    const { device, secret } = devices.add('iPhone');
+    const c = openPush(port, { host: REMOTE.host, origin: REMOTE.origin });
+    await c.opened;
+    c.send({ session: secret });
+    await c.next((f) => f.channel === 'desk:global');
+    c.send({ op: 'broker.watch', id: 1, input: { projectId: 'P1', afterSeq: 0 } });
+    expect((await c.next((f) => f.ack === 1)).result.ok).toBe(true);
+    devices.revoke(device.id);
+    h.recheckPhones();
+    expect(await c.closed).toBe(4401);
+  });
+
+  it('refuses an upgrade from another origin on the remote host', async () => {
+    const { port } = await pushSetup();
+    expect(await refusedUpgrade(port, { host: REMOTE.host, origin: 'https://evil.example' })).toBe(403);
+    expect(await refusedUpgrade(port, { host: 'evil.example', origin: REMOTE.origin })).toBe(421);
+  });
+});

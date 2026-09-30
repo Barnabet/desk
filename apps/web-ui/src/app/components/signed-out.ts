@@ -11,7 +11,7 @@ import { EmptyState } from './empty-state';
     <div
       deskEmptyState
       title="Open Desk from your terminal"
-      body="Run desk web on this computer and open the link it prints. A link signs this browser in once and expires after two minutes; if desk web is already running, press Enter in its terminal for a new one."
+      body="Run desk web on this computer and open the link it prints. A link signs this browser in once and expires after two minutes; if desk web is already running, press Enter in its terminal for a new one, or run desk web login when it runs as a login item. On a phone, run desk web pair on your Mac and scan its code again."
     ></div>
   `,
 })

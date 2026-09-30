@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { hostAllowed, originAllowed } from './security';
+import { hostAllowed, originAllowed, type RemoteOrigin } from './security';
 
 export type UpgradeRoute = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
@@ -18,10 +18,11 @@ function refuse(socket: Duplex, status: keyof typeof REASON): void {
 }
 
 /** WebSocket upgrades: the same Host (421) and Origin (403) checks as /rpc, then the route for the path (else 404). */
-export function attachUpgrades(server: Server, o: { port: () => number; routes: Record<string, UpgradeRoute> }): void {
+export function attachUpgrades(server: Server, o: { port: () => number; remote?: () => RemoteOrigin | null; routes: Record<string, UpgradeRoute> }): void {
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (!hostAllowed(req.headers.host, o.port())) return refuse(socket, 421);
-    if (!originAllowed(req.headers.origin, o.port())) return refuse(socket, 403);
+    const remote = o.remote?.() ?? null;
+    if (!hostAllowed(req.headers.host, o.port(), remote)) return refuse(socket, 421);
+    if (!originAllowed(req.headers.origin, o.port(), remote)) return refuse(socket, 403);
     let path: string;
     try {
       path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;

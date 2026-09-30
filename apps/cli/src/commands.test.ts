@@ -7,7 +7,7 @@ import { SEED_MODELS } from '@desk/core';
 import { FAKE_MODEL, seedThread } from '@desk/core/testing';
 import { daemonPaths, startDaemon, type RunningDaemon } from '@desk/daemon';
 import { runCli } from './commands';
-import { plistFor } from './launchd';
+import { plistFor, webPlistFor } from './launchd';
 
 let dir: string;
 let fake: FakeModelServer;
@@ -196,6 +196,14 @@ describe('launchd plist', () => {
     expect(plist).toContain('<string>/repo/apps/daemon/src/main.ts</string>');
     expect(plist).toContain('<key>KeepAlive</key>');
     expect(plist).toContain('/data/logs/deskd.launchd.log');
+  });
+
+  it('runs desk web --service for the data dir as its own login item', () => {
+    const plist = webPlistFor({ nodePath: '/usr/local/bin/node', loader: '/repo/node_modules/tsx/dist/loader.mjs', entry: '/repo/apps/cli/src/main.ts', dataDir: '/data', cwd: '/repo' });
+    expect(plist).toContain('<string>dev.desk.web</string>');
+    expect(plist).toContain('<string>/repo/apps/cli/src/main.ts</string>\n    <string>web</string>\n    <string>--service</string>');
+    expect(plist).toContain('<key>DESK_DATA_DIR</key>\n    <string>/data</string>');
+    expect(plist).toContain('/data/logs/web.launchd.log');
   });
 
   it('imports, lists, shows and removes skills', async () => {

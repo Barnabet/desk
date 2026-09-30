@@ -1,7 +1,16 @@
 import { WebSettingsStore } from './files';
 import { startWebServer, type StartWebServerOptions, type WebServer } from './server';
 
-export type WebCommandOptions = { dataDir: string; port?: number; open: boolean; dev: boolean };
+export type WebCommandOptions = {
+  dataDir: string;
+  port?: number;
+  open: boolean;
+  dev: boolean;
+  /** Sets (a URL) or removes (null) the address paired phones use, remembered in web-settings.json. */
+  remoteUrl?: string | null;
+  /** Running with no one at a terminal (the LaunchAgent): no login link is printed, since the output goes to a log file. */
+  service?: boolean;
+};
 
 export type WebCommandIO = {
   out(s: string): void;
@@ -17,15 +26,29 @@ export type WebCommandIO = {
  * also opens a different fresh link in the browser, so using the printed link as well never replays the opened one.
  */
 export async function runWebCommand(o: WebCommandOptions, io: WebCommandIO, start: (opts: StartWebServerOptions) => Promise<WebServer> = startWebServer): Promise<void> {
-  const server = await start({ dataDir: o.dataDir, ...(o.port !== undefined ? { port: o.port } : {}), open: o.open, dev: o.dev, log: (message) => io.err(`${message}\n`) });
+  if (o.remoteUrl !== undefined) new WebSettingsStore(o.dataDir).update({ remoteUrl: o.remoteUrl });
+  const open = o.open && !o.service;
+  const server = await start({ dataDir: o.dataDir, ...(o.port !== undefined ? { port: o.port } : {}), open, dev: o.dev, log: (message) => io.err(`${message}\n`) });
   // The origin, and everything the browser keeps for it (the session, onboarding, drafts), depends on the port.
   if (o.port !== undefined && o.port > 0) new WebSettingsStore(o.dataDir).update({ port: o.port });
   io.out(`Desk is at ${server.url}${o.dev ? ' (dev: the page reloads when the build changes)' : ''}\n`);
-  io.out(`${o.open ? 'Opened Desk in your browser. If it did not open, sign in with' : 'Sign in with'} this one-time link (valid for 2 minutes):\n  ${server.loginLink()}\n`);
+  if (server.remoteUrl) io.out(`Paired phones reach it at ${server.remoteUrl}. Pair one with: desk web pair\n`);
+  if (o.service) {
+    // A login link printed here would land in a log file: `desk web login` writes one only the person can use.
+    io.out('Running as a login item. Sign in on this Mac with: desk web login\n');
+    try {
+      await io.stopped;
+    } finally {
+      await server.close();
+    }
+    io.out('desk web stopped.\n');
+    return;
+  }
+  io.out(`${open ? 'Opened Desk in your browser. If it did not open, sign in with' : 'Sign in with'} this one-time link (valid for 2 minutes):\n  ${server.loginLink()}\n`);
   io.out(io.onEnter ? 'Press Enter for a new link, Ctrl-C to stop.\n' : 'Press Ctrl-C to stop.\n');
   const off = io.onEnter?.(() => {
     io.out(`New one-time link (valid for 2 minutes):\n  ${server.loginLink()}\n`);
-    if (o.open) void server.openLoginLink().catch((err: unknown) => io.err(`Could not open the browser: ${err instanceof Error ? err.message : String(err)}\n`));
+    if (open) void server.openLoginLink().catch((err: unknown) => io.err(`Could not open the browser: ${err instanceof Error ? err.message : String(err)}\n`));
   });
   try {
     await io.stopped;

@@ -31,6 +31,26 @@ export const LOGIN_JS = `(() => {
 })();
 `;
 
+/** The /pair answer: the paired phone's secret, stored by the external /pair.js like /login's. */
+export function pairPage(secret: string): string {
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="desk-session" content="${escapeHtml(secret)}"><title>Desk</title>${STYLE}<script src="/pair.js"></script></head><body></body></html>\n`;
+}
+
+export function pairFailedPage(): string {
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Desk</title>${STYLE}</head><body><main><h1>This pairing link has expired or was already used.</h1><p>Run <code>desk web pair</code> on your Mac and scan the new code.</p></main></body></html>\n`;
+}
+
+/** Stores the phone's secret for this origin and skips onboarding (the Mac already did it), then opens the app. */
+export const PAIR_JS = `(() => {
+  const meta = document.querySelector('meta[name="desk-session"]');
+  try {
+    if (meta) localStorage.setItem(${JSON.stringify(SESSION_STORAGE_KEY)}, meta.getAttribute('content') || '');
+    localStorage.setItem('desk.onboarded', '1');
+  } catch {}
+  location.replace('/');
+})();
+`;
+
 /** The page desk web opens instead of the link, so the one-time code never appears on a command line. */
 export function loginRedirectHtml(link: string): string {
   const href = escapeHtml(link);

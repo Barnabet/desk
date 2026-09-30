@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
@@ -9,7 +9,7 @@ import type { ServiceRow } from '@desk/client';
 import { runChat } from './chat';
 import { ApiError, clientFromDataDir, DeskClient, platformDataDir, readDaemonInfo } from './client';
 import { automationLine, createRenderer, runLine, stepLine } from './format';
-import { install, isInstalled, plistFor, uninstall } from './launchd';
+import { install, installWeb, isInstalled, isWebInstalled, plistFor, uninstall, uninstallWeb, webPlistFor } from './launchd';
 
 export type CliIO = {
   out(s: string): void;
@@ -271,21 +271,117 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     });
 
   // ── web ────────────────────────────────────────────────────────────
-  program
+  const web = program
     .command('web')
     .description('Serve the Desk web app on http://127.0.0.1 and sign in with a one-time link (runs until Ctrl-C)')
     .option('--port <port>', 'port on 127.0.0.1 (remembered for next time; default 7434)')
     .option('--no-open', 'print the login link without opening the browser')
     .option('--dev', 'reload the page whenever apps/web-ui/dist changes (with ng build --watch)')
-    .action(async (opts: { port?: string; open: boolean; dev?: boolean }) => {
+    .option('--remote-url <url>', "the private https:// address paired phones use, such as Tailscale Serve's (remembered; 'off' removes it)")
+    .option('--service', 'run with no terminal (the login item): print no login link; sign in with desk web login')
+    .action(async (opts: { port?: string; open: boolean; dev?: boolean; remoteUrl?: string; service?: boolean }) => {
       const port = opts.port === undefined ? undefined : Number(opts.port);
       if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error('--port must be a whole number from 1 to 65535');
       // Loaded here, so other commands do not pay for the server's dependencies.
-      const { runWebCommand } = await import('@desk/web-server');
+      const { parseRemoteUrl, runWebCommand } = await import('@desk/web-server');
+      const remoteUrl = opts.remoteUrl === undefined ? undefined : opts.remoteUrl === 'off' ? null : opts.remoteUrl;
+      if (remoteUrl && !parseRemoteUrl(remoteUrl)) throw new Error('--remote-url must be an https:// address with no path, such as https://my-mac.tail1234.ts.net');
       await runWebCommand(
-        { dataDir, ...(port !== undefined ? { port } : {}), open: opts.open, dev: opts.dev ?? false },
-        { out: io.out, err: io.err, stopped: io.stopped ?? untilStopped(), ...(io.onEnter ? { onEnter: io.onEnter } : process.stdin.isTTY ? { onEnter: terminalEnter } : {}) },
+        { dataDir, ...(port !== undefined ? { port } : {}), open: opts.open, dev: opts.dev ?? false, ...(remoteUrl !== undefined ? { remoteUrl } : {}), ...(opts.service ? { service: true } : {}) },
+        {
+          out: io.out,
+          err: io.err,
+          stopped: io.stopped ?? untilStopped(),
+          ...(opts.service ? {} : io.onEnter ? { onEnter: io.onEnter } : process.stdin.isTTY ? { onEnter: terminalEnter } : {}),
+        },
       );
+    });
+
+  /** The running desk web's port, or an error naming how to start it. */
+  const runningWebPort = async (): Promise<number> => {
+    const { readWebInfo } = await import('@desk/web-server');
+    const info = readWebInfo(dataDir);
+    if (!info) throw new Error('desk web is not running. Start it with desk web, or keep it running with desk web install.');
+    return info.port;
+  };
+
+  web
+    .command('login')
+    .description('Sign in to desk web from a browser on this Mac with a one-time link (for a desk web with no terminal)')
+    .option('--no-open', 'print the link without opening the browser')
+    .action(async (opts: { open: boolean }) => {
+      const { openPath, writeLoginFile, writePendingCode } = await import('@desk/web-server');
+      const port = await runningWebPort();
+      const link = `http://127.0.0.1:${port}/login?code=${writePendingCode(dataDir, 'browser')}`;
+      if (opts.open) {
+        // Through a 0600 redirect file, so the code never appears on a command line.
+        const file = writeLoginFile(dataDir, link);
+        try {
+          await openPath(file);
+          say('Opened Desk in your browser.');
+        } catch {
+          rmSync(file, { force: true });
+          say(`Could not open the browser. Sign in with this one-time link (valid for 10 minutes):\n  ${link}`);
+        }
+        return;
+      }
+      say(`Sign in with this one-time link (valid for 10 minutes):\n  ${link}`);
+    });
+
+  web
+    .command('pair')
+    .description('Pair a phone: shows a QR code that signs the phone in to desk web at its private address')
+    .option('--name <name>', 'what to call the phone in desk web phones', 'Phone')
+    .action(async (opts: { name: string }) => {
+      const { parseRemoteUrl, readWebInfo, WebSettingsStore, writePendingCode } = await import('@desk/web-server');
+      const remote = parseRemoteUrl(new WebSettingsStore(dataDir).get().remoteUrl ?? '');
+      if (!remote) throw new Error("Set the phones' address first: desk web --remote-url https://<this Mac's Tailscale name>. See Desk from your phone in docs/web.md.");
+      const link = `${remote.origin}/pair?code=${writePendingCode(dataDir, 'phone', { name: opts.name })}`;
+      const QR = (await import('qrcode')).default;
+      io.out(await QR.toString(link, { type: 'terminal', small: true, errorCorrectionLevel: 'L' }));
+      say(`Scan this with your phone's camera, or open this link on it (works once, for 10 minutes):\n  ${link}`);
+      if (!readWebInfo(dataDir)) say('desk web is not running yet: start it with desk web install (or desk web) before you scan.');
+    });
+
+  web
+    .command('phones')
+    .description('List paired phones')
+    .action(async () => {
+      const { DeviceStore } = await import('@desk/web-server');
+      const phones = new DeviceStore(dataDir).list();
+      if (!phones.length) return say('No paired phones. Pair one with desk web pair.');
+      for (const p of phones) say(`${p.id}  ${p.name}  paired ${p.created_at.slice(0, 10)}, last used ${p.last_seen_at.slice(0, 16).replace('T', ' ')} UTC`);
+    });
+
+  web
+    .command('unpair <id>')
+    .description('Sign a paired phone out (its id from desk web phones)')
+    .action(async (id: string) => {
+      const { DeviceStore } = await import('@desk/web-server');
+      const gone = new DeviceStore(dataDir).revoke(id);
+      if (!gone) throw new Error(`No paired phone has the id ${id}. See desk web phones.`);
+      say(`Signed out ${gone.name} (${gone.id}).`);
+    });
+
+  web
+    .command('install')
+    .description('Keep desk web running as a login item (a LaunchAgent), so paired phones can reach it')
+    .action(async () => {
+      if (process.platform !== 'darwin') throw new Error('desk web install sets up a macOS LaunchAgent.');
+      const root = repoRoot();
+      const loader = join(root, 'node_modules', 'tsx', 'dist', 'loader.mjs');
+      const entry = join(root, 'apps', 'cli', 'src', 'main.ts');
+      installWeb(webPlistFor({ nodePath: process.execPath, loader, entry, dataDir, cwd: root }), dataDir);
+      say('desk web now runs as a login item. Sign in on this Mac with desk web login; pair a phone with desk web pair.');
+    });
+
+  web
+    .command('uninstall')
+    .description('Remove the desk web login item and stop it')
+    .action(async () => {
+      if (!isWebInstalled()) return say('The desk web login item is not installed.');
+      uninstallWeb();
+      say('Removed the desk web login item.');
     });
 
   // ── projects ───────────────────────────────────────────────────────

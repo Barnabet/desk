@@ -1,0 +1,149 @@
+/*
+ * Phone-sized screens (a paired phone on desk web, docs/web.md): one column, the title bar and sub-nav scroll
+ * sideways, and the side panels stack under or over the main one. Loaded last, so it only narrows what the screen
+ * sheets set. Desktop windows never get this narrow.
+ */
+@media (max-width: 640px) {
+  /* Title bar: places scroll sideways; the deskd label gives way to the attention pill. */
+  .titlebar {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .titlebar .places {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .places a {
+    padding: 0 10px;
+  }
+  .titlebar .spacer,
+  .titlebar .daemon {
+    display: none;
+  }
+  .titlebar .pill {
+    flex-shrink: 0;
+    padding: 0 10px;
+  }
+  .switcher-pop {
+    position: fixed;
+    top: 44px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: calc(100dvh - 60px);
+    overflow: auto;
+  }
+  .subnav {
+    padding: 0 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .subnav a {
+    flex-shrink: 0;
+  }
+  .title {
+    font-size: 28px;
+  }
+
+  /* Conversation: the lane diagram gives its height to the chat; the Threads tab lists the same threads. */
+  .line-diagram {
+    display: none;
+  }
+  .conv-body {
+    padding: 0 12px 12px;
+    gap: 12px;
+  }
+  .conv-intro {
+    flex-wrap: wrap;
+  }
+  /* 16px text keeps iOS from zooming into the field; the keyboard hints and skill link make room for Send. */
+  .composer textarea,
+  .composer .textarea {
+    font-size: 16px;
+  }
+  .composer-bar .muted.small,
+  .composer-bar .link.small {
+    display: none;
+  }
+  .plan-open .conv-side {
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+
+  /* Attention: the board, then the selected item under it. */
+  .attention {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px 12px;
+  }
+  .attention-head h1 {
+    font-size: 28px;
+    line-height: 34px;
+  }
+  .rack {
+    padding: 8px;
+  }
+  .bay {
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 0;
+  }
+  .bay-name {
+    width: auto;
+    min-height: 0;
+  }
+  .bay-tray {
+    width: 100%;
+    min-height: 56px;
+  }
+  .attention .keys {
+    display: none;
+  }
+  .facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Map: the project card and legend fit the width. Projects are created on the Mac. */
+  .new-project-btn {
+    display: none;
+  }
+  .territory {
+    left: 12px;
+    right: 12px;
+    top: 12px;
+    width: auto;
+  }
+  .map-legend {
+    left: 12px;
+    right: 12px;
+    bottom: 16px;
+    min-width: 0;
+    max-width: none;
+  }
+
+  /* Library, Skills and System: one column; a preview or panel follows the list. */
+  .library,
+  .library.with-preview {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px 12px;
+  }
+  .skills,
+  .skills.with-panel {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
+  }
+  .sys-grid,
+  .roster-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .overlay .card {
+    width: auto;
+    margin: 0 12px;
+  }
+  .auto-inspector,
+  .auto-panel {
+    width: 100%;
+  }
+}
