@@ -4,6 +4,8 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { GlobalState, IpcResult } from '@desk/bff/contract';
 import { dispatch, type HandlerContext } from '@desk/bff/server';
 import type { Sessions } from './auth';
+import { callerOf, type Caller } from './caller';
+import type { DeviceStore } from './devices';
 import {
   AUTH_TIMEOUT_MS,
   CLOSE_BAD_FRAME,
@@ -16,9 +18,13 @@ import {
   type WebNotice,
   type WebPushChannel,
 } from './frames';
+import { phoneRefusal } from './phone-policy';
 
 export type PushHubDeps = {
   sessions: Sessions;
+  /** Paired phones: their secrets sign in too, and are checked again every `recheckMs` (a phone unpaired from the CLI). */
+  devices?: DeviceStore;
+  recheckMs?: number;
   broker: { snapshot(): GlobalState; dropSender(senderId: number): void };
   /** The HandlerContext a socket's broker.watch and unwatch run with (its sender id is the socket's). */
   ctx(senderId: number): HandlerContext;
@@ -28,7 +34,7 @@ export type PushHubDeps = {
   log?(message: string, err?: unknown): void;
 };
 
-type Client = { ws: WebSocket; senderId: number; secret: string; permission: NotifyPermission };
+type Client = { ws: WebSocket; senderId: number; secret: string; caller: Caller; permission: NotifyPermission };
 
 const pushOps = new Set<string>(PUSH_OPS);
 
@@ -49,11 +55,19 @@ export class PushHub {
   private readonly clients = new Map<number, Client>();
   private nextSender = 1;
   private readonly offRevoke: () => void;
+  private readonly recheck: ReturnType<typeof setInterval> | null;
 
   constructor(private readonly d: PushHubDeps) {
     this.offRevoke = d.sessions.onRevoke((secret) => {
       for (const c of this.clients.values()) if (c.secret === secret) c.ws.close(CLOSE_UNAUTHORIZED, 'signed out');
     });
+    this.recheck = d.devices ? setInterval(() => this.recheckPhones(), d.recheckMs ?? 15_000) : null;
+    this.recheck?.unref();
+  }
+
+  /** Closes the sockets of phones that were unpaired or went idle since they signed in. */
+  recheckPhones(): void {
+    for (const c of this.clients.values()) if (c.caller.kind === 'phone' && !this.d.devices?.who(c.secret)) c.ws.close(CLOSE_UNAUTHORIZED, 'signed out');
   }
 
   readonly handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
@@ -73,8 +87,9 @@ export class PushHub {
       if (client) return void this.onFrame(client, frame);
       clearTimeout(timer);
       const first = SessionFrame.safeParse(frame);
-      if (!first.success || !this.d.sessions.valid(first.data.session)) return ws.close(CLOSE_UNAUTHORIZED, 'unauthorized');
-      client = { ws, senderId: this.nextSender++, secret: first.data.session, permission: 'default' };
+      const caller = first.success ? callerOf(first.data.session, this.d.sessions, this.d.devices) : null;
+      if (!first.success || !caller) return ws.close(CLOSE_UNAUTHORIZED, 'unauthorized');
+      client = { ws, senderId: this.nextSender++, secret: first.data.session, caller, permission: 'default' };
       this.clients.set(client.senderId, client);
       this.write(client, { channel: 'desk:global', payload: this.d.broker.snapshot() });
     });
@@ -97,7 +112,10 @@ export class PushHub {
       c.permission = f.notifyPermission;
       return this.grantedMaybeChanged(before);
     }
-    const result: IpcResult<unknown> = pushOps.has(f.op)
+    const refused = c.caller.kind === 'phone' ? phoneRefusal(f.op, f.input) : null;
+    const result: IpcResult<unknown> = refused
+      ? { ok: false, error: { code: 'not_on_phone', message: refused } }
+      : pushOps.has(f.op)
       ? await dispatch(f.op, f.input, this.d.ctx(c.senderId), (err) => this.d.log?.(`push ${f.op} failed`, err))
       : { ok: false, error: { code: 'unknown_channel', message: 'Only broker.watch and broker.unwatch run on /push.' } };
     this.write(c, { ack: f.id, result });
@@ -136,6 +154,7 @@ export class PushHub {
 
   close(): void {
     this.offRevoke();
+    if (this.recheck) clearInterval(this.recheck);
     for (const ws of this.wss.clients) ws.terminate();
     this.wss.close();
   }

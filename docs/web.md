@@ -28,6 +28,41 @@ bin/desk web --no-open       # print the link without opening it
   - Otherwise, for example for desk web on another data dir through `DESK_DATA_DIR`, desk web runs this repository's deskd and stops it by its pid.
   - Repairing the LaunchAgent stays in the desktop app.
 
+## From your phone
+
+A paired phone opens the same web UI over a private network: message any project's Desk, answer its questions and approvals, read reports, threads and the Library. desk web still listens on `127.0.0.1` only. [Tailscale Serve](https://tailscale.com/kb/1312/serve) gives the Mac a private HTTPS address that only your own Tailscale devices can reach, and forwards it to desk web. Never use Tailscale Funnel, which would put it on the public internet.
+
+### Set up
+
+On the Mac, once:
+
+```sh
+desk web --remote-url https://<mac>.<tailnet>.ts.net   # remembered in web-settings.json ('off' removes it)
+desk web install                                       # a login item (LaunchAgent dev.desk.web) runs desk web --service
+tailscale serve --bg 7434                              # HTTPS on the tailnet → http://127.0.0.1:7434
+desk web pair --name "iPhone"                          # prints a QR code: scan it with the phone's camera
+```
+
+- The address is the Mac's MagicDNS name. Tailscale Serve needs MagicDNS and HTTPS certificates turned on for the tailnet (Tailscale's admin console, DNS page). The Mac App Store app's CLI is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
+- On the phone: install Tailscale, sign in with the same account, then scan the code. The link works once, for 10 minutes. The phone stays signed in: its secret is in the phone browser's storage for that address, and desk web keeps only a SHA-256 of it in `web-devices.json`. Add the page to the Home Screen for a full-screen app.
+- `desk web phones` lists paired phones, and `desk web unpair <id>` signs one out at once (open sockets close within 15 seconds). A phone unused for 30 days is signed out.
+- With desk web running as a login item there is no terminal, so it prints no login link (the log file would keep it). `desk web login` signs a browser on this Mac in instead. `desk web uninstall` removes the login item.
+- The phone reaches Desk while the Mac is awake and on the network. Browser notifications need an open tab, so a phone gets none while Desk is closed.
+
+### What a phone may do
+
+A paired phone may do what the web UI does from the couch, and nothing that changes what agents may do. `phone-policy.ts` holds the allow list, so an operation added later is refused on phones (403 `not_on_phone`) until it is listed.
+
+| A phone may | Only the Mac may |
+|---|---|
+| Read projects, the conversation, threads, their transcripts, diffs and files, service logs, the Library, memory, skills and the catalog, automations and their runs | Create, change or archive projects; change policy, settings or sources (and their write access) |
+| Message Desk and threads, stop or archive a thread, stop a service | Start or restart services |
+| Answer approvals one at a time (never *remember*) and questions, dismiss attention items | Change the model endpoint, models or config; turn built-in skills on or off; install, import, save or restore skills |
+| Upload to the Library; add, correct or remove memory | Create, edit, turn on or grant automations |
+| Run automations, answer their steps, cancel runs, stop steps | Start, restart or stop deskd; browse the Mac's folders; change desk web's settings; pair phones |
+
+Approving from the phone runs the action on the Mac, as approving on the Mac does, so treat a paired phone like the Mac's keyboard: pair only your own, and unpair a lost one.
+
 ## What differs from the desktop app
 
 The screens, their text and their look are the same. Both UIs load `@desk/ui-styles` and share their logic through `@desk/ui-core` (see the desktop app's [screens](desktop.md#screens)). What a browser does differently:
@@ -58,11 +93,13 @@ All in the Desk data dir, which agents cannot write outside their workspace.
 | File | What it holds |
 |---|---|
 | `web.json` | The running desk web's pid and port (mode 0600, no secrets). A second `desk web` reads it and exits, and deskd's sandbox guard reads the port from it. desk web removes it when it stops. |
-| `web-settings.json` | The port chosen with `--port`, and the "From the app" notifications switch. |
+| `web-settings.json` | The port chosen with `--port`, the "From the app" notifications switch, and the phones' address (`--remote-url`). |
 | `web-login-<random>.html` | A page that redirects to a one-time login link (mode 0600). desk web opens this file instead of the link, so the code never appears on a command line. It is deleted once the code is used or expires. Agents cannot read these files. |
+| `web-devices.json` | Paired phones: an id, a name, when each was paired and last used, and a SHA-256 of its secret (mode 0600). Agents cannot read it. |
+| `web-code-<random>.json` | A one-time code `desk web pair` or `desk web login` issued, as a SHA-256 (mode 0600). Deleted once used or found expired. Agents cannot read these files. |
 | `logs/web.log` | desk web's log. |
 
-Sessions and login codes live in desk web's memory only. The browser keeps its session secret in `localStorage` for `http://127.0.0.1:<port>`.
+Sessions and login codes live in desk web's memory only, except paired phones and the CLI's one-time codes above. The browser keeps its session secret in `localStorage` for `http://127.0.0.1:<port>`, a phone for the remote address.
 
 ## Architecture
 
@@ -91,8 +128,9 @@ browser (Angular app)  ── http://127.0.0.1:<port> ──►  desk web (Node)
 
 - The deskd token never leaves desk web. The browser gets the same operation results the desktop renderer gets, which hold no token.
 - There is no cookie. The session secret lives in this origin's `localStorage`. It travels as the `x-desk-session` header on `/rpc` and as `/push`'s first frame, and desk web compares it in constant time. A missing or wrong secret gets 401 on `/rpc` and closes `/push` with 4401. The page then shows "Open Desk from your terminal".
-- Host check: every request, the WebSocket upgrade included, must carry `Host: 127.0.0.1:<port>`. Anything else gets 421, which blocks DNS rebinding.
-- Origin check: `/rpc` and the `/push` upgrade also need `Origin: http://127.0.0.1:<port>`. Anything else gets 403. `/rpc` also takes only `application/json` (415 otherwise), up to 40 MB (413 above).
+- Host check: every request, the WebSocket upgrade included, must carry `Host: 127.0.0.1:<port>`, or the remote address's host when one is set. Anything else gets 421, which blocks DNS rebinding.
+- Origin check: `/rpc` and the `/push` upgrade also need `Origin: http://127.0.0.1:<port>` (or the remote address). Anything else gets 403.
+- A paired phone's secret is checked against `web-devices.json` on every request and every 15 seconds on `/push`, and its operations against the phone allow list. Sandboxed agents can reach the remote address through Tailscale, like any network address, but hold no secret for it and cannot read the files that would give one. `/rpc` also takes only `application/json` (415 otherwise), up to 40 MB (413 above).
 - Every HTTP response carries strict headers: a CSP with `script-src 'self'` and `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and same-origin opener and resource policies. The built app has no inline script.
 - Agent text never becomes HTML. `SafeMarkdown` renders `marked`'s tokens with Angular templates, and `apps/web-ui` has no `innerHTML` (`security.spec.ts` fails on it).
 - Sandboxed agents cannot read desk web's one-time login files, and cannot connect to its port. deskd reads the port from `web.json` each time it builds a sandbox profile, so a command or service started before desk web took its port can reach it until it restarts. desk web still asks it for a session.

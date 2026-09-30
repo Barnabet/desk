@@ -58,3 +58,62 @@ export function uninstall(): void {
   } catch {}
   rmSync(plistPath(), { force: true });
 }
+
+/** desk web's LaunchAgent (`desk web install`): keeps it serving for paired phones, with no terminal. */
+export const WEB_LAUNCHD_LABEL = 'dev.desk.web';
+
+export const webPlistPath = () => join(homedir(), 'Library', 'LaunchAgents', `${WEB_LAUNCHD_LABEL}.plist`);
+
+/** Runs `desk web --service` from this checkout at login, restarting it if it exits. */
+export function webPlistFor(o: { nodePath: string; loader: string; entry: string; dataDir: string; cwd: string }): string {
+  const args = [o.nodePath, '--import', o.loader, o.entry, 'web', '--service'].map((a) => `    <string>${esc(a)}</string>`).join('\n');
+  const log = esc(join(o.dataDir, 'logs', 'web.launchd.log'));
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${WEB_LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${args}
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DESK_DATA_DIR</key>
+    <string>${esc(o.dataDir)}</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>${esc(o.cwd)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${log}</string>
+  <key>StandardErrorPath</key>
+  <string>${log}</string>
+</dict>
+</plist>
+`;
+}
+
+export function isWebInstalled(): boolean {
+  return existsSync(webPlistPath());
+}
+
+/** Writes desk web's LaunchAgent and loads it, replacing an older one. */
+export function installWeb(plist: string, dataDir: string): void {
+  mkdirSync(join(dataDir, 'logs'), { recursive: true });
+  mkdirSync(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true });
+  if (isWebInstalled()) uninstallWeb();
+  writeFileSync(webPlistPath(), plist);
+  execFileSync('launchctl', ['bootstrap', domain(), webPlistPath()]);
+}
+
+export function uninstallWeb(): void {
+  try {
+    execFileSync('launchctl', ['bootout', `${domain()}/${WEB_LAUNCHD_LABEL}`], { stdio: 'ignore' });
+  } catch {}
+  rmSync(webPlistPath(), { force: true });
+}

@@ -43,7 +43,7 @@ describe('startDaemon', () => {
     expect(tick.mock.calls.length).toBe(calls);
   });
 
-  it("keeps agents off deskd's token file, its database, the model credentials file and its port, and off desk web's login files and port", async () => {
+  it("keeps agents off deskd's token file, its database, the model credentials file and its port, and off desk web's login files, codes, paired phones and port", async () => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-home-')));
     try {
@@ -51,8 +51,11 @@ describe('startDaemon', () => {
       const p = daemonPaths(dir);
       expect(d.runtime.guard).toEqual({
         dataDir: dir,
-        secrets: [p.daemonJson, p.db, `${p.db}-wal`, `${p.db}-shm`, `${p.db}-journal`, join(home, '.config', 'cliproxyapi.env')],
-        secretPatterns: [{ dir, prefix: 'web-login-', suffix: '.html' }],
+        secrets: [p.daemonJson, p.db, `${p.db}-wal`, `${p.db}-shm`, `${p.db}-journal`, join(home, '.config', 'cliproxyapi.env'), join(dir, 'web-devices.json')],
+        secretPatterns: [
+          { dir, prefix: 'web-login-', suffix: '.html' },
+          { dir, prefix: 'web-code-', suffix: '.json' },
+        ],
         readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh'), join(import.meta.dirname, '..', '..', '..', 'catalog', 'skills')],
         ports: [d.port],
         portFiles: [join(dir, 'web.json')],

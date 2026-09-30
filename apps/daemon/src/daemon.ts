@@ -111,12 +111,17 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       dataDir: o.dataDir,
       // Off limits to agents: the token file, every project's history, and the model credentials file; and read-only,
       // the git and ssh config that deskd's own git runs with.
-      secrets: [paths.daemonJson, ...['', '-wal', '-shm', '-journal'].map((x) => paths.db + x), modelCredentialsFile(home)],
+      // desk web's paired phones (hashes only, but no agent needs them) are off limits too.
+      secrets: [paths.daemonJson, ...['', '-wal', '-shm', '-journal'].map((x) => paths.db + x), modelCredentialsFile(home), paths.webDevices],
       // Desk's built-in skills are read-only too (in development they live in the repo's catalog/skills).
       readOnly: [join(home, '.gitconfig'), join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'git'), join(home, '.ssh'), builtinRoot],
-      // desk web's one-time login files hold a login code, and its web.json names the port it listens on. desk web may
-      // start, stop or change port while deskd runs, so the sandbox reads the file each time it builds a profile.
-      secretPatterns: [{ dir: o.dataDir, prefix: 'web-login-', suffix: '.html' }],
+      // desk web's one-time login files hold a login code, the CLI's pending codes (desk web login and pair) a hash of
+      // one, and its web.json names the port it listens on. desk web may start, stop or change port while deskd runs,
+      // so the sandbox reads the file each time it builds a profile.
+      secretPatterns: [
+        { dir: o.dataDir, prefix: 'web-login-', suffix: '.html' },
+        { dir: o.dataDir, prefix: 'web-code-', suffix: '.json' },
+      ],
       portFiles: [paths.webJson],
       home,
       ...(o.sandboxAvailable !== undefined ? { sandboxAvailable: o.sandboxAvailable } : {}),
