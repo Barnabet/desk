@@ -1,6 +1,6 @@
 # Reviews and acceptance — design
 
-**Status:** draft for Louis, 2026-10-02. Phase B of the harness roadmap (`docs/superpowers/plans/2026-10-02-harness-improvements-roadmap.md`). No code until he approves it and answers §10.
+**Status:** approved by Louis on 2026-10-02 with every recommendation in §10. Phase B of the harness roadmap (`docs/superpowers/plans/2026-10-02-harness-improvements-roadmap.md`). Implementation: Plan 23 (`docs/superpowers/plans/2026-10-02-plan-23-reviews-and-acceptance.md`).
 
 Today a thread's `complete` is the end of the story: Desk reads the summary, maybe sends a revision, and the thread is "done". This design makes three facts separate, recorded and visible in Desk:
 
@@ -13,7 +13,7 @@ Nothing here replaces threads, revisions or the review-round limit. It adds reco
 ## 0. Key decisions
 
 1. **A submission is a version.** Every `complete` records a submission: the worktree's HEAD commit for a git thread, and a SHA-256 for each library artifact it lists. A later `complete` by the same thread (after a revision or a resume) is a new submission that supersedes the earlier one. Acceptance, reviews and findings always name a submission, never just a thread.
-2. **Thread status does not change.** `done` still means the thread finished its run. Acceptance is a separate field (`none`, `in_review`, `changes_requested`, `accepted`, `accepted_with_limitations`), shown next to the status.
+2. **Thread status does not change.** `done` still means the thread finished its run. Acceptance is a separate field (`none`, `in_review`, `reviewed`, `changes_requested`, `accepted`, `accepted_with_limitations`), shown next to the status. `reviewed` means a reviewer filed its final assessment and Desk has not decided yet.
 3. **A reviewer is a thread with a link.** `request_review` spawns an ordinary thread (same scheduler, workspace, sandbox, wake rules, usage) whose row records the submission it reviews. It gets its own tools for its verdict and cannot `complete` in the usual way.
 4. **Independence is enforced, not requested.** Until it files its first assessment, a reviewer cannot read the builder's summary, transcript or messages, and the builder cannot message it. After that the runtime shows it the builder's summary and limitations, and it files its final review.
 5. **Only Desk or the user accepts.** A thread can never accept or waive anything. Desk cannot accept a submission with an open blocking finding unless it waives that finding with a reason; the user can always override.
@@ -27,7 +27,7 @@ All state is events, projected into three new tables (one additive migration).
 
 | Event | Stream | Payload |
 |---|---|---|
-| `submission.created` | builder thread | `submission_id`, `seq` (1, 2, … per thread), `commit` (null without git), `base`, `dirty` (false; see §10 Q1), `artifacts: [{path, sha256}]`, `claims: string[]` (requirements the thread says it met), `limitations: string[]`, `evidence: string` (how it verified) |
+| `submission.created` | builder thread | `submission_id`, `seq` (1, 2, … per thread), `commit` (null without git), `base` (null without git), `artifacts: [{path, sha256}]`, `claims: string[]` (requirements the thread says it met), `limitations: string[]`, `evidence: string` (how it verified) |
 | `review.requested` | reviewer thread | `review_id`, `submission_id`, `criteria: string[]`, `focus` (optional question), `requested_by` (`desk` or `user`) |
 | `review.assessed` | reviewer thread | `review_id`, `phase` (`initial` or `final`), `verdict` (`no_material_issues`, `issues_found`, `could_not_review`), `requirements: [{criterion, met: yes/no/unknown, note}]`, `not_checked: string[]` |
 | `finding.raised` | reviewer thread | `finding_id`, `review_id`, `submission_id`, `title`, `detail`, `blocking: boolean`, `reproducer` (a command, a file and line, or steps) |
@@ -47,7 +47,7 @@ All state is events, projected into three new tables (one additive migration).
 
 `complete` keeps its inputs and gains three optional ones: `claims`, `limitations`, `evidence`. The thread prompt asks for them ("list each requirement of your brief you met, what you did not do, and how you checked").
 
-For a git thread, the runtime reads `HEAD` of the worktree after the thread's last tool call. If the worktree has uncommitted changes, it either refuses `complete` with "commit your work first" or commits them itself with a fixed message (§10 Q1). For library artifacts it hashes each file listed (`tools/agent-files.ts` reads, as today).
+For a git thread, the runtime reads `HEAD` of the worktree after the thread's last tool call. If the worktree has uncommitted changes, it refuses `complete` with "commit your work first" (§10 decision 1). For library artifacts it hashes each file listed (`tools/agent-files.ts` reads, as today).
 
 The completion notice to Desk adds one line: `Submission 2: commit 3f9a1c0, 2 artifacts.` A revision or a resume leaves the old submission in place; the next `complete` supersedes it, and any acceptance of the old one stays recorded but no longer applies (the thread's `acceptance` goes back to `none`).
 
@@ -62,8 +62,8 @@ It refuses a thread with no submission, a superseded submission, and a reviewer 
 It spawns a thread titled `Review: <builder title>` with:
 
 - **Brief, built by the runtime:** the builder's original brief, the criteria, the focus, and the submission (commit and artifact paths). Desk's own words go in the criteria and focus only.
-- **Workspace:** for a git submission, a new worktree **detached at the submitted commit** (`git worktree add --detach`), so it can build and test exactly that version without touching the builder's branch. Without git, an empty workspace; the artifacts are already immutable library copies.
-- **Model:** as given, else the project's `review_model` setting (new, §10 Q3).
+- **Workspace:** for a git submission, a new worktree on its own review branch (`desk/review-…`) created **at the submitted commit**, so it can build and test exactly that version without touching the builder's branch (a branch rather than a detached HEAD, so every git tool works as in any thread). Without git, an empty workspace; the artifacts are already immutable library copies, and the project's sources are readable as for any thread.
+- **Model:** as given, else the project's `review_model` setting (new), else a different model family from the builder's (§10 decision 3).
 - **Skills:** the builder's active skills, so it can open the same file types.
 
 ### 3.2 What the reviewer cannot see before its first assessment
@@ -80,13 +80,14 @@ Memory and the library stay visible: they are project knowledge, not the builder
 Reviewer threads get every normal thread tool except `complete`, plus:
 
 - `raise_finding(title, detail, blocking, reproducer)`: one material problem, with how to see it.
-- `submit_assessment(verdict, requirements, not_checked)`: called twice. The first call (`initial`) unlocks the builder's summary, claims and limitations, which the runtime appends to the reviewer's conversation. The second (`final`) reconciles them and ends the review: the thread is `done`, its result is the review.
+- `submit_assessment(verdict, requirements, not_checked)`: called twice. The first call (`initial`) unlocks the builder's summary, claims, limitations and evidence, which come back as that call's result. The second (`final`) reconciles them and ends the review: the thread is `done`, and its result (the completion notice Desk reads) is the review.
+- `resolve_finding(finding_id, outcome: fixed | withdrawn, note)`: on a re-review, a finding the new submission fixes; or one of its own findings it no longer stands by.
 
 The reviewer prompt says plainly that `no_material_issues` is a good outcome when it is true, that each finding needs a reproducer it ran itself, and that "not checked" must list what it skipped. It must not edit the builder's branch (its worktree is detached; it may change files there to test a hypothesis, and nothing it does there reaches the builder).
 
 ### 3.4 Re-review
 
-After a revision, the builder submits again. Desk calls `request_review` with `reviewer` set to the earlier reviewer: that reviewer thread is reopened (like a revision, without spending the builder's rounds), its worktree is moved to the new commit, and it receives the list of its open findings. It marks each one fixed or still open, may raise new ones, and files a new final assessment. This keeps the same critic on the same problem, as the coordinators asked.
+After a revision, the builder submits again. Desk calls `request_review` with `reviewer` set to the earlier reviewer: that reviewer thread is reopened by a message of the new kind `review` (like a revision, without spending anyone's rounds), its review branch is moved to the new commit (its own local changes are kept in `git stash`), and it receives the builder's new report and the list of its open findings. It marks each one fixed (`resolve_finding`) or leaves it open, may raise new ones, and files one final assessment (the builder's report is already in front of it, so there is no initial phase). This keeps the same critic on the same problem, as the coordinators asked.
 
 ## 4. Accepting (B3)
 
@@ -98,7 +99,7 @@ After a revision, the builder submits again. Desk calls `request_review` with `r
 - `changes_requested` sends the open findings (plus `note`) to the builder as a revision, counted against `review_rounds` as today, and the thread's acceptance becomes `changes_requested`.
 - Desk is never the builder, and threads do not get this tool, so nobody accepts their own work.
 
-What acceptance changes (§10 Q4 sets how hard each is):
+What acceptance changes (a label only, §10 decision 4):
 
 - The thread list and the thread page show it: a chip `Accepted`, `Accepted · 2 limitations`, `Changes requested`, `In review`.
 - Desk's `report` lists each branch with its acceptance state. Unaccepted branches are listed separately as "not accepted".
@@ -122,7 +123,7 @@ What acceptance changes (§10 Q4 sets how hard each is):
 - **Thread page:** a new **Review** tab: submissions (newest first, with commit and artifacts), each with its reviews, requirements table and findings (blocking first, with reproducer and state). Buttons: Request review, Accept, Accept with limitations, Request changes, Waive (per finding).
 - **Line diagram:** a reviewer forks from the builder's lane, not from Desk's trunk.
 - **Attention:** nothing new by default. If Desk asks the user to decide (for example, to waive a blocking finding), it does so with `ask_user` as today.
-- **Phone policy:** viewing reviews is allowed; accepting and waiving are added to the phone allow list only if Louis wants them there (§10 Q5).
+- **Phone policy:** viewing reviews is allowed; requesting reviews, accepting and waiving stay off the phone allow list (§10 decision 5).
 - **CLI:** `desk threads` shows the chip; `desk review <thread>` prints the Review tab.
 
 ## 8. Safety
@@ -143,10 +144,10 @@ What acceptance changes (§10 Q4 sets how hard each is):
 
 S1–S3 can ship and be used by Desk before the UI lands, since Desk reads everything through its tools.
 
-## 10. Questions for Louis
+## 10. Decisions (Louis, 2026-10-02: every recommendation)
 
-1. **Uncommitted work at `complete`:** refuse until the thread commits (recommended: the thread decides what the version is), or commit it automatically.
-2. **When is a review required?** Never enforced, Desk decides from rule 4 (recommended to start), or required before acceptance for git threads, or for every thread.
-3. **Reviewer model:** a project setting `review_model` that defaults to a different model family from the builder's when one is configured (recommended: you already run both GPT and Claude), or the same as the thread model.
-4. **How hard is acceptance?** A label and a separate "not accepted" list in reports (recommended), or Desk cannot report a branch as ready without acceptance unless you override.
-5. **Phone:** reviews visible on the phone, accepting and waiving only on the Mac (recommended), or both on the phone too.
+1. **Uncommitted work at `complete`:** refused until the thread commits; the thread decides what the version is.
+2. **When a review is required:** never enforced. Desk decides from rule 4.
+3. **Reviewer model:** the project setting `review_model`. When it is unset, the reviewer gets Desk's model if its family differs from the builder's, else the first configured model of another family, else the thread model.
+4. **How hard acceptance is:** a label. Reports list unaccepted work separately; nothing is blocked.
+5. **Phone:** reviews are visible on the phone; requesting a review, accepting and waiving are Mac only (not in `phone-policy.ts`).
