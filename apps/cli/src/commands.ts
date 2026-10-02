@@ -8,7 +8,7 @@ import type { AutomationSummary, CatalogItem, CatalogReview, RunDetail, StreamSe
 import type { ServiceRow } from '@desk/client';
 import { runChat } from './chat';
 import { ApiError, clientFromDataDir, DeskClient, platformDataDir, readDaemonInfo } from './client';
-import { automationLine, createRenderer, runLine, stepLine } from './format';
+import { acceptanceLabel, automationLine, createRenderer, reviewText, runLine, stepLine } from './format';
 import { install, installWeb, isInstalled, isWebInstalled, plistFor, uninstall, uninstallWeb, webPlistFor } from './launchd';
 
 export type CliIO = {
@@ -28,7 +28,7 @@ type Project = { id: string; name: string; goal: string; settings: Record<string
 
 const INT_SETTINGS = new Set(['max_concurrent_threads', 'review_rounds']);
 const EFFORT_SETTINGS = new Set(['desk_reasoning_effort', 'thread_reasoning_effort']);
-const SETTINGS = new Set(['check_in', 'autonomy', 'desk_model', 'thread_model', 'fallback_model', ...EFFORT_SETTINGS, ...INT_SETTINGS]);
+const SETTINGS = new Set(['check_in', 'autonomy', 'desk_model', 'thread_model', 'fallback_model', 'review_model', ...EFFORT_SETTINGS, ...INT_SETTINGS]);
 const FIELDS = new Set(['name', 'goal', 'instructions']);
 
 const repoRoot = () => fileURLToPath(new URL('../../..', import.meta.url));
@@ -118,7 +118,7 @@ function parseAssignments(pairs: string[]): { fields: Record<string, string>; se
     const value = pair.slice(eq + 1);
     if (FIELDS.has(key)) fields[key] = value;
     else if (INT_SETTINGS.has(key)) settings[key] = Number(value);
-    else if (key === 'fallback_model') settings[key] = value === '' || value === 'none' ? null : value;
+    else if (key === 'fallback_model' || key === 'review_model') settings[key] = value === '' || value === 'none' ? null : value;
     // `none` is a real level (no reasoning); `default` (or empty) goes back to the model's default.
     else if (EFFORT_SETTINGS.has(key)) settings[key] = value === '' || value === 'default' ? null : value;
     else if (SETTINGS.has(key)) settings[key] = value;
@@ -421,7 +421,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         `${o.project.name} (${o.project.id})${o.project.archived_at ? ' [archived]' : ''}`,
         `Goal: ${o.project.goal || '(none)'}`,
         ...(o.project.instructions ? [`Instructions: ${o.project.instructions}`] : []),
-        `Settings: check_in=${s.check_in} autonomy=${s.autonomy} desk_model=${s.desk_model} thread_model=${s.thread_model} desk_reasoning_effort=${s.desk_reasoning_effort ?? 'default'} thread_reasoning_effort=${s.thread_reasoning_effort ?? 'default'} max_concurrent_threads=${s.max_concurrent_threads} review_rounds=${s.review_rounds}`,
+        `Settings: check_in=${s.check_in} autonomy=${s.autonomy} desk_model=${s.desk_model} thread_model=${s.thread_model} desk_reasoning_effort=${s.desk_reasoning_effort ?? 'default'} thread_reasoning_effort=${s.thread_reasoning_effort ?? 'default'} max_concurrent_threads=${s.max_concurrent_threads} review_rounds=${s.review_rounds} review_model=${s.review_model ?? 'auto'}`,
         `Desk: ${o.desk.status}`,
         `Sources:${o.sources.length ? '' : ' (none)'}`,
         ...o.sources.map((x: any) => `- ${x.id} ${x.label} (${x.kind}) ${x.path}`),
@@ -497,11 +497,23 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     say(
       threads.length
         ? threads
-            .map((t) => `${t.id} "${t.title}" [${t.status}] ${t.model}${t.git_branch ? ` ${t.git_branch}` : ''}${t.result_summary ? `\n    ${t.result_summary.split('\n')[0]}` : ''}`)
+            .map(
+              (t) =>
+                `${t.id} "${t.title}" [${t.status}]${acceptanceLabel(t) ? ` (${acceptanceLabel(t)})` : ''} ${t.model}${t.git_branch ? ` ${t.git_branch}` : ''}${t.result_summary ? `\n    ${t.result_summary.split('\n')[0]}` : ''}`,
+            )
             .join('\n')
         : 'No threads',
     );
   });
+  program
+    .command('review <thread>')
+    .description("A thread's submissions, reviews, findings and acceptance (request, accept and waive in the app or through Desk)")
+    .action(async (id: string) => {
+      const c = client();
+      const t = await c.threads.get(id);
+      const others = await c.threads.list(t.project_id, true);
+      say(reviewText(await c.threads.review(id), (x) => others.find((o) => o.id === x)?.title ?? x));
+    });
   const serviceLine = (x: ServiceRow) =>
     `${x.name}  ${x.status === 'running' ? `running${x.url ? ` ${x.url}` : ''}` : x.status === 'exited' ? `exited (${x.exit_signal ?? x.exit_code})` : `stopped (${x.stop_reason})`}  ${x.command}`;
   program.command('services <project>').description('List the project\'s services').action(async (ref: string) => {

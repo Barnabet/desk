@@ -202,7 +202,7 @@ describe('what send stores', () => {
     expect(() => rt.send({ from: a, to: t, kind: 'revision', text: 'Mine too.' })).toThrow('Only Desk sends revisions.');
     setStatus(t, 'done');
     expect(() => rt.send({ from: desk.id, to: t, kind: 'revision', text: 'Again.' })).toThrow(
-      'Review round limit (1) reached for "Draft": accept the work with noted caveats or escalate to the user.',
+      'Review round limit (1) reached for "Draft": change the approach (a new thread with a simpler plan), accept it with limitations (accept_submission), or report the blocker to the user.',
     );
   });
 

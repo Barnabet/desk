@@ -255,7 +255,9 @@ export function stopText(s: Stop, reviewRounds: number, messages: MessagesState 
               : `Answer from ${who}`
             : e.messageKind === 'resume'
               ? `${who} resumed it`
-              : `${who}: ${e.messageKind}`;
+              : e.messageKind === 'review'
+                ? `${who} asked for a re-review`
+                : `${who}: ${e.messageKind}`;
       return { title, sub: clock(s.from), quote: clip(e.text, 70), ...(e.auto ? { muted: true as const } : {}) };
     }
     case 'answer':

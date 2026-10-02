@@ -1,7 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject, input, signal } from '@angular/core';
 import { waitingOn, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
-import { ago, answeringLabel, href, waitHop, waitLabel, waitsOnYou, type WaitHop } from '@desk/ui-core';
+import { acceptanceChip, ago, answeringLabel, href, waitHop, waitLabel, waitsOnYou, type ReviewChip, type WaitHop } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/answering-badge';
 import { EmptyState } from '../components/empty-state';
 import { HopLink } from '../components/hop-link';
@@ -20,6 +20,8 @@ type RosterCard = {
   href: string;
   /** "answering Desk" while the thread's answer run is in progress; its status chip does not change. */
   answering: string | null;
+  /** Where its latest submission stands, or Reviewer (reviews and acceptance spec §7). */
+  chip: ReviewChip | null;
   /** What a waiting thread waits on (waitLabel), shown as its own line (design spec §8 item 13). */
   wait: string | null;
   /** One hop further, to what needs the user. */
@@ -45,6 +47,9 @@ type RosterCard = {
         </div>
         @if (c.answering) {
           <span deskAnsweringBadge [label]="c.answering"></span>
+        }
+        @if (c.chip; as chip) {
+          <span [class]="'chip chip-' + chip.tone + ' thread-acceptance'">{{ chip.label }}</span>
         }
         @if (c.t.reason && c.t.status !== 'running' && c.t.status !== 'waiting') {
           <span class="small muted">{{ c.t.reason }}</span>
@@ -149,6 +154,7 @@ export class ThreadRoster {
           t,
           href: href({ name: 'project', id: projectId, tab: 'threads', threadId: t.id }),
           answering: answeringLabel(messages, t.id),
+          chip: acceptanceChip(t),
           wait,
           hop: wait ? waitHop(messages, t.id, attention) : null,
           target,

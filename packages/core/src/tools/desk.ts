@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { messageById, PlanItemStatus, ReasoningEffort, sanitizeLabel, SkillName, type EventInput } from '@desk/protocol';
+import { messageById, PlanItemStatus, quoteLines, ReasoningEffort, sanitizeLabel, SkillName, snippet, type EventInput } from '@desk/protocol';
 import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coordination/render';
 import { newId } from '../ids';
+import { currentReviewOf, reviewSummary } from '../reviews/reviews';
 import { getAgent, getApproval, lastEvent, listThreads, pendingApprovalsFor, threadsByRef, type AgentRow } from '../state/queries';
 import { git } from '../workspaces/workspaces';
 import { defineTool, type Tool, type ToolContext } from './types';
@@ -101,11 +102,24 @@ export const listThreadsTool = defineTool({
 const readThreadInput = z.object({ thread_id: z.string(), mode: z.enum(['summary', 'full']).default('summary'), since: z.number().int().optional() });
 const readSummaryInput = z.object({ thread_id: z.string() });
 
-/** A thread's summary: status, brief, result, artifacts, branch, pending approvals and its last message. */
+/** A thread's summary: status, brief, result, artifacts, branch, pending approvals, its last message, and its reviews. */
 function threadSummary(ctx: ToolContext, t: AgentRow): string {
   const { store } = ctx.services;
+  // A reviewer forms its own view first: until its initial assessment, the builder shows only its brief and status (reviews spec §3.2).
+  const mine = getAgent(store.db, ctx.agentId);
+  const sealed = mine?.reviews_submission_id ? currentReviewOf(store.db, mine.id) : undefined;
+  if (sealed && sealed.builder_id === t.id && !sealed.revealed) {
+    return [
+      `Thread ${t.id} ${snippet(t.title ?? 'untitled', 80)}`,
+      `Status: ${t.status}`,
+      `Brief:\n${quoteLines(t.brief ?? '(none)')}`,
+      "Its result and messages are withheld until your initial assessment (submit_assessment): review the work itself first.",
+    ].join('\n');
+  }
   const last = lastEvent(store.db, t.id, 'assistant.message');
-  return formatThreadSummary(t, pendingApprovalsFor(store.db, t.id), last?.type === 'assistant.message' ? last.payload.content : null);
+  const base = formatThreadSummary(t, pendingApprovalsFor(store.db, t.id), last?.type === 'assistant.message' ? last.payload.content : null);
+  const review = reviewSummary(store.db, t);
+  return review ? `${base}\n${review}` : base;
 }
 
 /**
@@ -224,7 +238,7 @@ export const reportTool = defineTool({
 export const updateSettingsTool = defineTool({
   name: 'update_settings',
   description:
-    'Change project settings when the user asks (check-in cadence, autonomy, models, reasoning effort, concurrency, review rounds). Also record the preference in memory.',
+    'Change project settings when the user asks (check-in cadence, autonomy, models, reasoning effort, concurrency, review rounds, review model). Also record the preference in memory.',
   input: z.object({
     check_in: z.enum(['minimal', 'normal', 'detailed']).optional(),
     autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']).optional(),
@@ -235,6 +249,7 @@ export const updateSettingsTool = defineTool({
     thread_reasoning_effort: ReasoningEffort.nullable().optional().describe("Threads' reasoning level; null uses the model default"),
     max_concurrent_threads: z.number().int().min(1).max(32).optional(),
     review_rounds: z.number().int().min(0).max(10).optional(),
+    review_model: z.string().nullable().optional().describe("Reviewer threads' model; null picks a model of another family than the builder's"),
   }),
   async execute(patch, ctx) {
     ctx.services.updateSettings(ctx.projectId, patch);

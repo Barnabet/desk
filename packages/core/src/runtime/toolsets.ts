@@ -7,10 +7,11 @@ import { gitTools } from '../tools/git';
 import { jobTools } from '../tools/jobs';
 import { libraryListTool, libraryReadTool, libraryTools } from '../tools/library';
 import { memorySearchTool, memoryTools } from '../tools/memory';
+import { deskReviewTools, reviewerTools } from '../tools/review';
 import { stepTools } from '../tools/step';
 import { serviceTools } from '../tools/services';
 import { skillAuthoringTools, skillUseTools } from '../tools/skills';
-import { threadCoordinationTools } from '../tools/thread';
+import { completeTool, threadCoordinationTools } from '../tools/thread';
 import { viewImageTool } from '../tools/vision';
 import type { Tool } from '../tools/types';
 import { webTools } from '../tools/web';
@@ -34,11 +35,16 @@ export function deskToolsFor(_agent: AgentRow): Tool[] {
     ...deskAutomationTools,
     ...serviceTools,
     ...deskCoordinationTools,
+    ...deskReviewTools,
   ];
 }
 
-/** Threads: full workspace tools, skills (use only — Desk installs drafts); git tools only in worktrees. */
+/**
+ * Threads: full workspace tools, skills (use only — Desk installs drafts); git tools only in worktrees. A reviewer
+ * files its review with its own tools instead of complete (reviews and acceptance spec §3.3).
+ */
 export function threadToolsFor(agent: AgentRow): Tool[] {
+  const finish = agent.reviews_submission_id ? [...threadCoordinationTools.filter((t) => t !== completeTool), ...reviewerTools] : threadCoordinationTools;
   return [
     ...fileTools,
     viewImageTool,
@@ -50,7 +56,7 @@ export function threadToolsFor(agent: AgentRow): Tool[] {
     ...libraryTools,
     ...skillUseTools,
     ...(agent.git_branch ? gitTools : []),
-    ...threadCoordinationTools,
+    ...finish,
   ];
 }
 
@@ -85,7 +91,7 @@ let byName: Map<string, Tool> | undefined;
 export function toolByName(name: string): Tool | undefined {
   if (!byName) {
     const row = { git_branch: 'desk/x' } as AgentRow;
-    byName = new Map([...deskToolsFor(row), ...threadToolsFor(row)].map((t) => [t.name, t]));
+    byName = new Map([...deskToolsFor(row), ...threadToolsFor(row), ...reviewerTools].map((t) => [t.name, t]));
   }
   return byName.get(name);
 }

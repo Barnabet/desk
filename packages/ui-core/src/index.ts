@@ -23,6 +23,7 @@ export * from './memory';
 export * from './pairs';
 export * from './palette';
 export * from './policy-reason';
+export * from './reviews';
 export * from './router';
 export * from './row-views';
 export * from './skill-keys';

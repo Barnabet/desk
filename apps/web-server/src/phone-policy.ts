@@ -20,6 +20,7 @@ export const PHONE_OPS: ReadonlySet<string> = new Set([
   'threads.stop',
   'threads.archive',
   'threads.diff',
+  'threads.review',
   'threads.files',
   'threads.file',
   'services.logs',

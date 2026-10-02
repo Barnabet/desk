@@ -70,6 +70,12 @@ describe('the thread toolset (design spec §2.1, §2.3)', () => {
     expect(tool('wait_for_reply').description).toBe(WAIT_FOR_REPLY);
     expect(deskToolsFor(desk).find((x) => x.name === 'message_thread')!.gate).toBeUndefined();
     expect(params(deskToolsFor(desk).find((x) => x.name === 'read_thread')!)).toEqual(['thread_id', 'mode', 'since']);
+    // A reviewer files its review instead of completing (reviews and acceptance spec §3.3); Desk requests and accepts.
+    const reviewer = threadToolsFor({ ...getAgent(h.store.db, thread('Review: Auth API'))!, reviews_submission_id: 's1' }).map((x) => x.name);
+    expect(reviewer).toEqual(expect.arrayContaining(['raise_finding', 'resolve_finding', 'submit_assessment', 'message_desk']));
+    expect(reviewer).not.toContain('complete');
+    expect(own.map((x) => x.name)).not.toContain('submit_assessment');
+    expect(deskToolsFor(desk).map((x) => x.name)).toEqual(expect.arrayContaining(['request_review', 'accept_submission']));
   });
 });
 

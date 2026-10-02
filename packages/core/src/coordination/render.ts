@@ -10,6 +10,8 @@ export function formatThreadLine(t: AgentRow): string {
   const parts = [`${t.id} ${snippet(t.title ?? 'untitled', 80)} [${t.status}]`, t.reasoning_effort ? `${t.model} (${t.reasoning_effort} effort)` : t.model];
   if (t.git_branch) parts.push(`branch ${t.git_branch}`);
   if (t.review_round) parts.push(`review round ${t.review_round}`);
+  if (t.reviews_submission_id) parts.push('reviewer');
+  else if (t.acceptance !== 'none') parts.push(`acceptance: ${t.acceptance.replace(/_/g, ' ')}`);
   if (t.result_summary) parts.push(`result: ${snippet(t.result_summary, 160)}`);
   return `- ${parts.join('; ')}`;
 }

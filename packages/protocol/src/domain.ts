@@ -77,6 +77,8 @@ export const AgentMessageKind = z.enum([
   'revision',
   /** From Desk to a thread whose run failed (an error, not its own judgement): continue where it left off. */
   'resume',
+  /** From Desk to a reviewer thread: a new submission of the work it reviews, to check again. */
+  'review',
   'update',
   'question',
   'blocker',
@@ -95,6 +97,24 @@ export const AgentMessageKind = z.enum([
   'automation',
 ]);
 export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
+
+/**
+ * Where a thread's latest submission stands (reviews and acceptance spec §0): nothing yet, a review running, a review
+ * filed and waiting on a decision, or Desk's or the user's decision.
+ */
+export const Acceptance = z.enum(['none', 'in_review', 'reviewed', 'changes_requested', 'accepted', 'accepted_with_limitations']);
+export type Acceptance = z.infer<typeof Acceptance>;
+
+/** A reviewer's overall answer; `no_material_issues` is a normal outcome. */
+export const ReviewVerdict = z.enum(['no_material_issues', 'issues_found', 'could_not_review']);
+export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
+
+/** Whether a submission meets one acceptance criterion, as the reviewer found it. */
+export const RequirementCheck = z.object({ criterion: z.string().min(1), met: z.enum(['yes', 'no', 'unknown']), note: z.string() });
+export type RequirementCheck = z.infer<typeof RequirementCheck>;
+
+export const FindingState = z.enum(['open', 'fixed', 'waived', 'withdrawn']);
+export type FindingState = z.infer<typeof FindingState>;
 
 export const MemoryKind = z.enum(['fact', 'decision', 'preference', 'contact', 'note']);
 export type MemoryKind = z.infer<typeof MemoryKind>;

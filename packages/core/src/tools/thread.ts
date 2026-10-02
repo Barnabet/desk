@@ -6,7 +6,10 @@ import { readAgentFile } from './agent-files';
 import { resolveInside } from './paths';
 import { listArtifacts } from '../library/library';
 import { openFrom, sanitizeLabel, type MessagesState } from '@desk/protocol';
+import { newId } from '../ids';
+import { listSubmissions, sha256File } from '../reviews/reviews';
 import { getAgent, getDeskAgent, threadsByRef } from '../state/queries';
+import { git } from '../workspaces/workspaces';
 import { listThreadsTool, makeReadThreadTool } from './desk';
 import { defineTool, type ToolContext } from './types';
 
@@ -19,13 +22,27 @@ function parentOf(ctx: ToolContext): string {
 export const completeTool = defineTool({
   name: 'complete',
   description:
-    'Finish your assignment. Call exactly once, when the work is done or cannot be done, with an honest summary: what was done, what was not, and how it was verified. List library paths of artifacts you published, and skill draft directories you prepared.',
+    'Finish your assignment. Call exactly once, when the work is done or cannot be done, with an honest summary: what was done, what was not, and how it was verified. List library paths of artifacts you published, and skill draft directories you prepared. Your result is submitted as a version (your commit and these artifacts) that may be reviewed independently: commit your changes first, and list each requirement of your brief you met (claims), what you did not do or are unsure of (limitations), and how you checked (evidence).',
   input: z.object({
     summary: z.string().min(1),
     artifacts: z.array(z.string()).default([]),
     skill_drafts: z.array(z.string()).optional().describe('Skill draft directories in your workspace (each with a SKILL.md) for Desk to review and install'),
+    claims: z.array(z.string().min(1)).optional().describe('Each requirement of your brief you say you met'),
+    limitations: z.array(z.string().min(1)).optional().describe('What you did not do, could not check, or are unsure of'),
+    evidence: z.string().optional().describe('How you verified the work: commands run and what they showed, files checked'),
   }),
-  async execute({ summary, artifacts, skill_drafts = [] }, ctx) {
+  async execute({ summary, artifacts, skill_drafts = [], claims = [], limitations = [], evidence = '' }, ctx) {
+    const db = ctx.services.store.db;
+    const self = getAgent(db, ctx.agentId);
+    // The version this result is (reviews and acceptance spec §2): HEAD of a worktree with no uncommitted tracked changes.
+    let commit: string | null = null;
+    let base: string | null = null;
+    if (self?.git_branch) {
+      const dirty = await git(ctx.workspace, ['status', '--porcelain', '--untracked-files=no']);
+      if (dirty) throw new Error(`Commit your work first (git_commit): your worktree has uncommitted changes:\n${dirty.split('\n').slice(0, 20).join('\n')}`);
+      commit = await git(ctx.workspace, ['rev-parse', 'HEAD']);
+      base = self.git_base;
+    }
     if (artifacts.length) {
       const known = new Set(listArtifacts(ctx.services.store.db, ctx.projectId).map((a) => a.path));
       const missing = artifacts.filter((a) => !known.has(a));
@@ -40,13 +57,24 @@ export const completeTool = defineTool({
         return dir;
       }),
     );
-    ctx.services.store.append({
-      project_id: ctx.projectId,
-      agent_id: ctx.agentId,
-      type: 'agent.result',
-      payload: { summary, artifacts, ...(drafts.length ? { skill_drafts: drafts } : {}) },
-    });
-    return { content: 'Completion recorded.', yield: { status: 'done', reason: summary.split('\n')[0]!.slice(0, 200) } };
+    const libraryDir = ctx.services.libraryDir(ctx.projectId);
+    const hashed = await Promise.all(artifacts.map(async (path) => ({ path, sha256: await sha256File(await resolveInside(path, [libraryDir], libraryDir)) })));
+    const seq = listSubmissions(db, ctx.agentId).length + 1;
+    ctx.services.store.append([
+      {
+        project_id: ctx.projectId,
+        agent_id: ctx.agentId,
+        type: 'agent.result',
+        payload: { summary, artifacts, ...(drafts.length ? { skill_drafts: drafts } : {}) },
+      },
+      {
+        project_id: ctx.projectId,
+        agent_id: ctx.agentId,
+        type: 'submission.created',
+        payload: { submission_id: newId(), seq, commit, base, artifacts: hashed, claims, limitations, evidence },
+      },
+    ]);
+    return { content: `Completion recorded as submission ${seq}${commit ? ` (commit ${commit.slice(0, 10)})` : ''}.`, yield: { status: 'done', reason: summary.split('\n')[0]!.slice(0, 200) } };
   },
 });
 

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import type { ThreadView } from '@desk/client';
-import { answeringLabel, clock, duration, href, narrate, sentCalls, stopAt, stopsOf, waitHop, waitLabel } from '@desk/ui-core';
+import { acceptanceChip, answeringLabel, clock, duration, href, narrate, reviewVersion, sentCalls, stopAt, stopsOf, waitHop, waitLabel } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/answering-badge';
 import { Button } from '../components/button';
 import { ConfirmDialog } from '../components/confirm-dialog';
@@ -18,14 +18,16 @@ import { RouteView } from './route-view';
 import { DiffTab } from './tabs/diff-tab';
 import { FilesTab } from './tabs/files-tab';
 import { ResultTab } from './tabs/result-tab';
+import { ReviewTab } from './tabs/review-tab';
 import { SkillDraftsTab } from './tabs/skill-drafts-tab';
 import { tokens, usageByModel, UsageTab } from './tabs/usage-tab';
 import { Transcript, type ComposerMode, type Depth } from './transcript';
 
-type Tab = 'route' | 'result' | 'diff' | 'files' | 'drafts' | 'usage';
+type Tab = 'route' | 'result' | 'review' | 'diff' | 'files' | 'drafts' | 'usage';
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
   ['route', 'Route'],
   ['result', 'Result'],
+  ['review', 'Review'],
   ['diff', 'Diff'],
   ['files', 'Files'],
   ['drafts', 'Skill drafts'],
@@ -51,7 +53,7 @@ function readDepth(): Depth {
 /** One thread: its route, tabs and transcript. `at` (an event id, from `?at=`) selects the stop that holds it, once. */
 @Component({
   selector: 'div[deskThreadDetail]',
-  imports: [AnsweringBadge, Button, ConfirmDialog, EmptyState, HopLink, PairSheet, SkillBadge, RouteView, Transcript, ResultTab, DiffTab, FilesTab, SkillDraftsTab, UsageTab],
+  imports: [AnsweringBadge, Button, ConfirmDialog, EmptyState, HopLink, PairSheet, SkillBadge, RouteView, Transcript, ResultTab, ReviewTab, DiffTab, FilesTab, SkillDraftsTab, UsageTab],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'thread-detail' },
@@ -64,6 +66,9 @@ function readDepth(): Depth {
         <div class="thread-chips">
           @if (answering(); as a) {
             <span deskAnsweringBadge [label]="a"></span>
+          }
+          @if (chip(); as c) {
+            <span [class]="'chip chip-' + c.tone">{{ c.label }}</span>
           }
           @for (sk of thread().active_skills; track sk) {
             <span deskSkillBadge [name]="sk"></span>
@@ -102,6 +107,9 @@ function readDepth(): Depth {
           }
           @case ('result') {
             <div deskResultTab [projectId]="projectId()" [thread]="thread()"></div>
+          }
+          @case ('review') {
+            <div deskReviewTab [thread]="thread()" [threads]="project().threads" [version]="reviewAt()" [now]="now()"></div>
           }
           @case ('diff') {
             <div deskDiffTab [threadId]="threadId()" [version]="version()"></div>
@@ -205,6 +213,9 @@ export class ThreadDetail {
   protected readonly usage = computed(() => usageByModel(this.threadEvents(), this.threadId()));
   /** Changes whenever the thread's events do: Diff and Files fetch again. */
   protected readonly version = computed(() => String(this.threadEvents().at(-1)?.id ?? 0));
+  /** A reviewer's findings are its own events: the Review tab fetches again on any review event too. */
+  protected readonly reviewAt = computed(() => reviewVersion(this.events(), this.threadId()));
+  protected readonly chip = computed(() => acceptanceChip(this.thread()));
 
   protected readonly label = computed(() => statusLabel(this.thread().status, this.thread().reason, this.proxyDown()));
   protected readonly current = computed(() => this.selected() ?? this.stops().at(-1)?.n ?? null);

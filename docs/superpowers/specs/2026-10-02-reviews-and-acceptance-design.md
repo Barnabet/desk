@@ -108,7 +108,7 @@ What acceptance changes (a label only, §10 decision 4):
 ## 5. Lifecycle notices to Desk
 
 - Reviewer finished: `Review of "<builder>" (submission 2): issues found, 1 blocking. Findings: #f1 "Comparator drops duplicate fact IDs" (blocking), #f2 … Not checked: …`
-- Builder submitted again while a review of the old submission is still running: the reviewer gets a note that its submission was superseded, and Desk is told.
+- Builder submitted again while a review of the old submission is still running: Desk sees the new submission in the completion notice and decides (stop the reviewer, or let it finish and re-review with `reviewer`).
 - The user accepted or waived something: a notice to Desk, so its plan stays in line.
 
 ## 6. Prompts
