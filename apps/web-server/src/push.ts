@@ -35,7 +35,34 @@ export type PushHubDeps = {
   log?(message: string, err?: unknown): void;
 };
 
-type Client = { ws: WebSocket; senderId: number; secret: string; caller: Caller; permission: NotifyPermission };
+type Client = { ws: WebSocket; senderId: number; secret: string; caller: Caller; permission: NotifyPermission; /** Operations not answered yet. */ busy: Set<string> };
+
+/**
+ * The most JSON one `desk:events` frame carries (one event more when a single event is larger). A project's history is
+ * pushed in pages of thousands of events, several megabytes each: a phone's socket that drops on a frame that large
+ * never finishes opening the project. In frames this size, what arrived stays, and the page resumes after it.
+ */
+export const EVENTS_FRAME_BYTES = 256 * 1024;
+
+/** `desk:events` frames for a batch, as JSON texts of at most EVENTS_FRAME_BYTES each, in order. */
+export function eventFrames(batch: unknown[], limit = EVENTS_FRAME_BYTES): string[] {
+  const frames: string[] = [];
+  let parts: string[] = [];
+  let size = 0;
+  const flush = () => {
+    if (parts.length) frames.push(`{"channel":"desk:events","payload":[${parts.join(',')}]}`);
+    parts = [];
+    size = 0;
+  };
+  for (const e of batch) {
+    const text = JSON.stringify(e);
+    if (parts.length && size + text.length > limit) flush();
+    parts.push(text);
+    size += text.length + 1;
+  }
+  flush();
+  return frames;
+}
 
 const pushOps = new Set<string>(PUSH_OPS);
 
@@ -92,13 +119,15 @@ export class PushHub {
       const first = SessionFrame.safeParse(frame);
       const caller = first.success ? callerOf(first.data.session, this.d.sessions, this.d.devices) : null;
       if (!first.success || !caller) return ws.close(CLOSE_UNAUTHORIZED, 'unauthorized');
-      client = { ws, senderId: this.nextSender++, secret: first.data.session, caller, permission: 'default' };
+      client = { ws, senderId: this.nextSender++, secret: first.data.session, caller, permission: 'default', busy: new Set() };
       this.clients.set(client.senderId, client);
       this.write(client, { channel: 'desk:global', payload: this.d.broker.snapshot() });
     });
-    ws.on('close', () => {
+    ws.on('close', (code) => {
       clearTimeout(timer);
       if (!client) return;
+      // A socket that drops while a project's history is on its way: the page asks again, from what it received.
+      if (client.busy.size) this.d.log?.(`push socket of ${client.caller.kind === 'phone' ? 'a phone' : 'this computer'} closed (${code}) during ${[...client.busy].join(', ')}`);
       const before = this.granted();
       this.clients.delete(client.senderId);
       this.d.broker.dropSender(client.senderId);
@@ -116,11 +145,14 @@ export class PushHub {
       return this.grantedMaybeChanged(before);
     }
     const refused = c.caller.kind === 'phone' ? phoneRefusal(f.op, f.input) : null;
+    const running = `${f.op} #${f.id}`;
+    c.busy.add(running);
     const result: IpcResult<unknown> = refused
       ? { ok: false, error: { code: 'not_on_phone', message: refused } }
       : pushOps.has(f.op)
       ? await dispatch(f.op, f.input, this.d.ctx(c.senderId), (err) => this.d.log?.(`push ${f.op} failed`, err))
       : { ok: false, error: { code: 'unknown_channel', message: 'Only broker.watch and broker.unwatch run on /push.' } };
+    c.busy.delete(running);
     this.write(c, { ack: f.id, result });
   }
 
@@ -158,7 +190,9 @@ export class PushHub {
   }
 
   private write(c: Client, frame: PushServerFrame): void {
-    if (c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(frame));
+    if (c.ws.readyState !== c.ws.OPEN) return;
+    if ('channel' in frame && frame.channel === 'desk:events' && Array.isArray(frame.payload)) for (const text of eventFrames(frame.payload)) c.ws.send(text);
+    else c.ws.send(JSON.stringify(frame));
   }
 
   close(): void {
