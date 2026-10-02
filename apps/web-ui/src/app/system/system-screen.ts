@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal, untracked, ViewEncapsulation } from '@angular/core';
 import type { ChannelOutput } from '@desk/bff/contract';
-import type { RuntimesReport, UsageResponse } from '@desk/protocol';
+import type { RuntimesReport, UsageResponse, WorkspaceStorageReport } from '@desk/protocol';
 import { bytes, clock, duration, href, plural } from '@desk/ui-core';
 import { Button } from '../components/button';
 import { ConfirmDialog } from '../components/confirm-dialog';
@@ -416,6 +416,21 @@ export class NotificationsSection {
         </div>
       }
       <div>
+        <dt>Completed task storage</dt>
+        <dd>
+          <p class="field-hint">Dependencies and tool caches are cleaned after 24 hours of inactivity. Worktrees, branches, documents and build outputs are kept. Archive a task from Threads to remove its workspace after preserving remaining files.</p>
+          @if (storageError()) { <p class="field-error">{{ storageError() }}</p> }
+          @if (storage(); as s) {
+            <p>{{ size(s.reclaimable_bytes) }} can be reclaimed now.</p>
+            <button deskButton size="sm" [pending]="storagePending()" [disabled]="storagePending() || !hasCleanup()" (click)="cleanupWorkspaces()">Clean up completed tasks</button>
+            <button deskButton size="sm" variant="ghost" [disabled]="storagePending()" (click)="loadStorage()">Refresh storage</button>
+            @if (s.workspaces.length) {
+              <ul>@for (w of s.workspaces; track w.agent_id) { <li><a [href]="workspaceHref(w)">{{ w.title }}</a> — {{ w.reason ?? size(w.bytes) + ' reclaimable' }}</li> }</ul>
+            }
+          } @else if (!storageError()) { <p class="muted">Checking completed workspaces…</p> }
+        </dd>
+      </div>
+      <div>
         <dt>App</dt>
         <dd>{{ appLine() }}</dd>
       </div>
@@ -432,6 +447,11 @@ export class AboutSection {
   protected readonly info = signal<AppInfo | null>(null);
   protected readonly report = signal<RuntimesReport | null>(null);
   protected readonly pending = signal(false);
+  protected readonly storage = signal<WorkspaceStorageReport | null>(null);
+  protected readonly storagePending = signal(false);
+  protected readonly storageError = signal<string | null>(null);
+  protected readonly hasCleanup = computed(() => this.storage()?.workspaces.some((w) => w.directories) ?? false);
+  protected readonly workspaceHref = (w: WorkspaceStorageReport['workspaces'][number]) => href({ name: 'project', id: w.project_id, tab: 'threads', threadId: w.agent_id });
   protected readonly orphans = computed(() => this.report()?.envs.filter((e) => e.orphan) ?? []);
   protected readonly orphanBytes = computed(() => this.orphans().reduce((n, e) => n + e.bytes, 0));
   protected readonly envText = computed(() => {
@@ -449,6 +469,7 @@ export class AboutSection {
       () => this.info.set(null),
     );
     void this.loadRuntimes();
+    void this.loadStorage();
   }
 
   protected async cleanup(): Promise<void> {
@@ -462,6 +483,19 @@ export class AboutSection {
     } finally {
       this.pending.set(false);
     }
+  }
+
+  protected loadStorage(): Promise<void> {
+    return this.bridge.call('system.workspaces', {}).then((r) => { this.storage.set(r); this.storageError.set(null); }, (e) => this.storageError.set(describeError(e).message));
+  }
+
+  protected async cleanupWorkspaces(): Promise<void> {
+    this.storagePending.set(true);
+    try {
+      const r = await this.bridge.call('system.workspacesCleanup', {});
+      this.toasts.toast({ tone: 'info', message: `Freed ${bytes(r.bytes)} from ${plural(r.removed, 'dependency/cache directory')}.${r.errors.length ? ` ${r.errors.length} workspace(s) could not be cleaned.` : ''}` });
+      await this.loadStorage();
+    } catch (e) { this.toasts.error(e); } finally { this.storagePending.set(false); }
   }
 
   protected revealLogs(): void {

@@ -159,6 +159,8 @@ export const channels = {
 
   'system.runtimes': none,
   'system.runtimesCleanup': none,
+  'system.workspaces': none,
+  'system.workspacesCleanup': none,
 
   'daemon.status': none,
   'daemon.start': none,

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type ChatRequest, type FakeReply } from '@desk/fake-model';
-import { getDeskAgent } from '../state/queries';
+import { getAgent, getDeskAgent } from '../state/queries';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
 import { latestWhatsUp } from './whatsup';
 
@@ -30,6 +30,40 @@ const reminders = (deskId: string) => h.store.list({ agentId: deskId, types: ['m
 const deskRequests = () => h.fake.requests.filter((r) => r.model !== FAKE_MODEL.id);
 
 describe("What's up", () => {
+  it('ends silently after an update, without requesting or recording a confirmation', async () => {
+    const { rt, projectId, desk } = await setup((last) => last === 'Status'
+      ? tools(call('update_whats_up', { text: 'Research is underway.' }))
+      : text("What's up is updated."));
+    rt.sendToDesk(projectId, 'Status');
+    await rt.whenIdle();
+    expect(deskRequests()).toHaveLength(1);
+    expect(getAgent(h.store.db, desk.id)?.status).toBe('idle');
+    expect(h.store.list({ agentId: desk.id, types: ['tool.result'] }).at(-1)?.payload).toMatchObject({ name: 'update_whats_up', status: 'ok' });
+    expect(h.store.list({ agentId: desk.id, types: ['assistant.message'] }).some((e) => e.type === 'assistant.message' && e.payload.content === "What's up is updated.")).toBe(false);
+  });
+
+  it('can update mid-turn and continue to useful work and an answer', async () => {
+    const { rt, projectId } = await setup((_last, req) => {
+      const results = req.messages.filter((m) => m.role === 'tool');
+      if (!results.length) return tools(call('update_whats_up', { text: 'Checking progress.', end_turn: false }));
+      if (results.length === 1) return tools(call('list_threads', {}));
+      return text('Nothing running yet.');
+    });
+    rt.sendToDesk(projectId, 'Check progress');
+    await rt.whenIdle();
+    expect(deskRequests()).toHaveLength(3);
+  });
+
+  it.each([true, false])('preserves a batched wait (update first: %s)', async (updateFirst) => {
+    const update = call('update_whats_up', { text: 'Waiting for research.' });
+    const wait = call('wait_for_threads', {});
+    const { rt, projectId, desk } = await setup(() => tools(...(updateFirst ? [update, wait] : [wait, update])));
+    rt.sendToDesk(projectId, 'Wait');
+    await rt.whenIdle();
+    expect(deskRequests()).toHaveLength(1);
+    expect(getAgent(h.store.db, desk.id)?.status).toBe('waiting');
+  });
+
   it('update_whats_up replaces the text and the latest one is what the project shows', async () => {
     const { rt, projectId, desk } = await setup((last) =>
       last === 'Kick off' ? tools(call('update_whats_up', { text: 'Scoping the relaunch.' })) : last === 'More' ? tools(call('update_whats_up', { text: '  Two threads on it.  ' })) : text(''),
@@ -57,8 +91,8 @@ describe("What's up", () => {
     await rt.whenIdle();
     expect(reminders(desk.id)).toHaveLength(1);
     expect(latestWhatsUp(h.store.db, desk.id)?.text).toBe('Planned the research.');
-    // Brief, tool result, reminder, and the update's tool result: nothing after that.
-    expect(deskRequests()).toHaveLength(4);
+    // Brief, plan tool result, reminder: the update ends the turn without another request.
+    expect(deskRequests()).toHaveLength(3);
   });
 
   it('does not remind again when Desk ignores the reminder', async () => {

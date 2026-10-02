@@ -69,6 +69,38 @@ describe('workspaces', () => {
     expect(existsSync(path)).toBe(false);
     expect(git(repo, 'branch', '--list', branch)).toContain(branch);
   });
+
+  it.each(['modified', 'untracked', 'ignored'])('keeps a worktree with %s work', async (kind) => {
+    const { path } = await worktree();
+    if (kind === 'modified') writeFileSync(join(path, 'README.md'), 'valuable edit');
+    else if (kind === 'untracked') writeFileSync(join(path, 'new.txt'), 'unpublished');
+    else {
+      writeFileSync(join(repo, '.git', 'info', 'exclude'), 'output.pdf\n');
+      writeFileSync(join(path, 'output.pdf'), 'unpublished document');
+    }
+    await expect(removeWorkspace({ path, gitSourcePath: repo })).rejects.toThrow(/uncommitted, untracked, or ignored/);
+    expect(existsSync(path)).toBe(true);
+    expect(git(repo, 'worktree', 'list')).toContain(path);
+  });
+
+  it('does not fall back to deletion when git removal fails, or delete nonempty scratch workspaces', async () => {
+    const { path } = await worktree();
+    git(repo, 'worktree', 'lock', path);
+    await expect(removeWorkspace({ path, gitSourcePath: repo })).rejects.toThrow();
+    expect(existsSync(path)).toBe(true);
+    const scratch = join(base, 'scratch');
+    mkdirSync(scratch);
+    writeFileSync(join(scratch, 'report.pdf'), 'unpublished');
+    await expect(removeWorkspace({ path: scratch })).rejects.toThrow(/Publish or move/);
+    expect(readFileSync(join(scratch, 'report.pdf'), 'utf8')).toBe('unpublished');
+  });
+
+  it('keeps detached worktrees whose commits have no retained branch', async () => {
+    const { path } = await worktree();
+    git(path, 'checkout', '--detach');
+    await expect(removeWorkspace({ path, gitSourcePath: repo })).rejects.toThrow(/branch/);
+    expect(existsSync(path)).toBe(true);
+  });
 });
 
 describe('git tools', () => {

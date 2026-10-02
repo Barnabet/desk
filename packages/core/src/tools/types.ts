@@ -103,6 +103,7 @@ export interface RuntimeServices {
   /** Whether the pause of the project's automatic wakes is what keeps the agent from running now (design spec §5.4). */
   heldByPause(agentId: string): boolean;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
+  closeThread(deskId: string, threadId: string, discardWorkspace: boolean): Promise<string>;
   /** Whether the agent's running job was stopped and is still winding down (its run ends cancelled). */
   isStopping(agentId: string): boolean;
   resolveApproval(approvalId: string, decision: 'approved' | 'denied', opts?: { by?: 'user' | 'desk'; note?: string; remember?: boolean }): Promise<void>;

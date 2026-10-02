@@ -1,6 +1,7 @@
-import { mkdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rmdir } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { runProcess } from '../tools/process';
+import { ConflictError } from '../errors';
 
 /** Runs git and returns trimmed stdout+stderr; throws with git's output on failure. */
 /**
@@ -63,11 +64,32 @@ export async function createWorkspace(opts: { path: string; git?: { sourcePath: 
   return { git: { branch, base, common_dir: commonDir } };
 }
 
-/** Deletes a workspace. Worktrees are unregistered from their repo; their branch is kept. */
-export async function removeWorkspace(opts: { path: string; gitSourcePath?: string | null }): Promise<void> {
+/** Checks before archive changes task state; removal repeats this check after any running answer has stopped. */
+export async function assertWorkspaceRemovable(opts: { path: string; gitSourcePath?: string | null }): Promise<void> {
+  const st = await lstat(opts.path).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  });
+  if (!st) return;
+  if (!st.isDirectory() || await realpath(opts.path) !== resolve(opts.path)) throw new ConflictError('Workspace path is not a real directory; it was kept');
   if (opts.gitSourcePath) {
-    await git(opts.gitSourcePath, ['worktree', 'remove', '--force', opts.path]).catch(() => undefined);
-    await git(opts.gitSourcePath, ['worktree', 'prune']).catch(() => undefined);
+    // Detached HEADs have no retained branch guaranteeing that their commits remain reachable.
+    try {
+      await git(opts.path, ['symbolic-ref', '--quiet', 'HEAD']);
+    } catch {
+      throw new ConflictError('Workspace has no checked-out branch; preserve its commits before archiving');
+    }
+    const status = await git(opts.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']);
+    if (status) throw new ConflictError('Workspace contains uncommitted, untracked, or ignored files. Commit or publish remaining work and remove local files before archiving; nothing was deleted');
+    return;
   }
-  await rm(opts.path, { recursive: true, force: true });
+  if ((await readdir(opts.path)).length) throw new ConflictError('Workspace contains files. Publish or move them before archiving; nothing was deleted');
+}
+
+/** Removes only an empty scratch folder or a clean worktree, including ignored files. Never forces or falls back to rm. */
+export async function removeWorkspace(opts: { path: string; gitSourcePath?: string | null }): Promise<void> {
+  await assertWorkspaceRemovable(opts);
+  if (!(await lstat(opts.path).catch((err: NodeJS.ErrnoException) => { if (err.code === 'ENOENT') return null; throw err; }))) return;
+  if (opts.gitSourcePath) await git(opts.gitSourcePath, ['worktree', 'remove', opts.path]);
+  else await rmdir(opts.path);
 }

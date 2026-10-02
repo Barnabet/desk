@@ -9,3 +9,4 @@ export * from './builtins';
 export * from './quote';
 export * from './messages';
 export * from './automations';
+export * from './storage';
