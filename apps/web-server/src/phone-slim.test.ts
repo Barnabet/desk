@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredEvent } from '@desk/protocol';
-import { PHONE_FRAME_BYTES, PHONE_TEXT_LIMIT, PHONE_TOOL_LIMIT, slimForPhone, slimPushForPhone, slimResultForPhone } from './phone-slim';
+import { PHONE_TEXT_LIMIT, PHONE_TOOL_LIMIT, slimForPhone, slimPushForPhone, slimResultForPhone } from './phone-slim';
 
 const long = 'x'.repeat(PHONE_TEXT_LIMIT + 500);
 const over = PHONE_TEXT_LIMIT + 500 - PHONE_TOOL_LIMIT;
@@ -42,26 +42,14 @@ describe('slimForPhone', () => {
   });
 
   it('slims event pushes and event pages only', () => {
-    expect(((slimPushForPhone('desk:events', [result])[0] as StoredEvent[])[0] as unknown as { payload: { content: string } }).payload.content.length).toBeLessThan(long.length);
-    expect((slimPushForPhone('desk:event', result)[0] as { payload: { content: string } }).payload.content.length).toBeLessThan(long.length);
+    expect(((slimPushForPhone('desk:events', [result]) as StoredEvent[])[0] as unknown as { payload: { content: string } }).payload.content.length).toBeLessThan(long.length);
+    expect((slimPushForPhone('desk:event', result) as unknown as { payload: { content: string } }).payload.content.length).toBeLessThan(long.length);
     const global = { overview: [] };
-    expect(slimPushForPhone('desk:global', global)).toEqual([global]);
-    expect(slimPushForPhone('desk:global', global)[0]).toBe(global);
+    expect(slimPushForPhone('desk:global', global)).toBe(global);
     const page = slimResultForPhone('threads.transcript', { events: [result], next_after: 7 }) as { events: Array<{ payload: { content: string } }>; next_after: number };
     expect(page.next_after).toBe(7);
     expect(page.events[0]!.payload.content.length).toBeLessThan(long.length);
     const other = { events: [result] };
     expect(slimResultForPhone('projects.list', other)).toBe(other);
-  });
-
-  it('splits a big backfill page into frames a phone accepts, keeping every event in order', () => {
-    const events = Array.from({ length: 5000 }, (_, i) => ({ ...base, id: i + 1, type: 'message.user', payload: { text: 'y'.repeat(300) } }) as unknown as StoredEvent);
-    const frames = slimPushForPhone('desk:events', events) as StoredEvent[][];
-    expect(frames.length).toBeGreaterThan(5);
-    for (const f of frames) expect(Buffer.byteLength(JSON.stringify(f))).toBeLessThanOrEqual(PHONE_FRAME_BYTES);
-    expect(frames.flat().map((e) => e.id)).toEqual(events.map((e) => e.id));
-    const huge = { ...message, id: 9, payload: { text: 'z'.repeat(PHONE_FRAME_BYTES * 2) } } as unknown as StoredEvent;
-    expect(slimPushForPhone('desk:events', [events[0]!, huge, events[1]!])).toEqual([[events[0]], [huge], [events[1]]]);
-    expect(slimPushForPhone('desk:events', [])).toEqual([]);
   });
 });

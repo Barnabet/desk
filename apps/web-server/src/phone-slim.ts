@@ -52,40 +52,11 @@ export function slimForPhone(e: StoredEvent): StoredEvent {
   }
 }
 
-/**
- * The most a `desk:events` frame to a phone holds. The backfill goes out 5000 events per page, several megabytes in one
- * WebSocket message, and an iPhone drops a socket on a message that big (URLSession's WebSocket stops at 1 MB): the
- * page reconnects, asks for the history again and stays on "Loading…". Phones get the same events in smaller frames.
- */
-export const PHONE_FRAME_BYTES = 256 * 1024;
-
-/** `events` in consecutive batches of at most PHONE_FRAME_BYTES of JSON each (an event bigger than that goes alone). */
-function inFrames(events: StoredEvent[]): StoredEvent[][] {
-  const out: StoredEvent[][] = [];
-  let batch: StoredEvent[] = [];
-  let bytes = 0;
-  for (const e of events) {
-    const size = Buffer.byteLength(JSON.stringify(e)) + 1;
-    if (batch.length && bytes + size > PHONE_FRAME_BYTES) {
-      out.push(batch);
-      batch = [];
-      bytes = 0;
-    }
-    batch.push(e);
-    bytes += size;
-  }
-  if (batch.length) out.push(batch);
-  return out;
-}
-
-/**
- * A push as a paired phone receives it, as one payload or several on the same channel: `desk:events` batches slimmed
- * and split into frames of PHONE_FRAME_BYTES, `desk:event`s slimmed, others as they are.
- */
-export function slimPushForPhone(channel: string, payload: unknown): unknown[] {
-  if (channel === 'desk:events' && Array.isArray(payload)) return inFrames((payload as StoredEvent[]).map(slimForPhone));
-  if (channel === 'desk:event' && payload && typeof payload === 'object') return [slimForPhone(payload as StoredEvent)];
-  return [payload];
+/** A push payload as a paired phone receives it: `desk:events` batches and `desk:event`s slimmed, others as they are. */
+export function slimPushForPhone(channel: string, payload: unknown): unknown {
+  if (channel === 'desk:events' && Array.isArray(payload)) return (payload as StoredEvent[]).map(slimForPhone);
+  if (channel === 'desk:event' && payload && typeof payload === 'object') return slimForPhone(payload as StoredEvent);
+  return payload;
 }
 
 /** Operations whose result is an event page (`{ events, next_after }`), slimmed for phones like pushes. */

@@ -170,17 +170,11 @@ export class PushHub {
 
   send(senderId: number, channel: WebPushChannel, payload: unknown): void {
     const c = this.clients.get(senderId);
-    if (c) this.push(c, channel, payload);
+    if (c) this.write(c, { channel, payload: c.caller.kind === 'phone' ? slimPushForPhone(channel, payload) : payload });
   }
 
   broadcast(channel: WebPushChannel, payload: unknown): void {
-    for (const c of this.clients.values()) this.push(c, channel, payload);
-  }
-
-  /** A push to one socket: to a phone, slimmed and in small frames (`slimPushForPhone`). */
-  private push(c: Client, channel: WebPushChannel, payload: unknown): void {
-    if (c.caller.kind !== 'phone') return this.write(c, { channel, payload });
-    for (const part of slimPushForPhone(channel, payload)) this.write(c, { channel, payload: part });
+    for (const c of this.clients.values()) this.write(c, { channel, payload: c.caller.kind === 'phone' ? slimPushForPhone(channel, payload) : payload });
   }
 
   /** desk:notify, to the sockets that may show notifications. */
