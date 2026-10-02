@@ -436,7 +436,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       }
       const results = done.map((d) => d.r);
 
-      const yielded = results.find((r) => r.yield)?.yield;
+      // A silent end-of-turn update must not override a wait/completion in the same batch.
+      const yielded = (results.find((r) => r.yield && r.yield.status !== 'idle') ?? results.find((r) => r.yield))?.yield;
       // (An answer run cannot yield: its gate denies complete and wait_for_reply. If it did, it would still close.)
       if (yielded) return finish('yielded', yielded.status, yielded.reason, closing(WHY.unfinished));
     }

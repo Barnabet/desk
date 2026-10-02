@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { realpath } from 'node:fs/promises';
+import { realpath, rmdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
   emptyMessages,
   foldMessages,
@@ -32,13 +32,17 @@ import {
   type SkillScope,
   type StoredEvent,
   type WritableSkillScope,
+  type WorkspaceStorageReport,
+  type WorkspaceCleanupResult,
 } from '@desk/protocol';
 import { SkillStore, type SkillDetail, type SkillSaveInput, type SkillSummary } from '../skills/store';
 import { BuiltinSkills, builtinEnabled } from '../skills/builtins';
 import type { SkillRef } from '../catalog/service';
 import { AttachmentStore } from '../attachments/store';
 import { sanitizeLibraryName, uniqueLibraryName } from '../library/library';
-import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
+import { assertWorkspaceRemovable, createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
+import { cleanWorkspaceDependencies, workspaceCleanupCandidates, WORKSPACE_RETENTION_MS } from '../workspaces/cleanup';
+import { closeWorkspace, inspectWorkspaceClosure } from '../workspaces/close';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
@@ -223,6 +227,8 @@ export class Runtime {
   private readonly folds = new Map<string, MessagesState>();
   /** Threads being archived: from archiveThread's first step, nothing new reaches them (design spec §3.5). */
   private readonly archiving = new Set<string>();
+  private readonly cleaning = new Set<string>();
+  private workspaceCleanup: Promise<WorkspaceCleanupResult> | undefined;
   /** Per project, the times of the counted wakes of the last hour, by trigger (design spec §5.4). Empty after a restart. */
   private readonly wakeWindows = new Map<string, { agent: number[]; lifecycle: number[] }>();
   /** Projects whose automatic wakes are paused until the user writes to one of their agents or resumes them (§5.4). */
@@ -335,6 +341,7 @@ export class Runtime {
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
       heldByPause: (agentId) => this.heldByPause(agentId),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
+      closeThread: (deskId, threadId, discardWorkspace) => this.closeThread(deskId, threadId, discardWorkspace),
       isStopping: (agentId) => this.stoppedAt.has(agentId),
       resolveApproval: (id, decision, opts) => this.resolveApproval(id, decision, opts),
       updateSettings: (projectId, patch) => this.updateSettings(projectId, patch),
@@ -748,20 +755,123 @@ export class Runtime {
     if (t.role !== 'thread') throw new ValidationError('Only threads can be archived');
     if (!TERMINAL.has(t.status)) throw new ConflictError(`Thread ${threadId} is ${t.status}; stop it before archiving`);
     if (this.archiving.has(t.id)) throw new ConflictError(`Thread ${threadId} is already being archived`);
+    if (this.cleaning.has(t.id)) throw new ConflictError('Workspace cleanup is in progress; try archiving again shortly');
     this.archiving.add(t.id);
     try {
+      const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
+      if (t.workspace_path) await assertWorkspaceRemovable({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
       // Closed before the stop, so the stopped job's afterRun finds nothing open and starts nothing.
       this.closeQuestionsTo(t, WHY.archived);
       await this.scheduler.stopAndWait(t.id);
       await this.stopServicesOf(t.project_id, 'thread_archived', t.id);
       if (t.workspace_path) {
-        const source = t.git_source_id ? getSource(this.o.store.db, t.git_source_id) : undefined;
         await removeWorkspace({ path: t.workspace_path, gitSourcePath: source?.path ?? null });
       }
       this.o.store.append({ project_id: t.project_id, agent_id: t.id, type: 'agent.archived', payload: {} });
     } finally {
       this.archiving.delete(t.id);
     }
+  }
+
+  /** Desk explicitly retires accepted work. Preview first; disposal is scoped to one managed workspace. */
+  async closeThread(deskId: string, threadId: string, discardWorkspace: boolean): Promise<string> {
+    const desk = this.requireAgent(deskId);
+    const t = this.requireAgent(threadId);
+    if (desk.role !== 'desk' || t.role !== 'thread' || desk.project_id !== t.project_id) throw new ValidationError('Desk can only close threads in its own project');
+    if (t.archived_at) return 'Thread is already closed (archived).';
+    if (this.archiving.has(t.id) || this.cleaning.has(t.id)) throw new ConflictError('Workspace maintenance is already in progress');
+    const path = join(this.o.dataDir, 'workspaces', t.id);
+    const safe = () => {
+      const current = this.requireAgent(t.id);
+      if (this.shuttingDown || current.status !== 'done' || this.scheduler.isActive(t.id) || this.resolving.has(t.id)) throw new ConflictError('Only a fully completed, inactive thread can be closed');
+      if (current.workspace_path !== path || (existsSync(path) && realOrSelf(path) !== join(realOrSelf(this.o.dataDir), 'workspaces', t.id))) throw new ConflictError('Only managed thread workspaces can be closed');
+      if (pendingApprovalsFor(this.o.store.db, t.id).length || pendingInbox(this.o.store, t.id).length
+        || openTo(this.messages(t.project_id), t.id).length || openFrom(this.messages(t.project_id), t.id).length) throw new ConflictError('Thread has pending messages, questions, or approvals; resolve them before closing');
+      for (const p of listProjects(this.o.store.db, { includeArchived: true })) {
+        if (listServices(this.o.store.db, p.id).some(s => s.status === 'running' && (s.agent_id === t.id || isWithin(realOrSelf(s.cwd), realOrSelf(path)) || s.command.includes(path)))) throw new ConflictError('A running service uses this workspace; move or stop it before closing');
+        if (listSources(this.o.store.db, p.id).some(s => isWithin(realOrSelf(s.path), realOrSelf(path)))) throw new ConflictError('A project source uses this workspace; move it before closing');
+      }
+    };
+    this.archiving.add(t.id);
+    try {
+      safe();
+      if (!discardWorkspace) {
+        const report = await inspectWorkspaceClosure(path);
+        return JSON.stringify({ ...report, action: 'preview', notice: 'Review the result and workspace files. Publish/move required deliverables and evidence, install skill drafts, and confirm no other task needs this workspace. Then call close_thread with discard_workspace: true to delete ALL remaining workspace files and archive the thread. Conversation, published library files and external Git branches remain.' });
+      }
+      const report = await closeWorkspace(path, safe);
+      this.o.store.append({ project_id: t.project_id, agent_id: t.id, type: 'agent.archived', payload: {} });
+      return `Closed "${t.title ?? t.id}" and removed its workspace (${report.bytes} bytes in ${report.files} files). Conversation, published library files and ${report.repositories.length} Git branch(es) were kept. The task cannot be resumed; use a new thread for later work.`;
+    } finally { this.archiving.delete(t.id); }
+  }
+
+  /** Completed, unarchived threads only; never walk outside Desk's own workspace directory. */
+  private cleanupThreads(): AgentRow[] {
+    return listProjects(this.o.store.db, { includeArchived: true }).flatMap((p) => listAgents(this.o.store.db, p.id))
+      .filter((a) => a.role === 'thread' && a.status === 'done' && !a.archived_at && a.workspace_path && existsSync(a.workspace_path));
+  }
+
+  private cleanupRefusal(a: AgentRow, now: number, age: number): string | null {
+    if (this.shuttingDown) return 'Desk is shutting down';
+    if (!a.workspace_path || a.workspace_path !== join(this.o.dataDir, 'workspaces', a.id)
+      || realOrSelf(a.workspace_path) !== join(realOrSelf(this.o.dataDir), 'workspaces', a.id)) return 'This is not a managed thread workspace';
+    if (a.status !== 'done' || a.archived_at || this.archiving.has(a.id)) return 'Task is not available for cleanup';
+    if (this.scheduler.isActive(a.id) || pendingApprovalsFor(this.o.store.db, a.id).length || this.resolving.has(a.id)) return 'Task is active';
+    if (listAgents(this.o.store.db, a.project_id).some((other) => this.scheduler.isActive(other.id) || other.status === 'running' || other.status === 'queued')) return 'Project has active tasks';
+    if (listServices(this.o.store.db, a.project_id).some((s) => s.agent_id === a.id && s.status === 'running')) return 'A running service uses this workspace';
+    if (pendingInbox(this.o.store, a.id).length || openTo(this.messages(a.project_id), a.id).length) return 'Task has unread messages or unanswered questions';
+    const changed = Date.parse(a.updated_at);
+    if (!Number.isFinite(changed) || now - changed < age) return `Waiting for ${age === WORKSPACE_RETENTION_MS ? '24 hours' : 'one minute'} of inactivity`;
+    return null;
+  }
+
+  private cleanupProtectedPaths(a: AgentRow): string[] {
+    const result = lastEvent(this.o.store.db, a.id, 'agent.result');
+    const drafts = result?.type === 'agent.result' ? result.payload.skill_drafts ?? [] : [];
+    return drafts.map((p) => resolve(a.workspace_path!, p));
+  }
+
+  async workspaceStorage(): Promise<WorkspaceStorageReport> {
+    const workspaces: WorkspaceStorageReport['workspaces'] = [];
+    for (const a of this.cleanupThreads()) {
+      let reason = this.cleanupRefusal(a, this.now().getTime(), 60_000);
+      let candidates: Awaited<ReturnType<typeof workspaceCleanupCandidates>> = [];
+      if (!reason) {
+        try {
+          candidates = await workspaceCleanupCandidates(a.workspace_path!, this.cleanupProtectedPaths(a));
+        } catch (err) {
+          reason = err instanceof Error ? err.message : String(err);
+        }
+      }
+      workspaces.push({ agent_id: a.id, project_id: a.project_id, title: a.title ?? a.id, bytes: candidates.reduce((n, c) => n + c.bytes, 0), directories: candidates.length, reason });
+    }
+    return { retention_hours: WORKSPACE_RETENTION_MS / 3_600_000, reclaimable_bytes: workspaces.reduce((n, w) => n + w.bytes, 0), workspaces };
+  }
+
+  /** Single flight; wakeups wait until their workspace is safe to use again. Manual cleanup shortens the retention grace. */
+  cleanupWorkspaces(manual = false): Promise<WorkspaceCleanupResult> {
+    if (this.workspaceCleanup) return this.workspaceCleanup;
+    const work = async (): Promise<WorkspaceCleanupResult> => {
+      const total: WorkspaceCleanupResult = { removed: 0, bytes: 0, errors: [] };
+      for (const a of this.cleanupThreads()) {
+        const idle = () => !this.cleanupRefusal(this.requireAgent(a.id), this.now().getTime(), manual ? 60_000 : WORKSPACE_RETENTION_MS);
+        if (!idle()) continue;
+        this.cleaning.add(a.id);
+        try {
+          const result = await cleanWorkspaceDependencies(a.workspace_path!, this.cleanupProtectedPaths(a), idle);
+          total.removed += result.removed;
+          total.bytes += result.bytes;
+        } catch (err) {
+          total.errors.push({ agent_id: a.id, message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          this.cleaning.delete(a.id);
+          this.wake(a.id);
+        }
+      }
+      return total;
+    };
+    this.workspaceCleanup = work().finally(() => { this.workspaceCleanup = undefined; });
+    return this.workspaceCleanup;
   }
 
   /** Low-level thread creation in an existing directory. `parentId` defaults to the project's Desk; `null` makes a standalone thread. */
@@ -1124,6 +1234,11 @@ export class Runtime {
     const serviceId = existing?.id ?? `svc_${newId()}`;
     const env = withSkillEnv(scrubbedEnv(workspace), this.skillEnv(place.agent.id));
     const sandbox = { enabled: await this.sandboxAvailable(), writable: [workspace, ...place.writable, ...this.writeRoots(place.agent)], guard: this.guard, gitDirs: this.gitDirs(place.agent) };
+    if (this.cleaning.has(place.agent.id) || this.archiving.has(place.agent.id)) throw new ConflictError('Workspace maintenance is in progress; start the service again shortly');
+    for (const id of this.archiving) {
+      const retiring = this.requireAgent(id).workspace_path;
+      if (retiring && (isWithin(realOrSelf(cwd), realOrSelf(retiring)) || command.includes(retiring))) throw new ConflictError('This service uses a workspace being closed');
+    }
     const relCwd = cwd === workspace ? '.' : cwd.slice(workspace.length + 1);
     const pid = this.serviceProcs.start(serviceId, {
       command,
@@ -1414,6 +1529,7 @@ export class Runtime {
    */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    await this.workspaceCleanup;
     await this.engine.shutdown();
     this.scheduler.stopAll(SHUTDOWN_REASON);
     const resolutions = [...this.resolutions];
@@ -1823,7 +1939,9 @@ export class Runtime {
       const source = getSource(this.o.store.db, input.gitSourceId);
       if (!source || source.project_id !== project.id || source.kind !== 'git') throw new ValidationError(`Unknown git source: ${input.gitSourceId}`);
       // The worktree takes the step folder's place (the engine created it empty, with only .desk/).
-      await removeWorkspace({ path: workspacePath, gitSourcePath: source.path });
+      // Remove that scaffolding only if empty; a retry must never discard files from the previous attempt.
+      await rmdir(join(workspacePath, '.desk')).catch((err: NodeJS.ErrnoException) => { if (err.code !== 'ENOENT' && err.code !== 'ENOTEMPTY') throw err; });
+      await removeWorkspace({ path: workspacePath, gitSourcePath: existsSync(join(workspacePath, '.git')) ? source.path : null });
       const ws = await createWorkspace({ path: workspacePath, git: { sourcePath: source.path, branch: `desk/auto-${input.automationName}-${id.slice(-6).toLowerCase()}` } });
       mkdirSync(join(workspacePath, '.desk'), { recursive: true });
       git = ws.git ? { source_id: source.id, ...ws.git } : null;
@@ -1976,7 +2094,7 @@ export class Runtime {
    * passes the wake budget (admit); if it does not, its items stay stored. Returns whether it enqueued a job.
    */
   private wake(agentId: string): boolean {
-    if (this.shuttingDown || this.scheduler.isActive(agentId)) return false;
+    if (this.shuttingDown || this.cleaning.has(agentId) || this.scheduler.isActive(agentId)) return false;
     const agent = this.requireAgent(agentId);
     const d = wakeDecision(this.wakeState(agent));
     if (d.kind === 'none' || !this.admit(agent.project_id, d.trigger)) return false;

@@ -102,6 +102,8 @@ describe('IPC dispatch', () => {
     expect(await dispatch('catalog.install', { id: 'pre-mortem' }, ctx)).toMatchObject({ ok: true, value: { skill: { scope: 'global' } } });
     expect(await dispatch('system.runtimes', {}, ctx)).toEqual({ ok: true, value: { bytes: 0, envs: [] } });
     expect(await dispatch('system.runtimesCleanup', {}, ctx)).toEqual({ ok: true, value: { removed: 0, bytes: 0 } });
+    expect(await dispatch('system.workspaces', {}, ctx)).toEqual({ ok: true, value: { retention_hours: 24, reclaimable_bytes: 0, workspaces: [] } });
+    expect(await dispatch('system.workspacesCleanup', {}, ctx)).toEqual({ ok: true, value: { removed: 0, bytes: 0, errors: [] } });
     expect(await dispatch('skills.runtimeRetry', { name: 'pre-mortem' }, ctx)).toMatchObject({ ok: true, value: { state: 'none' } });
     expect(await dispatch('catalog.prepare', { id: '../etc' }, ctx)).toMatchObject({ ok: false });
   });

@@ -16,6 +16,17 @@ const overview: ProjectOverview = {
 const fold = (events: Parameters<typeof reduceProject>[1][]) => events.reduce(reduceProject, projectFromOverview(overview));
 
 describe('reduceProject', () => {
+  it('updates the live Desk model with project settings while keeping thread assignments', () => {
+    const s = fold([
+      ev(3, 'agent.created', { role: 'thread', model: 'm', title: 'T', brief: 'b', workspace_path: '/w/t', parent_id: 'd' }, { agent: 't' }),
+      ev(4, 'project.updated', { settings: { desk_model: 'new-model', thread_model: 'new-model' } }),
+      ev(5, 'project.updated', { name: 'Renamed' }),
+    ]);
+    expect(s.project.settings.desk_model).toBe('new-model');
+    expect(s.desk?.model).toBe('new-model');
+    expect(s.threads[0]?.model).toBe('m');
+  });
+
   it("takes What's up from the overview, then from Desk's updates", () => {
     expect(fold([]).whatsUp).toBeNull();
     const s = [ev(3, 'whats_up.updated', { text: 'Two threads on the relaunch.' }, { agent: 'd', ts: '2026-09-25T10:00:00Z' })].reduce(

@@ -7,6 +7,7 @@ const CHANGING_TOOLS = new Set([
   'spawn_thread',
   'message_thread',
   'stop_thread',
+  'close_thread',
   'update_plan',
   'report',
   'resolve_approval',
@@ -22,7 +23,7 @@ const CHANGING_NOTICES = new Set(['completed', 'failed', 'cancelled']);
 /** The sender label stored on the runtime's reminders to Desk; its conversation shows them as `[Desk runtime — reminder] …`. */
 export const REMINDER_LABEL = 'the Desk runtime';
 export const WHATS_UP_REMINDER =
-  "Update What's up with update_whats_up: things changed this turn, and it is the first thing the user reads in the project. Then end your turn without writing anything else.";
+  "Update What's up with update_whats_up (end_turn: true): things changed this turn, and it is the first thing the user reads in the project. The tool ends your turn; do not write a confirmation.";
 
 /** The project's current What's up, as Desk last wrote it. */
 export function latestWhatsUp(db: Db, deskId: string): { text: string; ts: string } | null {
