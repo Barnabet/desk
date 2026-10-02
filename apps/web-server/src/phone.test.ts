@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { channels, initialGlobalState } from '@desk/bff/contract';
 import { createWebApp } from './app';
 import { LoginCodes, Sessions } from './auth';
-import { DeviceStore, writePendingCode } from './devices';
+import { DeviceStore, writePairingCodes, writePendingCode } from './devices';
+import { PAIR_GUESSES } from './app';
 import { PHONE_OPS, phoneRefusal } from './phone-policy';
 import { PushHub } from './push';
 import { contentSecurityPolicy, hostAllowed, originAllowed, parseRemoteUrl } from './security';
@@ -126,6 +127,32 @@ describe('pairing a phone', () => {
   });
 });
 
+describe('pairing a Home Screen app with the short code', () => {
+  const post = (app: ReturnType<typeof setup>['app'], code: unknown, origin = REMOTE.origin) =>
+    app.request('/pair', { method: 'POST', headers: { host: REMOTE.host, origin, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+
+  it('pairs once with the typed code and answers the secret as JSON', async () => {
+    const { app, dataDir, devices, paired } = setup();
+    const { short } = writePairingCodes(dataDir, { name: 'iPhone' });
+    const res = await post(app, short.toLowerCase());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = (await res.json()) as { ok: true; value: { secret: string } };
+    expect(devices.who(body.value.secret)?.name).toBe('iPhone');
+    expect(paired).toEqual(['iPhone']);
+    expect((await post(app, short)).status).toBe(401);
+  });
+
+  it('refuses another origin, a QR code, and too many wrong codes, even a right one after them', async () => {
+    const { app, dataDir } = setup();
+    const { code, short } = writePairingCodes(dataDir);
+    expect((await post(app, short, 'https://evil.example')).status).toBe(403);
+    expect((await post(app, code)).status).toBe(401);
+    for (let i = 1; i < PAIR_GUESSES; i++) expect((await post(app, 'ZZZZ-ZZZZ')).status).toBe(401);
+    expect((await post(app, short)).status).toBe(429);
+  });
+});
+
 describe('what a paired phone may do', () => {
   it('reads and talks, but is refused what stays on the Mac', async () => {
     const { pair, rpc } = setup();
@@ -198,6 +225,21 @@ describe('/push for a paired phone', () => {
     devices.revoke(device.id);
     h.recheckPhones();
     expect(await c.closed).toBe(4401);
+  });
+
+  it('cuts long tool texts in what it pushes to a phone, and not to a browser', async () => {
+    const { hub: h, devices, port } = await pushSetup();
+    const { secret } = devices.add('iPhone');
+    const c = openPush(port, { host: REMOTE.host, origin: REMOTE.origin });
+    await c.opened;
+    c.send({ session: secret });
+    await c.next((f) => f.channel === 'desk:global');
+    const content = 'x'.repeat(10_000);
+    const event = { id: 1, ts: 't', project_id: 'P1', agent_id: 'A1', type: 'tool.result', payload: { run_id: 'r', tool_call_id: 't', name: 'bash', status: 'ok', content } };
+    h.broadcast('desk:events', [event]);
+    const f = await c.next((x) => x.channel === 'desk:events');
+    expect(f.payload[0].payload.content.length).toBeLessThan(3000);
+    expect(event.payload.content.length).toBe(10_000);
   });
 
   it('refuses an upgrade from another origin on the remote host', async () => {

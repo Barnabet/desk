@@ -129,7 +129,14 @@ export class DeviceStore {
 /** What a pending code opens: a paired phone (`desk web pair`), or a session in a browser on this Mac (`desk web login`). */
 export type PendingKind = 'phone' | 'browser';
 
-const Pending = z.object({ kind: z.enum(['phone', 'browser']), hash: z.string().regex(/^[a-f0-9]{64}$/), name: z.string().max(80), expires_at: z.number() });
+const Pending = z.object({
+  kind: z.enum(['phone', 'browser']),
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** A phone's short code, typed into the app (an iPhone Home Screen app keeps its own storage, apart from Safari's). */
+  short_hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  name: z.string().max(80),
+  expires_at: z.number(),
+});
 const PENDING_PREFIX = 'web-code-';
 const PENDING_SUFFIX = '.json';
 
@@ -139,22 +146,60 @@ const PENDING_SUFFIX = '.json';
  * cannot read these files (deskd's sandbox guard), and could not use what is in them.
  */
 export function writePendingCode(dataDir: string, kind: PendingKind, o: { name?: string; now?: number } = {}): string {
-  const code = newToken();
-  mkdirSync(dataDir, { recursive: true });
-  const file = join(dataDir, `${PENDING_PREFIX}${randomBytes(8).toString('hex')}${PENDING_SUFFIX}`);
-  const body = { kind, hash: hashOf(code), name: (o.name ?? '').trim().slice(0, 80), expires_at: (o.now ?? Date.now()) + PENDING_TTL_MS };
-  writeFileSync(file, `${JSON.stringify(body)}\n`, { mode: 0o600, flag: 'wx' });
-  chmodSync(file, 0o600);
-  return code;
+  return writePending(dataDir, kind, o, null).code;
+}
+
+/** The short code's letters: no I, L, O, 0 or 1, which read alike. 31^8 codes, and desk web limits wrong guesses. */
+const SHORT_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const SHORT = /^[A-HJKMNP-Z2-9]{8}$/;
+
+/** Uppercase, without spaces or dashes: what a short code is compared as. */
+export const normalizeShortCode = (text: string): string => text.toUpperCase().replace(/[\s-]/g, '');
+
+function newShortCode(): string {
+  let out = '';
+  // 256 is not a multiple of 31: bytes from 248 up are skipped, so every letter is equally likely.
+  while (out.length < 8) for (const b of randomBytes(16)) if (b < 248 && out.length < 8) out += SHORT_ALPHABET[b % 31];
+  return out;
 }
 
 /**
- * Spends a code `writePendingCode` wrote for this kind: deletes its file and returns the name it was issued with, or
+ * Pairs a phone either way, once: `code` for the QR link, and `short` (`ABCD-EFGH`) to type into the Desk app on the
+ * phone, for a Home Screen app that cannot open the link with its own storage. One file, so one pairing.
+ */
+export function writePairingCodes(dataDir: string, o: { name?: string; now?: number } = {}): { code: string; short: string } {
+  const short = newShortCode();
+  const { code } = writePending(dataDir, 'phone', o, short);
+  return { code, short: `${short.slice(0, 4)}-${short.slice(4)}` };
+}
+
+function writePending(dataDir: string, kind: PendingKind, o: { name?: string; now?: number }, short: string | null): { code: string } {
+  const code = newToken();
+  mkdirSync(dataDir, { recursive: true });
+  const file = join(dataDir, `${PENDING_PREFIX}${randomBytes(8).toString('hex')}${PENDING_SUFFIX}`);
+  const body = {
+    kind,
+    hash: hashOf(code),
+    ...(short ? { short_hash: hashOf(short) } : {}),
+    name: (o.name ?? '').trim().slice(0, 80),
+    expires_at: (o.now ?? Date.now()) + PENDING_TTL_MS,
+  };
+  writeFileSync(file, `${JSON.stringify(body)}\n`, { mode: 0o600, flag: 'wx' });
+  chmodSync(file, 0o600);
+  return { code };
+}
+
+/** Whether `text` has the shape of a short pairing code (dashes and spaces allowed, any case). */
+export const isShortCode = (text: string): boolean => SHORT.test(normalizeShortCode(text));
+
+/**
+ * Spends a code `writePendingCode` or `writePairingCodes` wrote for this kind (a phone's short code too): deletes its file and returns the name it was issued with, or
  * null. Expired and unreadable files are deleted on the way.
  */
 export function redeemPendingCode(dataDir: string, kind: PendingKind, code: string, now = Date.now()): { name: string } | null {
-  if (!TOKEN.test(code)) return null;
-  const hash = hashOf(code);
+  const short = kind === 'phone' && isShortCode(code);
+  if (!short && !TOKEN.test(code)) return null;
+  const hash = hashOf(short ? normalizeShortCode(code) : code);
   let names: string[];
   try {
     names = readdirSync(dataDir).filter((n) => n.startsWith(PENDING_PREFIX) && n.endsWith(PENDING_SUFFIX));
@@ -175,7 +220,8 @@ export function redeemPendingCode(dataDir: string, kind: PendingKind, code: stri
       rmSync(file, { force: true });
       continue;
     }
-    if (found || p.kind !== kind || !sameHash(p.hash, hash)) continue;
+    const want = short ? p.short_hash : p.hash;
+    if (found || p.kind !== kind || !want || !sameHash(want, hash)) continue;
     // Deleted before the session exists: a second request racing this one finds nothing.
     rmSync(file, { force: true });
     found = { name: p.name };

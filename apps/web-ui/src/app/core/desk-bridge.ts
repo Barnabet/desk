@@ -14,6 +14,7 @@ import {
   type WebChannelOutput,
   type WebPushChannel,
 } from '@desk/web-server/contract';
+import { markOnboarded } from './onboarded';
 
 /** A failed call: `code` is deskd's error code, or the host's (`unauthorized`, `invalid_url`, `web_unreachable`, …). */
 export class DeskCallError extends Error {
@@ -73,6 +74,8 @@ export class DeskBridge {
   private readonly signedOutState = signal(this.secret === null);
   /** True while this browser holds no valid session secret; the app then shows only "Open Desk from your terminal". */
   readonly signedOut: Signal<boolean> = this.signedOutState.asReadonly();
+  /** True when the page is open at the phones' address rather than desk web's on this computer: it then offers pairing. */
+  readonly remote = location.hostname !== '127.0.0.1';
   private readonly pushState = signal<PushStatus>('idle');
   readonly pushStatus: Signal<PushStatus> = this.pushState.asReadonly();
   private readonly folderState = signal<FolderRequest | null>(null);
@@ -151,6 +154,29 @@ export class DeskBridge {
   setNotifyPermission(permission: NotifyPermission): void {
     this.permission = permission;
     if (this.live && this.socket) this.send(this.socket, { notifyPermission: permission });
+  }
+
+  /**
+   * Pairs this page as a phone with the short code `desk web pair` printed: for a Home Screen app, whose storage is its
+   * own, so the QR link (opened in Safari) cannot sign it in. Stores the secret, skips onboarding, and signs in.
+   */
+  async pair(code: string): Promise<void> {
+    let res: Response;
+    try {
+      res = await fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    } catch {
+      throw new DeskCallError(UNREACHABLE);
+    }
+    const body = (await res.json().catch(() => null)) as IpcResult<{ secret: string }> | null;
+    if (!body) throw new DeskCallError('bad_response', `desk web answered ${res.status}.`, res.status);
+    if (!body.ok) throw new DeskCallError({ ...body.error, status: res.status });
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, body.value.secret);
+    } catch {
+      // Storage may be unavailable: this page still signs in until it closes.
+    }
+    markOnboarded();
+    this.signIn(body.value.secret);
   }
 
   /** Forgets the session secret, unless another tab has stored a newer one, which this page then uses. */

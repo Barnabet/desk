@@ -22,6 +22,11 @@ export class FakeDeskBridge implements DeskBridgeApi {
   private readonly reconnectListeners = new Set<() => void>();
   private readonly signedOutState = signal(false);
   readonly signedOut = this.signedOutState.asReadonly();
+  /** Set to true to act as a page open at the phones' remote address. */
+  remote = false;
+  /** The codes `pair` was given; `pairWith` decides each answer (resolve to pair, throw an IpcError-shaped object to fail). */
+  readonly pairCodes: string[] = [];
+  pairWith: (code: string) => void = () => {};
   private readonly pushState = signal<PushStatus>('live');
   readonly pushStatus = this.pushState.asReadonly();
   private readonly folderState = signal<FolderRequest | null>(null);
@@ -102,6 +107,16 @@ export class FakeDeskBridge implements DeskBridgeApi {
 
   signOut(): void {
     this.signedOutState.set(true);
+  }
+
+  async pair(code: string): Promise<void> {
+    this.pairCodes.push(code);
+    try {
+      this.pairWith(code);
+    } catch (err) {
+      throw err instanceof DeskCallError ? err : new DeskCallError(err as IpcError);
+    }
+    this.signedOutState.set(false);
   }
 
   setPushStatus(status: PushStatus): void {

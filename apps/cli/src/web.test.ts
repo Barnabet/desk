@@ -92,6 +92,7 @@ describe('desk web', () => {
     out = '';
     expect(await runCli(['web', 'pair', '--name', 'iPhone'], io)).toBe(0);
     expect(out).toMatch(/https:\/\/mac\.tail1234\.ts\.net\/pair\?code=[A-Za-z0-9_-]{43}/);
+    expect(out).toMatch(/type this code: [A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}\n/);
     expect(out).toContain('desk web is not running yet');
     expect(out).toContain('▄');
 
@@ -126,6 +127,9 @@ describe('desk web', () => {
 
     let printed = '';
     expect(await runCli(['web', 'login', '--no-open'], { out: (s) => void (printed += s), err: () => {}, dataDir: dir })).toBe(0);
+    // --no-open is login's own flag: it prints the link and never tries the browser.
+    expect(printed).not.toContain('Could not open');
+    expect(printed).not.toContain('Opened Desk');
     const link = /http:\/\/127\.0\.0\.1:\d+\/login\?code=[A-Za-z0-9_-]{43}/.exec(printed)?.[0];
     expect(link).toBeDefined();
     const page = await (await fetch(link!)).text();

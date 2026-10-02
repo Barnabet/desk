@@ -201,6 +201,8 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   const program = new Command('desk')
     .description('Desk — local project coordinator (dev client for deskd)')
     .exitOverride()
+    // With desk web's own (below): `desk web login --no-open` is login's flag, not desk web's.
+    .enablePositionalOptions()
     .configureOutput({ writeOut: io.out, writeErr: io.err });
 
   // ── daemon ─────────────────────────────────────────────────────────
@@ -273,6 +275,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   // ── web ────────────────────────────────────────────────────────────
   const web = program
     .command('web')
+    .enablePositionalOptions()
     .description('Serve the Desk web app on http://127.0.0.1 and sign in with a one-time link (runs until Ctrl-C)')
     .option('--port <port>', 'port on 127.0.0.1 (remembered for next time; default 7434)')
     .option('--no-open', 'print the login link without opening the browser')
@@ -333,13 +336,15 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
     .description('Pair a phone: shows a QR code that signs the phone in to desk web at its private address')
     .option('--name <name>', 'what to call the phone in desk web phones', 'Phone')
     .action(async (opts: { name: string }) => {
-      const { parseRemoteUrl, readWebInfo, WebSettingsStore, writePendingCode } = await import('@desk/web-server');
+      const { parseRemoteUrl, readWebInfo, WebSettingsStore, writePairingCodes } = await import('@desk/web-server');
       const remote = parseRemoteUrl(new WebSettingsStore(dataDir).get().remoteUrl ?? '');
       if (!remote) throw new Error("Set the phones' address first: desk web --remote-url https://<this Mac's Tailscale name>. See Desk from your phone in docs/web.md.");
-      const link = `${remote.origin}/pair?code=${writePendingCode(dataDir, 'phone', { name: opts.name })}`;
+      const { code, short } = writePairingCodes(dataDir, { name: opts.name });
+      const link = `${remote.origin}/pair?code=${code}`;
       const QR = (await import('qrcode')).default;
       io.out(await QR.toString(link, { type: 'terminal', small: true, errorCorrectionLevel: 'L' }));
       say(`Scan this with your phone's camera, or open this link on it (works once, for 10 minutes):\n  ${link}`);
+      say(`Or, in Desk on your phone's Home Screen, type this code: ${short}`);
       if (!readWebInfo(dataDir)) say('desk web is not running yet: start it with desk web install (or desk web) before you scan.');
     });
 

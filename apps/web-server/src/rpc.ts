@@ -9,6 +9,7 @@ import type { DeviceStore } from './devices';
 import { decodeBytes, encodeBytes } from './codec';
 import { PUSH_OPS, SESSION_HEADER } from './frames';
 import { phoneRefusal } from './phone-policy';
+import { slimResultForPhone } from './phone-slim';
 import { originCheck, type RemoteOrigin } from './security';
 import { webChannels, type WebChannel, type WebChannelOutput } from './web-channels';
 
@@ -87,6 +88,8 @@ export function mountRpc(app: Hono, d: RpcDeps): void {
     if (Object.hasOwn(channels, op)) result = await dispatch(op, input, d.ctx(), log);
     else if (Object.hasOwn(webChannels, op)) result = await dispatchWeb(op as WebChannel, input, d.web, log);
     else return refusal(404, 'unknown_channel', `Unknown operation: ${op.slice(0, 64)}`);
+    // A paired phone gets event pages with long tool texts cut (phone-slim.ts), as on /push.
+    if (result.ok && c.get('caller').kind === 'phone') result = { ok: true, value: slimResultForPhone(op, result.value) };
     return rpcJson(!result.ok && result.error.code === 'invalid_request' ? 400 : 200, encodeBytes(result));
   });
 }
