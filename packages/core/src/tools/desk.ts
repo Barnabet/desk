@@ -21,12 +21,29 @@ export function requireThread(ctx: ToolContext, ref: string): AgentRow {
 
 const emit = (ctx: ToolContext, e: EventInput) => ctx.services.store.append(e);
 
+/** The longest thread title spawn_thread keeps; a longer one is shortened rather than refused. */
+export const MAX_THREAD_TITLE = 80;
+
+/** A thread title on one line and at most `MAX_THREAD_TITLE` characters, cut at a word boundary when one is near the end. */
+export function shortenTitle(title: string): string {
+  const flat = title.replace(/\s+/g, ' ').trim();
+  if (flat.length <= MAX_THREAD_TITLE) return flat;
+  const head = flat.slice(0, MAX_THREAD_TITLE - 1);
+  const space = head.lastIndexOf(' ');
+  const cut = space >= MAX_THREAD_TITLE / 2 ? head.slice(0, space) : head;
+  return `${cut.replace(/[\s,;:.\-–—(]+$/, '')}…`;
+}
+
 export const spawnThreadTool = defineTool({
   name: 'spawn_thread',
   description:
     'Start a new thread (a full agent with its own workspace) on a self-contained assignment. Write the brief so it stands alone: objective, context, constraints, definition of done, what to return. Pass git_source_id to work on a repository (gets its own branch).',
   input: z.object({
-    title: z.string().min(1).max(80),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(`A short name for what the thread owns; one longer than ${MAX_THREAD_TITLE} characters is shortened`),
     brief: z.string().min(1),
     git_source_id: z.string().optional(),
     model: z.string().optional(),
@@ -35,7 +52,8 @@ export const spawnThreadTool = defineTool({
     ),
     skills: z.array(SkillName).optional().describe('Skills to activate on the thread from the start (their instructions join its context)'),
   }),
-  async execute({ title, brief, git_source_id, model, reasoning_effort, skills = [] }, ctx) {
+  async execute({ title: asked, brief, git_source_id, model, reasoning_effort, skills = [] }, ctx) {
+    const title = shortenTitle(asked);
     const id = await ctx.services.spawnThread(ctx.agentId, {
       title,
       brief,
@@ -48,7 +66,8 @@ export const spawnThreadTool = defineTool({
     const extras = [t.reasoning_effort ? `${t.model}, ${t.reasoning_effort} effort` : t.model, ...(t.git_branch ? [`branch ${t.git_branch}`] : []), ...(skills.length ? [`skills: ${skills.join(', ')}`] : [])];
     // Its start is a lifecycle wake: while the project is paused, the thread waits for the user to resume it (§5.4).
     const held = ctx.services.heldByPause(id) ? ' Automatic wakes are paused in this project; it starts once the user resumes them.' : '';
-    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).${held}`;
+    const shortened = title !== asked.replace(/\s+/g, ' ') ? ` Its title was shortened to fit ${MAX_THREAD_TITLE} characters.` : '';
+    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).${shortened}${held}`;
   },
 });
 
