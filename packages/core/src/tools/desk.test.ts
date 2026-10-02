@@ -17,6 +17,7 @@ import {
   reportTool,
   resolveApprovalTool,
   reviewDiffTool,
+  MAX_THREAD_TITLE,
   spawnThreadTool,
   stopThreadTool,
   updatePlanTool,
@@ -76,6 +77,19 @@ describe('spawn_thread', () => {
     expect(t.git_branch).toBe(`desk/fix-bug-${id.slice(-6).toLowerCase()}`);
     expect(existsSync(join(t.workspace_path!, 'a.txt'))).toBe(true);
     await expect(spawnThreadTool.execute({ title: 'x', brief: 'b', git_source_id: 'nope' }, ctx)).rejects.toThrow(/Unknown git source/);
+  });
+
+  it('shortens a title that is too long instead of refusing it', async () => {
+    const { rt, ctx } = await setup([text('working')]);
+    const long = 'W6-Harness: measure.sh scorecard for BNP provenance (clean + injected runs, per-field accuracy, regressions)';
+    const parsed = spawnThreadTool.input.parse({ title: `  ${long}\n`, brief: 'b' });
+    const out = String(await spawnThreadTool.execute(parsed, ctx));
+    await rt.whenIdle();
+    const t = getAgent(h.store.db, idOf(out))!;
+    expect(t.title).toBe('W6-Harness: measure.sh scorecard for BNP provenance (clean + injected runs…');
+    expect(t.title!.length).toBeLessThanOrEqual(MAX_THREAD_TITLE);
+    expect(out).toContain(`"${t.title}"`);
+    expect(out).toMatch(/title was shortened/);
   });
 });
 
