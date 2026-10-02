@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { waitingOn, type MessagesState, type ProjectState, type ThreadView } from '@desk/client';
-import { ago, answeringLabel, href, waitHop, waitLabel, waitsOnYou, type WaitHop } from '@desk/ui-core';
+import { acceptanceChip, ago, answeringLabel, href, waitHop, waitLabel, waitsOnYou, type WaitHop } from '@desk/ui-core';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { HopLink } from '../components/HopLink';
 import { PairSheet } from '../components/PairSheet';
@@ -36,6 +36,7 @@ export function ThreadCard({
   /** Opens the pair sheet with what it waits on; null for "waiting on you", which is not a pair. */
   onWait: (() => void) | null;
 }) {
+  const chip = acceptanceChip(t);
   const card = (
     <a className={`card thread-card${t.archived_at ? ' archived' : ''}${wait ? ' has-wait' : ''}`} href={href({ name: 'project', id: projectId, tab: 'threads', threadId: t.id })}>
       <div className="thread-card-head">
@@ -43,6 +44,7 @@ export function ThreadCard({
         <StatusChip status={t.status} reason={t.reason} proxyDown={proxyDown} />
       </div>
       {answering ? <AnsweringBadge label={answering} /> : null}
+      {chip ? <span className={`chip chip-${chip.tone} thread-acceptance`}>{chip.label}</span> : null}
       {/* A waiting thread's wait comes from the message fold, never from the status reason (design spec §7). */}
       {t.reason && t.status !== 'running' && t.status !== 'waiting' ? <span className="small muted">{t.reason}</span> : null}
       {t.activity ? <span className="mono small thread-activity">{t.activity}</span> : null}

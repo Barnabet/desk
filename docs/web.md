@@ -57,11 +57,11 @@ A paired phone may do what the web UI does from the couch, and nothing that chan
 
 | A phone may | Only the Mac may |
 |---|---|
-| Read projects, the conversation, threads, their transcripts, diffs and files, service logs, the Library, memory, skills and the catalog, automations and their runs | Create, change or archive projects; change policy, settings or sources (and their write access) |
+| Read projects, the conversation, threads, their transcripts, diffs, files and reviews, service logs, the Library, memory, skills and the catalog, automations and their runs | Create, change or archive projects; change policy, settings or sources (and their write access) |
 | Message Desk and threads, stop or archive a thread, stop a service | Start or restart services |
 | Answer approvals one at a time (never *remember*) and questions, dismiss attention items | Change the model endpoint, models or config; turn built-in skills on or off; install, import, save or restore skills |
 | Upload to the Library; add, correct or remove memory | Create, edit, turn on or grant automations |
-| Run automations, answer their steps, cancel runs, stop steps | Start, restart or stop deskd; browse the Mac's folders; change desk web's settings; pair phones |
+| Run automations, answer their steps, cancel runs, stop steps | Request a review, accept a thread's work or request changes, waive a finding; start, restart or stop deskd; browse the Mac's folders; change desk web's settings; pair phones |
 
 Approving from the phone runs the action on the Mac, as approving on the Mac does, so treat a paired phone like the Mac's keyboard: pair only your own, and unpair a lost one.
 

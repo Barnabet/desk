@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredEvent, StreamServerMessage } from '@desk/protocol';
-import { automationLine, createRenderer, runLine, stepLine } from './format';
+import type { ThreadReview } from '@desk/client';
+import { acceptanceLabel, automationLine, createRenderer, reviewText, runLine, stepLine } from './format';
 
 let seq = 0;
 const ev = (agent_id: string | null, body: Pick<StoredEvent, 'type' | 'payload'>): StreamServerMessage => ({
@@ -148,5 +149,49 @@ describe('automation lines', () => {
         '',
       ].join('\n'),
     );
+  });
+});
+
+describe('reviews', () => {
+  const sub = (seq: number, extra = {}) => ({ id: `s${seq}`, seq, commit: `${seq}abcdef0123456`, claims: [], limitations: [], evidence: '', artifacts: [], superseded_by: null, ...extra });
+  const review = {
+    acceptance: 'reviewed',
+    accepted_submission_id: null,
+    submissions: [sub(1, { superseded_by: 's2' }), sub(2, { claims: ['Totals match'], limitations: ['EUR only'], evidence: 'pytest: 12 passed', artifacts: [{ path: 'r.md', sha256: 'ab'.repeat(32) }] })],
+    reviews: [{ id: 'rv', reviewer_id: 'r', submission_id: 's1', phase: 'final', verdict: 'issues_found', requirements: [{ criterion: 'Totals match', met: 'no', note: 'March' }] }],
+    findings: [
+      { id: 'f1', title: 'March is off', blocking: true, reproducer: 'python c.py', state: 'open', reason: null },
+      { id: 'f2', title: 'Typo', blocking: false, reproducer: '', state: 'waived', reason: 'Cosmetic' },
+    ],
+    reviewing: null,
+  } as unknown as ThreadReview;
+
+  it('labels acceptance for desk threads', () => {
+    expect(acceptanceLabel({ acceptance: 'accepted_with_limitations', reviews_submission_id: null })).toBe('accepted with limitations');
+    expect(acceptanceLabel({ acceptance: 'none', reviews_submission_id: null })).toBe('');
+    expect(acceptanceLabel({ acceptance: 'none', reviews_submission_id: 's1' })).toBe('reviewer');
+  });
+
+  it('prints the current submission, open findings with reproducers, reviews and older submissions', () => {
+    expect(reviewText(review, (id) => (id === 'r' ? 'Review: Comparator' : id))).toBe(
+      [
+        'Acceptance: reviewed',
+        'Submission 2 commit 2abcdef012',
+        '  claims: Totals match',
+        '  limitation: EUR only',
+        '  checked: pytest: 12 passed',
+        `  file: r.md ${'ab'.repeat(6)}`,
+        'Open findings:',
+        '- f1 (blocking) March is off',
+        '    reproduce: python c.py',
+        'Reviews:',
+        '- Review: Comparator on submission 1: issues found',
+        '    [no] Totals match: March',
+        'Resolved findings:',
+        '- f2 Typo [waived: Cosmetic]',
+        'Submission 1 commit 1abcdef012 [superseded]',
+      ].join('\n'),
+    );
+    expect(reviewText({ ...review, submissions: [] }, String)).toBe('Nothing submitted yet.');
   });
 });

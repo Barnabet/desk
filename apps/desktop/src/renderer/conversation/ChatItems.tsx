@@ -20,6 +20,8 @@ const FEED: Record<string, string> = {
   approval: 'Approval',
   stalled: 'Stalled',
   revision: 'Sent back',
+  resume: 'Resumed',
+  review: 'Re-review',
 };
 
 /** The daemon labels threads as `thread "Title" (id)`; people only need the title. */

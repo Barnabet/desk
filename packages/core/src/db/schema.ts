@@ -1,6 +1,6 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 // Type-only import: erased at runtime, so drizzle-kit can still load this file standalone.
-import type { AutomationDefinition, AutomationLayout, Grant, InputValue, Outputs, PlanItem, ProjectSettings, ReasoningEffort, StepGate, StepQuestion } from '@desk/protocol';
+import type { AutomationDefinition, AutomationLayout, Grant, InputValue, Outputs, PlanItem, ProjectSettings, ReasoningEffort, RequirementCheck, StepGate, StepQuestion } from '@desk/protocol';
 
 export const events = sqliteTable(
   'events',
@@ -54,6 +54,13 @@ export const agents = sqliteTable(
     git_branch: text('git_branch'),
     git_base: text('git_base'),
     git_common_dir: text('git_common_dir'),
+    /** Where its latest submission stands (reviews and acceptance spec §0). */
+    acceptance: text('acceptance', { enum: ['none', 'in_review', 'reviewed', 'changes_requested', 'accepted', 'accepted_with_limitations'] })
+      .notNull()
+      .default('none'),
+    accepted_submission_id: text('accepted_submission_id'),
+    /** A reviewer thread: the submission it reviews (its latest review's). */
+    reviews_submission_id: text('reviews_submission_id'),
     /** A step agent's automation run and step (role `step`). */
     automation_run_id: text('automation_run_id'),
     automation_step_id: text('automation_step_id'),
@@ -284,4 +291,71 @@ export const automationStepRuns = sqliteTable(
     updated_at: text('updated_at').notNull(),
   },
   (t) => [primaryKey({ columns: [t.run_id, t.step_id] }), index('automation_step_runs_status_idx').on(t.status)],
+);
+
+/** What a thread's `complete` submitted (reviews and acceptance spec §1.2). */
+export const submissions = sqliteTable(
+  'submissions',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    thread_id: text('thread_id').notNull(),
+    seq: integer('seq').notNull(),
+    commit: text('commit'),
+    base: text('base'),
+    artifacts: text('artifacts', { mode: 'json' }).$type<Array<{ path: string; sha256: string }>>().notNull(),
+    claims: text('claims', { mode: 'json' }).$type<string[]>().notNull(),
+    limitations: text('limitations', { mode: 'json' }).$type<string[]>().notNull(),
+    evidence: text('evidence').notNull(),
+    superseded_by: text('superseded_by'),
+    created_at: text('created_at').notNull(),
+  },
+  (t) => [index('submissions_thread_idx').on(t.thread_id, t.seq)],
+);
+
+export const reviews = sqliteTable(
+  'reviews',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    submission_id: text('submission_id').notNull(),
+    builder_id: text('builder_id').notNull(),
+    reviewer_id: text('reviewer_id').notNull(),
+    criteria: text('criteria', { mode: 'json' }).$type<string[]>().notNull(),
+    focus: text('focus'),
+    requested_by: text('requested_by', { enum: ['desk', 'user'] }).notNull(),
+    /** The reviewer has the builder's report (after its initial assessment, or from the start on a re-review). */
+    revealed: integer('revealed', { mode: 'boolean' }).notNull(),
+    /** null until an assessment; `initial`, then `final`. */
+    phase: text('phase', { enum: ['initial', 'final'] }),
+    verdict: text('verdict', { enum: ['no_material_issues', 'issues_found', 'could_not_review'] }),
+    requirements: text('requirements', { mode: 'json' }).$type<RequirementCheck[]>().notNull(),
+    not_checked: text('not_checked', { mode: 'json' }).$type<string[]>().notNull(),
+    created_at: text('created_at').notNull(),
+    updated_at: text('updated_at').notNull(),
+  },
+  (t) => [index('reviews_submission_idx').on(t.submission_id), index('reviews_reviewer_idx').on(t.reviewer_id)],
+);
+
+export const findings = sqliteTable(
+  'findings',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    review_id: text('review_id').notNull(),
+    submission_id: text('submission_id').notNull(),
+    builder_id: text('builder_id').notNull(),
+    title: text('title').notNull(),
+    detail: text('detail').notNull(),
+    blocking: integer('blocking', { mode: 'boolean' }).notNull(),
+    reproducer: text('reproducer').notNull(),
+    state: text('state', { enum: ['open', 'fixed', 'waived', 'withdrawn'] }).notNull(),
+    /** `fixed`: the submission that fixed it. */
+    fixed_in: text('fixed_in'),
+    reason: text('reason'),
+    resolved_by: text('resolved_by', { enum: ['desk', 'user', 'reviewer'] }),
+    created_at: text('created_at').notNull(),
+    resolved_at: text('resolved_at'),
+  },
+  (t) => [index('findings_builder_idx').on(t.builder_id, t.state)],
 );

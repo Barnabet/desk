@@ -1,6 +1,7 @@
 import type {
   WorkspaceStorageReport,
   WorkspaceCleanupResult,
+  AcceptSubmissionRequest,
   AddSourceRequest,
   AttentionResponse,
   BuiltinDuplicateRequest,
@@ -23,6 +24,7 @@ import type {
   ModelEndpointTestResult,
   ModelInfo,
   ProjectSummary,
+  RequestReviewRequest,
   SkillImportRequest,
   SkillWriteRequest,
   StreamServerMessage,
@@ -64,6 +66,7 @@ import type {
   SkillSummary,
   ServiceRow,
   SourceRow,
+  ThreadReview,
   AutomationSaved,
   AutomationVersion,
 } from './types';
@@ -205,6 +208,13 @@ export class DeskClient {
     diff: (id: string) => this.get<ThreadDiff>(`/threads/${enc(id)}/diff`),
     files: (id: string, path = '') => this.get<WorkspaceEntry[]>(`/threads/${enc(id)}/files${path ? `?path=${enc(path)}` : ''}`),
     file: (id: string, path: string) => this.raw(`/threads/${enc(id)}/files/raw/${encPath(path)}`),
+    /** Submissions, reviews, findings and acceptance (reviews and acceptance spec §7). */
+    review: (id: string) => this.get<ThreadReview>(`/threads/${enc(id)}/review`),
+    /** Has the latest submission reviewed; with `reviewer_id`, by the same reviewer again. */
+    requestReview: (id: string, req: RequestReviewRequest) =>
+      this.post<{ reviewer_id: string; review_id: string; reopened: boolean }>(`/threads/${enc(id)}/review`, req),
+    accept: (id: string, req: AcceptSubmissionRequest) => this.post<{ submission_seq: number; waived: number }>(`/threads/${enc(id)}/accept`, req),
+    waiveFinding: (findingId: string, reason?: string) => this.post<{ ok: true }>(`/findings/${enc(findingId)}/waive`, reason ? { reason } : {}),
   };
 
   /** Images agents looked at (view_image), by sha256. They never change, so callers may cache them. */

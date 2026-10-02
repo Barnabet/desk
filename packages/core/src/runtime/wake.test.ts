@@ -39,6 +39,8 @@ const COLUMNS: Array<[string, Omit<Item, 'id'>]> = [
   ['Desk answer', { from: 'desk', kind: 'answer' }],
   ['Desk question', { from: 'desk', kind: 'question' }],
   ['Desk revision', { from: 'desk', kind: 'revision' }],
+  ['Desk resume', { from: 'desk', kind: 'resume' }],
+  ['Desk review', { from: 'desk', kind: 'review' }],
   ['thread question', { from: 'thread', kind: 'question' }],
   ['thread note', { from: 'thread', kind: 'note' }],
   ['thread answer', { from: 'thread', kind: 'answer' }],
@@ -51,12 +53,12 @@ const all = (cell: string) => COLUMNS.map(() => cell);
 const TABLE: Record<string, string[]> = {
   running: all('none'),
   queued: all('run:queued'),
-  'waiting on a reply': ['run:user', 'run:user', 'run:agent', 'run:agent', 'run:agent', 'run:agent', 'run:agent', 'answer:agent', 'none', 'run:agent'],
+  'waiting on a reply': ['run:user', 'run:user', 'run:agent', 'run:agent', 'run:agent', 'run:agent', 'run:agent', 'run:agent', 'run:agent', 'answer:agent', 'none', 'run:agent'],
   'waiting on an approval': all('none'),
-  idle: ['run:user', 'answer:user', 'run:agent', 'run:lifecycle', 'run:agent', 'answer:agent', 'run:agent', 'answer:agent', 'none', 'run:agent'],
-  done: ['run:user', 'answer:user', 'none', 'none', 'none', 'answer:agent', 'run:agent', 'answer:agent', 'none', 'none'],
-  failed: ['run:user', 'answer:user', 'none', 'none', 'none', 'answer:agent', 'run:agent', 'answer:agent', 'none', 'none'],
-  'cancelled, sent after the stop': ['run:user', 'run:user', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'],
+  idle: ['run:user', 'answer:user', 'run:agent', 'run:lifecycle', 'run:agent', 'answer:agent', 'run:agent', 'run:agent', 'run:agent', 'answer:agent', 'none', 'run:agent'],
+  done: ['run:user', 'answer:user', 'none', 'none', 'none', 'answer:agent', 'run:agent', 'none', 'run:agent', 'answer:agent', 'none', 'none'],
+  failed: ['run:user', 'answer:user', 'none', 'none', 'none', 'answer:agent', 'run:agent', 'run:agent', 'run:agent', 'answer:agent', 'none', 'none'],
+  'cancelled, sent after the stop': ['run:user', 'run:user', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'],
   'cancelled, sent before the stop': all('none'),
   archived: all('none'),
   'in an archived project': all('none'),
@@ -117,6 +119,7 @@ describe('wakeDecision: questions', () => {
     expect(decide('thread', 'waiting', [item(6, 'thread', 'answer')], { open })).toBe('run:agent');
     expect(decide('thread', 'idle', [item(6, 'thread', 'answer')], { open })).toBe('run:agent');
     expect(decide('thread', 'done', [item(6, 'desk', 'revision')], { open })).toBe('run:agent');
+    expect(decide('thread', 'failed', [item(6, 'desk', 'resume')], { open })).toBe('run:agent');
     expect(decide('thread', 'idle', [item(6, 'desk', 'note')], { open })).toBe('run:agent');
     expect(decide('thread', 'done', [], { open, pendingApprovals: 1 })).toBe('none');
     expect(decide('thread', 'cancelled', [], { open, cancelledAt: 1 })).toBe('none');

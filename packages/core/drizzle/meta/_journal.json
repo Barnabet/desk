@@ -54,8 +54,15 @@
     {
       "idx": 7,
       "version": "6",
-      "when": 1790812800000,
-      "tag": "0007_desk_model",
+      "when": 1790976291297,
+      "tag": "0007_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790981402837,
+      "tag": "0008_desk_model",
       "breakpoints": true
     }
   ]

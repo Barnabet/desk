@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AcceptSubmissionRequest,
   AddSourceRequest,
   AutomationAnswerRequest,
   AutomationCreateRequest,
@@ -16,9 +17,11 @@ import {
   MemoryWriteRequest,
   ModelEndpointPutRequest,
   ModelsPutRequest,
+  RequestReviewRequest,
   SkillWriteRequest,
   StepId,
   UpdateProjectRequest,
+  WaiveFindingRequest,
 } from '@desk/protocol';
 
 const id = z.string().min(1).max(200);
@@ -69,6 +72,11 @@ export const channels = {
   'threads.stop': z.object({ id }),
   'threads.archive': z.object({ id }),
   'threads.diff': z.object({ id }),
+  /** Submissions, reviews, findings and acceptance (reviews and acceptance spec §7); the only review operation a phone may run. */
+  'threads.review': z.object({ id }),
+  'threads.requestReview': z.object({ id, req: RequestReviewRequest }),
+  'threads.accept': z.object({ id, req: AcceptSubmissionRequest }),
+  'threads.waiveFinding': z.object({ findingId: id, req: WaiveFindingRequest }),
   'services.logs': z.object({ id, lines: z.number().int().min(1).max(2000).optional() }),
   'services.start': z.object({ id }),
   'services.stop': z.object({ id }),

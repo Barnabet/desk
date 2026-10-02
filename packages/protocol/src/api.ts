@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AutomationExport, AutomationLayout, AutomationName, Grant, InputValue, ValidationIssue } from './automations';
-import { AgentStatus, ArtifactKind, MemoryKind, ModelInfo, SkillName } from './domain';
+import { Acceptance, AgentStatus, ArtifactKind, MemoryKind, ModelInfo, SkillName } from './domain';
 import { EphemeralEvent } from './events';
 import { ProjectSettingsPatch } from './settings';
 
@@ -40,6 +40,27 @@ export const ResolveApprovalRequest = z.object({
   remember: z.boolean().optional(),
 });
 export type ResolveApprovalRequest = z.input<typeof ResolveApprovalRequest>;
+
+/** The user asks for a review of a thread's latest submission (reviews and acceptance spec §7); `reviewer_id` re-reviews with the same reviewer. */
+export const RequestReviewRequest = z.object({
+  criteria: z.array(z.string().trim().min(1).max(2000)).min(1).max(30),
+  focus: z.string().max(4000).optional(),
+  model: z.string().min(1).optional(),
+  reviewer_id: z.string().min(1).optional(),
+});
+export type RequestReviewRequest = z.input<typeof RequestReviewRequest>;
+
+/** The user's decision about a thread's latest submission; `waive` waives open findings first. */
+export const AcceptSubmissionRequest = z.object({
+  decision: Acceptance.extract(['accepted', 'accepted_with_limitations', 'changes_requested']),
+  limitations: z.array(z.string().trim().min(1).max(1000)).max(30).optional(),
+  waive: z.array(z.object({ finding_id: z.string().min(1), reason: z.string().max(4000).optional() })).max(50).optional(),
+  note: z.string().max(8000).optional(),
+});
+export type AcceptSubmissionRequest = z.input<typeof AcceptSubmissionRequest>;
+
+export const WaiveFindingRequest = z.object({ reason: z.string().max(4000).optional() });
+export type WaiveFindingRequest = z.input<typeof WaiveFindingRequest>;
 
 export const MemoryWriteRequest = z.object({ kind: MemoryKind, content: z.string().min(1), supersedes: z.string().optional() });
 export type MemoryWriteRequest = z.input<typeof MemoryWriteRequest>;

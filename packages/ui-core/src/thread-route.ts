@@ -246,7 +246,18 @@ export function stopText(s: Stop, reviewRounds: number, messages: MessagesState 
       return { title: e.state === 'pending' ? 'Waiting for your approval' : e.state === 'approved' ? 'You approved' : e.state === 'denied' ? 'You denied' : `Approval ${e.state}`, sub: `${e.tool} · ${clock(s.from)}` };
     case 'incoming': {
       const who = senderName(messages, e.fromAgentId, e.fromLabel);
-      const title = e.messageKind === 'question' ? `${who} asked` : e.messageKind === 'answer' ? (e.auto ? `${who} could not answer` : `Answer from ${who}`) : `${who}: ${e.messageKind}`;
+      const title =
+        e.messageKind === 'question'
+          ? `${who} asked`
+          : e.messageKind === 'answer'
+            ? e.auto
+              ? `${who} could not answer`
+              : `Answer from ${who}`
+            : e.messageKind === 'resume'
+              ? `${who} resumed it`
+              : e.messageKind === 'review'
+                ? `${who} asked for a re-review`
+                : `${who}: ${e.messageKind}`;
       return { title, sub: clock(s.from), quote: clip(e.text, 70), ...(e.auto ? { muted: true as const } : {}) };
     }
     case 'answer':

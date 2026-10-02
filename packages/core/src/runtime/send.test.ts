@@ -67,12 +67,20 @@ describe('send refusals (design spec §2.4)', () => {
       `"${name}" has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change.`;
     const fromDesk = (name: string) =>
       `"${name}" has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`;
+    const failedFromDesk = (name: string) =>
+      `"${name}" failed: its last run ended in an error. Send kind "resume" to continue it where it left off, "question" to ask about its work, or spawn a new thread.`;
     const pricing = thread('Pricing', 'done');
     const deploy = thread('Deploy', 'failed');
     expect(send(a, pricing)).toThrow(sibling('Pricing'));
     expect(send(a, deploy)).toThrow(sibling('Deploy'));
     expect(send(desk.id, pricing)).toThrow(fromDesk('Pricing'));
-    expect(send(desk.id, deploy)).toThrow(fromDesk('Deploy'));
+    expect(send(desk.id, deploy)).toThrow(failedFromDesk('Deploy'));
+
+    // Only Desk resumes, and only a thread whose run failed.
+    expect(send(a, deploy, 'resume')).toThrow('Only Desk resumes threads.');
+    expect(send(desk.id, pricing, 'resume')).toThrow('"Pricing" is done; resume only continues a thread whose run failed. Send "revision" if its work fell short of its brief.');
+    expect(send(desk.id, f, 'resume')).toThrow('"Frontend" is running; resume only continues a thread whose run failed. Send a note instead.');
+    expect(send(desk.id, scout, 'resume')).toThrow('"Scout" was stopped; it cannot receive messages.');
 
     const long = 'Messages are limited to 4000 characters; publish long content with library_publish and send its path.';
     expect(send(a, f, 'note', 'x'.repeat(4001))).toThrow(long);
@@ -86,7 +94,7 @@ describe('send refusals (design spec §2.4)', () => {
     expect(send(desk.id, 'Old', 'note', 'x'.repeat(4001))).toThrow('"Old" is archived.');
     expect(send(a, scout, 'note', 'x'.repeat(4001))).toThrow('"Scout" was stopped; it cannot receive messages.');
     expect(send(a, pricing, 'note', 'x'.repeat(4001))).toThrow(sibling('Pricing'));
-    expect(send(desk.id, deploy, 'note', 'x'.repeat(4001))).toThrow(fromDesk('Deploy'));
+    expect(send(desk.id, deploy, 'note', 'x'.repeat(4001))).toThrow(failedFromDesk('Deploy'));
 
     expect(h.store.list({ projectId, types: ['message.agent', 'agent.revision'] })).toEqual([]);
     expect(rt.send({ from: a, to: f, kind: 'note', text: 'x'.repeat(4000) }).kind).toBe('note');
@@ -194,8 +202,22 @@ describe('what send stores', () => {
     expect(() => rt.send({ from: a, to: t, kind: 'revision', text: 'Mine too.' })).toThrow('Only Desk sends revisions.');
     setStatus(t, 'done');
     expect(() => rt.send({ from: desk.id, to: t, kind: 'revision', text: 'Again.' })).toThrow(
-      'Review round limit (1) reached for "Draft": accept the work with noted caveats or escalate to the user.',
+      'Review round limit (1) reached for "Draft": change the approach (a new thread with a simpler plan), accept it with limitations (accept_submission), or report the blocker to the user.',
     );
+  });
+
+  it("resumes a failed thread with Desk's resume, without a review round, even when the rounds are spent", async () => {
+    const { projectId, desk, thread } = await setup();
+    rt.updateSettings(projectId, { review_rounds: 0 });
+    const t = thread('Deploy', 'failed');
+    const r = rt.send({ from: desk.id, to: 'Deploy', kind: 'resume', text: 'The connection dropped; carry on.', toolCallId: 'call_m' });
+    expect(r).toEqual({ id: expect.any(Number), kind: 'resume', note: `Sent resume #${r.id} to "Deploy"; it has been reopened.` });
+    expect(stored(r.id).payload).toMatchObject({ kind: 'resume', text: 'The connection dropped; carry on.', tool_call_id: 'call_m' });
+    await rt.whenIdle();
+    // It ran again (and answered "noted"), and nothing counted as a revision.
+    expect(threadRequests('Deploy')).toHaveLength(1);
+    expect(getAgent(h.store.db, t)).toMatchObject({ status: 'idle', review_round: 0 });
+    expect(h.store.list({ agentId: t, types: ['agent.revision'] })).toEqual([]);
   });
 });
 

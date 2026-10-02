@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { messageById, PlanItemStatus, ReasoningEffort, sanitizeLabel, SkillName, type EventInput } from '@desk/protocol';
+import { messageById, PlanItemStatus, quoteLines, ReasoningEffort, sanitizeLabel, SkillName, snippet, type EventInput } from '@desk/protocol';
 import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coordination/render';
 import { newId } from '../ids';
+import { currentReviewOf, reviewSummary } from '../reviews/reviews';
 import { getAgent, getApproval, lastEvent, listThreads, pendingApprovalsFor, threadsByRef, type AgentRow } from '../state/queries';
 import { git } from '../workspaces/workspaces';
 import { defineTool, type Tool, type ToolContext } from './types';
@@ -21,12 +22,29 @@ export function requireThread(ctx: ToolContext, ref: string): AgentRow {
 
 const emit = (ctx: ToolContext, e: EventInput) => ctx.services.store.append(e);
 
+/** The longest thread title spawn_thread keeps; a longer one is shortened rather than refused. */
+export const MAX_THREAD_TITLE = 80;
+
+/** A thread title on one line and at most `MAX_THREAD_TITLE` characters, cut at a word boundary when one is near the end. */
+export function shortenTitle(title: string): string {
+  const flat = title.replace(/\s+/g, ' ').trim();
+  if (flat.length <= MAX_THREAD_TITLE) return flat;
+  const head = flat.slice(0, MAX_THREAD_TITLE - 1);
+  const space = head.lastIndexOf(' ');
+  const cut = space >= MAX_THREAD_TITLE / 2 ? head.slice(0, space) : head;
+  return `${cut.replace(/[\s,;:.\-–—(]+$/, '')}…`;
+}
+
 export const spawnThreadTool = defineTool({
   name: 'spawn_thread',
   description:
     'Start a new thread (a full agent with its own workspace) on a self-contained assignment. Write the brief so it stands alone: objective, context, constraints, definition of done, what to return. Pass git_source_id to work on a repository (gets its own branch).',
   input: z.object({
-    title: z.string().min(1).max(80),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(`A short name for what the thread owns; one longer than ${MAX_THREAD_TITLE} characters is shortened`),
     brief: z.string().min(1),
     git_source_id: z.string().optional(),
     model: z.string().optional(),
@@ -35,7 +53,8 @@ export const spawnThreadTool = defineTool({
     ),
     skills: z.array(SkillName).optional().describe('Skills to activate on the thread from the start (their instructions join its context)'),
   }),
-  async execute({ title, brief, git_source_id, model, reasoning_effort, skills = [] }, ctx) {
+  async execute({ title: asked, brief, git_source_id, model, reasoning_effort, skills = [] }, ctx) {
+    const title = shortenTitle(asked);
     const id = await ctx.services.spawnThread(ctx.agentId, {
       title,
       brief,
@@ -48,18 +67,19 @@ export const spawnThreadTool = defineTool({
     const extras = [t.reasoning_effort ? `${t.model}, ${t.reasoning_effort} effort` : t.model, ...(t.git_branch ? [`branch ${t.git_branch}`] : []), ...(skills.length ? [`skills: ${skills.join(', ')}`] : [])];
     // Its start is a lifecycle wake: while the project is paused, the thread waits for the user to resume it (§5.4).
     const held = ctx.services.heldByPause(id) ? ' Automatic wakes are paused in this project; it starts once the user resumes them.' : '';
-    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).${held}`;
+    const shortened = title !== asked.replace(/\s+/g, ' ') ? ` Its title was shortened to fit ${MAX_THREAD_TITLE} characters.` : '';
+    return `Spawned thread ${id} "${title}" (${extras.join(', ')}).${shortened}${held}`;
   },
 });
 
 export const messageThreadTool = defineTool({
   name: 'message_thread',
   description:
-    'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
+    'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. `resume`: continue a thread whose run failed (an error such as a lost connection, not a verdict on its work) where it left off; no review round. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
   input: z.object({
     thread_id: z.string(),
     text: z.string().min(1),
-    kind: z.enum(['note', 'question', 'revision']).default('note'),
+    kind: z.enum(['note', 'question', 'revision', 'resume']).default('note'),
     skills: z.array(SkillName).optional().describe('Skills to activate on the thread (effective from its next turn)'),
   }),
   async execute({ thread_id, text, kind, skills = [] }, ctx) {
@@ -116,11 +136,24 @@ export const closeThreadTool = defineTool({
 const readThreadInput = z.object({ thread_id: z.string(), mode: z.enum(['summary', 'full']).default('summary'), since: z.number().int().optional() });
 const readSummaryInput = z.object({ thread_id: z.string() });
 
-/** A thread's summary: status, brief, result, artifacts, branch, pending approvals and its last message. */
+/** A thread's summary: status, brief, result, artifacts, branch, pending approvals, its last message, and its reviews. */
 function threadSummary(ctx: ToolContext, t: AgentRow): string {
   const { store } = ctx.services;
+  // A reviewer forms its own view first: until its initial assessment, the builder shows only its brief and status (reviews spec §3.2).
+  const mine = getAgent(store.db, ctx.agentId);
+  const sealed = mine?.reviews_submission_id ? currentReviewOf(store.db, mine.id) : undefined;
+  if (sealed && sealed.builder_id === t.id && !sealed.revealed) {
+    return [
+      `Thread ${t.id} ${snippet(t.title ?? 'untitled', 80)}`,
+      `Status: ${t.status}`,
+      `Brief:\n${quoteLines(t.brief ?? '(none)')}`,
+      "Its result and messages are withheld until your initial assessment (submit_assessment): review the work itself first.",
+    ].join('\n');
+  }
   const last = lastEvent(store.db, t.id, 'assistant.message');
-  return formatThreadSummary(t, pendingApprovalsFor(store.db, t.id), last?.type === 'assistant.message' ? last.payload.content : null);
+  const base = formatThreadSummary(t, pendingApprovalsFor(store.db, t.id), last?.type === 'assistant.message' ? last.payload.content : null);
+  const review = reviewSummary(store.db, t);
+  return review ? `${base}\n${review}` : base;
 }
 
 /**
@@ -239,7 +272,7 @@ export const reportTool = defineTool({
 export const updateSettingsTool = defineTool({
   name: 'update_settings',
   description:
-    'Change project settings when the user asks (check-in cadence, autonomy, models, reasoning effort, concurrency, review rounds). Also record the preference in memory.',
+    'Change project settings when the user asks (check-in cadence, autonomy, models, reasoning effort, concurrency, review rounds, review model). Also record the preference in memory.',
   input: z.object({
     check_in: z.enum(['minimal', 'normal', 'detailed']).optional(),
     autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']).optional(),
@@ -250,6 +283,7 @@ export const updateSettingsTool = defineTool({
     thread_reasoning_effort: ReasoningEffort.nullable().optional().describe("Threads' reasoning level; null uses the model default"),
     max_concurrent_threads: z.number().int().min(1).max(32).optional(),
     review_rounds: z.number().int().min(0).max(10).optional(),
+    review_model: z.string().nullable().optional().describe("Reviewer threads' model; null picks a model of another family than the builder's"),
   }),
   async execute(patch, ctx) {
     ctx.services.updateSettings(ctx.projectId, patch);

@@ -20,6 +20,7 @@ import {
   type AgentMessageKind,
   type ArtifactKind,
   type EventInput,
+  type EventOf,
   type MemoryKind,
   type MessagesState,
   type MessageView,
@@ -40,7 +41,7 @@ import { BuiltinSkills, builtinEnabled } from '../skills/builtins';
 import type { SkillRef } from '../catalog/service';
 import { AttachmentStore } from '../attachments/store';
 import { sanitizeLibraryName, uniqueLibraryName } from '../library/library';
-import { assertWorkspaceRemovable, createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
+import { assertWorkspaceRemovable, createWorkspace, git, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from '../workspaces/workspaces';
 import { cleanWorkspaceDependencies, workspaceCleanupCandidates, WORKSPACE_RETENTION_MS } from '../workspaces/cleanup';
 import { closeWorkspace, inspectWorkspaceClosure } from '../workspaces/close';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
@@ -104,6 +105,18 @@ import type { ValidateContext } from '../automations/validate';
 import { locateScript } from '../tools/skills';
 import { toolByName, toolsForRole } from './toolsets';
 import { takeWake, wakeDecision, type Item, type Trigger, type WakeState } from './wake';
+import {
+  builderReport,
+  chooseReviewModel,
+  currentReviewOf,
+  formatFindingLine,
+  formatSubmissionLine,
+  getFinding,
+  latestSubmission,
+  openFindings,
+  reviewBrief,
+  reviewsOfBuilder,
+} from '../reviews/reviews';
 
 export type RuntimeOptions = {
   store: EventStore;
@@ -339,6 +352,8 @@ export class Runtime {
       send: (input) => this.send(input),
       messages: (projectId) => this.messages(projectId),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
+      requestReview: (input) => this.requestReview(input),
+      acceptSubmission: (input) => this.acceptSubmission(input),
       heldByPause: (agentId) => this.heldByPause(agentId),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
       closeThread: (deskId, threadId, discardWorkspace) => this.closeThread(deskId, threadId, discardWorkspace),
@@ -596,9 +611,10 @@ export class Runtime {
    * state takes this kind, the text size, one open question per asker and thread, and a thread's 20 questions or
    * notes to other threads an hour. A note or an update to an agent whose open question the sender has seen is that
    * question's answer (auto-link, §1.3): it may reach a failed or stopped asker, and it is exempt from the sender cap.
-   * Desk's revision goes its own way (sendRevision); anything else is delivered, a question tracked, with the tool call
-   * that sent it. Each refusal throws the text the model reads; `note` is the tool result (§2.5). The thread
-   * message_thread tool refuses Desk as a target itself (§2.4 check 2).
+   * Desk's revision goes its own way (sendRevision), and so does its resume of a failed thread (checkResume); anything
+   * else is delivered, a question tracked, with the tool call that sent it. Each refusal throws the text the model
+   * reads; `note` is the tool result (§2.5). The thread message_thread tool refuses Desk as a target itself (§2.4
+   * check 2).
    */
   send(input: SendInput): SendResult {
     const from = this.requireAgent(input.from);
@@ -616,12 +632,17 @@ export class Runtime {
       if (to.status === 'cancelled' || this.stoppedAt.has(to.id)) throw new Error(`${name} was stopped; it cannot receive messages.`);
       if (input.kind === 'note' && (to.status === 'done' || to.status === 'failed')) {
         throw new Error(
-          from.role === 'desk'
-            ? `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`
-            : `${name} has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change.`,
+          from.role !== 'desk'
+            ? `${name} has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change.`
+            : to.status === 'failed'
+              ? `${name} failed: its last run ended in an error. Send kind "resume" to continue it where it left off, "question" to ask about its work, or spawn a new thread.`
+              : `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`,
         );
       }
     }
+    if (input.kind === 'resume') this.checkResume(from, to);
+    const sealed = this.sealedPair(from, to);
+    if (sealed) throw new Error(sealed);
     if (input.text.length > MAX_MESSAGE_CHARS) {
       throw new Error(`Messages are limited to ${MAX_MESSAGE_CHARS} characters; publish long content with library_publish and send its path.`);
     }
@@ -645,6 +666,11 @@ export class Runtime {
       }
     }
     if (input.kind === 'revision') return this.sendRevision(from, to, input);
+    if (input.kind === 'resume') {
+      const id = this.deliver(from.id, to.id, 'resume', input.text, { toolCallId: input.toolCallId });
+      const outcome = this.heldByPause(to.id) ? ` (${PAUSED_NOTE})` : '; it has been reopened';
+      return { id, kind: 'resume', note: `Sent resume #${id} to ${name}${outcome}.` };
+    }
     const next = this.sendOutcome(from, to, input.kind);
     const id = this.deliver(from.id, to.id, input.kind, input.text, { tracked: input.kind === 'question', toolCallId: input.toolCallId });
     // The pause kept the recipient from being woken (maybe this very send paused the project): it reads this after the resume.
@@ -676,7 +702,7 @@ export class Runtime {
 
   /** Validates model ids, and reasoning levels against the model they apply to, then applies a settings patch. */
   updateSettings(projectId: string, patch: ProjectSettingsPatch): void {
-    for (const key of ['desk_model', 'thread_model', 'fallback_model'] as const) {
+    for (const key of ['desk_model', 'thread_model', 'fallback_model', 'review_model'] as const) {
       const model = patch[key];
       if (model) this.o.models.get(model);
     }
@@ -694,10 +720,22 @@ export class Runtime {
     this.updateProject(projectId, { settings: patch });
   }
 
-  /** Creates a thread for Desk: its own workspace (git worktree for a repo source, else a scratch dir), then starts it. */
+  /**
+   * Creates a thread for Desk: its own workspace (git worktree for a repo source, else a scratch dir), then starts it.
+   * A reviewer (`review`) branches from the submitted commit (`gitAt`) and gets its review record before it starts.
+   */
   async spawnThread(
     parentId: string,
-    input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] },
+    input: {
+      title: string;
+      brief: string;
+      gitSourceId?: string;
+      gitAt?: string;
+      model?: string;
+      reasoningEffort?: ReasoningEffort;
+      skills?: string[];
+      review?: Omit<EventOf<'review.requested'>['payload'], 'revealed'>;
+    },
   ): Promise<string> {
     const parent = this.requireAgent(parentId);
     const project = getProject(this.o.store.db, parent.project_id)!;
@@ -723,25 +761,28 @@ export class Runtime {
     const workspacePath = join(this.o.dataDir, 'workspaces', id);
     const ws = await createWorkspace({
       path: workspacePath,
-      ...(gitSource ? { git: { sourcePath: gitSource.path, branch: threadBranchName(input.title, id) } } : {}),
+      ...(gitSource ? { git: { sourcePath: gitSource.path, branch: threadBranchName(input.title, id), ...(input.gitAt ? { at: input.gitAt } : {}) } } : {}),
     });
-    this.o.store.append({
-      project_id: project.id,
-      agent_id: id,
-      type: 'agent.created',
-      payload: {
-        role: 'thread',
-        model,
-        ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
-        title: input.title,
-        brief: input.brief,
-        workspace_path: workspacePath,
-        parent_id: parent.id,
-        git: ws.git && gitSource ? { source_id: gitSource.id, ...ws.git } : null,
-        ...(skills.length ? { skills } : {}),
+    this.o.store.append([
+      {
+        project_id: project.id,
+        agent_id: id,
+        type: 'agent.created',
+        payload: {
+          role: 'thread',
+          model,
+          ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+          title: input.title,
+          brief: input.brief,
+          workspace_path: workspacePath,
+          parent_id: parent.id,
+          git: ws.git && gitSource ? { source_id: gitSource.id, ...ws.git } : null,
+          ...(skills.length ? { skills } : {}),
+        },
       },
-    });
-    this.deliver(parent.id, id, 'start', 'Begin your assignment.');
+      ...(input.review ? [{ project_id: project.id, agent_id: id, type: 'review.requested' as const, payload: { ...input.review, revealed: false } }] : []),
+    ]);
+    this.deliver(parent.id, id, 'start', input.review ? 'Begin your review.' : 'Begin your assignment.');
     return id;
   }
 
@@ -872,6 +913,216 @@ export class Runtime {
     };
     this.workspaceCleanup = work().finally(() => { this.workspaceCleanup = undefined; });
     return this.workspaceCleanup;
+  }
+
+  // ── reviews and acceptance (spec 2026-10-02-reviews-and-acceptance-design.md) ─────────────
+
+  /**
+   * Has a thread's latest submission reviewed by an independent reviewer thread (spec §3.1): a new one on its own
+   * branch at the submitted commit, or, with `reviewerId`, the earlier reviewer reopened on the new submission (§3.4).
+   */
+  async requestReview(input: {
+    threadId: string;
+    criteria: string[];
+    focus?: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+    reviewerId?: string;
+    by: 'desk' | 'user';
+  }): Promise<{ reviewerId: string; reviewId: string; reopened: boolean }> {
+    const db = this.o.store.db;
+    const t = this.requireReviewable(input.threadId);
+    const name = nameOf(t);
+    const criteria = input.criteria.map((c) => c.trim()).filter(Boolean);
+    if (!criteria.length) throw new ValidationError('Give at least one acceptance criterion to review against.');
+    const sub = latestSubmission(db, t.id);
+    if (!sub) throw new ValidationError(`${name} has not submitted anything yet: a thread submits its work when it calls complete.`);
+    if (t.status !== 'done') throw new ConflictError(`${name} is ${t.status}; review a thread once it has finished (done).`);
+    const busy = reviewsOfBuilder(db, t.id).find((r) => r.submission_id === sub.id && r.phase !== 'final' && this.liveReviewer(r.reviewer_id));
+    if (busy) throw new ConflictError(`Submission ${sub.seq} of ${name} is already being reviewed by ${nameOf(this.requireAgent(busy.reviewer_id))}.`);
+    const desk = getDeskAgent(db, t.project_id);
+    if (!desk) throw new ConflictError('This project has no Desk.');
+    const reviewId = newId();
+    const record = { review_id: reviewId, submission_id: sub.id, builder_id: t.id, criteria, ...(input.focus ? { focus: input.focus } : {}), requested_by: input.by };
+
+    if (input.reviewerId) {
+      const r = this.requireAgent(input.reviewerId);
+      if (currentReviewOf(db, r.id)?.builder_id !== t.id) throw new ValidationError(`${nameOf(r)} is not a reviewer of ${name}.`);
+      if (r.archived_at || r.status === 'cancelled') throw new ConflictError(`${nameOf(r)} was stopped or archived; request a new reviewer instead.`);
+      if (!['done', 'idle', 'failed'].includes(r.status)) throw new ConflictError(`${nameOf(r)} is ${r.status}; wait until it has finished.`);
+      let moved = '';
+      if (sub.commit && r.workspace_path && r.git_branch) {
+        // Its own changes are kept, out of the way: the branch moves to the new commit.
+        const stash = await git(r.workspace_path, ['stash', 'push', '--include-untracked', '-m', `review of submission ${sub.seq - 1} and before`]);
+        await git(r.workspace_path, ['reset', '--hard', sub.commit]);
+        moved = `Your worktree is now at commit ${sub.commit.slice(0, 10)} (submission ${sub.seq})${stash.startsWith('No local changes') ? '' : '; your earlier local changes are in git stash'}.`;
+      }
+      this.o.store.append({ project_id: t.project_id, agent_id: r.id, type: 'review.requested', payload: { ...record, revealed: true } });
+      const open = openFindings(db, t.id);
+      const text = [
+        `${name} submitted again after your review: please re-review submission ${sub.seq}.`,
+        moved,
+        `Acceptance criteria:\n${criteria.map((c) => `- ${c}`).join('\n')}`,
+        ...(input.focus ? [`Focus: ${input.focus}`] : []),
+        open.length
+          ? `Open findings (mark the ones this submission fixes with resolve_finding; leave the others open):\n${open.map(formatFindingLine).join('\n')}`
+          : 'There are no open findings.',
+        builderReport(t, sub),
+        'Check the fixes yourself, raise any new problems, then call submit_assessment once with your final review.',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      this.deliver(desk.id, r.id, 'review', text.slice(0, MAX_MESSAGE_CHARS));
+      return { reviewerId: r.id, reviewId, reopened: true };
+    }
+
+    const project = getProject(db, t.project_id)!;
+    const model = chooseReviewModel(project.settings, t.model, this.o.models, input.model);
+    const skills = t.active_skills.filter((n) => {
+      const s = this.skills.resolve(n, project.id);
+      return s && !s.error;
+    });
+    const reviewerId = await this.spawnThread(desk.id, {
+      title: `Review: ${t.title ?? 'untitled'}`.slice(0, 80),
+      brief: reviewBrief(t, sub, criteria, input.focus),
+      ...(sub.commit && t.git_source_id ? { gitSourceId: t.git_source_id, gitAt: sub.commit } : {}),
+      model,
+      ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(skills.length ? { skills } : {}),
+      review: record,
+    });
+    return { reviewerId, reviewId, reopened: false };
+  }
+
+  /**
+   * Desk's or the user's decision about a thread's latest submission (spec §4). Open blocking findings must be waived
+   * (Desk with a reason). `changes_requested` sends the open findings back: Desk's as a revision (review rounds apply),
+   * the user's as their message.
+   */
+  acceptSubmission(input: {
+    threadId: string;
+    decision: 'accepted' | 'accepted_with_limitations' | 'changes_requested';
+    limitations?: string[];
+    waive?: Array<{ findingId: string; reason?: string }>;
+    note?: string;
+    by: 'desk' | 'user';
+  }): { submissionSeq: number; waived: number } {
+    const db = this.o.store.db;
+    const t = this.requireReviewable(input.threadId);
+    const name = nameOf(t);
+    const sub = latestSubmission(db, t.id);
+    if (!sub) throw new ValidationError(`${name} has not submitted anything yet.`);
+    const limitations = (input.limitations ?? []).map((l) => l.trim()).filter(Boolean);
+    if (input.decision === 'accepted_with_limitations' && !limitations.length) throw new ValidationError('Say which limitations the acceptance has.');
+    const open = openFindings(db, t.id);
+    const waive = input.waive ?? [];
+    for (const w of waive) {
+      if (!open.some((f) => f.id === w.findingId)) throw new ValidationError(`${w.findingId} is not an open finding about ${name}.`);
+      if (input.by === 'desk' && !w.reason?.trim()) throw new ValidationError(`Give a reason for waiving ${w.findingId}.`);
+    }
+    const waived = new Set(waive.map((w) => w.findingId));
+    const blocking = open.filter((f) => f.blocking && !waived.has(f.id));
+    if (input.decision !== 'changes_requested' && blocking.length) {
+      throw new ConflictError(
+        `${name} has open blocking findings:\n${blocking.map(formatFindingLine).join('\n')}\nWaive each one with a reason, or request changes.`,
+      );
+    }
+    const waivers: EventInput[] = waive.map((w) => ({
+      project_id: t.project_id,
+      agent_id: t.id,
+      type: 'finding.resolved',
+      payload: { finding_id: w.findingId, outcome: 'waived', ...(w.reason?.trim() ? { reason: w.reason.trim() } : {}), by: input.by },
+    }));
+    const record: EventInput = {
+      project_id: t.project_id,
+      agent_id: t.id,
+      type: 'acceptance.recorded',
+      payload: { submission_id: sub.id, decision: input.decision, limitations, by: input.by, ...(input.note?.trim() ? { note: input.note.trim() } : {}) },
+    };
+    if (input.decision === 'changes_requested') {
+      const still = open.filter((f) => !waived.has(f.id));
+      const text = [input.note?.trim(), still.length ? `Open findings from review:\n${still.map(formatFindingLine).join('\n')}` : '']
+        .filter(Boolean)
+        .join('\n\n');
+      if (!text) throw new ValidationError('Say what needs to change (note), or request changes when a review has open findings.');
+      if (input.by === 'desk') {
+        const desk = getDeskAgent(db, t.project_id)!;
+        // The revision checks the round limit first: refused, nothing is recorded.
+        this.send({ from: desk.id, to: t.id, kind: 'revision', text: text.slice(0, MAX_MESSAGE_CHARS) });
+        this.o.store.append([...waivers, record]);
+      } else {
+        this.o.store.append([...waivers, record]);
+        this.sendMessage(t.id, `Changes requested for submission ${sub.seq}:\n\n${text}`);
+      }
+    } else {
+      this.o.store.append([...waivers, record]);
+    }
+    if (input.by === 'user') {
+      const what = input.decision === 'changes_requested' ? 'requested changes to' : input.decision === 'accepted' ? 'accepted' : 'accepted, with limitations,';
+      this.runtimeNoteToDesk(t.project_id, `The user ${what} submission ${sub.seq} of ${name}${waive.length ? ` and waived ${waive.length} finding(s)` : ''}.`);
+    }
+    return { submissionSeq: sub.seq, waived: waive.length };
+  }
+
+  /** The user waives one open finding without deciding about the submission (spec §7 Waive). */
+  waiveFinding(findingId: string, reason: string | undefined, by: 'desk' | 'user'): void {
+    const f = getFinding(this.o.store.db, findingId);
+    if (!f) throw new NotFoundError(`Unknown finding: ${findingId}`);
+    if (f.state !== 'open') throw new ConflictError(`Finding ${findingId} is already ${f.state}.`);
+    if (by === 'desk' && !reason?.trim()) throw new ValidationError('Give a reason for the waiver.');
+    this.requireOpenProject(f.project_id);
+    this.o.store.append({
+      project_id: f.project_id,
+      agent_id: f.builder_id,
+      type: 'finding.resolved',
+      payload: { finding_id: f.id, outcome: 'waived', ...(reason?.trim() ? { reason: reason.trim() } : {}), by },
+    });
+    if (by === 'user') this.runtimeNoteToDesk(f.project_id, `The user waived finding ${f.id} ("${snippet(f.title, 120)}")${reason?.trim() ? `: ${snippet(reason, 300)}` : ''}.`);
+  }
+
+  /**
+   * Why a builder and its reviewer may not message each other yet (spec §3.2): until the reviewer's initial
+   * assessment, neither can reach the other. Undefined when they may.
+   */
+  private sealedPair(from: AgentRow, to: AgentRow): string | undefined {
+    if (from.role !== 'thread' || to.role !== 'thread') return undefined;
+    const db = this.o.store.db;
+    for (const [reviewer, builder] of [
+      [from, to],
+      [to, from],
+    ] as const) {
+      const r = reviewer.reviews_submission_id ? currentReviewOf(db, reviewer.id) : undefined;
+      if (r && r.builder_id === builder.id && !r.revealed) {
+        return reviewer === from
+          ? `You cannot message ${nameOf(to)} before your initial assessment: form your own view from the work first (submit_assessment).`
+          : `${nameOf(to)} is reviewing your work independently and cannot be messaged until it has filed its initial assessment.`;
+      }
+    }
+    return undefined;
+  }
+
+  /** A builder thread that can be reviewed or accepted: a live (not archived) thread that is not itself a reviewer. */
+  private requireReviewable(threadId: string): AgentRow {
+    const t = this.requireAgent(threadId);
+    if (t.role !== 'thread') throw new ValidationError(`${threadId} is not a thread.`);
+    if (t.archived_at) throw new ConflictError(`${nameOf(t)} is archived.`);
+    if (t.reviews_submission_id) throw new ValidationError(`${nameOf(t)} is a reviewer; its result is a review, not a submission.`);
+    this.requireOpenProject(t.project_id);
+    return t;
+  }
+
+  /** A reviewer that may still file its review: not stopped, failed or archived. */
+  private liveReviewer(id: string): boolean {
+    const r = getAgent(this.o.store.db, id);
+    return !!r && !r.archived_at && r.status !== 'cancelled' && r.status !== 'failed';
+  }
+
+  /** A line from the runtime to the project's Desk (the user acted on reviews): read at its next run, which this starts. */
+  private runtimeNoteToDesk(projectId: string, text: string): void {
+    const desk = getDeskAgent(this.o.store.db, projectId);
+    if (!desk) return;
+    this.o.store.append({ project_id: projectId, agent_id: desk.id, type: 'message.agent', payload: { from_agent_id: desk.id, from_label: REMINDER_LABEL, kind: 'reminder', text } });
+    this.wake(desk.id);
   }
 
   /** Low-level thread creation in an existing directory. `parentId` defaults to the project's Desk; `null` makes a standalone thread. */
@@ -1784,12 +2035,27 @@ export class Runtime {
     return openFrom(s, to.id).find((q) => q.to === from.id && q.id <= from.inbox_cursor);
   }
 
+  /**
+   * Desk's resume: reopens a thread whose run failed, without a review round (a failure is an error, not a verdict on
+   * its work). Refused for any other sender, recipient or status.
+   */
+  private checkResume(from: AgentRow, to: AgentRow): void {
+    if (from.role !== 'desk' || to.role !== 'thread') throw new Error('Only Desk resumes threads.');
+    if (to.status !== 'failed') {
+      throw new Error(
+        `${nameOf(to)} is ${to.status}; resume only continues a thread whose run failed.${to.status === 'done' ? ' Send "revision" if its work fell short of its brief.' : ' Send a note instead.'}`,
+      );
+    }
+  }
+
   /** Desk's revision, as before: the review-round limit, then `agent.revision`, then the message that reopens the thread. */
   private sendRevision(from: AgentRow, to: AgentRow, input: SendInput): SendResult {
     if (from.role !== 'desk' || to.role !== 'thread') throw new Error('Only Desk sends revisions.');
     const limit = getProject(this.o.store.db, to.project_id)!.settings.review_rounds;
     if (to.review_round >= limit) {
-      throw new Error(`Review round limit (${limit}) reached for ${nameOf(to)}: accept the work with noted caveats or escalate to the user.`);
+      throw new Error(
+        `Review round limit (${limit}) reached for ${nameOf(to)}: change the approach (a new thread with a simpler plan), accept it with limitations (accept_submission), or report the blocker to the user.`,
+      );
     }
     const round = to.review_round + 1;
     this.o.store.append({ project_id: to.project_id, agent_id: to.id, type: 'agent.revision', payload: { round, feedback: input.text } });
@@ -2318,6 +2584,10 @@ export class Runtime {
         const artifacts = agent.result_artifacts ?? [];
         const result = lastEvent(this.o.store.db, agent.id, 'agent.result');
         const drafts = (result?.type === 'agent.result' && result.payload.skill_drafts) || [];
+        // A reviewer's result is its review; a builder's is a submission (reviews and acceptance spec §2).
+        // Named only when it pins something (a commit or artifacts); a bare summary needs no version line.
+        const latest = agent.reviews_submission_id ? undefined : latestSubmission(this.o.store.db, agent.id);
+        const submission = latest && (latest.commit || latest.artifacts.length) ? latest : undefined;
         // Messages that raced the completion stay pending (a done thread is not reopened for them): Desk decides.
         const unread = pendingInbox(this.o.store, agent.id).map((e) => `#${e.id}`);
         send(
@@ -2326,6 +2596,7 @@ export class Runtime {
             // The thread's own words go in as one quoted line each (snippet); the runtime's text stays plain.
             `Summary: ${agent.result_summary ? snippet(agent.result_summary, 4000) : '(none)'}`,
             ...(artifacts.length ? [`Artifacts: ${artifacts.join(', ')}`] : []),
+            ...(submission ? [`${formatSubmissionLine(submission)}.`] : []),
             ...(drafts.length ? [`Skill drafts to review and install (skill_write from_dir): ${drafts.join(', ')}`] : []),
             ...(unread.length ? [`Unread messages that arrived after it finished: ${unread.join(', ')}`] : []),
           ].join('\n'),

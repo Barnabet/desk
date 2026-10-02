@@ -43,7 +43,7 @@ export type ToolContext = {
 export type SendInput = {
   from: string;
   to: string;
-  kind: Extract<AgentMessageKind, 'note' | 'question' | 'revision' | 'update' | 'blocker'>;
+  kind: Extract<AgentMessageKind, 'note' | 'question' | 'revision' | 'resume' | 'update' | 'blocker'>;
   text: string;
   toolCallId?: string;
 };
@@ -100,6 +100,25 @@ export interface RuntimeServices {
   /** The project's message fold: the agent directory, every message with its question state, the answer runs. */
   messages(projectId: string): MessagesState;
   spawnThread(parentId: string, input: { title: string; brief: string; gitSourceId?: string; model?: string; reasoningEffort?: ReasoningEffort; skills?: string[] }): Promise<string>;
+  /** Reviews and acceptance (spec 2026-10-02): an independent review of a thread's latest submission. */
+  requestReview(input: {
+    threadId: string;
+    criteria: string[];
+    focus?: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+    reviewerId?: string;
+    by: 'desk' | 'user';
+  }): Promise<{ reviewerId: string; reviewId: string; reopened: boolean }>;
+  /** Desk's or the user's decision about a thread's latest submission. */
+  acceptSubmission(input: {
+    threadId: string;
+    decision: 'accepted' | 'accepted_with_limitations' | 'changes_requested';
+    limitations?: string[];
+    waive?: Array<{ findingId: string; reason?: string }>;
+    note?: string;
+    by: 'desk' | 'user';
+  }): { submissionSeq: number; waived: number };
   /** Whether the pause of the project's automatic wakes is what keeps the agent from running now (design spec §5.4). */
   heldByPause(agentId: string): boolean;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;

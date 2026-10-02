@@ -98,6 +98,9 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
         parent_id: e.payload.parent_id,
         inbox_cursor: 0,
         review_round: 0,
+        acceptance: 'none',
+        accepted_submission_id: null,
+        reviews_submission_id: null,
         result_summary: null,
         result_artifacts: null,
         active_skills: e.payload.skills ?? [],
@@ -125,6 +128,20 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
       return touch((a) => ({ ...a, result_summary: e.payload.summary, result_artifacts: e.payload.artifacts }));
     case 'agent.revision':
       return touch((a) => ({ ...a, review_round: e.payload.round }));
+    case 'submission.created':
+      return touch((a) => ({ ...a, acceptance: 'none', accepted_submission_id: null }));
+    case 'review.requested': {
+      const p = e.payload;
+      const next = touch((a) => ({ ...a, reviews_submission_id: p.submission_id }));
+      return updateAgent(next, p.builder_id, (a) => ({ ...a, acceptance: 'in_review', updated_at: e.ts }));
+    }
+    case 'review.assessed':
+      if (e.payload.phase !== 'final') return s;
+      return updateAgent(s, e.payload.builder_id, (a) => (a.acceptance === 'in_review' ? { ...a, acceptance: 'reviewed', updated_at: e.ts } : a));
+    case 'acceptance.recorded': {
+      const p = e.payload;
+      return touch((a) => ({ ...a, acceptance: p.decision, accepted_submission_id: p.decision === 'changes_requested' ? null : p.submission_id }));
+    }
     case 'agent.model_switched':
       return touch((a) => ({ ...a, model_override: e.payload.to }));
     case 'run.started':

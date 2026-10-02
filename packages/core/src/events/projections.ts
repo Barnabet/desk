@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { resolveSettings, type AutomationDefinition, type StoredEvent } from '@desk/protocol';
 import type { Tx } from '../db/open';
 import {
@@ -11,11 +11,14 @@ import {
   automationStepRuns,
   automationVersions,
   builtinSkillSettings,
+  findings,
   memory,
   plans,
   projects,
+  reviews,
   services,
   sources,
+  submissions,
   usageTotals,
 } from '../db/schema';
 
@@ -146,6 +149,107 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
     case 'agent.revision':
       tx.update(agents).set({ review_round: ev.payload.round, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
       return;
+    case 'submission.created': {
+      const p = ev.payload;
+      const thread = requireAgentId(ev);
+      tx.update(submissions)
+        .set({ superseded_by: p.submission_id })
+        .where(and(eq(submissions.thread_id, thread), isNull(submissions.superseded_by)))
+        .run();
+      tx.insert(submissions)
+        .values({
+          id: p.submission_id,
+          project_id: ev.project_id,
+          thread_id: thread,
+          seq: p.seq,
+          commit: p.commit,
+          base: p.base,
+          artifacts: p.artifacts,
+          claims: p.claims,
+          limitations: p.limitations,
+          evidence: p.evidence,
+          created_at: ev.ts,
+        })
+        .run();
+      // A new version: whatever was decided about the previous one no longer applies to the thread.
+      tx.update(agents).set({ acceptance: 'none', accepted_submission_id: null, updated_at: ev.ts }).where(eq(agents.id, thread)).run();
+      return;
+    }
+    case 'review.requested': {
+      const p = ev.payload;
+      const reviewer = requireAgentId(ev);
+      tx.insert(reviews)
+        .values({
+          id: p.review_id,
+          project_id: ev.project_id,
+          submission_id: p.submission_id,
+          builder_id: p.builder_id,
+          reviewer_id: reviewer,
+          criteria: p.criteria,
+          focus: p.focus ?? null,
+          requested_by: p.requested_by,
+          revealed: p.revealed,
+          requirements: [],
+          not_checked: [],
+          created_at: ev.ts,
+          updated_at: ev.ts,
+        })
+        .run();
+      tx.update(agents).set({ reviews_submission_id: p.submission_id, updated_at: ev.ts }).where(eq(agents.id, reviewer)).run();
+      tx.update(agents).set({ acceptance: 'in_review', updated_at: ev.ts }).where(eq(agents.id, p.builder_id)).run();
+      return;
+    }
+    case 'review.assessed': {
+      const p = ev.payload;
+      tx.update(reviews)
+        .set({ phase: p.phase, verdict: p.verdict, requirements: p.requirements, not_checked: p.not_checked, revealed: true, updated_at: ev.ts })
+        .where(eq(reviews.id, p.review_id))
+        .run();
+      if (p.phase !== 'final') return;
+      // A thread waiting on a review moves to `reviewed` (a superseded submission already reset it to `none`).
+      tx.update(agents)
+        .set({ acceptance: 'reviewed', updated_at: ev.ts })
+        .where(and(eq(agents.id, p.builder_id), eq(agents.acceptance, 'in_review')))
+        .run();
+      return;
+    }
+    case 'finding.raised': {
+      const p = ev.payload;
+      const r = tx.select().from(reviews).where(eq(reviews.id, p.review_id)).get();
+      tx.insert(findings)
+        .values({
+          id: p.finding_id,
+          project_id: ev.project_id,
+          review_id: p.review_id,
+          submission_id: p.submission_id,
+          builder_id: r?.builder_id ?? '',
+          title: p.title,
+          detail: p.detail,
+          blocking: p.blocking,
+          reproducer: p.reproducer,
+          state: 'open',
+          created_at: ev.ts,
+        })
+        .run();
+      return;
+    }
+    case 'finding.resolved': {
+      const p = ev.payload;
+      tx.update(findings)
+        .set({ state: p.outcome, fixed_in: p.submission_id ?? null, reason: p.reason ?? null, resolved_by: p.by, resolved_at: ev.ts })
+        .where(and(eq(findings.id, p.finding_id), eq(findings.state, 'open')))
+        .run();
+      return;
+    }
+    case 'acceptance.recorded': {
+      const p = ev.payload;
+      const accepted = p.decision !== 'changes_requested';
+      tx.update(agents)
+        .set({ acceptance: p.decision, accepted_submission_id: accepted ? p.submission_id : null, updated_at: ev.ts })
+        .where(and(eq(agents.id, requireAgentId(ev)), ne(agents.role, 'desk')))
+        .run();
+      return;
+    }
     case 'agent.skills_changed':
       tx.update(agents).set({ active_skills: ev.payload.skills, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
       return;

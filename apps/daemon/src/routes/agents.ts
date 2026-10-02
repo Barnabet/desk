@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { MessageRequest, ResolveApprovalRequest } from '@desk/protocol';
-import { getAgent, listApprovals, listThreads, NotFoundError, type AgentRow, type ApprovalStatus, type Db } from '@desk/core';
+import { AcceptSubmissionRequest, MessageRequest, RequestReviewRequest, ResolveApprovalRequest, WaiveFindingRequest } from '@desk/protocol';
+import { getAgent, listApprovals, listThreads, NotFoundError, threadReview, type AgentRow, type ApprovalStatus, type Db } from '@desk/core';
 import type { AppDeps } from '../app';
 import { body, intQuery } from '../http';
 import { requireProject } from './projects';
@@ -49,6 +49,43 @@ export function agentRoutes({ runtime, store }: AppDeps): Hono {
   r.post('/threads/:id/archive', async (c) => {
     const t = requireThread(db, c.req.param('id'));
     await runtime.archiveThread(t.id);
+    return c.json({ ok: true });
+  });
+
+  // Reviews and acceptance (spec 2026-10-02-reviews-and-acceptance-design.md §7).
+  r.get('/threads/:id/review', (c) => c.json(threadReview(db, requireThread(db, c.req.param('id')))));
+
+  r.post('/threads/:id/review', async (c) => {
+    const t = requireThread(db, c.req.param('id'));
+    const req = await body(c, RequestReviewRequest);
+    const out = await runtime.requestReview({
+      threadId: t.id,
+      criteria: req.criteria,
+      ...(req.focus?.trim() ? { focus: req.focus.trim() } : {}),
+      ...(req.model ? { model: req.model } : {}),
+      ...(req.reviewer_id ? { reviewerId: req.reviewer_id } : {}),
+      by: 'user',
+    });
+    return c.json({ reviewer_id: out.reviewerId, review_id: out.reviewId, reopened: out.reopened }, 201);
+  });
+
+  r.post('/threads/:id/accept', async (c) => {
+    const t = requireThread(db, c.req.param('id'));
+    const req = await body(c, AcceptSubmissionRequest);
+    const out = runtime.acceptSubmission({
+      threadId: t.id,
+      decision: req.decision,
+      ...(req.limitations ? { limitations: req.limitations } : {}),
+      ...(req.waive ? { waive: req.waive.map((w) => ({ findingId: w.finding_id, ...(w.reason ? { reason: w.reason } : {}) })) } : {}),
+      ...(req.note ? { note: req.note } : {}),
+      by: 'user',
+    });
+    return c.json({ submission_seq: out.submissionSeq, waived: out.waived });
+  });
+
+  r.post('/findings/:id/waive', async (c) => {
+    const req = await body(c, WaiveFindingRequest);
+    runtime.waiveFinding(c.req.param('id'), req.reason, 'user');
     return c.json({ ok: true });
   });
 
