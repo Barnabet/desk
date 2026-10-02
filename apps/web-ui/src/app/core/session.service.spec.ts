@@ -121,6 +121,52 @@ describe('project session', () => {
     expect(resumed).toEqual([2]);
   });
 
+  it("on a phone, fetches a thread's history when its transcript is shown, and catches up after a reconnect", async () => {
+    const desk = ev(2, 'agent.created', { role: 'desk', model: 'm', title: 'Desk', brief: null, workspace_path: '/w', parent_id: null }, { agent: 'd' });
+    const thread = ev(3, 'agent.created', { role: 'thread', model: 'm', title: 'Checklist', brief: 'Build it', workspace_path: '/w/t', parent_id: 'd' }, { agent: 't' });
+    const said = (id: number, content: string) => ev(id, 'assistant.message', { run_id: 'r', content, tool_calls: [] }, { agent: 't' });
+    // What desk web sends a phone: the threads' transcripts left out of the backfill.
+    const backfill: StoredEvent[] = [ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' }), desk, thread, ev(5, 'message.user', { text: 'Kick off' }, { agent: 'd' })];
+    const history: StoredEvent[] = [thread, said(4, 'Reading the brief.')];
+    const asked: Array<{ id: string; after?: number }> = [];
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': ({ afterSeq }: { afterSeq: number }) => {
+        bridge.emit('desk:events', backfill.filter((e) => e.id > afterSeq));
+        return { ok: true };
+      },
+      'threads.transcript': (i: { id: string; after?: number }) => {
+        asked.push({ id: i.id, after: i.after });
+        const events = history.filter((e) => e.agent_id === i.id && e.id > (i.after ?? 0));
+        return { events, next_after: events.at(-1)?.id ?? i.after ?? 0 };
+      },
+    });
+    bridge.remote = true;
+    await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready|user|1|1|brief,assistant|'));
+    expect(asked).toEqual([{ id: 't', after: 0 }]);
+    // Said while the phone was away: the backfill after the drop leaves it out, the fetch after the rewatch brings it.
+    history.push(said(6, 'Done.'));
+    backfill.push(ev(7, 'message.user', { text: 'Thanks' }, { agent: 'd' }));
+    bridge.reconnect();
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready|user,user|1|1|brief,assistant,assistant|'));
+    expect(asked).toEqual([
+      { id: 't', after: 0 },
+      { id: 't', after: 5 },
+    ]);
+  });
+
+  it('never fetches histories off a phone, nor Desk\'s own on a phone', async () => {
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      'broker.watch': () => ({ ok: true }),
+      'threads.transcript': () => ({ events: [], next_after: 0 }),
+    });
+    await render(Probe, { inputs: { id: 'p', agent: 't' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent?.startsWith('ready|')).toBe(true));
+    expect(bridge.calls.filter((c) => c.channel === 'threads.transcript')).toEqual([]);
+  });
+
   it('watches again when a watch after a reconnect failed: on the next reconnect, and once deskd is live again', async () => {
     const events: StoredEvent[] = [ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' })];
     let deskd = true;

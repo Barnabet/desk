@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { GlobalState, IpcResult } from '@desk/bff/contract';
+import type { StoredEvent } from '@desk/protocol';
 import { dispatch, type HandlerContext } from '@desk/bff/server';
 import type { Sessions } from './auth';
 import { callerOf, type Caller } from './caller';
@@ -19,7 +20,7 @@ import {
   type WebPushChannel,
 } from './frames';
 import { phoneRefusal } from './phone-policy';
-import { slimPushForPhone } from './phone-slim';
+import { slimPushForPhone, trimBackfillForPhone } from './phone-slim';
 
 export type PushHubDeps = {
   sessions: Sessions;
@@ -35,7 +36,17 @@ export type PushHubDeps = {
   log?(message: string, err?: unknown): void;
 };
 
-type Client = { ws: WebSocket; senderId: number; secret: string; caller: Caller; permission: NotifyPermission; /** Operations not answered yet. */ busy: Set<string> };
+type Client = {
+  ws: WebSocket;
+  senderId: number;
+  secret: string;
+  caller: Caller;
+  permission: NotifyPermission;
+  /** Operations not answered yet. */
+  busy: Set<string>;
+  /** A phone's watched projects and their Desk agent: its backfill leaves out every other agent's transcript. */
+  desks: Map<string, string>;
+};
 
 /**
  * The most JSON one `desk:events` frame carries (one event more when a single event is larger). A project's history is
@@ -119,7 +130,7 @@ export class PushHub {
       const first = SessionFrame.safeParse(frame);
       const caller = first.success ? callerOf(first.data.session, this.d.sessions, this.d.devices) : null;
       if (!first.success || !caller) return ws.close(CLOSE_UNAUTHORIZED, 'unauthorized');
-      client = { ws, senderId: this.nextSender++, secret: first.data.session, caller, permission: 'default', busy: new Set() };
+      client = { ws, senderId: this.nextSender++, secret: first.data.session, caller, permission: 'default', busy: new Set(), desks: new Map() };
       this.clients.set(client.senderId, client);
       this.write(client, { channel: 'desk:global', payload: this.d.broker.snapshot() });
     });
@@ -147,6 +158,7 @@ export class PushHub {
     const refused = c.caller.kind === 'phone' ? phoneRefusal(f.op, f.input) : null;
     const running = `${f.op} #${f.id}`;
     c.busy.add(running);
+    if (!refused && c.caller.kind === 'phone' && f.op === 'broker.watch') await this.learnDesk(c, f.input);
     const result: IpcResult<unknown> = refused
       ? { ok: false, error: { code: 'not_on_phone', message: refused } }
       : pushOps.has(f.op)
@@ -154,6 +166,16 @@ export class PushHub {
       : { ok: false, error: { code: 'unknown_channel', message: 'Only broker.watch and broker.unwatch run on /push.' } };
     c.busy.delete(running);
     this.write(c, { ack: f.id, result });
+  }
+
+  /** Notes a phone's watched project's Desk agent before its backfill goes out; when unknown, the backfill stays whole. */
+  private async learnDesk(c: Client, input: unknown): Promise<void> {
+    const projectId = (input as { projectId?: unknown } | null)?.projectId;
+    if (typeof projectId !== 'string') return;
+    const r = await dispatch('projects.get', { id: projectId }, this.d.ctx(c.senderId), () => {});
+    const deskId = r.ok ? (r.value as { desk?: { id: string } | null }).desk?.id : undefined;
+    if (deskId) c.desks.set(projectId, deskId);
+    else c.desks.delete(projectId);
   }
 
   private grantedMaybeChanged(before: number): void {
@@ -170,7 +192,13 @@ export class PushHub {
 
   send(senderId: number, channel: WebPushChannel, payload: unknown): void {
     const c = this.clients.get(senderId);
-    if (c) this.write(c, { channel, payload: c.caller.kind === 'phone' ? slimPushForPhone(channel, payload) : payload });
+    if (!c) return;
+    if (c.caller.kind !== 'phone') return this.write(c, { channel, payload });
+    // desk:events is a watch's backfill (live events come one by one as desk:event, whole).
+    const first = channel === 'desk:events' && Array.isArray(payload) ? (payload[0] as { project_id?: string } | undefined) : undefined;
+    const page = first?.project_id ? trimBackfillForPhone(payload as StoredEvent[], c.desks.get(first.project_id)) : payload;
+    if (Array.isArray(page) && !page.length) return;
+    this.write(c, { channel, payload: slimPushForPhone(channel, page) });
   }
 
   broadcast(channel: WebPushChannel, payload: unknown): void {

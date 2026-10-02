@@ -58,6 +58,9 @@ export const SESSION_RELEASE_DELAY = new InjectionToken<number>('SESSION_RELEASE
 
 type Stream = { runId: string; text: string };
 
+/** Events per `threads.transcript` page when a phone fetches a thread's history. */
+const HISTORY_PAGE = 2000;
+
 /** One agent's transcript, folded from the session log plus its live stream (the desktop's useTranscript). */
 export function transcriptOf(events: readonly StoredEvent[], stream: Stream | undefined, projectId: string, agentId: string): TranscriptState {
   let t = emptyTranscript(agentId);
@@ -85,6 +88,15 @@ class ProjectSession {
   private loading: { projectId: string; afterSeq: number } | null = null;
   /** Counts rewatches, so only the latest one's outcome sets or clears `watchFailed`. */
   private watches = 0;
+  /** The project's Desk agent, once the overview is in. */
+  private deskId = '';
+  /** Called once the backfill is in. */
+  private onSynced: Array<() => void> = [];
+  /**
+   * On a phone, the threads whose history this session fetched. desk web leaves the threads' transcripts out of a phone's
+   * backfill (phone-slim.ts), so a thread's history is fetched when something first shows its transcript.
+   */
+  private readonly fetched = new Set<string>();
 
   constructor(
     readonly projectId: string,
@@ -120,9 +132,12 @@ class ProjectSession {
   rewatch(): void {
     if (!this.synced) return;
     const n = ++this.watches;
-    this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: this.cursor }).then(
+    const from = this.cursor;
+    this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: from }).then(
       () => {
         if (n === this.watches) this.watchFailed = false;
+        // A phone's backfill after the drop left out the threads' transcripts too: the fetched ones catch up from there.
+        for (const agentId of this.fetched) void this.fetchHistory(agentId, from).catch(() => {});
       },
       () => {
         if (n === this.watches) this.watchFailed = true;
@@ -136,6 +151,11 @@ class ProjectSession {
   }
 
   transcript(agentId: string): Signal<TranscriptState> {
+    if (this.bridge.remote && !this.fetched.has(agentId)) {
+      this.fetched.add(agentId);
+      // A failed fetch is tried again after the next reconnect (rewatch), like the others.
+      void this.fetchHistory(agentId, 0).catch(() => {});
+    }
     let t = this.transcripts.get(agentId);
     if (!t) {
       const events = computed(() => this.state().events);
@@ -146,11 +166,40 @@ class ProjectSession {
     return t;
   }
 
+  /**
+   * Fetches an agent's history after `after`, once the backfill is in (phones). Not after its last event held: the
+   * backfill kept its status changes, whose ids may follow the transcript events it left out.
+   */
+  private async fetchHistory(agentId: string, after: number): Promise<void> {
+    if (!this.synced) await new Promise<void>((resolve) => this.onSynced.push(resolve));
+    if (agentId === this.deskId) return;
+    for (;;) {
+      const page = await this.bridge.call('threads.transcript', { id: agentId, after, limit: HISTORY_PAGE });
+      this.merge(page.events);
+      if (page.events.length < HISTORY_PAGE) return;
+      after = page.next_after;
+    }
+  }
+
+  /**
+   * Adds fetched events to the log, in id order. Only those up to the cursor: later ones come live (desk:event is never
+   * trimmed), and the live fold relies on the log ending at the last event it applied.
+   */
+  private merge(events: StoredEvent[]): void {
+    const cursor = this.cursor;
+    this.store.set((s) => {
+      const have = new Set(s.events.map((e) => e.id));
+      const add = events.filter((e) => e.id <= cursor && !have.has(e.id));
+      return add.length ? { ...s, events: s.events.concat(add).sort((a, b) => a.id - b.id) } : s;
+    });
+  }
+
   private async load(): Promise<void> {
     this.started = true;
     try {
       const overview = await this.bridge.call('projects.get', { id: this.projectId });
       const deskId = overview.desk?.id ?? '';
+      this.deskId = deskId;
       this.base = { project: projectFromOverview(overview), chat: emptyChat(deskId), timeline: emptyTimeline(deskId), messages: emptyMessages() };
       // The bridge sends this watch again if /push drops before its answer, as `loading` is then: from the last event
       // received (enqueueMany moves it on), so a long history resumes where the socket dropped rather than from zero.
@@ -162,6 +211,7 @@ class ProjectSession {
       const base = this.base;
       this.synced = true;
       this.store.set((s) => this.apply({ ...s, ...base, status: 'ready', error: null }));
+      for (const resolve of this.onSynced.splice(0)) resolve();
     } catch (err) {
       this.loading = null;
       this.started = false;

@@ -52,6 +52,19 @@ export function slimForPhone(e: StoredEvent): StoredEvent {
   }
 }
 
+/** What only an agent's transcript shows: the bulk of a project's history, left out of a phone's backfill for threads. */
+const TRANSCRIPT_ONLY = new Set<string>(['assistant.message', 'tool.call', 'tool.result', 'usage', 'context.compacted']);
+
+/**
+ * A backfill page as a paired phone receives it: without the threads' transcripts (everything but Desk's own), which the
+ * phone fetches with `threads.transcript` when it opens a thread. Desk's conversation, the threads' states, questions,
+ * reports and approvals all stay. `deskId` unknown (undefined) leaves the page whole.
+ */
+export function trimBackfillForPhone(events: StoredEvent[], deskId: string | undefined): StoredEvent[] {
+  if (deskId === undefined) return events;
+  return events.filter((e) => !(e.agent_id && e.agent_id !== deskId && TRANSCRIPT_ONLY.has(e.type)));
+}
+
 /** A push payload as a paired phone receives it: `desk:events` batches and `desk:event`s slimmed, others as they are. */
 export function slimPushForPhone(channel: string, payload: unknown): unknown {
   if (channel === 'desk:events' && Array.isArray(payload)) return (payload as StoredEvent[]).map(slimForPhone);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredEvent } from '@desk/protocol';
-import { PHONE_TEXT_LIMIT, PHONE_TOOL_LIMIT, slimForPhone, slimPushForPhone, slimResultForPhone } from './phone-slim';
+import { PHONE_TEXT_LIMIT, PHONE_TOOL_LIMIT, slimForPhone, slimPushForPhone, slimResultForPhone, trimBackfillForPhone } from './phone-slim';
 
 const long = 'x'.repeat(PHONE_TEXT_LIMIT + 500);
 const over = PHONE_TEXT_LIMIT + 500 - PHONE_TOOL_LIMIT;
@@ -51,5 +51,26 @@ describe('slimForPhone', () => {
     expect(page.events[0]!.payload.content.length).toBeLessThan(long.length);
     const other = { events: [result] };
     expect(slimResultForPhone('projects.list', other)).toBe(other);
+  });
+});
+
+describe('trimBackfillForPhone', () => {
+  const e = (id: number, agent: string | null, type: string) => ({ ...base, id, agent_id: agent, type, payload: {} }) as unknown as StoredEvent;
+  it("drops only the threads' transcript events, and nothing while Desk's agent is unknown", () => {
+    const page = [
+      e(1, null, 'project.created'),
+      e(2, 'D', 'assistant.message'),
+      e(3, 'D', 'usage'),
+      e(4, 'T', 'agent.created'),
+      e(5, 'T', 'assistant.message'),
+      e(6, 'T', 'tool.call'),
+      e(7, 'T', 'tool.result'),
+      e(8, 'T', 'usage'),
+      e(9, 'T', 'context.compacted'),
+      e(10, 'T', 'question.asked'),
+      e(11, 'T', 'approval.requested'),
+    ];
+    expect(trimBackfillForPhone(page, 'D').map((x) => x.id)).toEqual([1, 2, 3, 4, 10, 11]);
+    expect(trimBackfillForPhone(page, undefined)).toBe(page);
   });
 });
