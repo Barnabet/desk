@@ -47,6 +47,16 @@ describe('serveUi', () => {
     expect(new Uint8Array(await font.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
   });
 
+  it('caches the files named by their content for good, and nothing else or under --dev', async () => {
+    writeFileSync(join(uiDir, 'main-2MUEY3J4.js'), 'console.log(2);');
+    writeFileSync(join(uiDir, 'media', 'geist-latin-wght-normal-T72VVCUW.woff2'), Buffer.from([4]));
+    for (const path of ['/main-2MUEY3J4.js', '/media/geist-latin-wght-normal-T72VVCUW.woff2'])
+      expect((await app().request(path)).headers.get('cache-control'), path).toBe('public, max-age=31536000, immutable');
+    expect((await app(true).request('/main-2MUEY3J4.js')).headers.get('cache-control')).toBeNull();
+    expect((await app().request('/media/geist.woff2')).headers.get('cache-control')).toBeNull();
+    expect((await app().request('/')).headers.get('cache-control')).toBe('no-store');
+  });
+
   it('never serves a file outside the build, and 404s what is not there', async () => {
     for (const path of ['/..%2fsecret.txt', '/%2e%2e/secret.txt', '/media/..%2f..%2fsecret.txt', '/missing.js', '/media', '/%E0%A4%A']) {
       expect((await app().request(path)).status, path).toBe(404);

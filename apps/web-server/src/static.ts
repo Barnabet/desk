@@ -45,7 +45,13 @@ const notBuilt = (uiDir: string) =>
     headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
   });
 
-/** Serves the Angular build. It holds no secrets, so it needs no session; `/` is index.html and is never cached. */
+/** An Angular build file named by its content (`main-2MUEY3J4.js`, `media/geist-latin-wght-normal-T72VVCUW.woff2`). */
+const HASHED = /-[A-Z0-9]{8}\.[a-z0-9]+$/;
+
+/**
+ * Serves the Angular build. It holds no secrets, so it needs no session; `/` is index.html and is never cached. Files
+ * named by their content are cached for good (outside --dev), so a phone downloads the app once per build, not per open.
+ */
 export function serveUi(uiDir: string, o: { dev: boolean }): (c: Context) => Promise<Response> {
   const root = resolve(uiDir);
   return async (c) => {
@@ -70,6 +76,9 @@ export function serveUi(uiDir: string, o: { dev: boolean }): (c: Context) => Pro
       const page = o.dev ? (html.includes('</body>') ? html.replace('</body>', `${DEV_RELOAD_TAG}</body>`) : html + DEV_RELOAD_TAG) : html;
       return new Response(page, { headers: { 'content-type': MIME['.html']!, 'cache-control': 'no-store' } });
     }
-    return new Response(new Uint8Array(body), { headers: { 'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream' } });
+    const type = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream';
+    const headers: Record<string, string> = { 'content-type': type };
+    if (!o.dev && HASHED.test(rel)) headers['cache-control'] = 'public, max-age=31536000, immutable';
+    return new Response(new Uint8Array(body), { headers });
   };
 }
