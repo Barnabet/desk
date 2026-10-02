@@ -1,3 +1,4 @@
+import type { ThreadReview } from '@desk/client';
 import { imageLabel, type AutomationSummary, type RunListEntry, type StepRunInfo, type StoredEvent, type StreamServerMessage } from '@desk/protocol';
 
 const clip = (s: string, n: number) => {
@@ -195,4 +196,45 @@ export function runLine(e: RunListEntry): string {
 export function stepLine(title: string, st: StepRunInfo): string {
   const text = st.error ?? st.summary;
   return `  • ${title} → ${st.status}${st.attempt > 1 ? ` (attempt ${st.attempt})` : ''}${st.route ? ` · route ${st.route}` : ''}${text ? `: ${clip(text, 200)}` : ''}`;
+}
+
+/** A thread's acceptance in a few words, for `desk threads`: `accepted`, `in review`, `reviewer`; empty for none. */
+export function acceptanceLabel(t: { acceptance?: string; reviews_submission_id?: string | null }): string {
+  if (t.reviews_submission_id) return 'reviewer';
+  return !t.acceptance || t.acceptance === 'none' ? '' : t.acceptance.replace(/_/g, ' ');
+}
+
+/** `desk review <thread>`: acceptance, the current submission, open findings with reproducers, reviews, older submissions. */
+export function reviewText(r: ThreadReview, name: (threadId: string) => string): string {
+  if (r.reviewing) {
+    const seq = r.reviewing.submission_seq;
+    return `Reviewer of ${name(r.reviewing.builder_id)}${seq ? ` (submission ${seq})` : ''}: ${r.reviewing.phase === 'final' ? `filed, ${(r.reviewing.verdict ?? '').replace(/_/g, ' ')}` : 'in progress'}. See: desk review ${r.reviewing.builder_id}`;
+  }
+  const latest = r.submissions.at(-1);
+  if (!latest) return 'Nothing submitted yet.';
+  const seqOf = (id: string | null) => r.submissions.find((s) => s.id === id)?.seq;
+  const sub = (s: ThreadReview['submissions'][number]) =>
+    [
+      `Submission ${s.seq}${s.commit ? ` commit ${s.commit.slice(0, 10)}` : ''}${s.id === r.accepted_submission_id ? ' [accepted]' : s.superseded_by ? ' [superseded]' : ''}`,
+      ...s.claims.map((c) => `  claims: ${c}`),
+      ...s.limitations.map((c) => `  limitation: ${c}`),
+      ...(s.evidence ? [`  checked: ${clip(s.evidence, 200)}`] : []),
+      ...s.artifacts.map((a) => `  file: ${a.path} ${a.sha256.slice(0, 12)}`),
+    ].join('\n');
+  const open = r.findings.filter((f) => f.state === 'open');
+  const resolved = r.findings.filter((f) => f.state !== 'open');
+  return [
+    `Acceptance: ${r.acceptance.replace(/_/g, ' ')}`,
+    sub(latest),
+    open.length ? 'Open findings:' : 'Open findings: none',
+    ...open.map((f) => `- ${f.id}${f.blocking ? ' (blocking)' : ''} ${f.title}${f.reproducer ? `\n    reproduce: ${f.reproducer}` : ''}`),
+    ...(r.reviews.length ? ['Reviews:'] : []),
+    ...[...r.reviews].reverse().map(
+      (v) =>
+        `- ${name(v.reviewer_id)} on submission ${seqOf(v.submission_id) ?? '?'}: ${v.phase === 'final' ? (v.verdict ?? '').replace(/_/g, ' ') : 'in progress'}` +
+        v.requirements.map((q) => `\n    [${q.met}] ${q.criterion}${q.note ? `: ${q.note}` : ''}`).join(''),
+    ),
+    ...(resolved.length ? ['Resolved findings:', ...resolved.map((f) => `- ${f.id} ${f.title} [${f.state}${f.reason ? `: ${f.reason}` : ''}]`)] : []),
+    ...r.submissions.slice(0, -1).reverse().map(sub),
+  ].join('\n');
 }

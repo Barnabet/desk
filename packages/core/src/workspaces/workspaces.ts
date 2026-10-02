@@ -43,18 +43,18 @@ export function threadBranchName(title: string, threadId: string): string {
 
 export type WorkspaceGit = { branch: string; base: string; common_dir: string };
 
-/** Creates a thread workspace: a git worktree on a new branch at the source's HEAD, or a plain directory. */
-export async function createWorkspace(opts: { path: string; git?: { sourcePath: string; branch: string } }): Promise<{ git: WorkspaceGit | null }> {
+/** A thread workspace: a scratch directory, or a worktree on a new branch from the source's HEAD (or from commit `at`). */
+export async function createWorkspace(opts: { path: string; git?: { sourcePath: string; branch: string; at?: string } }): Promise<{ git: WorkspaceGit | null }> {
   if (!opts.git) {
     await mkdir(opts.path, { recursive: true });
     return { git: null };
   }
-  const { sourcePath, branch } = opts.git;
+  const { sourcePath, branch, at } = opts.git;
   let base: string;
   try {
-    base = await git(sourcePath, ['rev-parse', 'HEAD']);
+    base = await git(sourcePath, ['rev-parse', '--verify', `${at ?? 'HEAD'}^{commit}`]);
   } catch {
-    throw new Error(`Source repository ${sourcePath} has no commits to branch from`);
+    throw new Error(at ? `Commit ${at} is not in ${sourcePath}` : `Source repository ${sourcePath} has no commits to branch from`);
   }
   await mkdir(dirname(opts.path), { recursive: true });
   await git(sourcePath, ['worktree', 'add', '-b', branch, opts.path, base]);

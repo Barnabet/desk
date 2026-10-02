@@ -9,6 +9,7 @@ import { globalStore } from '../state/global';
 import { resetSessions, setReleaseDelay, startSessionRouting } from '../state/session';
 import { clearAttachmentCache } from '../components/ImageThumbs';
 import { installBridge } from '../test/bridge';
+import { reviewFixture } from '@desk/ui-core/testing';
 import { ThreadsScreen } from './ThreadsScreen';
 
 afterEach(cleanup);
@@ -32,6 +33,9 @@ const agent = (id: string, extra: Record<string, unknown> = {}) => ({
   parent_id: id === 'd' ? null : 'd',
   inbox_cursor: 0,
   review_round: 0,
+  acceptance: 'none',
+  accepted_submission_id: null,
+  reviews_submission_id: null,
   result_summary: null,
   result_artifacts: null,
   active_skills: [],
@@ -171,6 +175,56 @@ describe('ThreadsScreen', () => {
     expect(screen.getByRole('table').textContent).toContain('1,200');
     fireEvent.click(screen.getByRole('button', { name: 'Turn into a skill' }));
     await waitFor(() => expect(bridge.calls.filter((c) => c.channel === 'projects.send')).toHaveLength(2));
+  });
+
+  it('shows the review on its tab and the chip, waives a finding, then accepts with limitations and asks for a re-review', async () => {
+    const reviewed: StoredEvent[] = [
+      ev(8, 'submission.created', { submission_id: 's2', seq: 2, commit: 'abc', base: 'b', artifacts: [], claims: [], limitations: [], evidence: '' }, t),
+      ev(9, 'review.requested', { review_id: 'rv', submission_id: 's2', builder_id: 't', criteria: ['x'], requested_by: 'desk', revealed: false }, { agent: 'r' }),
+    ];
+    let review = reviewFixture();
+    const bridge = setup([...base, ...finished, ...reviewed], {
+      'threads.review': () => review,
+      'threads.waiveFinding': () => {
+        review = { ...review, findings: review.findings.map((x) => ({ ...x, state: 'waived' as const, resolved_by: 'user' as const })) };
+        return { ok: true };
+      },
+      'threads.accept': () => ({ submission_seq: 2, waived: 0 }),
+      'threads.requestReview': () => ({ reviewer_id: 'r', review_id: 'rv2', reopened: true }),
+    });
+    await screen.findByRole('heading', { name: 'Welcome emails', level: 1 });
+    expect(screen.getByText('In review')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
+    const panel = screen.getByRole('tabpanel');
+    expect(await within(panel).findByText('March total is off by one cent')).toBeTruthy();
+    expect(within(panel).getByLabelText('Reproducer').textContent).toBe('python compare.py --month 2026-03');
+    expect(within(panel).getByText('Issues found')).toBeTruthy();
+    expect(within(panel).getByText('Waived by Desk: Cosmetic')).toBeTruthy();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Accept with limitations' }));
+    expect(within(panel).getByText('Waive the 1 open blocking finding below first, or request changes.')).toBeTruthy();
+    expect((within(panel).getAllByRole('button', { name: 'Accept with limitations' }).at(-1) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Waive' }));
+    fireEvent.change(within(panel).getByLabelText('Why waive it'), { target: { value: 'Known rounding' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Waive finding' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'threads.waiveFinding')?.input).toEqual({ findingId: 'f1', req: { reason: 'Known rounding' } }));
+
+    expect(await within(panel).findByText('Open findings (0)')).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Accept with limitations' }));
+    await waitFor(() => expect(within(panel).queryByText(/Waive the 1 open blocking/)).toBeNull());
+    fireEvent.change(within(panel).getByLabelText('Limitations, one per line'), { target: { value: '- Only EUR checked\n\nNo March' } });
+    fireEvent.click(within(panel).getAllByRole('button', { name: 'Accept with limitations' }).at(-1)!);
+    await waitFor(() =>
+      expect(bridge.calls.find((c) => c.channel === 'threads.accept')?.input).toEqual({ id: 't', req: { decision: 'accepted_with_limitations', limitations: ['Only EUR checked', 'No March'] } }),
+    );
+
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Request a re-review' }));
+    expect((within(panel).getByLabelText('Acceptance criteria, one per line') as HTMLTextAreaElement).value).toBe('Totals match the ledger');
+    fireEvent.click(within(panel).getAllByRole('button', { name: 'Request a review' }).at(-1)!);
+    await waitFor(() =>
+      expect(bridge.calls.find((c) => c.channel === 'threads.requestReview')?.input).toEqual({ id: 't', req: { criteria: ['Totals match the ledger'], reviewer_id: 'r' } }),
+    );
   });
 
   it('explains scratch threads on Diff and browses Files', async () => {

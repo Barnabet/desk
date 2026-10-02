@@ -652,3 +652,78 @@
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* Review tab (reviews and acceptance spec §7). */
+.review-tab h3 {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.review-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.review-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--card);
+}
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+.review-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.review-item-head strong {
+  flex: 1;
+  min-width: 0;
+}
+.review-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review-repro {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--sunken);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.review-req {
+  margin: 0;
+  padding-left: 18px;
+}
+.review-req .met-yes {
+  color: var(--ok);
+}
+.review-req .met-no {
+  color: var(--accent);
+}
+.thread-acceptance {
+  align-self: flex-start;
+}

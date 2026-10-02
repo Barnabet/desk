@@ -48,6 +48,8 @@ const settingsFields = {
   check_in: z.enum(['minimal', 'normal', 'detailed']),
   autonomy: z.enum(['dispatch-freely', 'ask-before-dispatch']),
   review_rounds: z.number().int().min(0).max(10),
+  /** Reviewer threads' model; null picks a model of another family than the builder's when one is configured. */
+  review_model: z.string().min(1).nullable(),
   policy: z.array(PolicyRule),
 };
 
@@ -61,6 +63,7 @@ export const ProjectSettings = z.object({
   check_in: settingsFields.check_in.default('normal'),
   autonomy: settingsFields.autonomy.default('dispatch-freely'),
   review_rounds: settingsFields.review_rounds.default(2),
+  review_model: settingsFields.review_model.default(null),
   policy: settingsFields.policy.default(() => DEFAULT_POLICY.map((r) => ({ ...r }))),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;

@@ -65,6 +65,7 @@ Pass `next_after` as the next `after` to continue.
 | `check_in` | `normal` | `minimal`, `normal` or `detailed` |
 | `autonomy` | `dispatch-freely` | Or `ask-before-dispatch` |
 | `review_rounds` | 2 | Maximum send-backs per thread |
+| `review_model` | `null` | The reviewer threads' model. `null`: Desk's model when its family differs from the builder's, else the first configured model of another family, else `thread_model` |
 | `policy` | see README | Ordered `PolicyRule[]`; the first match wins |
 
 ## Services
@@ -207,6 +208,10 @@ Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never ru
 | GET | `/v1/attention` | `?project_id=`. `{ items: AttentionItem[], seq }`, oldest first |
 | POST | `/v1/attention/:id/dismiss` | Only `needs_you`, `stalled`, `failed` and `paused` items (409 for `approval`, `question` and `automation_ask`, 404 if not currently listed). Appends `attention.dismissed`. Dismissing `paused` is Resume: the project's automatic wakes resume and every agent decides again |
 | GET | `/v1/threads/:id/diff` | `{ base, branch, files: [{ path, status: added\|modified\|deleted, additions, deletions }], patch }` against the thread's base, including uncommitted and untracked files. 409 for non-git or archived threads |
+| GET | `/v1/threads/:id/review` | `{ acceptance, accepted_submission_id, submissions, reviews, findings, reviewing }`: the thread's submissions (oldest first: `seq`, `commit`, `base`, `artifacts[{ path, sha256 }]`, `claims`, `limitations`, `evidence`, `superseded_by`), the reviews of them (`reviewer_id`, `criteria`, `focus`, `requested_by`, `revealed`, `phase: initial\|final`, `verdict`, `requirements[{ criterion, met: yes\|no\|unknown, note }]`, `not_checked`), findings about its work (`title`, `detail`, `blocking`, `reproducer`, `state: open\|fixed\|waived\|withdrawn`, `fixed_in`, `reason`, `resolved_by`), and for a reviewer thread the review it does (with `submission_seq`) |
+| POST | `/v1/threads/:id/review` | `{ criteria: string[], focus?, model?, reviewer_id? }`: has the latest submission reviewed by a new reviewer thread on its own branch at the submitted commit, or with `reviewer_id` by the same reviewer again. 409 unless the thread is `done`, or while a review of that submission runs. `201 { reviewer_id, review_id, reopened }` |
+| POST | `/v1/threads/:id/accept` | `{ decision: accepted\|accepted_with_limitations\|changes_requested, limitations?, waive?: [{ finding_id, reason? }], note? }`, about the latest submission. Limitations are required with `accepted_with_limitations`; open blocking findings must be waived first (409). Changes go to the thread as the user's message. Desk is told. `{ submission_seq, waived }` |
+| POST | `/v1/findings/:id/waive` | `{ reason? }`: waives one open finding (409 once resolved). Desk is told |
 | GET | `/v1/threads/:id/files` | `?path=` a directory in the workspace. `[{ name, path, type: file\|dir, size }]`, directories first, `.git` hidden |
 | GET | `/v1/threads/:id/files/raw/<path>` | Raw file. 403 if the path (or a symlink) leads outside the workspace, 404 if missing, 409 once archived |
 | GET | `/v1/skills/:name/versions/:v` | A skill as it was at version `v` (same shape as the skill detail). Also under `/v1/projects/:id/skills/…`, resolving project then global |
@@ -284,6 +289,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 |---|---|
 | Projects | `project.created`, `project.updated`, `project.archived`, `source.added`, `source.updated`, `source.removed` |
 | Agents | `agent.created`, `agent.status_changed`, `agent.result`, `agent.revision`, `agent.model_switched`, `agent.skills_changed`, `agent.archived` |
+| Reviews | `submission.created` (a thread's `complete`: its HEAD commit, refused while uncommitted changes remain, and each library file's SHA-256), `review.requested` (on the reviewer's stream), `review.assessed` (`initial`, then `final` with the verdict), `finding.raised`, `finding.resolved` (`fixed`, `waived` or `withdrawn`), `acceptance.recorded` |
 | Coordination | `plan.updated`, `report`, `question.asked`, `whats_up.updated` (Desk's What's up, written with `update_whats_up`; when Desk ends a turn after changing things without rewriting it, the runtime sends Desk a `message.agent` of kind `reminder`, which clients do not show) |
 | Messages and runs | `message.user` (`question: true` for the user's Ask), `message.agent` (see Messages below), `inbox.drained`, `run.started` (`answering` on an answer run), `run.finished`, `assistant.message`, `tool.call`, `tool.result` (with `images` for `view_image`, see Attachments), `images.withheld`, `context.compacted`, `usage` |
 | Approvals | `approval.requested`, `approval.resolved` |
@@ -294,7 +300,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 
 **Agent statuses:** `idle`, `queued`, `running`, `waiting` (on a reply, an approval or threads), `done`, `failed`, `cancelled`.
 
-**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `resume` (Desk continuing a thread whose run failed, without a review round), `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`), `reminder` (for Desk alone) and `automation`: messages from automation runs to Desk (Tell Desk steps, run reports, waiting notices), labelled `automation "<title>"`. Optional fields:
+**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `resume` (Desk continuing a thread whose run failed, without a review round), `review` (Desk asking a reviewer thread to look at a new submission again), `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`), `reminder` (for Desk alone) and `automation`: messages from automation runs to Desk (Tell Desk steps, run reports, waiting notices), labelled `automation "<title>"`. Optional fields:
 
 - `tracked: true`: a question whose state the runtime follows: open, then answered, closed (the runtime wrote the answer) or withdrawn (the asker finished).
 - `reply_to`: on an `answer`, the id of the question it answers. A note or update to an agent whose question the sender has seen is stored as its answer.

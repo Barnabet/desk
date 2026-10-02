@@ -60,6 +60,10 @@ export type ChannelOutputs = {
   'threads.stop': Out<Client['threads']['stop']>;
   'threads.archive': Out<Client['threads']['archive']>;
   'threads.diff': Out<Client['threads']['diff']>;
+  'threads.review': Out<Client['threads']['review']>;
+  'threads.requestReview': Out<Client['threads']['requestReview']>;
+  'threads.accept': Out<Client['threads']['accept']>;
+  'threads.waiveFinding': Out<Client['threads']['waiveFinding']>;
   'services.logs': Out<Client['services']['logs']>;
   'services.start': Out<Client['services']['start']>;
   'services.stop': Out<Client['services']['stop']>;

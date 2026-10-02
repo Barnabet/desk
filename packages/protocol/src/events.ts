@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  Acceptance,
   AgentMessageKind,
   AgentRole,
   ArtifactKind,
@@ -8,6 +9,8 @@ import {
   MemoryKind,
   PlanItem,
   ReasoningEffort,
+  RequirementCheck,
+  ReviewVerdict,
   RunFinishReason,
   ServiceActor,
   ServiceName,
@@ -89,6 +92,80 @@ export const EventBody = z.discriminatedUnion('type', [
     z.object({ from: z.string(), to: z.string(), reason: z.string(), scope: z.literal('run') }),
   ),
   event('agent.revision', z.object({ round: z.number().int().min(1), feedback: z.string() })),
+  /** A thread's `complete`, pinned: the commit and the library artifacts it submits (reviews and acceptance spec §1.1). */
+  event(
+    'submission.created',
+    z.object({
+      submission_id: z.string(),
+      seq: z.number().int().min(1),
+      /** HEAD of its worktree; null for a thread without git. */
+      commit: z.string().nullable(),
+      base: z.string().nullable(),
+      artifacts: z.array(z.object({ path: z.string(), sha256: z.string() })),
+      claims: z.array(z.string()),
+      limitations: z.array(z.string()),
+      evidence: z.string(),
+    }),
+  ),
+  /** On the reviewer's stream: what it reviews and against which criteria. `revealed`: it already has the builder's report (a re-review). */
+  event(
+    'review.requested',
+    z.object({
+      review_id: z.string(),
+      submission_id: z.string(),
+      builder_id: z.string(),
+      criteria: z.array(z.string().min(1)).min(1),
+      focus: z.string().optional(),
+      requested_by: z.enum(['desk', 'user']),
+      revealed: z.boolean(),
+    }),
+  ),
+  event(
+    'review.assessed',
+    z.object({
+      review_id: z.string(),
+      submission_id: z.string(),
+      builder_id: z.string(),
+      phase: z.enum(['initial', 'final']),
+      verdict: ReviewVerdict,
+      requirements: z.array(RequirementCheck),
+      not_checked: z.array(z.string()),
+    }),
+  ),
+  event(
+    'finding.raised',
+    z.object({
+      finding_id: z.string(),
+      review_id: z.string(),
+      submission_id: z.string(),
+      title: z.string().min(1),
+      detail: z.string(),
+      blocking: z.boolean(),
+      reproducer: z.string().min(1),
+    }),
+  ),
+  event(
+    'finding.resolved',
+    z.object({
+      finding_id: z.string(),
+      outcome: z.enum(['fixed', 'waived', 'withdrawn']),
+      /** `fixed`: the submission that fixes it. */
+      submission_id: z.string().optional(),
+      reason: z.string().optional(),
+      by: z.enum(['desk', 'user', 'reviewer']),
+    }),
+  ),
+  /** On the builder's stream: Desk's or the user's decision about one submission. */
+  event(
+    'acceptance.recorded',
+    z.object({
+      submission_id: z.string(),
+      decision: Acceptance.extract(['accepted', 'accepted_with_limitations', 'changes_requested']),
+      limitations: z.array(z.string()),
+      by: z.enum(['desk', 'user']),
+      note: z.string().optional(),
+    }),
+  ),
   event('agent.archived', z.object({})),
   event('agent.skills_changed', z.object({ skills: z.array(SkillName) })),
   event(

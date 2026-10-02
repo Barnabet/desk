@@ -103,6 +103,29 @@ describe('thread inspection', () => {
   });
 });
 
+describe('reviews and acceptance', () => {
+  it("serves a thread's review and records the user's decision", async () => {
+    const { runtime, api, projectId } = await setup();
+    const t = runtime.createThread(projectId, { title: 'Comparator', brief: 'b', workspacePath: join(h.dir, 'cmp') });
+    h.store.append([
+      { project_id: projectId, agent_id: t, type: 'agent.result', payload: { summary: 'Compared', artifacts: [] } },
+      { project_id: projectId, agent_id: t, type: 'submission.created', payload: { submission_id: 's1', seq: 1, commit: null, base: null, artifacts: [], claims: ['Totals match'], limitations: [], evidence: 'ran it' } },
+      { project_id: projectId, agent_id: t, type: 'agent.status_changed', payload: { status: 'done' } },
+    ]);
+    const before = await api('GET', `/threads/${t}/review`);
+    expect(before.status).toBe(200);
+    expect(before.body).toMatchObject({ acceptance: 'none', accepted_submission_id: null, submissions: [{ id: 's1', seq: 1, claims: ['Totals match'] }], reviews: [], findings: [], reviewing: null });
+
+    expect((await api('POST', `/threads/${t}/review`, { criteria: [] })).status).toBe(400);
+    expect((await api('POST', `/threads/${t}/accept`, { decision: 'accepted_with_limitations' })).status).toBe(400);
+    const accepted = await api('POST', `/threads/${t}/accept`, { decision: 'accepted', note: 'Looks right' });
+    expect(accepted).toEqual({ status: 200, body: { submission_seq: 1, waived: 0 } });
+    expect((await api('GET', `/threads/${t}/review`)).body).toMatchObject({ acceptance: 'accepted', accepted_submission_id: 's1' });
+    expect((await api('POST', '/findings/nope/waive', {})).status).toBe(404);
+    expect((await api('GET', '/threads/nope/review')).status).toBe(404);
+  });
+});
+
 describe('raw files over HTTP', () => {
   it('serves one file after another, each with its own length (node-server writes Content-Length into the headers it is given)', async () => {
     const { app, api, runtime, projectId } = await setup();

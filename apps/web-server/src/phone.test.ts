@@ -160,7 +160,7 @@ describe('what a paired phone may do', () => {
     const listed = await rpc('projects.list', secret);
     expect(listed.status).toBe(200);
     expect(await listed.json()).toEqual({ ok: true, value: [{ id: 'P1' }] });
-    for (const op of ['config.patch', 'config.saveEndpoint', 'projects.update', 'projects.addSource', 'automations.setGrants', 'daemon.stop', 'skills.import', 'fs.listDirs', 'app.updateSettings']) {
+    for (const op of ['config.patch', 'config.saveEndpoint', 'projects.update', 'projects.addSource', 'automations.setGrants', 'daemon.stop', 'skills.import', 'fs.listDirs', 'app.updateSettings', 'threads.requestReview', 'threads.accept', 'threads.waiveFinding']) {
       const res = await rpc(op, secret);
       expect(res.status, op).toBe(403);
       expect(((await res.json()) as { error: { code: string } }).error.code, op).toBe('not_on_phone');

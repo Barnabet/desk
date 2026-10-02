@@ -1,7 +1,39 @@
-import type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, ServiceRow, SkillDetail, SkillSummary, SourceRow, UsageRow } from '@desk/core';
+import type {
+  AgentRow,
+  ApprovalRow,
+  ArtifactRow,
+  FindingRow,
+  MemoryRow,
+  PlanRow,
+  ProjectRow,
+  ReviewRow,
+  ServiceRow,
+  SkillDetail,
+  SkillSummary,
+  SourceRow,
+  SubmissionRow,
+  ThreadReview,
+  UsageRow,
+} from '@desk/core';
 import type { AutomationDefinition, AutomationDetail, StoredEvent, ValidationIssue } from '@desk/protocol';
 
-export type { AgentRow, ApprovalRow, ArtifactRow, MemoryRow, PlanRow, ProjectRow, ServiceRow, SkillDetail, SkillSummary, SourceRow, UsageRow };
+export type {
+  AgentRow,
+  ApprovalRow,
+  ArtifactRow,
+  FindingRow,
+  MemoryRow,
+  PlanRow,
+  ProjectRow,
+  ReviewRow,
+  ServiceRow,
+  SkillDetail,
+  SkillSummary,
+  SourceRow,
+  SubmissionRow,
+  ThreadReview,
+  UsageRow,
+};
 
 /** Contents of `<dataDir>/daemon.json`. */
 export type DaemonInfo = { port: number; token: string; pid: number; version: string; started_at?: string };

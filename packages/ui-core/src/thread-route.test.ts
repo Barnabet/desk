@@ -225,6 +225,7 @@ describe('messages and answer runs on the route', () => {
       // A sender the fold does not know is named from its label.
       agentMsg(30, 't', 'x', 'update', 'Legacy.', { from_label: 'thread "Old stream" (x)' }),
       agentMsg(31, 't', 'd', 'resume', 'The connection dropped; carry on.'),
+      agentMsg(32, 't', 'd', 'review', 'Please re-review submission 2.'),
     ];
     const m = foldMessages(events);
     const stops = stopsOf(narrate(events.reduce(reduceTranscript, emptyTranscript('t')).entries));
@@ -237,8 +238,9 @@ describe('messages and answer runs on the route', () => {
       ['steer', `You asked · ${clock(ts(29))}`, false],
       ['work', 'Messages', false],
       ['incoming', 'Desk resumed it', false],
+      ['incoming', 'Desk asked for a re-review', false],
     ]);
-    expect(stops.map((x) => x.cards.length)).toEqual([0, 0, 0, 4, 0, 0, 1, 0]);
+    expect(stops.map((x) => x.cards.length)).toEqual([0, 0, 0, 4, 0, 0, 1, 0, 0]);
   });
 
   it("keeps other threads' messages as cards in the current stop, and a sent message in place of its tool row", () => {

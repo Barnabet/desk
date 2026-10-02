@@ -1,6 +1,6 @@
 # Harness improvements · Roadmap
 
-**Status:** Louis picked A1 (resume, shipped with this roadmap) and the Phase B spec next. Every other item gets its own spec and numbered plan before any code.
+**Status:** A1 (resume) shipped with this roadmap. Phase B (submissions, reviews, acceptance) shipped with Plan 23. Every other item gets its own spec and numbered plan before any code.
 
 **Source:** feedback from two of Desk's own coordinators (GPT-6 Astra, then Claude Fable 5.1) after a long financial-checker project, pasted by Louis on 2026-10-02. Their shared conclusion: threads build well but certify their own work badly, and the coordinator pays for every independent check with its own context. Desk should make "I produced it", "I checked it" and "it is accepted" three separate, recorded facts.
 
@@ -34,6 +34,8 @@ Grouped so each phase ships on its own and later phases build on earlier ones.
 - **A3 · Memory maintenance for agents.** `memory_update` (edit in place, keeps history as events), `memory_retire` (mark historical without a replacement), several changes in one call, and optional links (thread, commit, library path) shown with the entry.
 
 ### Phase B · Produced, checked, accepted (the core ask)
+
+**Done** (Plan 23): spec `docs/superpowers/specs/2026-10-02-reviews-and-acceptance-design.md`, approved with every recommendation.
 
 Both coordinators ranked this first.
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ThreadView } from '@desk/client';
-import { answeringLabel, clock, duration, href, narrate, sentCalls, stopAt, stopsOf, waitHop, waitLabel } from '@desk/ui-core';
+import { acceptanceChip, answeringLabel, clock, duration, href, narrate, reviewVersion, sentCalls, stopAt, stopsOf, waitHop, waitLabel } from '@desk/ui-core';
 import { call } from '../bridge';
 import { AnsweringBadge } from '../components/AnsweringBadge';
 import { HopLink } from '../components/HopLink';
@@ -18,14 +18,16 @@ import { RouteView } from './RouteView';
 import { DiffTab } from './tabs/DiffTab';
 import { FilesTab } from './tabs/FilesTab';
 import { ResultTab } from './tabs/ResultTab';
+import { ReviewTab } from './tabs/ReviewTab';
 import { SkillDraftsTab } from './tabs/SkillDraftsTab';
 import { tokens, usageByModel, UsageTab } from './tabs/UsageTab';
 import { Transcript, type ComposerMode, type Depth } from './Transcript';
 
-type Tab = 'route' | 'result' | 'diff' | 'files' | 'drafts' | 'usage';
+type Tab = 'route' | 'result' | 'review' | 'diff' | 'files' | 'drafts' | 'usage';
 const TABS: Array<[Tab, string]> = [
   ['route', 'Route'],
   ['result', 'Result'],
+  ['review', 'Review'],
   ['diff', 'Diff'],
   ['files', 'Files'],
   ['drafts', 'Skill drafts'],
@@ -107,6 +109,9 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
   }, [threadEvents]);
   const usage = useMemo(() => usageByModel(threadEvents, thread.id), [threadEvents, thread.id]);
   const version = String(threadEvents.at(-1)?.id ?? 0);
+  // A reviewer's findings are its own events: the Review tab fetches again on any review event too.
+  const reviewAt = useMemo(() => reviewVersion(s.events, thread.id), [s.events, thread.id]);
+  const chip = acceptanceChip(thread);
 
   const rounds = project.project.settings.review_rounds;
   const label = statusLabel(thread.status, thread.reason, proxyDown);
@@ -181,6 +186,7 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
           </p>
           <div className="thread-chips">
             {answering ? <AnsweringBadge label={answering} /> : null}
+            {chip ? <span className={`chip chip-${chip.tone}`}>{chip.label}</span> : null}
             {thread.active_skills.map((sk) => (
               <SkillBadge key={sk} name={sk} />
             ))}
@@ -210,6 +216,8 @@ export function ThreadDetail({ s, thread, at }: { s: SessionState; thread: Threa
             )
           ) : tab === 'result' ? (
             <ResultTab projectId={projectId} thread={thread} />
+          ) : tab === 'review' ? (
+            <ReviewTab thread={thread} threads={project.threads} version={reviewAt} now={now} />
           ) : tab === 'diff' ? (
             <DiffTab threadId={thread.id} version={version} />
           ) : tab === 'files' ? (
