@@ -35,6 +35,8 @@ Grouped so each phase ships on its own and later phases build on earlier ones.
 
 ### Phase B · Produced, checked, accepted (the core ask)
 
+Design draft: `docs/superpowers/specs/2026-10-02-reviews-and-acceptance-design.md`.
+
 Both coordinators ranked this first.
 
 - **B1 · Submissions pinned to a version.** `complete` records what it submits: the worktree's HEAD commit (refused if there are uncommitted changes on a git thread) and a hash of each library artifact. A later commit on that branch marks the submission superseded.
