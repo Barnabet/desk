@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEVICE_IDLE_MS, DeviceStore, devicePaths, PENDING_TTL_MS, redeemPendingCode, writePendingCode } from './devices';
+import { DEVICE_IDLE_MS, DeviceStore, devicePaths, PENDING_TTL_MS, redeemPendingCode, writePairingCodes, writePendingCode } from './devices';
 
 let dir: string;
 beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), 'desk-devices-'))));
@@ -73,5 +73,22 @@ describe('pending codes', () => {
     expect(redeemPendingCode(dir, 'browser', 'not a code', now)).toBeNull();
     expect(redeemPendingCode(dir, 'browser', code, now + PENDING_TTL_MS)).toBeNull();
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('pairs a phone once by its QR code or its short code, in any case, with or without the dash', () => {
+    const now = 1_000_000;
+    const a = writePairingCodes(dir, { name: 'iPhone', now });
+    expect(a.short).toMatch(/^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/);
+    expect(readFileSync(join(dir, readdirSync(dir)[0]!), 'utf8')).not.toContain(a.short.replace('-', ''));
+    expect(redeemPendingCode(dir, 'browser', a.short, now)).toBeNull();
+    expect(redeemPendingCode(dir, 'phone', ` ${a.short.toLowerCase().replace('-', ' ')} `, now)).toEqual({ name: 'iPhone' });
+    expect(redeemPendingCode(dir, 'phone', a.code, now)).toBeNull();
+
+    const b = writePairingCodes(dir, { now });
+    expect(redeemPendingCode(dir, 'phone', b.code, now)).toEqual({ name: '' });
+    expect(redeemPendingCode(dir, 'phone', b.short, now)).toBeNull();
+    // A code issued by desk web login, or a QR-only phone code, has no short code.
+    writePendingCode(dir, 'phone', { now });
+    expect(redeemPendingCode(dir, 'phone', 'ABCD-EFGH', now)).toBeNull();
   });
 });

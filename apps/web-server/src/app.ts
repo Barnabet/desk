@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import type { LoginCodes } from './auth';
 import { DEV_RELOAD_JS } from './dev';
-import { PENDING_TTL_MS, redeemPendingCode } from './devices';
+import { isShortCode, PENDING_TTL_MS, redeemPendingCode } from './devices';
 import { sweepLoginFiles } from './files';
 import { LOGIN_JS, loginFailedPage, loginPage, PAIR_JS, pairFailedPage, pairPage } from './login';
-import { mountRpc, type RpcDeps } from './rpc';
-import { hostCheck, securityHeaders } from './security';
+import { mountRpc, rpcJson, type RpcDeps } from './rpc';
+import { hostCheck, originCheck, securityHeaders } from './security';
 import { serveUi } from './static';
 
 export type WebAppDeps = RpcDeps & {
@@ -19,6 +19,10 @@ export type WebAppDeps = RpcDeps & {
   /** A phone was paired. */
   onPaired?(name: string): void;
 };
+
+/** Wrong short pairing codes allowed per window, across all callers: a short code cannot be guessed in so few tries. */
+export const PAIR_GUESSES = 10;
+const PAIR_WINDOW_MS = 10 * 60_000;
 
 const page = (status: number, html: string) => new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 const script = (js: string) => new Response(js, { headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' } });
@@ -54,6 +58,29 @@ export function createWebApp(d: WebAppDeps): Hono {
     return page(200, pairPage(secret));
   });
   app.get('/pair.js', () => script(PAIR_JS));
+  // The short code typed into the app's signed-out page: an iPhone Home Screen app keeps its own storage, so the QR link
+  // (opened in Safari) cannot pair it. Wrong codes are counted across all callers, PAIR_GUESSES per 10 minutes.
+  let guesses: number[] = [];
+  app.post('/pair', originCheck(d.port, d.remote), async (c) => {
+    const now = Date.now();
+    guesses = guesses.filter((t) => now - t < PAIR_WINDOW_MS);
+    if (guesses.length >= PAIR_GUESSES) return rpcJson(429, { ok: false, error: { code: 'too_many_tries', message: 'Too many wrong codes. Wait 10 minutes, then run desk web pair for a new one.' } });
+    let code = '';
+    try {
+      const body = (await c.req.json()) as { code?: unknown };
+      code = typeof body.code === 'string' ? body.code.slice(0, 32) : '';
+    } catch {
+      code = '';
+    }
+    const pending = d.dataDir && d.devices && isShortCode(code) ? redeemPendingCode(d.dataDir, 'phone', code, now) : null;
+    if (!pending || !d.devices) {
+      guesses.push(now);
+      return rpcJson(401, { ok: false, error: { code: 'bad_code', message: 'That code is wrong or has expired. Run desk web pair on your Mac for a new one.' } });
+    }
+    const { device, secret } = d.devices.add(pending.name || 'Phone');
+    d.onPaired?.(device.name);
+    return rpcJson(200, { ok: true, value: { secret } });
+  });
   mountRpc(app, d);
   if (d.dev) app.get('/__dev/reload.js', () => script(DEV_RELOAD_JS));
   app.get('*', serveUi(d.uiDir, { dev: d.dev }));

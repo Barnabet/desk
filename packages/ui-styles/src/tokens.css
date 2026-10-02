@@ -543,6 +543,20 @@ pre {
   font-size: 22px;
   color: var(--ink);
 }
+/* desk web's signed-out page at the phones' address: the short pairing code (web UI only). */
+.pair-form {
+  width: min(320px, 100%);
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+.pair-form .input {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .error-boundary {
   display: flex;
   flex-direction: column;

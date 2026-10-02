@@ -19,6 +19,7 @@ import {
   type WebPushChannel,
 } from './frames';
 import { phoneRefusal } from './phone-policy';
+import { slimPushForPhone } from './phone-slim';
 
 export type PushHubDeps = {
   sessions: Sessions;
@@ -51,7 +52,9 @@ function parse(text: string): unknown {
  * reach one; broker.watch and unwatch arrive here, so their sender is always the socket they came on.
  */
 export class PushHub {
-  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  // Compressed: a project's history is sent whole when a page opens it, and JSON shrinks several times over (phones on
+  // Tailscale feel that most).
+  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: { threshold: 1024 } });
   private readonly clients = new Map<number, Client>();
   private nextSender = 1;
   private readonly offRevoke: () => void;
@@ -135,11 +138,11 @@ export class PushHub {
 
   send(senderId: number, channel: WebPushChannel, payload: unknown): void {
     const c = this.clients.get(senderId);
-    if (c) this.write(c, { channel, payload });
+    if (c) this.write(c, { channel, payload: c.caller.kind === 'phone' ? slimPushForPhone(channel, payload) : payload });
   }
 
   broadcast(channel: WebPushChannel, payload: unknown): void {
-    for (const c of this.clients.values()) this.write(c, { channel, payload });
+    for (const c of this.clients.values()) this.write(c, { channel, payload: c.caller.kind === 'phone' ? slimPushForPhone(channel, payload) : payload });
   }
 
   /** desk:notify, to the sockets that may show notifications. */
