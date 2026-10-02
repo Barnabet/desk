@@ -54,7 +54,7 @@ const agent = (id: string, extra: Record<string, unknown> = {}) => ({
 
 const overview = (): ProjectOverview =>
   ({
-    project: { id: 'p', name: 'Onboarding', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
+    project: { id: 'p', name: 'Onboarding', goal: 'g', instructions: '', settings: { desk_model: 'm', thread_model: 'm', fallback_model: null, max_concurrent_threads: 4, check_in: 'normal', autonomy: 'dispatch-freely', review_rounds: 2, review_model: null, policy: [] }, created_at: 't', updated_at: 't', archived_at: null },
     desk: agent('d'),
     sources: [],
     plan: null,
