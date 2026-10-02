@@ -210,7 +210,7 @@ describe('/push for a paired phone', () => {
     attachUpgrades(s, { port: () => port, remote: () => REMOTE, routes: { '/push': h.handleUpgrade } });
     await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', () => resolve()));
     port = (s.address() as AddressInfo).port;
-    return { hub: h, devices, dataDir, port };
+    return { hub: h, devices, dataDir, port, sessions };
   }
 
   it('signs in on the remote host, and closes with 4401 once the phone is unpaired', async () => {
@@ -240,6 +240,27 @@ describe('/push for a paired phone', () => {
     const f = await c.next((x) => x.channel === 'desk:events');
     expect(f.payload[0].payload.content.length).toBeLessThan(3000);
     expect(event.payload.content.length).toBe(10_000);
+  });
+
+  it('sends a phone a big backfill page in frames under 1 MB, and a browser in one', async () => {
+    const { hub: h, devices, port, sessions } = await pushSetup();
+    const { secret } = devices.add('iPhone');
+    const phone = openPush(port, { host: REMOTE.host, origin: REMOTE.origin });
+    const browser = openPush(port, { host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` });
+    await Promise.all([phone.opened, browser.opened]);
+    phone.send({ session: secret });
+    browser.send({ session: sessions.create() });
+    await Promise.all([phone.next((f) => f.channel === 'desk:global'), browser.next((f) => f.channel === 'desk:global')]);
+    const events = Array.from({ length: 5000 }, (_, i) => ({ id: i + 1, ts: 't', project_id: 'P1', agent_id: 'A1', type: 'message.user', payload: { text: 'y'.repeat(400) } }));
+    h.broadcast('desk:events', events);
+    const all = await browser.next((f) => f.channel === 'desk:events');
+    expect(all.payload).toHaveLength(5000);
+    await phone.next((x) => x.channel === 'desk:events' && (x.payload as Array<{ id: number }>).some((e) => e.id === 5000));
+    const frames = phone.frames.filter((x) => x.channel === 'desk:events');
+    expect(frames.length).toBeGreaterThan(5);
+    for (const f of frames) expect(Buffer.byteLength(JSON.stringify(f))).toBeLessThan(1024 * 1024);
+    const got = frames.flatMap((f) => (f.payload as Array<{ id: number }>).map((e) => e.id));
+    expect(got).toEqual(events.map((e) => e.id));
   });
 
   it('refuses an upgrade from another origin on the remote host', async () => {
