@@ -5,7 +5,7 @@ import { initialGlobalState } from '@desk/bff/contract';
 import type { HandlerContext } from '@desk/bff/server';
 import { Sessions } from './auth';
 import type { WebNotice } from './frames';
-import { PushHub } from './push';
+import { EVENTS_FRAME_BYTES, eventFrames, PushHub } from './push';
 import { connected, openPush, refusedUpgrade, sleep, unusedContext, until } from './testing';
 import { attachUpgrades } from './upgrade';
 
@@ -139,6 +139,34 @@ describe('/push', () => {
     a.send({ op: 'broker.unwatch', id: 2, input: { projectId: 'p1' } });
     expect(await a.next((f) => f.ack === 2)).toEqual({ ack: 2, result: { ok: true, value: { ok: true } } });
     expect(unwatched).toEqual([[1, 'p1']]);
+  });
+
+  it('sends a long batch of events as frames of at most EVENTS_FRAME_BYTES, in order, before the answer', async () => {
+    const box: { hub?: PushHub } = {};
+    const batch = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, text: 'x'.repeat(100_000) }));
+    const { hub: h, port, secret } = await setup(async (senderId) => box.hub!.send(senderId, 'desk:events', batch));
+    box.hub = h;
+    const a = await connected(port, secret);
+    a.send({ op: 'broker.watch', id: 1, input: { projectId: 'p1', afterSeq: 0 } });
+    const ack = await a.next((f) => f.ack === 1);
+    const frames = a.frames.slice(0, a.frames.indexOf(ack)).filter((f) => f.channel === 'desk:events');
+    expect(frames.length).toBe(6);
+    for (const f of frames) expect(JSON.stringify(f).length).toBeLessThanOrEqual(EVENTS_FRAME_BYTES);
+    expect(frames.flatMap((f) => f.payload)).toEqual(batch);
+    // One event larger than a frame still goes out, alone.
+    expect(eventFrames([{ id: 1 }, { id: 2, text: 'x'.repeat(40) }, { id: 3 }], 30).map((t) => (JSON.parse(t) as { payload: Array<{ id: number }> }).payload.map((e) => e.id))).toEqual([[1], [2], [3]]);
+  });
+
+  it('logs a socket that closes before a watch is answered', async () => {
+    let release = () => {};
+    const { port, secret, logs } = await setup(() => new Promise<void>((resolve) => (release = resolve)));
+    const a = await connected(port, secret);
+    a.send({ op: 'broker.watch', id: 7, input: { projectId: 'p1', afterSeq: 0 } });
+    await sleep(20);
+    a.ws.close(1000);
+    await until(() => logs.length > 0);
+    expect(logs).toEqual(['push socket of this computer closed (1000) during broker.watch #7']);
+    release();
   });
 
   it('refuses other operations and bad input, and closes a socket that sends a malformed frame', async () => {

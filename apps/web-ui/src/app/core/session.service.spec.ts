@@ -97,6 +97,30 @@ describe('project session', () => {
     ]);
   });
 
+  it('moves its first watch on with what arrives, so a watch sent again after a drop resumes rather than starting over', async () => {
+    const events: StoredEvent[] = [
+      ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' }),
+      ev(2, 'agent.created', { role: 'desk', model: 'm', title: 'Desk', brief: null, workspace_path: '/w', parent_id: null }, { agent: 'd' }),
+      ev(3, 'message.user', { text: 'Kick off' }, { agent: 'd' }),
+    ];
+    const resumed: number[] = [];
+    const bridge: FakeDeskBridge = new FakeDeskBridge({
+      'projects.get': () => overview(),
+      // The socket drops after the first frame; the bridge sends the same input again on the next one.
+      'broker.watch': (input: { afterSeq: number }) => {
+        bridge.emit('desk:events', events.slice(0, 2));
+        resumed.push(input.afterSeq);
+        bridge.emit('desk:events', events.filter((e) => e.id > input.afterSeq));
+        // A frame sent twice is dropped.
+        bridge.emit('desk:events', events.slice(0, 2));
+        return { ok: true };
+      },
+    });
+    await render(Probe, { inputs: { id: 'p', agent: 'd' }, providers: providers(bridge) });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready|user|0|0|steer|'));
+    expect(resumed).toEqual([2]);
+  });
+
   it('watches again when a watch after a reconnect failed: on the next reconnect, and once deskd is live again', async () => {
     const events: StoredEvent[] = [ev(1, 'project.created', { name: 'Launch', goal: 'g', instructions: '' })];
     let deskd = true;

@@ -51,7 +51,8 @@ export class FakeDeskBridge implements DeskBridgeApi {
   call<C extends Channel>(op: C, input: ChannelInput<C>): Promise<ChannelOutput<C>>;
   call<C extends WebChannel>(op: C, input: WebChannelInput<C>): Promise<WebChannelOutput<C>>;
   call(op: string, input: unknown): Promise<unknown> {
-    this.calls.push({ channel: op, input });
+    // A session moves its first watch's input on while it loads (the real bridge sends it as a frame): recorded as it was called.
+    this.calls.push({ channel: op, input: op === 'broker.watch' ? { ...(input as object) } : input });
     const handler = this.handlers[op as Channel | WebChannel];
     if (!handler) {
       if (op === 'app.pickFolder') return this.pickFolder((input as { purpose: FolderPurpose }).purpose);
