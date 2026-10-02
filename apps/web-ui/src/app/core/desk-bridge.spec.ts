@@ -275,7 +275,10 @@ describe('DeskBridge over /push', () => {
     const first = lastSocket();
     first.open();
     first.receive({ channel: 'desk:global', payload: {} });
-    const pending = bridge.call('broker.watch', { projectId: 'p', afterSeq: 4 });
+    const input = { projectId: 'p', afterSeq: 0 };
+    const pending = bridge.call('broker.watch', input);
+    // What is sent again is the input as it is then: a session moves its first watch on with what it received.
+    input.afterSeq = 4;
     first.drop(1006);
     expect(bridge.pushStatus()).toBe('reconnecting');
     vi.advanceTimersByTime(499);

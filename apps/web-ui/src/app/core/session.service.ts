@@ -81,6 +81,8 @@ class ProjectSession {
   private base: Pick<SessionState, 'project' | 'chat' | 'timeline' | 'messages'> | null = null;
   /** Set while a watch after a reconnect has failed (deskd was offline): `retryWatch` tries again. */
   private watchFailed = false;
+  /** The first watch's input while it is unanswered: its `afterSeq` follows the cursor. */
+  private loading: { projectId: string; afterSeq: number } | null = null;
   /** Counts rewatches, so only the latest one's outcome sets or clears `watchFailed`. */
   private watches = 0;
 
@@ -150,12 +152,18 @@ class ProjectSession {
       const overview = await this.bridge.call('projects.get', { id: this.projectId });
       const deskId = overview.desk?.id ?? '';
       this.base = { project: projectFromOverview(overview), chat: emptyChat(deskId), timeline: emptyTimeline(deskId), messages: emptyMessages() };
-      await this.bridge.call('broker.watch', { projectId: this.projectId, afterSeq: 0 });
+      // The bridge sends this watch again if /push drops before its answer, as `loading` is then: from the last event
+      // received (enqueueMany moves it on), so a long history resumes where the socket dropped rather than from zero.
+      const loading = { projectId: this.projectId, afterSeq: 0 };
+      this.loading = loading;
+      await this.bridge.call('broker.watch', loading);
+      this.loading = null;
       // The backfill (pushed before watch resolves) and the overview become visible in a single update.
       const base = this.base;
       this.synced = true;
       this.store.set((s) => this.apply({ ...s, ...base, status: 'ready', error: null }));
     } catch (err) {
+      this.loading = null;
       this.started = false;
       this.synced = false;
       const missing = err instanceof DeskCallError && err.status === 404;
@@ -169,9 +177,12 @@ class ProjectSession {
 
   enqueueMany(events: StoredEvent[]): void {
     for (const e of events) {
+      // A watch sent again starts after the cursor, but one sent twice (or from zero) repeats events: those are dropped.
+      if (e.id <= this.cursor) continue;
       this.queue.push(e);
-      if (e.id > this.cursor) this.cursor = e.id;
+      this.cursor = e.id;
     }
+    if (this.loading) this.loading.afterSeq = this.cursor;
     if (this.scheduled) return;
     this.scheduled = true;
     queueMicrotask(() => {

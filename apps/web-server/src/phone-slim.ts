@@ -1,42 +1,52 @@
 import type { StoredEvent } from '@desk/protocol';
 
 /**
- * How much of a long tool text a paired phone receives. A project's history goes to the page in full when it opens, and
- * tool calls and results (file contents, command output) make most of it: 45 MB for one long project, which an iPhone
- * never finishes loading. Phones get the start of each long text and a note; the Mac's apps still get everything.
+ * How much of a long text a paired phone receives. A project's history goes to the page in full when it opens, and
+ * tool calls and results (file contents, command output, repeated in each assistant message's tool calls) make most of
+ * it: 45 MB for one long project, which an iPhone never finishes loading. Phones get the start of each long text and a
+ * note; the Mac's apps still get everything.
  */
 export const PHONE_TEXT_LIMIT = 2000;
+/** Tool texts are cut shorter: a phone shows a glimpse of them, and there are thousands. */
+export const PHONE_TOOL_LIMIT = 500;
 
-const cut = (s: string): string =>
-  s.length <= PHONE_TEXT_LIMIT ? s : `${s.slice(0, PHONE_TEXT_LIMIT)}\n… [${s.length - PHONE_TEXT_LIMIT} more characters: open this on your Mac to see all of it]`;
+const cut = (s: string, limit: number): string =>
+  s.length <= limit ? s : `${s.slice(0, limit)}\n… [${s.length - limit} more characters: open this on your Mac to see all of it]`;
 
-/** Every string in a parsed JSON value, cut to PHONE_TEXT_LIMIT. */
-function cutDeep(v: unknown): unknown {
-  if (typeof v === 'string') return cut(v);
-  if (Array.isArray(v)) return v.map(cutDeep);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cutDeep(x)]));
+/** Every string in a parsed JSON value, cut to `limit`. */
+function cutDeep(v: unknown, limit: number): unknown {
+  if (typeof v === 'string') return cut(v, limit);
+  if (Array.isArray(v)) return v.map((x) => cutDeep(x, limit));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cutDeep(x, limit)]));
   return v;
 }
 
 /** A tool call's arguments (a JSON string) with long values cut, still valid JSON when it was. */
 function cutArguments(args: string): string {
-  if (args.length <= PHONE_TEXT_LIMIT) return args;
+  if (args.length <= PHONE_TOOL_LIMIT) return args;
   try {
-    return JSON.stringify(cutDeep(JSON.parse(args) as unknown));
+    return JSON.stringify(cutDeep(JSON.parse(args) as unknown, PHONE_TOOL_LIMIT));
   } catch {
-    return cut(args);
+    return cut(args, PHONE_TOOL_LIMIT);
   }
 }
 
-/** The event as a paired phone receives it: tool calls, results and compaction summaries with long texts cut. */
+/**
+ * The event as a paired phone receives it: tool calls (also those inside assistant messages), tool results and
+ * compaction summaries with long texts cut. What an agent says, and what an approval asks, stay whole.
+ */
 export function slimForPhone(e: StoredEvent): StoredEvent {
   switch (e.type) {
+    case 'assistant.message':
+      return e.payload.tool_calls.every((c) => c.arguments.length <= PHONE_TOOL_LIMIT)
+        ? e
+        : { ...e, payload: { ...e.payload, tool_calls: e.payload.tool_calls.map((c) => ({ ...c, arguments: cutArguments(c.arguments) })) } };
     case 'tool.call':
-      return e.payload.arguments.length <= PHONE_TEXT_LIMIT ? e : { ...e, payload: { ...e.payload, arguments: cutArguments(e.payload.arguments) } };
+      return e.payload.arguments.length <= PHONE_TOOL_LIMIT ? e : { ...e, payload: { ...e.payload, arguments: cutArguments(e.payload.arguments) } };
     case 'tool.result':
-      return e.payload.content.length <= PHONE_TEXT_LIMIT ? e : { ...e, payload: { ...e.payload, content: cut(e.payload.content) } };
+      return e.payload.content.length <= PHONE_TOOL_LIMIT ? e : { ...e, payload: { ...e.payload, content: cut(e.payload.content, PHONE_TOOL_LIMIT) } };
     case 'context.compacted':
-      return e.payload.checkpoint.length <= PHONE_TEXT_LIMIT ? e : { ...e, payload: { ...e.payload, checkpoint: cut(e.payload.checkpoint) } };
+      return e.payload.checkpoint.length <= PHONE_TEXT_LIMIT ? e : { ...e, payload: { ...e.payload, checkpoint: cut(e.payload.checkpoint, PHONE_TEXT_LIMIT) } };
     default:
       return e;
   }
