@@ -55,11 +55,11 @@ export const spawnThreadTool = defineTool({
 export const messageThreadTool = defineTool({
   name: 'message_thread',
   description:
-    'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
+    'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. `resume`: continue a thread whose run failed (an error such as a lost connection, not a verdict on its work) where it left off; no review round. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
   input: z.object({
     thread_id: z.string(),
     text: z.string().min(1),
-    kind: z.enum(['note', 'question', 'revision']).default('note'),
+    kind: z.enum(['note', 'question', 'revision', 'resume']).default('note'),
     skills: z.array(SkillName).optional().describe('Skills to activate on the thread (effective from its next turn)'),
   }),
   async execute({ thread_id, text, kind, skills = [] }, ctx) {

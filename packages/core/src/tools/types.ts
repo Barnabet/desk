@@ -43,7 +43,7 @@ export type ToolContext = {
 export type SendInput = {
   from: string;
   to: string;
-  kind: Extract<AgentMessageKind, 'note' | 'question' | 'revision' | 'update' | 'blocker'>;
+  kind: Extract<AgentMessageKind, 'note' | 'question' | 'revision' | 'resume' | 'update' | 'blocker'>;
   text: string;
   toolCallId?: string;
 };

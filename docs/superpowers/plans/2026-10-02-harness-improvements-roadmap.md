@@ -1,6 +1,6 @@
 # Harness improvements · Roadmap
 
-**Status:** proposal, waiting for Louis to pick what to build first. Each item he picks gets its own spec and numbered plan before any code.
+**Status:** Louis picked A1 (resume, shipped with this roadmap) and the Phase B spec next. Every other item gets its own spec and numbered plan before any code.
 
 **Source:** feedback from two of Desk's own coordinators (GPT-6 Astra, then Claude Fable 5.1) after a long financial-checker project, pasted by Louis on 2026-10-02. Their shared conclusion: threads build well but certify their own work badly, and the coordinator pays for every independent check with its own context. Desk should make "I produced it", "I checked it" and "it is accepted" three separate, recorded facts.
 
@@ -29,7 +29,7 @@ Grouped so each phase ships on its own and later phases build on earlier ones.
 
 ### Phase A · Quick fixes (small, independent)
 
-- **A1 · Resume a failed thread.** `message_thread kind: "resume"` (Desk only) reopens a `failed` thread with a plain "continue where you left off" note. No review round, no "fell short" framing. Smallest item on the list.
+- **A1 · Resume a failed thread. Done.** `message_thread kind: "resume"` (Desk only) reopens a `failed` thread with a plain "continue where you left off" message. No review round, no "fell short" framing. A note to a failed thread is refused with a pointer to `resume`, and resume to any other status is refused (`runtime.ts` `checkResume`, wake rule 4.3).
 - **A2 · Tokens per thread where Desk and the user look.** Add prompt and completion totals to the Threads list (both UIs) and to `list_threads` / `read_thread`. Optional per-model prices in Settings → Models turn them into dollars.
 - **A3 · Memory maintenance for agents.** `memory_update` (edit in place, keeps history as events), `memory_retire` (mark historical without a replacement), several changes in one call, and optional links (thread, commit, library path) shown with the entry.
 
