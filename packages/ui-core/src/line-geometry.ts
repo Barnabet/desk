@@ -32,7 +32,7 @@ const MERGE_PX = 10;
 /** A link this fresh shows the message travelling. */
 const LIVE_MS = 8_000;
 /** Agent messages the diagram draws as links; the rest it already shows (start is the fork, completed a rejoin, stalled and approval marks) or never shows (reminder). */
-const LINKED = new Set(['note', 'revision', 'update', 'question', 'blocker', 'answer']);
+const LINKED = new Set(['note', 'revision', 'resume', 'update', 'question', 'blocker', 'answer']);
 const IN_FLIGHT = new Set<AgentStatus>(['running', 'waiting', 'queued']);
 const TERMINAL = new Set<AgentStatus>(['done', 'cancelled', 'failed']);
 
@@ -45,7 +45,7 @@ export type MessageLink = {
   ids: number[];
   from: string;
   to: string;
-  /** The strongest kind in it: a question, else an answer, else a note (notes, revisions, updates, blockers). */
+  /** The strongest kind in it: a question, else an answer, else a note (notes, revisions, resumes, updates, blockers). */
   kind: 'question' | 'answer' | 'note';
   /** Messages went both ways. */
   both: boolean;

@@ -75,6 +75,8 @@ export type GitInfo = z.infer<typeof GitInfo>;
 export const AgentMessageKind = z.enum([
   'note',
   'revision',
+  /** From Desk to a thread whose run failed (an error, not its own judgement): continue where it left off. */
+  'resume',
   'update',
   'question',
   'blocker',

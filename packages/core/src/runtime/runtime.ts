@@ -589,9 +589,10 @@ export class Runtime {
    * state takes this kind, the text size, one open question per asker and thread, and a thread's 20 questions or
    * notes to other threads an hour. A note or an update to an agent whose open question the sender has seen is that
    * question's answer (auto-link, §1.3): it may reach a failed or stopped asker, and it is exempt from the sender cap.
-   * Desk's revision goes its own way (sendRevision); anything else is delivered, a question tracked, with the tool call
-   * that sent it. Each refusal throws the text the model reads; `note` is the tool result (§2.5). The thread
-   * message_thread tool refuses Desk as a target itself (§2.4 check 2).
+   * Desk's revision goes its own way (sendRevision), and so does its resume of a failed thread (checkResume); anything
+   * else is delivered, a question tracked, with the tool call that sent it. Each refusal throws the text the model
+   * reads; `note` is the tool result (§2.5). The thread message_thread tool refuses Desk as a target itself (§2.4
+   * check 2).
    */
   send(input: SendInput): SendResult {
     const from = this.requireAgent(input.from);
@@ -609,12 +610,15 @@ export class Runtime {
       if (to.status === 'cancelled' || this.stoppedAt.has(to.id)) throw new Error(`${name} was stopped; it cannot receive messages.`);
       if (input.kind === 'note' && (to.status === 'done' || to.status === 'failed')) {
         throw new Error(
-          from.role === 'desk'
-            ? `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`
-            : `${name} has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change.`,
+          from.role !== 'desk'
+            ? `${name} has finished; its result is final. Send kind "question" to ask about its work, or tell Desk (message_desk) if its work needs to change.`
+            : to.status === 'failed'
+              ? `${name} failed: its last run ended in an error. Send kind "resume" to continue it where it left off, "question" to ask about its work, or spawn a new thread.`
+              : `${name} has finished; its result is final. Send kind "question" to ask about its work, "revision" if it fell short of its brief, or spawn a new thread whose brief points at its result or branch.`,
         );
       }
     }
+    if (input.kind === 'resume') this.checkResume(from, to);
     if (input.text.length > MAX_MESSAGE_CHARS) {
       throw new Error(`Messages are limited to ${MAX_MESSAGE_CHARS} characters; publish long content with library_publish and send its path.`);
     }
@@ -638,6 +642,11 @@ export class Runtime {
       }
     }
     if (input.kind === 'revision') return this.sendRevision(from, to, input);
+    if (input.kind === 'resume') {
+      const id = this.deliver(from.id, to.id, 'resume', input.text, { toolCallId: input.toolCallId });
+      const outcome = this.heldByPause(to.id) ? ` (${PAUSED_NOTE})` : '; it has been reopened';
+      return { id, kind: 'resume', note: `Sent resume #${id} to ${name}${outcome}.` };
+    }
     const next = this.sendOutcome(from, to, input.kind);
     const id = this.deliver(from.id, to.id, input.kind, input.text, { tracked: input.kind === 'question', toolCallId: input.toolCallId });
     // The pause kept the recipient from being woken (maybe this very send paused the project): it reads this after the resume.
@@ -1666,6 +1675,19 @@ export class Runtime {
   private answerable(s: MessagesState, from: AgentRow, to: AgentRow, kind: SendInput['kind']): MessageView | undefined {
     if (kind !== 'note' && kind !== 'update') return undefined;
     return openFrom(s, to.id).find((q) => q.to === from.id && q.id <= from.inbox_cursor);
+  }
+
+  /**
+   * Desk's resume: reopens a thread whose run failed, without a review round (a failure is an error, not a verdict on
+   * its work). Refused for any other sender, recipient or status.
+   */
+  private checkResume(from: AgentRow, to: AgentRow): void {
+    if (from.role !== 'desk' || to.role !== 'thread') throw new Error('Only Desk resumes threads.');
+    if (to.status !== 'failed') {
+      throw new Error(
+        `${nameOf(to)} is ${to.status}; resume only continues a thread whose run failed.${to.status === 'done' ? ' Send "revision" if its work fell short of its brief.' : ' Send a note instead.'}`,
+      );
+    }
   }
 
   /** Desk's revision, as before: the review-round limit, then `agent.revision`, then the message that reopens the thread. */

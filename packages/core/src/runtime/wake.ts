@@ -77,8 +77,8 @@ export function wakeDecision(s: WakeState): Wake {
   // 4.2 A stopped thread waits for the user.
   if (agent.status === 'cancelled') return NONE;
   const fromDesk = pending.filter((i) => i.from === 'desk');
-  // 4.3 A revision reopens finished work.
-  if (fromDesk.some((i) => i.kind === 'revision')) return run('agent');
+  // 4.3 A revision reopens finished work, and a resume a thread whose run failed.
+  if (fromDesk.some((i) => i.kind === 'revision' || (i.kind === 'resume' && agent.status === 'failed'))) return run('agent');
   // 4.4 A thread waiting on a reply runs for anything from Desk, and for an answer.
   if (agent.status === 'waiting' && (fromDesk.length || pending.some((i) => i.kind === 'answer'))) return run('agent');
   // 4.5 An idle thread runs for an answer (it asked, then ended its turn in text) and for a Desk message other than a

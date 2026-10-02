@@ -294,7 +294,7 @@ To resume after a disconnect, subscribe again with the last `event.id` you recei
 
 **Agent statuses:** `idle`, `queued`, `running`, `waiting` (on a reply, an approval or threads), `done`, `failed`, `cancelled`.
 
-**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`), `reminder` (for Desk alone) and `automation`: messages from automation runs to Desk (Tell Desk steps, run reports, waiting notices), labelled `automation "<title>"`. Optional fields:
+**Messages.** A `message.agent` is stored on its recipient's stream (`agent_id`) with `from_agent_id`, `from_label` (`Desk`, or `thread "<title>" (<id>)`), `kind` and `text`. Kinds: `note`, `update`, `question`, `blocker`, `revision`, `resume` (Desk continuing a thread whose run failed, without a review round), `answer`, `start` (Desk's opening message to a new thread, which clients hide), the runtime's notices (`completed`, `failed`, `cancelled`, `approval`, `stalled`), `reminder` (for Desk alone) and `automation`: messages from automation runs to Desk (Tell Desk steps, run reports, waiting notices), labelled `automation "<title>"`. Optional fields:
 
 - `tracked: true`: a question whose state the runtime follows: open, then answered, closed (the runtime wrote the answer) or withdrawn (the asker finished).
 - `reply_to`: on an `answer`, the id of the question it answers. A note or update to an agent whose question the sender has seen is stored as its answer.

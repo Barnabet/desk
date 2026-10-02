@@ -193,7 +193,9 @@ describe('message_thread refusals', () => {
     const send = (thread_id: string, kind: 'note' | 'revision') => messageThreadTool.execute({ thread_id, kind, text: 'More, please.' }, ctx);
 
     await expect(send(thread('Pricing', 'done'), 'note')).rejects.toThrow(finished('Pricing'));
-    await expect(send(thread('Deploy', 'failed'), 'note')).rejects.toThrow(finished('Deploy'));
+    await expect(send(thread('Deploy', 'failed'), 'note')).rejects.toThrow(
+      '"Deploy" failed: its last run ended in an error. Send kind "resume" to continue it where it left off, "question" to ask about its work, or spawn a new thread.',
+    );
     const stopped = thread('Scout', 'cancelled');
     await expect(send(stopped, 'note')).rejects.toThrow('"Scout" was stopped; it cannot receive messages.');
     await expect(send(stopped, 'revision')).rejects.toThrow('"Scout" was stopped; it cannot receive messages.');
@@ -262,7 +264,7 @@ describe('message_thread through the send path', () => {
     expect(q!.payload).toMatchObject({ from_label: 'Desk', kind: 'question', text: 'Per seat?', tracked: true, tool_call_id: 'tc' });
     expect(getAgent(h.store.db, t)!.active_skills).toEqual(['house-style']);
     expect(messageThreadTool.description).toBe(
-      'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
+      'Send a message to a thread. `note`: context, a redirection or follow-up work for a thread that is still working; your notes carry your authority. `question`: ask it something only it knows (for status or results use read_thread instead); a finished thread is woken just to answer, from its context (a model run), and its result stays final. `revision`: send finished work back with specific feedback; reopens it, limited by the project review-round setting. `resume`: continue a thread whose run failed (an error such as a lost connection, not a verdict on its work) where it left off; no review round. If the thread asked you a question, your next message to it is recorded as the answer. Pass skills to activate more skills on it. At most 4000 characters.',
     );
   });
 });
