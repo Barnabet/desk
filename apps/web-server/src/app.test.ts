@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createWebApp } from './app';
 import { CODE_TTL_MS, LoginCodes, Sessions } from './auth';
@@ -116,6 +117,21 @@ describe('the desk web app', () => {
       expect(r.headers.get('cross-origin-resource-policy')).toBe('same-origin');
       expect(r.headers.get('set-cookie')).toBeNull();
     }
+  });
+
+  it('gzips the app and /rpc answers for a browser that accepts it, never the pages holding a secret', async () => {
+    const { app, codes, secretOf } = setup();
+    const gz = { ...HOST, 'accept-encoding': 'gzip, deflate, br' };
+    const index = await app.request('/', { headers: gz });
+    expect(index.headers.get('content-encoding')).toBe('gzip');
+    expect(index.headers.get('vary')).toContain('Accept-Encoding');
+    const login = await app.request(`/login?code=${codes.issue()}`, { headers: gz });
+    expect(login.headers.get('content-encoding')).toBeNull();
+    const secret = await secretOf(login);
+    const call = await app.request('/rpc/app.info', { method: 'POST', headers: { ...RPC, 'accept-encoding': 'gzip', 'x-desk-session': secret! }, body: '{}' });
+    expect(call.headers.get('content-encoding')).toBe('gzip');
+    expect((JSON.parse(gunzipSync(Buffer.from(await call.arrayBuffer())).toString('utf8')) as { value: { version: string } }).value.version).toBe('1.0.0');
+    expect((await app.request('/', { headers: HOST })).headers.get('content-encoding')).toBeNull();
   });
 
   it('serves the reload script and adds it to index.html only under --dev', async () => {

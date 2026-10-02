@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { compress } from 'hono/compress';
 import type { LoginCodes } from './auth';
 import { DEV_RELOAD_JS } from './dev';
 import { isShortCode, PENDING_TTL_MS, redeemPendingCode } from './devices';
@@ -81,8 +82,12 @@ export function createWebApp(d: WebAppDeps): Hono {
     d.onPaired?.(device.name);
     return rpcJson(200, { ok: true, value: { secret } });
   });
+  // The app's files and /rpc answers are gzipped: a phone on Tailscale downloads a quarter as much. Pages and answers
+  // holding a secret (/login, /pair) are not, so their size says nothing about it.
+  const squeeze = compress({ encoding: 'gzip' });
+  app.use('/rpc/*', squeeze);
   mountRpc(app, d);
   if (d.dev) app.get('/__dev/reload.js', () => script(DEV_RELOAD_JS));
-  app.get('*', serveUi(d.uiDir, { dev: d.dev }));
+  app.get('*', squeeze, serveUi(d.uiDir, { dev: d.dev }));
   return app;
 }
