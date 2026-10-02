@@ -242,6 +242,59 @@ describe('/push for a paired phone', () => {
     expect(event.payload.content.length).toBe(10_000);
   });
 
+  it("leaves the threads' transcripts out of a phone's backfill, keeping Desk's own and every live event", async () => {
+    const { devices } = setup();
+    const sessions = new Sessions();
+    const e = (id: number, agent: string, type: string, payload: object = {}) => ({ id, ts: 't', project_id: 'P1', agent_id: agent, type, payload });
+    const backfill = [
+      e(1, 'D', 'agent.created', { role: 'desk' }),
+      e(2, 'D', 'tool.call', { run_id: 'r', tool_call_id: 'c', name: 'spawn', arguments: '{}' }),
+      e(3, 'T', 'agent.created', { role: 'thread' }),
+      e(4, 'T', 'tool.call', { run_id: 'r', tool_call_id: 'c', name: 'bash', arguments: '{}' }),
+      e(5, 'T', 'tool.result', { run_id: 'r', tool_call_id: 'c', name: 'bash', status: 'ok', content: 'ok' }),
+      e(6, 'T', 'agent.status_changed', { status: 'done' }),
+    ];
+    let hubRef: PushHub | null = null;
+    const h = new PushHub({
+      sessions,
+      devices,
+      recheckMs: 60_000,
+      broker: { snapshot: () => initialGlobalState(), dropSender: () => {} },
+      ctx: (senderId) => ({
+        ...unusedContext(senderId),
+        client: () => ({ projects: { get: async () => ({ desk: { id: 'D' } }) } }) as never,
+        broker: {
+          snapshot: () => initialGlobalState(),
+          watch: async () => void hubRef!.send(senderId, 'desk:events', backfill),
+          unwatch: () => {},
+        },
+      }),
+    });
+    hubRef = h;
+    hub = h;
+    const s = createServer((_req, res) => res.writeHead(404).end());
+    server = s;
+    let port = 0;
+    attachUpgrades(s, { port: () => port, remote: () => REMOTE, routes: { '/push': h.handleUpgrade } });
+    await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', () => resolve()));
+    port = (s.address() as AddressInfo).port;
+
+    const phone = openPush(port, { host: REMOTE.host, origin: REMOTE.origin });
+    const browser = openPush(port, { host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` });
+    await Promise.all([phone.opened, browser.opened]);
+    phone.send({ session: devices.add('iPhone').secret });
+    browser.send({ session: sessions.create() });
+    await Promise.all([phone.next((f) => f.channel === 'desk:global'), browser.next((f) => f.channel === 'desk:global')]);
+    for (const c of [phone, browser]) c.send({ op: 'broker.watch', id: 1, input: { projectId: 'P1', afterSeq: 0 } });
+    await Promise.all([phone.next((f) => f.ack === 1), browser.next((f) => f.ack === 1)]);
+    const ids = (c: typeof phone) => c.frames.filter((f) => f.channel === 'desk:events').flatMap((f) => (f.payload as Array<{ id: number }>).map((x) => x.id));
+    expect(ids(phone)).toEqual([1, 2, 3, 6]);
+    expect(ids(browser)).toEqual([1, 2, 3, 4, 5, 6]);
+    // Live events are never left out.
+    h.broadcast('desk:event', e(7, 'T', 'tool.call', { run_id: 'r', tool_call_id: 'd', name: 'bash', arguments: '{}' }));
+    expect((await phone.next((f) => f.channel === 'desk:event')).payload.id).toBe(7);
+  });
+
   it('refuses an upgrade from another origin on the remote host', async () => {
     const { port } = await pushSetup();
     expect(await refusedUpgrade(port, { host: REMOTE.host, origin: 'https://evil.example' })).toBe(403);
