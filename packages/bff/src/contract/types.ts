@@ -68,6 +68,7 @@ export type ChannelOutputs = {
   'services.start': Out<Client['services']['start']>;
   'services.stop': Out<Client['services']['stop']>;
   'services.restart': Out<Client['services']['restart']>;
+  'services.remove': Out<Client['services']['remove']>;
   'threads.files': Out<Client['threads']['files']>;
   'threads.file': Out<Client['threads']['file']>;
   'approvals.list': Out<Client['approvals']['list']>;

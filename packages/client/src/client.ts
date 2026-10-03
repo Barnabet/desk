@@ -230,6 +230,7 @@ export class DeskClient {
     start: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/start`),
     stop: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/stop`),
     restart: (id: string) => this.post<ServiceRow>(`/services/${enc(id)}/restart`),
+    remove: (id: string) => this.del<{ ok: true }>(`/services/${enc(id)}`),
   };
 
   /** Automations: definitions, versions, the user's switch and grants, runs (automations spec §7.1). */

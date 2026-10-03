@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { realpath, rmdir } from 'node:fs/promises';
+import { realpath, rm, rmdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
@@ -117,7 +117,7 @@ import {
   reviewBrief,
   reviewsOfBuilder,
 } from '../reviews/reviews';
-import type { ReceiptInput } from '../receipts/receipts';
+import { runningChecks, type ReceiptInput } from '../receipts/receipts';
 import { CheckJobs } from '../checks/service';
 import { ThreadWatches } from '../watches/watches';
 
@@ -342,6 +342,9 @@ export class Runtime {
       projectDir: (projectId) => this.projectDir(projectId),
       sandboxEnabled: () => this.sandboxAvailable(),
       guard: this.guard,
+      gitDirs: (agent) => this.gitDirs(agent),
+      unsafeSource: (real) => this.unsafeSource(real),
+      inMaintenance: (agentId) => this.cleaning.has(agentId) || this.archiving.has(agentId),
       recordReceipt: (agentId, receipt) => this.recordReceipt(agentId, receipt),
       notifyDesk: (deskId, text) => {
         const desk = this.requireAgent(deskId);
@@ -393,6 +396,7 @@ export class Runtime {
       startService: (projectId, input) => this.startService(projectId, input),
       stopService: (serviceId, by) => this.stopService(serviceId, by),
       restartService: (serviceId, by) => this.restartService(serviceId, by),
+      removeService: (serviceId, by) => this.removeService(serviceId, by),
       serviceLogs: (serviceId, lines) => this.serviceLogs(serviceId, lines),
     };
     this.serviceProcs = new ServiceProcesses({
@@ -871,6 +875,7 @@ export class Runtime {
       for (const p of listProjects(this.o.store.db, { includeArchived: true })) {
         if (listServices(this.o.store.db, p.id).some(s => s.status === 'running' && (s.agent_id === t.id || isWithin(realOrSelf(s.cwd), realOrSelf(path)) || s.command.includes(path)))) throw new ConflictError('A running service uses this workspace; move or stop it before closing');
         if (listSources(this.o.store.db, p.id).some(s => isWithin(realOrSelf(s.path), realOrSelf(path)))) throw new ConflictError('A project source uses this workspace; move it before closing');
+        if (runningChecks(this.o.store.db, p.id).some(c => typeof c.where === 'object' && 'thread_id' in c.where && c.where.thread_id === t.id && c.where.mode === 'workspace')) throw new ConflictError('A check is running in this workspace; wait for it or cancel it before closing');
       }
     };
     this.archiving.add(t.id);
@@ -1589,6 +1594,14 @@ export class Runtime {
   async restartService(serviceId: string, by: string): Promise<ServiceRow> {
     const s = this.requireService(serviceId);
     return this.startService(s.project_id, { name: s.name, command: s.command, cwd: s.cwd, ...(s.source_id ? { sourceId: s.source_id } : { threadId: s.agent_id }), by });
+  }
+
+  /** Takes a service that is not running off the project's list and deletes its log. */
+  async removeService(serviceId: string, by: string): Promise<void> {
+    const s = this.requireService(serviceId);
+    if (s.status === 'running' || this.serviceProcs.isRunning(s.id)) throw new ConflictError(`${s.name} is running; stop it first`);
+    this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.removed', payload: { service_id: s.id, by } });
+    await rm(this.serviceLogFile(s.project_id, s.id), { force: true }).catch((err) => this.reportError(err, `removing ${s.name}'s log`));
   }
 
   serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean } {

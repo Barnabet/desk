@@ -1,11 +1,11 @@
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, realpath, rm } from 'node:fs/promises';
 import { quoteLines, sanitizeLabel, type CheckWhere } from '@desk/protocol';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import type { EventStore } from '../events/store';
 import { newId } from '../ids';
 import { formatCheckLine, formatDuration, getCheck, gitState, receiptOf, runningChecks, type CheckRow, type ReceiptInput } from '../receipts/receipts';
 import { latestSubmission } from '../reviews/reviews';
-import { getAgent, getSource } from '../state/queries';
+import { getAgent, getSource, type AgentRow } from '../state/queries';
 import type { SandboxGuard } from '../tools/sandbox';
 import { discardStepWorktree, git } from '../workspaces/workspaces';
 import { CHECK_TAIL_LINES, CHECK_TIMEOUT_S, checkDirs, MAX_RUNNING_CHECKS, runCheckSteps, stepLog, tailText, type CheckResult } from './runner';
@@ -18,6 +18,12 @@ export type CheckDeps = {
   projectDir: (projectId: string) => string;
   sandboxEnabled: () => Promise<boolean>;
   guard: SandboxGuard;
+  /** The git dirs an agent's commands may not reconfigure (`SandboxSpec.gitDirs`); applied to checks that write. */
+  gitDirs: (agent: AgentRow) => string[];
+  /** Why a source folder can never be written by agents (`Runtime.unsafeSource`), or null. */
+  unsafeSource: (real: string) => string | null;
+  /** Whether a thread's workspace is being cleaned up or closed right now. */
+  inMaintenance: (agentId: string) => boolean;
   recordReceipt: (agentId: string, receipt: ReceiptInput) => void;
   /** Delivers a check's end to Desk (a `check` message) and wakes it. */
   notifyDesk: (deskId: string, text: string) => void;
@@ -25,7 +31,15 @@ export type CheckDeps = {
 };
 
 /** Where a check runs, resolved: its folder, what its steps may write, and how to read its git state. */
-type Place = { cwd: string; writable: string[]; head: string | null; state: () => Promise<{ head: string | null; dirty: boolean | null }>; snapshotOf?: string };
+type Place = {
+  cwd: string;
+  writable: string[];
+  head: string | null;
+  state: () => Promise<{ head: string | null; dirty: boolean | null }>;
+  snapshotOf?: string;
+  /** Set when the steps may change a thread's workspace or a source: the git dirs they still may not reconfigure. */
+  gitDirs?: string[];
+};
 
 const NO_GIT = async () => ({ head: null, dirty: null });
 const SHUTDOWN = 'Desk shut down while it ran';
@@ -58,7 +72,7 @@ export class CheckJobs {
     await mkdir(dirs.logs, { recursive: true });
     let place: Place;
     try {
-      place = await this.place(desk.project_id, input.where, dirs.work);
+      place = await this.place(desk, input.where, dirs.work);
     } catch (err) {
       await rm(dirs.root, { recursive: true, force: true });
       throw err;
@@ -78,9 +92,14 @@ export class CheckJobs {
     return getCheck(db, id)!;
   }
 
-  /** Resolves `where`: scratch, a clean snapshot at a thread's submitted commit, a thread's workspace or a source (both read-only). */
-  private async place(projectId: string, where: CheckWhere, work: string): Promise<Place> {
+  /**
+   * Resolves `where`: scratch, a clean snapshot at a thread's submitted commit, a thread's workspace or a source (both
+   * read-only unless `write`: then only a source that allows agents to write, or the workspace of a thread that is not
+   * working, with its repo's shared git dir as for the thread's own shell).
+   */
+  private async place(desk: AgentRow, where: CheckWhere, work: string): Promise<Place> {
     const db = this.d.store.db;
+    const projectId = desk.project_id;
     if (where === 'scratch') {
       await mkdir(work, { recursive: true });
       return { cwd: work, writable: [work], head: null, state: NO_GIT };
@@ -89,7 +108,11 @@ export class CheckJobs {
       const s = getSource(db, where.source_id);
       if (!s || s.project_id !== projectId) throw new NotFoundError(`Unknown source: ${where.source_id}`);
       const state = s.kind === 'git' ? () => gitState(s.path) : NO_GIT;
-      return { cwd: s.path, writable: [], head: (await state()).head, state };
+      if (!where.write) return { cwd: s.path, writable: [], head: (await state()).head, state };
+      if (!s.agent_write) throw new ConflictError(`Agents may not write to ${s.label}; the user turns it on in Settings → Sources.`);
+      const unsafe = this.d.unsafeSource(await realpath(s.path).catch(() => s.path));
+      if (unsafe) throw new ConflictError(`Checks cannot write to ${s.label}: it is ${unsafe}.`);
+      return { cwd: s.path, writable: [s.path], head: (await state()).head, state, gitDirs: this.d.gitDirs(desk) };
     }
     const t = getAgent(db, where.thread_id);
     if (!t || t.project_id !== projectId || t.role !== 'thread') throw new NotFoundError(`Unknown thread: ${where.thread_id}`);
@@ -98,7 +121,10 @@ export class CheckJobs {
       if (t.archived_at || !t.workspace_path) throw new ConflictError(`${name} has no workspace to check.`);
       const ws = t.workspace_path;
       const state = t.git_branch ? () => gitState(ws) : NO_GIT;
-      return { cwd: ws, writable: [], head: (await state()).head, state };
+      if (!where.write) return { cwd: ws, writable: [], head: (await state()).head, state };
+      if (t.status === 'running' || t.status === 'queued') throw new ConflictError(`${name} is working; message it to change its workspace, or wait until it stops.`);
+      if (this.d.inMaintenance(t.id)) throw new ConflictError(`${name}'s workspace is being cleaned up or closed.`);
+      return { cwd: ws, writable: [ws, ...(t.git_common_dir ? [t.git_common_dir] : [])], head: (await state()).head, state, gitDirs: this.d.gitDirs(t) };
     }
     const source = t.git_source_id ? getSource(db, t.git_source_id) : undefined;
     if (!source || !t.git_branch) throw new ValidationError(`${name} does not work in a git repository: check its workspace instead (mode "workspace").`);
@@ -122,7 +148,7 @@ export class CheckJobs {
         cwd: o.place.cwd,
         out: o.dirs.out,
         logs: o.dirs.logs,
-        sandbox: { enabled: await this.d.sandboxEnabled(), writable: [...o.place.writable, o.dirs.out], guard: this.d.guard },
+        sandbox: { enabled: await this.d.sandboxEnabled(), writable: [...o.place.writable, o.dirs.out], guard: this.d.guard, ...(o.place.gitDirs?.length ? { gitDirs: o.place.gitDirs } : {}) },
         timeoutMs: o.timeoutS * 1000,
         expect: o.expect,
         signal: o.controller.signal,
@@ -150,7 +176,7 @@ export class CheckJobs {
     } finally {
       // The working copy goes; out/ and logs/ stay for Desk to read.
       if (o.place.snapshotOf) await discardStepWorktree({ path: o.dirs.work, gitSourcePath: o.place.snapshotOf }).catch((err) => this.d.onError(err, `removing ${id}'s snapshot`));
-      else if (o.place.writable.includes(o.dirs.work)) await rm(o.dirs.work, { recursive: true, force: true }).catch(() => undefined);
+      else if (o.place.cwd === o.dirs.work) await rm(o.dirs.work, { recursive: true, force: true }).catch(() => undefined);
     }
     const reason = o.controller.signal.reason;
     const interrupted = reason === SHUTDOWN;

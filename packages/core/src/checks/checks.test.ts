@@ -139,6 +139,32 @@ describe('check jobs', () => {
     expect(await ended(ws.id)).toMatchObject({ status: 'passed' });
   });
 
+  it('changes a source or a finished thread’s workspace only with write, and only where agents may write', async () => {
+    const { projectId, desk } = await project();
+    const source = await repo();
+    const sourceId = await rt.addSource(projectId, source, 'repo');
+    const thread = await rt.spawnThread(desk.id, { title: 'Builder', brief: 'b', gitSourceId: sourceId });
+    await rt.whenIdle();
+    const ws = getAgent(h.store.db, thread)!.workspace_path!;
+    // A one-off cleanup Desk used to run as a "service": unlocking a thread's worktree so close_thread can remove it.
+    git(source, 'worktree', 'lock', ws);
+    const unlock = await rt.checks.start(desk.id, { title: 'Unlock', steps: ['git worktree unlock "$PWD"'], where: { thread_id: thread, mode: 'workspace', write: true }, expect: [] });
+    expect(await ended(unlock.id)).toMatchObject({ status: 'passed' });
+    expect(git(source, 'worktree', 'list', '--porcelain')).not.toContain('locked');
+
+    const clean = await rt.checks.start(desk.id, { title: 'Clean', steps: ['echo stale > stale.txt', 'rm stale.txt README.md'], where: { source_id: sourceId, write: true }, expect: [] });
+    expect(clean.cwd).toBe(source);
+    expect(await ended(clean.id)).toMatchObject({ status: 'passed' });
+    expect(existsSync(join(source, 'README.md'))).toBe(false);
+    // The source is never removed with the check's working copy.
+    expect(existsSync(source)).toBe(true);
+
+    rt.setSourceWrite(projectId, sourceId, false);
+    await expect(rt.checks.start(desk.id, { title: 'No', steps: ['true'], where: { source_id: sourceId, write: true }, expect: [] })).rejects.toThrow(/may not write to repo/);
+    // Read-only checks still run there.
+    expect(await ended((await rt.checks.start(desk.id, { title: 'Read', steps: ['git status'], where: { source_id: sourceId }, expect: [] })).id)).toMatchObject({ status: 'passed' });
+  });
+
   it('allows three running checks per project, cancels, and is Desk’s only', async () => {
     const { projectId, desk } = await project();
     const ids: string[] = [];

@@ -377,6 +377,8 @@ export const EventBody = z.discriminatedUnion('type', [
   /** The process ended on its own. */
   event('service.exited', z.object({ service_id: z.string(), code: z.number().int().nullable(), signal: z.string().nullable() })),
   event('service.stopped', z.object({ service_id: z.string(), by: ServiceActor, reason: ServiceStopReason })),
+  /** A service that is not running was taken off the project's list (its log goes too). */
+  event('service.removed', z.object({ service_id: z.string(), by: ServiceActor })),
   event(
     'context.compacted',
     z.object({

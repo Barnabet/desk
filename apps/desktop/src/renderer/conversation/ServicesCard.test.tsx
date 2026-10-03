@@ -84,6 +84,14 @@ describe('ServicesCard', () => {
     expect(bridge.calls.find((c) => c.channel === 'app.openExternal')?.input).toEqual({ url: 'http://localhost:5173/' });
   });
 
+  it('removes a service that is not running, and offers no Remove while one runs', async () => {
+    const bridge = installBridge({ 'services.remove': () => ({ ok: true }) });
+    render(<ServicesCard project={state([svc({}), svc({ id: 's2', name: 'w6-unlock', status: 'exited', exit_code: 0, url: null, ended_at: '2026-09-24T20:28:00Z' })])} />);
+    expect(within(screen.getByRole('listitem', { name: /^web, running/ })).queryByRole('button', { name: /^Remove/ })).toBeNull();
+    fireEvent.click(within(screen.getByRole('listitem', { name: /^w6-unlock, exited/ })).getByRole('button', { name: 'Remove w6-unlock' }));
+    await waitFor(() => expect(bridge.calls.find((c) => c.channel === 'services.remove')?.input).toEqual({ id: 's2' }));
+  });
+
   it('shows the log tail as plain text in a sheet', async () => {
     const bridge = installBridge({ 'services.logs': () => ({ text: '<b>not html</b>\n  ➜  Local: http://localhost:5173/', truncated: false }) });
     render(<ServicesCard project={state([svc({})])} />);

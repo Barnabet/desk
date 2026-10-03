@@ -81,6 +81,7 @@ export const channels = {
   'services.start': z.object({ id }),
   'services.stop': z.object({ id }),
   'services.restart': z.object({ id }),
+  'services.remove': z.object({ id }),
   'threads.files': z.object({ id, path: z.string().max(4096).optional() }),
   'threads.file': z.object({ id, path: relPath }),
 
