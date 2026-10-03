@@ -1,6 +1,6 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 // Type-only import: erased at runtime, so drizzle-kit can still load this file standalone.
-import type { AutomationDefinition, AutomationLayout, Grant, InputValue, Outputs, PlanItem, ProjectSettings, ReasoningEffort, RequirementCheck, StepGate, StepQuestion } from '@desk/protocol';
+import type { AutomationDefinition, AutomationLayout, CheckWhere, Grant, InputValue, Outputs, PlanItem, ProjectSettings, ReasoningEffort, RequirementCheck, StepGate, StepQuestion } from '@desk/protocol';
 
 export const events = sqliteTable(
   'events',
@@ -358,4 +358,71 @@ export const findings = sqliteTable(
     resolved_at: text('resolved_at'),
   },
   (t) => [index('findings_builder_idx').on(t.builder_id, t.state)],
+);
+
+/** Shell commands the platform ran and saw end (spec 2026-10-03 §1). */
+export const receipts = sqliteTable(
+  'receipts',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    agent_id: text('agent_id').notNull(),
+    tool: text('tool').notNull(),
+    tool_call_id: text('tool_call_id'),
+    check_id: text('check_id'),
+    step: integer('step'),
+    command: text('command').notNull(),
+    cwd: text('cwd').notNull(),
+    head: text('head'),
+    dirty: integer('dirty', { mode: 'boolean' }),
+    exit_code: integer('exit_code'),
+    outcome: text('outcome', { enum: ['exit', 'timeout', 'aborted', 'killed'] }).notNull(),
+    duration_ms: integer('duration_ms').notNull(),
+    output_bytes: integer('output_bytes').notNull(),
+    output_sha256: text('output_sha256').notNull(),
+    started_at: text('started_at').notNull(),
+    finished_at: text('finished_at').notNull(),
+  },
+  (t) => [index('receipts_agent_idx').on(t.agent_id, t.finished_at), index('receipts_head_idx').on(t.project_id, t.head), index('receipts_check_idx').on(t.check_id)],
+);
+
+/** Desk's check jobs (spec 2026-10-03 §2). */
+export const checks = sqliteTable(
+  'checks',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    agent_id: text('agent_id').notNull(),
+    title: text('title').notNull(),
+    steps: text('steps', { mode: 'json' }).$type<string[]>().notNull(),
+    where: text('where', { mode: 'json' }).$type<CheckWhere>().notNull(),
+    expect: text('expect', { mode: 'json' }).$type<string[]>().notNull(),
+    timeout_s: integer('timeout_s').notNull(),
+    cwd: text('cwd').notNull(),
+    head: text('head'),
+    status: text('status', { enum: ['running', 'passed', 'failed', 'timed_out', 'cancelled', 'interrupted'] }).notNull(),
+    failed_step: integer('failed_step'),
+    reason: text('reason'),
+    duration_ms: integer('duration_ms'),
+    started_at: text('started_at').notNull(),
+    finished_at: text('finished_at'),
+  },
+  (t) => [index('checks_project_idx').on(t.project_id, t.status)],
+);
+
+/** Desk's one-shot watches on a thread's messages to other threads (spec 2026-10-03 §3). */
+export const watches = sqliteTable(
+  'watches',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull(),
+    desk_id: text('desk_id').notNull(),
+    thread_id: text('thread_id').notNull(),
+    match: text('match'),
+    state: text('state', { enum: ['open', 'fired', 'cancelled', 'thread_finished'] }).notNull(),
+    message_id: integer('message_id'),
+    created_at: text('created_at').notNull(),
+    ended_at: text('ended_at'),
+  },
+  (t) => [index('watches_open_idx').on(t.project_id, t.state)],
 );

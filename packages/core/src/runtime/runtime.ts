@@ -117,6 +117,9 @@ import {
   reviewBrief,
   reviewsOfBuilder,
 } from '../reviews/reviews';
+import type { ReceiptInput } from '../receipts/receipts';
+import { CheckJobs } from '../checks/service';
+import { ThreadWatches } from '../watches/watches';
 
 export type RuntimeOptions = {
   store: EventStore;
@@ -227,6 +230,10 @@ export class Runtime {
   readonly automations: Automations;
   /** Runs automations (spec §3). */
   readonly engine: AutomationEngine;
+  /** Desk's check jobs (spec 2026-10-03 §2). */
+  readonly checks: CheckJobs;
+  /** Desk's watches on threads' messages (spec 2026-10-03 §3). */
+  readonly watches: ThreadWatches;
   private readonly proxy: ProxyGate | undefined;
   /** Bytes of images per request, by model, lowered after an endpoint refused a request as too large (until restart). */
   private readonly imageBudgets = new Map<string, number>();
@@ -330,10 +337,30 @@ export class Runtime {
         threadModel: (projectId) => getProject(this.o.store.db, projectId)?.settings.thread_model ?? DEFAULT_MODEL_ID,
       },
     });
+    this.checks = new CheckJobs({
+      store: o.store,
+      projectDir: (projectId) => this.projectDir(projectId),
+      sandboxEnabled: () => this.sandboxAvailable(),
+      guard: this.guard,
+      recordReceipt: (agentId, receipt) => this.recordReceipt(agentId, receipt),
+      notifyDesk: (deskId, text) => {
+        const desk = this.requireAgent(deskId);
+        this.o.store.append({ project_id: desk.project_id, agent_id: desk.id, type: 'message.agent', payload: { from_agent_id: desk.id, from_label: 'Check', kind: 'check', text } });
+        this.wake(desk.id);
+      },
+      onError: (err, ctx) => this.reportError(err, ctx),
+    });
+    this.watches = new ThreadWatches({
+      store: o.store,
+      noteToDesk: (projectId, text) => this.runtimeNoteToDesk(projectId, text),
+      onError: (err, ctx) => this.reportError(err, ctx),
+    });
     this.services = {
       store: o.store,
       automations: this.automations,
       engine: this.engine,
+      checks: this.checks,
+      watches: this.watches,
       skills: this.skills,
       attachments: this.attachments,
       agentModel: (agentId, model) => {
@@ -353,6 +380,7 @@ export class Runtime {
       messages: (projectId) => this.messages(projectId),
       spawnThread: (parentId, input) => this.spawnThread(parentId, input),
       requestReview: (input) => this.requestReview(input),
+      recordReceipt: (agentId, receipt) => this.recordReceipt(agentId, receipt),
       acceptSubmission: (input) => this.acceptSubmission(input),
       heldByPause: (agentId) => this.heldByPause(agentId),
       stopAgent: (agentId, opts) => this.stopAgent(agentId, opts),
@@ -698,6 +726,7 @@ export class Runtime {
       if (!TERMINAL.has(agent.status) || this.scheduler.isActive(agent.id)) this.stopAgent(agent.id, { by: agent.id, reason: 'Project archived' });
     }
     this.stopServicesOf(projectId, 'project_archived').catch((err) => this.reportError(err, `stopping services of ${projectId}`));
+    this.checks.cancelProject(projectId);
   }
 
   /** Validates model ids, and reasoning levels against the model they apply to, then applies a settings patch. */
@@ -997,7 +1026,7 @@ export class Runtime {
         open.length
           ? `Open findings (mark the ones this submission fixes with resolve_finding; leave the others open):\n${open.map(formatFindingLine).join('\n')}`
           : 'There are no open findings.',
-        builderReport(t, sub),
+        builderReport(db, t, sub),
         'Check the fixes yourself, raise any new problems, then call submit_assessment once with your final review.',
       ]
         .filter(Boolean)
@@ -1147,7 +1176,18 @@ export class Runtime {
     return !!r && !r.archived_at && r.status !== 'cancelled' && r.status !== 'failed';
   }
 
-  /** A line from the runtime to the project's Desk (the user acted on reviews): read at its next run, which this starts. */
+  /** Records a command's receipt (spec 2026-10-03 §1). A background job can end after its agent or the daemon is gone. */
+  recordReceipt(agentId: string, receipt: ReceiptInput): void {
+    try {
+      const a = getAgent(this.o.store.db, agentId);
+      if (!a) return;
+      this.o.store.append({ project_id: a.project_id, agent_id: a.id, type: 'receipt.recorded', payload: { receipt_id: newId(), ...receipt } });
+    } catch (err) {
+      this.reportError(err, `receipt of ${agentId}`);
+    }
+  }
+
+  /** A line from the runtime to the project's Desk (the user acted on reviews, a watch fired): read at its next run, which this starts. */
   private runtimeNoteToDesk(projectId: string, text: string): void {
     const desk = getDeskAgent(this.o.store.db, projectId);
     if (!desk) return;
@@ -1811,6 +1851,7 @@ export class Runtime {
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     await this.workspaceCleanup;
+    await this.checks.shutdown();
     await this.engine.shutdown();
     this.scheduler.stopAll(SHUTDOWN_REASON);
     const resolutions = [...this.resolutions];
@@ -1820,6 +1861,7 @@ export class Runtime {
       this.o.store.append({ project_id: s.project_id, agent_id: null, type: 'service.stopped', payload: { service_id: s.id, by: 'system', reason: 'daemon_shutdown' } });
     }
     await Promise.all([this.serviceProcs.stopAll(), this.scheduler.whenIdle(), ...resolutions.map((r) => r.recorded)]);
+    this.watches.close();
     this.proxy?.close();
   }
 
@@ -1850,6 +1892,8 @@ export class Runtime {
     for (const agent of listLiveAgents(this.o.store.db)) {
       if (this.repairCrashedRun(agent)) repaired(agent.project_id);
     }
+    // Checks cut off by the crash: recorded interrupted (never re-run); their notices wake Desk below.
+    this.checks.recover();
     for (const [projectId, count] of repairedByProject) {
       this.o.store.append({
         project_id: projectId,
@@ -2330,8 +2374,14 @@ export class Runtime {
       const prev = link ? lastSucceededRun(db, link.run.automation_id) : undefined;
       if (prev && prev.id !== agent.automation_run_id) own.push(runDir(this.o.dataDir, prev.id), ...descendantRunDirs(db, this.o.dataDir, prev.id));
     }
-    // Desk reads its project's automation runs: report folders and Tell Desk attachments (spec §6.1).
-    if (agent.role === 'desk') own.push(...runIdsOfProject(this.o.store.db, agent.project_id).map((id) => runDir(this.o.dataDir, id)));
+    // Desk reads its project's automation runs: report folders and Tell Desk attachments (spec §6.1),
+    // and its check jobs' output folders and logs (spec 2026-10-03 §2).
+    if (agent.role === 'desk') own.push(...runIdsOfProject(this.o.store.db, agent.project_id).map((id) => runDir(this.o.dataDir, id)), join(this.projectDir(agent.project_id), 'checks'));
+    // A thread reads its Desk's workspace, where Desk shares what it prepared (spec 2026-10-03 §4); writes stay its own.
+    if (agent.role === 'thread') {
+      const desk = getDeskAgent(this.o.store.db, agent.project_id);
+      if (desk?.workspace_path) own.push(desk.workspace_path);
+    }
     return [...own, ...roots, this.libraryDir(agent.project_id), ...this.skills.roots(agent.project_id)];
   }
 

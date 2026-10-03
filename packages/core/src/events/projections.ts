@@ -11,15 +11,18 @@ import {
   automationStepRuns,
   automationVersions,
   builtinSkillSettings,
+  checks,
   findings,
   memory,
   plans,
   projects,
+  receipts,
   reviews,
   services,
   sources,
   submissions,
   usageTotals,
+  watches,
 } from '../db/schema';
 
 function requireAgentId(ev: StoredEvent): string {
@@ -252,6 +255,71 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
     }
     case 'agent.skills_changed':
       tx.update(agents).set({ active_skills: ev.payload.skills, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();
+      return;
+    case 'receipt.recorded': {
+      const p = ev.payload;
+      tx.insert(receipts)
+        .values({
+          id: p.receipt_id,
+          project_id: ev.project_id,
+          agent_id: requireAgentId(ev),
+          tool: p.tool,
+          tool_call_id: p.tool_call_id ?? null,
+          check_id: p.check_id ?? null,
+          step: p.step ?? null,
+          command: p.command,
+          cwd: p.cwd,
+          head: p.head,
+          dirty: p.dirty,
+          exit_code: p.exit_code,
+          outcome: p.outcome,
+          duration_ms: p.duration_ms,
+          output_bytes: p.output_bytes,
+          output_sha256: p.output_sha256,
+          started_at: p.started_at,
+          finished_at: ev.ts,
+        })
+        .run();
+      return;
+    }
+    case 'check.started': {
+      const p = ev.payload;
+      tx.insert(checks)
+        .values({
+          id: p.check_id,
+          project_id: ev.project_id,
+          agent_id: requireAgentId(ev),
+          title: p.title,
+          steps: p.steps,
+          where: p.where,
+          expect: p.expect,
+          timeout_s: p.timeout_s,
+          cwd: p.cwd,
+          head: p.head,
+          status: 'running',
+          started_at: ev.ts,
+        })
+        .run();
+      return;
+    }
+    case 'check.finished': {
+      const p = ev.payload;
+      tx.update(checks)
+        .set({ status: p.status, failed_step: p.failed_step, reason: p.reason, duration_ms: p.duration_ms, finished_at: ev.ts })
+        .where(and(eq(checks.id, p.check_id), eq(checks.status, 'running')))
+        .run();
+      return;
+    }
+    case 'watch.set':
+      tx.insert(watches)
+        .values({ id: ev.payload.watch_id, project_id: ev.project_id, desk_id: requireAgentId(ev), thread_id: ev.payload.thread_id, match: ev.payload.match ?? null, state: 'open', created_at: ev.ts })
+        .run();
+      return;
+    case 'watch.ended':
+      tx.update(watches)
+        .set({ state: ev.payload.reason, message_id: ev.payload.message_id ?? null, ended_at: ev.ts })
+        .where(and(eq(watches.id, ev.payload.watch_id), eq(watches.state, 'open')))
+        .run();
       return;
     case 'agent.archived':
       tx.update(agents).set({ archived_at: ev.ts, updated_at: ev.ts }).where(eq(agents.id, requireAgentId(ev))).run();

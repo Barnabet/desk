@@ -1,9 +1,10 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { runProcess } from './process';
+import { gitState, receiptOf } from '../receipts/receipts';
+import { runProcess, type ProcessResult } from './process';
 import { shellInvocation } from './sandbox';
-import { defineTool } from './types';
+import { defineTool, type ToolContext } from './types';
 
 export const SAFE_ENV_KEYS = ['PATH', 'HOME', 'LANG', 'TERM', 'TMPDIR', 'USER', 'SHELL'] as const;
 
@@ -30,6 +31,21 @@ export function withSkillEnv(env: NodeJS.ProcessEnv, e: { bins: string[]; vars: 
   return { ...env, ...e.vars, PATH: [...e.bins, env.PATH ?? '/usr/bin:/bin'].join(':') };
 }
 
+/** The git state of a tool's working folder: read only in a git workspace (a scratch one has none). */
+export const workspaceGitState = (ctx: ToolContext) => (ctx.git ? gitState(ctx.workspace) : Promise.resolve({ head: null, dirty: null }));
+
+/** Runs a command and records its receipt (spec 2026-10-03 §1): where it ran, how it ended, a hash of its output. */
+export async function recordedRun(ctx: ToolContext, tool: string, command: string, run: () => Promise<ProcessResult>): Promise<ProcessResult> {
+  const state = await workspaceGitState(ctx);
+  const startedAt = Date.now();
+  const r = await run();
+  ctx.services.recordReceipt(
+    ctx.agentId,
+    receiptOf({ tool, command, cwd: ctx.workspace, state, startedAt, exitCode: r.exitCode, timedOut: r.timedOut, aborted: r.aborted, output: r.output, toolCallId: ctx.toolCallId }),
+  );
+  return r;
+}
+
 export const bashTool = defineTool({
   name: 'bash',
   description:
@@ -40,13 +56,15 @@ export const bashTool = defineTool({
   }),
   gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command, timeout_s }, ctx) {
-    const r = await runProcess({
-      ...shellInvocation(command, ctx.sandbox),
-      cwd: ctx.workspace,
-      env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
-      timeoutMs: timeout_s * 1000,
-      signal: ctx.signal,
-    });
+    const r = await recordedRun(ctx, 'bash', command, () =>
+      runProcess({
+        ...shellInvocation(command, ctx.sandbox),
+        cwd: ctx.workspace,
+        env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
+        timeoutMs: timeout_s * 1000,
+        signal: ctx.signal,
+      }),
+    );
     const status = r.aborted ? 'aborted' : r.timedOut ? `timed out after ${timeout_s}s` : `exit code ${r.exitCode}`;
     return `[${status}]\n${r.output}`;
   },
@@ -62,13 +80,15 @@ export const bashReadonlyTool = defineTool({
   }),
   gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command, timeout_s }, ctx) {
-    const r = await runProcess({
-      ...shellInvocation(command, { ...ctx.sandbox, writable: [] }),
-      cwd: ctx.workspace,
-      env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
-      timeoutMs: timeout_s * 1000,
-      signal: ctx.signal,
-    });
+    const r = await recordedRun(ctx, 'bash_readonly', command, () =>
+      runProcess({
+        ...shellInvocation(command, { ...ctx.sandbox, writable: [] }),
+        cwd: ctx.workspace,
+        env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
+        timeoutMs: timeout_s * 1000,
+        signal: ctx.signal,
+      }),
+    );
     const status = r.aborted ? 'aborted' : r.timedOut ? `timed out after ${timeout_s}s` : `exit code ${r.exitCode}`;
     return `[${status}]\n${r.output}`;
   },

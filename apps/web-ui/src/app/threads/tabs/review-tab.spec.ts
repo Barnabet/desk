@@ -23,6 +23,11 @@ describe('ReviewTab', () => {
     expect(screen.getByText('Not checked: Currencies other than EUR')).toBeTruthy();
     expect(screen.getByText('Superseded')).toBeTruthy();
     expect(screen.getByText('Waived by Desk: Cosmetic')).toBeTruthy();
+    const ran = screen.getByRole('list', { name: 'Commands run on submission 2' });
+    expect(within(ran).getByText('exit 0').className).toBe('met-yes');
+    expect(ran.textContent).toContain('pytest -q');
+    expect(ran.textContent).toContain('4.2 s');
+    expect(screen.getByText('Desk saw no commands run on this commit with no uncommitted changes.')).toBeTruthy();
     expect(bridge.calls).toEqual([{ channel: 'threads.review', input: { id: 't' } }]);
   });
 

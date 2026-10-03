@@ -5,6 +5,7 @@ import { quoteLines, snippet, type Acceptance, type ModelInfo, type ProjectSetti
 import type { Db } from '../db/open';
 import { findings, reviews, submissions } from '../db/schema';
 import type { AgentRow } from '../state/queries';
+import { formatReceiptLine, receiptsOnCommit, type ReceiptRow } from '../receipts/receipts';
 
 export type SubmissionRow = typeof submissions.$inferSelect;
 export type ReviewRow = typeof reviews.$inferSelect;
@@ -85,8 +86,23 @@ export function formatSubmissionLine(s: SubmissionRow): string {
   return `Submission ${s.seq} (${s.id}): ${parts.join(', ')}`;
 }
 
-/** The builder's own report, quoted: what a reviewer is shown once it has formed its view. */
-export function builderReport(t: AgentRow, s: SubmissionRow): string {
+/** Commands the builder ran on a submission's commit with no uncommitted changes, newest first (spec 2026-10-03 §1). */
+export const submissionReceipts = (db: Db, s: SubmissionRow): ReceiptRow[] => (s.commit ? receiptsOnCommit(db, s.thread_id, s.commit) : []);
+
+/**
+ * What the platform saw the builder run on a submission's commit, as lines: recorded by deskd, so it sits next to the
+ * builder's own account of how it verified. Empty without a commit.
+ */
+export function receiptLines(db: Db, s: SubmissionRow): string[] {
+  if (!s.commit) return [];
+  const rows = submissionReceipts(db, s);
+  return rows.length
+    ? [`Commands Desk recorded on commit ${s.commit.slice(0, 10)} with no uncommitted changes (newest first):`, ...rows.map((r) => formatReceiptLine(r))]
+    : [`Commands Desk recorded on commit ${s.commit.slice(0, 10)} with no uncommitted changes: none.`];
+}
+
+/** The builder's own report, quoted, then the commands Desk recorded on its commit: what a reviewer is shown once it has formed its view. */
+export function builderReport(db: Db, t: AgentRow, s: SubmissionRow): string {
   const list = (label: string, items: string[]) => (items.length ? `${label}:\n${quoteLines(items.map((i) => `- ${i}`).join('\n'))}` : `${label}: (none given)`);
   return [
     `The builder's report on submission ${s.seq}, in its own words:`,
@@ -94,6 +110,7 @@ export function builderReport(t: AgentRow, s: SubmissionRow): string {
     list('Requirements it says it met', s.claims),
     list('Limitations it reported', s.limitations),
     `How it says it verified:\n${quoteLines(s.evidence || '(not said)')}`,
+    ...receiptLines(db, s),
   ].join('\n');
 }
 
@@ -153,6 +170,7 @@ export function reviewSummary(db: Db, t: AgentRow): string | undefined {
   return [
     `Acceptance: ${t.acceptance.replace(/_/g, ' ')}`,
     `Latest ${formatSubmissionLine(sub)}`,
+    ...receiptLines(db, sub),
     ...reviewsOf.map((r) => `- review ${r.id} by thread ${r.reviewer_id} of submission ${getSubmission(db, r.submission_id)?.seq ?? '?'}: ${r.phase === 'final' ? (r.verdict ?? '').replace(/_/g, ' ') : 'in progress'}`),
     ...(open.length ? ['Open findings:', ...open.map(formatFindingLine)] : []),
   ].join('\n');
@@ -170,16 +188,20 @@ export interface ThreadReview {
   findings: FindingRow[];
   /** For a reviewer thread: the review it is doing (or last did), with the reviewed submission's number. */
   reviewing: (ReviewRow & { submission_seq: number | null }) | null;
+  /** By submission id: the commands Desk recorded on its commit with no uncommitted changes, newest first. */
+  receipts: Record<string, ReceiptRow[]>;
 }
 
 export function threadReview(db: Db, t: AgentRow): ThreadReview {
   const reviewing = t.reviews_submission_id ? currentReviewOf(db, t.id) : undefined;
+  const subs = listSubmissions(db, t.id);
   return {
     acceptance: t.acceptance,
     accepted_submission_id: t.accepted_submission_id,
-    submissions: listSubmissions(db, t.id),
+    submissions: subs,
     reviews: reviewsOfBuilder(db, t.id),
     findings: findingsOfBuilder(db, t.id),
     reviewing: reviewing ? { ...reviewing, submission_seq: getSubmission(db, reviewing.submission_id)?.seq ?? null } : null,
+    receipts: Object.fromEntries(subs.map((s) => [s.id, submissionReceipts(db, s)])),
   };
 }

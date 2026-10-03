@@ -33,8 +33,8 @@ export type Trigger = 'user' | 'queued' | 'lifecycle' | 'agent' | 'automation';
 /** Nothing; a full run; or an answer run for one question, which never changes the agent's status (design spec §4). */
 export type Wake = { kind: 'none' } | { kind: 'run'; trigger: Trigger } | { kind: 'answer'; question: number; trigger: Trigger };
 
-/** Runtime notices about threads, a thread's start, and the runtime's What's up reminder to Desk. */
-export const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(['start', 'completed', 'failed', 'cancelled', 'approval', 'stalled', 'reminder', 'automation']);
+/** Runtime notices about threads, a thread's start, the runtime's What's up reminder to Desk, and its check jobs' ends. */
+export const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(['start', 'completed', 'failed', 'cancelled', 'approval', 'stalled', 'reminder', 'automation', 'check']);
 
 /** Statuses a thread answers from without reopening: the user's Ask to it gets an answer run instead of a run. */
 const ANSWERS_FROM: ReadonlySet<AgentStatus> = new Set<AgentStatus>(['idle', 'done', 'failed']);

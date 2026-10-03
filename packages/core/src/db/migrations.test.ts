@@ -43,7 +43,8 @@ function seedStaleDeskModel(file: string): void {
 }
 
 it('repairs previously changed Desk models when an existing database is opened', async () => {
-  const legacy = await legacyMigrations((entries) => entries.filter((e) => e.tag !== '0008_desk_model'));
+  // What a build from before the fix shipped: migrations up to 0007.
+  const legacy = await legacyMigrations((entries) => entries.filter((e) => e.idx < 8));
   const file = join(dir, 'desk.db');
   let opened: ReturnType<typeof openDb> | undefined = openDb(file, { migrationsFolder: legacy });
   try {

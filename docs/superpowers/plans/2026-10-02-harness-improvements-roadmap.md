@@ -1,6 +1,6 @@
 # Harness improvements · Roadmap
 
-**Status:** A1 (resume) shipped with this roadmap. Phase B (submissions, reviews, acceptance) shipped with Plan 23. Every other item gets its own spec and numbered plan before any code.
+**Status:** A1 (resume) shipped with this roadmap. Phase B (submissions, reviews, acceptance) shipped with Plan 23. C1 (receipts), C2 (check jobs, Desk only), D2 (watch a thread) and D3 (read-only scratch, Desk's workspace only) shipped with Plan 24. Every other item gets its own spec and numbered plan before any code.
 
 **Source:** feedback from two of Desk's own coordinators (GPT-6 Astra, then Claude Fable 5.1) after a long financial-checker project, pasted by Louis on 2026-10-02. Their shared conclusion: threads build well but certify their own work badly, and the coordinator pays for every independent check with its own context. Desk should make "I produced it", "I checked it" and "it is accepted" three separate, recorded facts.
 

@@ -8,7 +8,8 @@ import type { SkillStore } from '../skills/store';
 import { quoteLines, sanitizeLabel, snippet, traffic, type AgentStep, type AutomationDefinition, type MessagesState, type MessageView, type Outputs, type SkillScope } from '@desk/protocol';
 import { listAutomations, type AutomationRunRow } from '../automations/queries';
 import { automationSummary } from '../automations/views';
-import { listApprovals, listServices, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
+import { getDeskAgent, listApprovals, listServices, listSources, listThreads, type AgentRow, type ProjectRow } from '../state/queries';
+import { openWatches } from '../watches/watches';
 import { formatSkillLine, renderSkill } from '../tools/skills';
 
 export type PromptContext = {
@@ -233,8 +234,9 @@ export function deskSystemPrompt(ctx: PromptContext): string {
       [
         '1. Scope — understand the request using the goal, memory, library and sources (read-only tools). Ask the user (ask_user) only when you are genuinely blocked; otherwise make reasonable assumptions and state them.',
         "2. Plan & dispatch — keep the plan current with update_plan. Delegate work to threads with spawn_thread. Each brief must stand alone: objective, relevant context and file paths, constraints, definition of done, and what to return. Split independent work into parallel threads. Threads see each other's titles and briefs and can message each other, so title each thread by what it owns and put contracts shared between threads (API shapes, file ownership, names) in every brief concerned. Route follow-up work to a thread that is still working (message_thread note) instead of spawning duplicates. A finished thread's result is final: to learn more about its work, send it a question (it answers from its context without reopening); if the work fell short of its brief, send a revision; if its run failed (an error, not its judgement), send a resume, which continues it where it left off without spending a review round; for new work that builds on it, spawn a new thread whose brief points at its result or branch. Pass git_source_id for work on a repository.",
-        '3. Supervise — thread questions, blockers, approvals and completions arrive as [message #id from thread "…" — kind] blocks, the thread\'s words quoted with "> ". A thread that asked you something is usually waiting: answer it with message_thread (your next message to that thread is recorded as the answer). Threads never see your plain text; only the user does. Answer from your knowledge and memory when you can; escalate to the user only when you cannot. Redirect stalled or drifting threads. Threads also message each other, and the user may write to a thread directly; you are not woken for either, and the latest of those messages are listed under Thread traffic. Step in only when threads disagree, duplicate work, or decide something that affects the plan or another thread. When the user wrote to a thread, take it as the user\'s wish for that thread and keep the plan in line with it.',
+        '3. Supervise — thread questions, blockers, approvals and completions arrive as [message #id from thread "…" — kind] blocks, the thread\'s words quoted with "> ". A thread that asked you something is usually waiting: answer it with message_thread (your next message to that thread is recorded as the answer). Threads never see your plain text; only the user does. Answer from your knowledge and memory when you can; escalate to the user only when you cannot. Redirect stalled or drifting threads. Threads also message each other, and the user may write to a thread directly; you are not woken for either, and the latest of those messages are listed under Thread traffic. Step in only when threads disagree, duplicate work, or decide something that affects the plan or another thread. When the user wrote to a thread, take it as the user\'s wish for that thread and keep the plan in line with it. To be woken the next time a thread messages another thread (a handoff you depend on, an interface change), use watch_thread instead of polling: it fires once.',
         `4. Review — when a thread completes, check its result against the brief (read_thread, library_read, review_diff for code). A completion is the thread's own claim, and a passing test count is not acceptance: for work whose correctness matters (code others build on, numbers people act on, anything the user will rely on), have it reviewed independently (request_review, with explicit criteria) instead of trusting its summary. Record your decision against the submission with accept_submission: accepted, accepted with limitations (say what is not established), or changes requested (at most ${s.review_rounds} rounds per thread; a plain message_thread kind "revision" also works). At the round limit, change the approach (a new thread with a simpler plan), accept with limitations, or report the blocker to the user. In reports, list accepted and not-accepted work separately. To see a document, page, slide, sheet, video frame or image, render it with its file skill and look at it with view_image.`,
+        "4a. Evidence — Desk records every command agents run (list_receipts): before trusting \"tests pass\", see whether the platform saw them run on the submitted commit, and how they ended. To check something yourself without a thread, use run_check: a few commands run in the background (on a clean snapshot of a thread's submitted commit, its workspace, a source, or an empty folder) and you get a Check message when they end. Prefer it over spawning a thread just to run tests or rebuild an output, and carry on meanwhile.",
         '5. Assemble & report — combine accepted results into what the user asked for; draft combined documents in your workspace and publish them with library_publish. Send a report with the outcome. For code, list the branches/PRs and the order to merge them, and describe any conflicts. You never merge branches yourself.',
         '6. Retire finished work — you MUST use close_thread once a completed thread\'s result is accepted (with accept_submission when it was reviewed; a reviewer thread once the work it reviewed is decided) and no review, questions, revisions, running service or other task needs its workspace. Inspect with close_thread first. Publish or move all required documents, evidence and outputs to permanent storage; install needed skill drafts; commit code to a retained branch. Then call close_thread with discard_workspace: true and explain where the required work is preserved. This deletes all remaining workspace files and archives the thread, keeping conversation history and external Git branches. Do not keep fully finished threads around indefinitely. Do not close based solely on another thread\'s claim; verify acceptance and downstream needs yourself. Closing does not end your own turn.',
         '6a. Curate memory — record durable decisions, facts, preferences and contacts with memory_write; supersede outdated entries instead of contradicting them.',
@@ -273,7 +275,7 @@ export function deskSystemPrompt(ctx: PromptContext): string {
     '',
     section("What's up", whatsUpLine(latestWhatsUp(db, agent.id))),
     '',
-    section('Threads', threads.map(formatThreadLine).join('\n')),
+    section('Threads', threadLines(db, project.id, threads)),
     ...trafficSection(ctx.messages),
     '',
     section(
@@ -297,8 +299,23 @@ export function deskSystemPrompt(ctx: PromptContext): string {
     librarySection(db, project.id, libraryDir, agent.id),
     ...skillsSections(ctx),
     '',
-    section('Your workspace', `${agent.workspace_path} — scratch space for drafting combined documents before publishing them.`),
+    section(
+      'Your workspace',
+      `${agent.workspace_path} — scratch space for drafting combined documents before publishing them. Threads can read it (not write it): put files you prepare for threads (inputs, fixtures, extracted data) in ${agent.workspace_path}/shared/ and give the path in the brief, so they do not redo the work.`,
+    ),
   ].join('\n');
+}
+
+/** Desk's thread list, marking the threads it watches (watch_thread). */
+function threadLines(db: Db, projectId: string, threads: AgentRow[]): string {
+  const watched = new Map(openWatches(db, projectId).map((w) => [w.thread_id, w]));
+  return threads.map((t) => formatThreadLine(t, watched.get(t.id))).join('\n');
+}
+
+/** A thread may read its Desk's workspace (shared scratch, spec 2026-10-03 §4). */
+function deskShareLine(db: Db, agent: AgentRow): string[] {
+  const desk = agent.role === 'thread' ? getDeskAgent(db, agent.project_id) : undefined;
+  return desk?.workspace_path ? [`${desk.workspace_path} — Desk's workspace, which you can read but not write: Desk puts files it prepared for threads in its shared/ folder.`] : [];
 }
 
 export function threadSystemPrompt(ctx: PromptContext): string {
@@ -323,6 +340,7 @@ export function threadSystemPrompt(ctx: PromptContext): string {
       'Workspace',
       [
         `${agent.workspace_path} — your own directory; do your work here.`,
+        ...deskShareLine(db, agent),
         'Completed tasks keep their source and outputs, but dependencies and tool caches may be cleaned after 24 hours of inactivity. Keep dependency manifests and lockfiles; reinstall missing dependencies when resuming work. Publish deliverables to the library and commit code before requesting workspace removal.',
         ...gitLines,
         'Sources marked writable below are the user\'s real project folders: you may also write there and run the project\'s own tools and services against its real data (e.g. enqueue into a local tool, start its server). Make code changes in your workspace (your branch), not in the user\'s checkout, unless your brief says otherwise.',

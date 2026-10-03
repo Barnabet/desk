@@ -4,7 +4,7 @@ import { SkillName, WritableSkillScope } from '@desk/protocol';
 import { z } from 'zod';
 import type { SkillDetail, SkillStore, SkillSummary } from '../skills/store';
 import { getAgent } from '../state/queries';
-import { scrubbedEnv, withSkillEnv } from './bash';
+import { recordedRun, scrubbedEnv, withSkillEnv } from './bash';
 import { runProcess } from './process';
 import { shellInvocation } from './sandbox';
 import { defineTool, type ToolContext } from './types';
@@ -164,14 +164,16 @@ export const skillRunTool = defineTool({
     const skillEnv = ctx.services.skillEnv(ctx.agentId, { scope: skill.scope, name: skill.name });
     if (skillEnv.blocked) throw new Error(skillEnv.blocked);
     const command = [commandFor(file), ...args.map(shellQuote)].join(' ');
-    const r = await runProcess({
-      ...shellInvocation(command, ctx.sandbox),
-      cwd: ctx.workspace,
-      env: { ...withSkillEnv(scrubbedEnv(ctx.workspace), skillEnv), SKILL_DIR: skill.dir, SKILL_NAME: skill.name },
-      timeoutMs: timeout_s * 1000,
-      signal: ctx.signal,
-      ...(stdin !== undefined ? { stdin } : {}),
-    });
+    const r = await recordedRun(ctx, 'skill_run', `${skill.name}: ${command}`, () =>
+      runProcess({
+        ...shellInvocation(command, ctx.sandbox),
+        cwd: ctx.workspace,
+        env: { ...withSkillEnv(scrubbedEnv(ctx.workspace), skillEnv), SKILL_DIR: skill.dir, SKILL_NAME: skill.name },
+        timeoutMs: timeout_s * 1000,
+        signal: ctx.signal,
+        ...(stdin !== undefined ? { stdin } : {}),
+      }),
+    );
     const status = r.aborted ? 'aborted' : r.timedOut ? `timed out after ${timeout_s}s` : `exit code ${r.exitCode}`;
     const setup = waitedMs >= 1000 ? `(Set up ${skill.name}'s Python environment first: first use only, ${Math.round(waitedMs / 1000)} s.)\n` : '';
     return `${setup}[${status}]\n${r.output}`;

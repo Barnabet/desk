@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createHash, type Hash } from 'node:crypto';
 import { z } from 'zod';
 import { newId } from '../ids';
-import { scrubbedEnv, withSkillEnv } from './bash';
+import { receiptOf } from '../receipts/receipts';
+import { scrubbedEnv, withSkillEnv, workspaceGitState } from './bash';
 import { shellInvocation, type SandboxSpec } from './sandbox';
 import { defineTool } from './types';
 
@@ -9,6 +11,8 @@ const MAX_BUFFER = 1_000_000;
 
 export type JobStatus = 'running' | 'exited' | 'killed';
 export type JobSnapshot = { status: JobStatus; exitCode: number | null; output: string };
+/** How a job ended, with its whole output's size and hash (the buffer keeps only a tail). */
+export type JobEnd = { exitCode: number | null; killed: boolean; bytes: number; sha256: string };
 
 type Job = {
   agentId: string;
@@ -17,18 +21,28 @@ type Job = {
   readOffset: number;
   status: JobStatus;
   exitCode: number | null;
+  hash: Hash;
+  bytes: number;
 };
 
 /** Long-running shell processes owned by agents. Output is buffered (tail-capped) and read incrementally. */
 export class JobManager {
   private readonly jobs = new Map<string, Job>();
 
-  start(agentId: string, opts: { command: string; cwd: string; env: NodeJS.ProcessEnv; sandbox: SandboxSpec }): string {
+  start(agentId: string, opts: { command: string; cwd: string; env: NodeJS.ProcessEnv; sandbox: SandboxSpec; onEnd?: (end: JobEnd) => void }): string {
     const inv = shellInvocation(opts.command, opts.sandbox);
     const child = spawn(inv.command, inv.args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const id = `job_${newId()}`;
-    const job: Job = { agentId, child, output: '', readOffset: 0, status: 'running', exitCode: null };
+    const job: Job = { agentId, child, output: '', readOffset: 0, status: 'running', exitCode: null, hash: createHash('sha256'), bytes: 0 };
+    let ended = false;
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      opts.onEnd?.({ exitCode: job.exitCode, killed: job.status === 'killed', bytes: job.bytes, sha256: job.hash.digest('hex') });
+    };
     const onData = (buf: Buffer) => {
+      job.hash.update(buf);
+      job.bytes += buf.length;
       job.output += buf.toString('utf8');
       if (job.output.length > MAX_BUFFER) {
         const cut = job.output.length - MAX_BUFFER;
@@ -41,10 +55,12 @@ export class JobManager {
     child.on('error', (err) => {
       job.output += `\n[failed to start: ${err.message}]\n`;
       if (job.status === 'running') job.status = 'exited';
+      end();
     });
     child.on('close', (code) => {
       job.exitCode = code;
       if (job.status === 'running') job.status = 'exited';
+      end();
     });
     this.jobs.set(id, job);
     return id;
@@ -104,7 +120,20 @@ export const bashBackgroundTool = defineTool({
   input: z.object({ command: z.string().min(1) }),
   gate: { subject: (i) => ({ command: i.command }), unmatched: 'auto' },
   async execute({ command }, ctx) {
-    const id = ctx.jobs.start(ctx.agentId, { command, cwd: ctx.workspace, env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)), sandbox: ctx.sandbox });
+    const state = await workspaceGitState(ctx);
+    const startedAt = Date.now();
+    const id = ctx.jobs.start(ctx.agentId, {
+      command,
+      cwd: ctx.workspace,
+      env: withSkillEnv(scrubbedEnv(ctx.workspace), ctx.services.skillEnv(ctx.agentId)),
+      sandbox: ctx.sandbox,
+      // Its receipt is recorded when it ends, under the call that started it.
+      onEnd: (e) =>
+        ctx.services.recordReceipt(
+          ctx.agentId,
+          receiptOf({ tool: 'bash_background', command, cwd: ctx.workspace, state, startedAt, exitCode: e.exitCode, killed: e.killed, output: { bytes: e.bytes, sha256: e.sha256 }, toolCallId: ctx.toolCallId }),
+        ),
+    });
     return `Started ${id}. Use bash_output to read its output and bash_kill to stop it.`;
   },
 });
