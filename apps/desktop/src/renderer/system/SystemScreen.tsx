@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { RuntimesReport, UsageResponse } from '@desk/protocol';
+import type { RuntimesReport, UsageResponse, WorkspaceStorageReport } from '@desk/protocol';
 import type { Appearance, ChannelOutput } from '@desk/bff/contract';
 import { bytes, clock, duration, href, plural } from '@desk/ui-core';
 import { call } from '../bridge';
@@ -347,6 +347,35 @@ function RuntimesFacts() {
   );
 }
 
+function WorkspaceFacts() {
+  const [report, setReport] = useState<WorkspaceStorageReport | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => call('system.workspaces', {}).then((r) => { setReport(r); setError(null); }).catch((e) => setError(describeError(e).message));
+  useEffect(() => { void load(); }, []);
+  const cleanup = async () => {
+    setPending(true);
+    try {
+      const r = await call('system.workspacesCleanup', {});
+      toast({ tone: 'info', message: `Freed ${bytes(r.bytes)} from ${plural(r.removed, 'dependency/cache directory')}.${r.errors.length ? ` ${r.errors.length} workspace(s) could not be cleaned.` : ''}` });
+      await load();
+    } catch (e) { toastError(e); } finally { setPending(false); }
+  };
+  return <div>
+    <dt>Completed task storage</dt>
+    <dd>
+      <p className="field-hint">Dependencies and tool caches are cleaned after 24 hours of inactivity. Worktrees, branches, documents and build outputs are kept. Archive a task from Threads to remove its workspace after preserving remaining files.</p>
+      {error ? <p className="field-error">{error}</p> : null}
+      {report ? <>
+        <p>{bytes(report.reclaimable_bytes)} can be reclaimed now.</p>
+        <Button size="sm" pending={pending} disabled={pending || !report.workspaces.some((w) => w.directories)} onClick={() => void cleanup()}>Clean up completed tasks</Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={() => void load()}>Refresh storage</Button>
+        {report.workspaces.length ? <ul>{report.workspaces.map((w) => <li key={w.agent_id}><a href={href({ name: 'project', id: w.project_id, tab: 'threads', threadId: w.agent_id })}>{w.title}</a> — {w.reason ?? `${bytes(w.bytes)} reclaimable`}</li>)}</ul> : null}
+      </> : error ? null : <p className="muted">Checking completed workspaces…</p>}
+    </dd>
+  </div>;
+}
+
 function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   useEffect(() => {
@@ -363,6 +392,7 @@ function AboutSection() {
           <dd className="mono">{info?.dataDir ?? '…'}</dd>
         </div>
         <RuntimesFacts />
+        <WorkspaceFacts />
         <div>
           <dt>App</dt>
           <dd>

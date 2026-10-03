@@ -34,6 +34,7 @@ function setup(extra: Record<string, (input: any) => unknown> = {}) {
     'app.updateSettings': (p: { notifications?: boolean; appearance?: string }) => ({ notifications: true, appearance: 'system', ...p }),
     'app.info': () => ({ version: '1.0.0', platform: 'darwin', packaged: true, dataDir: '/Users/me/Library/Application Support/Desk' }),
     'app.revealLogs': () => undefined,
+    'system.workspaces': () => ({ retention_hours: 24, reclaimable_bytes: 0, workspaces: [] }),
     'models.list': () => [model('claude-opus-5-5'), model('claude-fable-5-1')],
     'models.replace': ({ models }: { models: unknown[] }) => models,
     usage: () => ({ rows: [{ project_id: 'p1', model: 'claude-opus-5-5', prompt_tokens: 12000, completion_tokens: 3000 }], totals: { prompt_tokens: 12000, completion_tokens: 3000 } }),
@@ -52,6 +53,22 @@ describe('modelProblems', () => {
 });
 
 describe('SystemScreen', () => {
+  it('previews completed-task storage, explains protected workspaces, and cleans dependencies', async () => {
+    let cleaned = false;
+    const bridge = setup({
+      'system.workspaces': () => ({ retention_hours: 24, reclaimable_bytes: cleaned ? 0 : 2048, workspaces: [
+        { agent_id: 't', project_id: 'p1', title: 'Finished app', bytes: cleaned ? 0 : 2048, directories: cleaned ? 0 : 1, reason: null },
+        { agent_id: 's', project_id: 'p1', title: 'Preview', bytes: 0, directories: 0, reason: 'A running service uses this workspace' },
+      ] }),
+      'system.workspacesCleanup': () => { cleaned = true; return { removed: 1, bytes: 2048, errors: [] }; },
+    });
+    expect(await screen.findByText('A running service uses this workspace', { exact: false })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Finished app' }).getAttribute('href')).toContain('t');
+    fireEvent.click(screen.getByRole('button', { name: 'Clean up completed tasks' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Clean up completed tasks' }) as HTMLButtonElement).disabled).toBe(true));
+    expect(bridge.calls.some((c) => c.channel === 'system.workspacesCleanup')).toBe(true);
+  });
+
   it('shows deskd and controls it', async () => {
     const bridge = setup();
     const d = screen.getByRole('region', { name: 'deskd' });
@@ -155,7 +172,7 @@ describe('SystemScreen', () => {
     expect(await within(data).findByText(/100\.0 MB for 2 skills/)).toBeTruthy();
     fireEvent.click(within(data).getByRole('button', { name: 'Clean up unused (40.0 MB)' }));
     expect(await within(data).findByText(/60\.0 MB for 1 skill$/)).toBeTruthy();
-    expect(within(data).queryByRole('button', { name: /Clean up/ })).toBeNull();
+    expect(within(data).queryByRole('button', { name: /Clean up unused/ })).toBeNull();
     expect(bridge.calls.filter((c) => c.channel === 'system.runtimesCleanup')).toHaveLength(1);
   });
 });

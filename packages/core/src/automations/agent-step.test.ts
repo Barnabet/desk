@@ -173,4 +173,34 @@ describe('agent steps', () => {
     expect(existsSync(stepDir(h.dir, r, 'sum'))).toBe(false);
     expect(execFileSync('git', ['-C', repo, 'branch', '--list', agent.git_branch!]).toString()).toContain(agent.git_branch!);
   });
+
+  it('retries in a fresh worktree when the failed attempt left files in its own', async () => {
+    let n = 0;
+    ({ h, rt, projectId, clock } = await automationHarness({
+      script: (req) => {
+        if (!isStep(req)) return text('ok');
+        n++;
+        if (n === 1) return tools(call('write_file', { path: 'notes.txt', content: 'half done' }));
+        return n === 2 ? tools(call('fail_step', { reason: 'flaky source' })) : tools(call('complete', { summary: 'second time', outputs: { headline: 'ok' } }));
+      },
+    }));
+    const repo = join(h.files, 'repo');
+    mkdirSync(repo);
+    execFileSync('git', ['init', '-q', repo]);
+    writeFileSync(join(repo, 'README.md'), '# r');
+    execFileSync('git', ['-C', repo, 'add', '.']);
+    execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init']);
+    const source = await rt.addSource(projectId, repo);
+    const r = await start(create(agentDef({ git_source_id: source, on_error: { retry: 1 } }), 'gitty'));
+    await vi.waitFor(() => expect(getStepRun(h.store.db, r, 'sum')).toMatchObject({ status: 'pending', attempt: 2 }));
+    await rt.whenIdle();
+    clock.advance(30_000);
+    await rt.engine.tick();
+    await rt.whenIdle();
+    expect(getStepRun(h.store.db, r, 'sum')).toMatchObject({ status: 'succeeded', attempt: 2, summary: 'second time' });
+    const agents = stepAgentsOf(h.store.db, r, 'sum');
+    expect(agents).toHaveLength(2);
+    await vi.waitFor(() => expect(agents.every((a) => getAgent(h.store.db, a.id)!.archived_at)).toBe(true));
+    expect(existsSync(stepDir(h.dir, r, 'sum'))).toBe(false);
+  });
 });

@@ -219,6 +219,13 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
     tickAutomations(); // catches up schedules and waits that fell due while the daemon was down
     const automationTimer = setInterval(tickAutomations, o.automationTickMs ?? ENGINE_TICK_MS);
     automationTimer.unref();
+    const cleanupWorkspaces = () => runtime.cleanupWorkspaces().then((r) => {
+      if (r.removed) log.info(`workspace retention removed ${r.removed} dependency/cache directories (${r.bytes} bytes)`);
+      for (const error of r.errors) log.error(`workspace cleanup skipped ${error.agent_id}: ${error.message}`);
+    }).catch((err) => log.error('workspace cleanup failed', err));
+    void cleanupWorkspaces();
+    const cleanupTimer = setInterval(() => void cleanupWorkspaces(), 60 * 60_000);
+    cleanupTimer.unref();
 
     let stopped = false;
     return {
@@ -232,6 +239,7 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
         stopNotifier();
         clearInterval(stallTimer);
         clearInterval(automationTimer);
+        clearInterval(cleanupTimer);
         await server.close();
         await runtime.shutdown();
         close();

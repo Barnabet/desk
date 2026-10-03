@@ -72,6 +72,12 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
         .set({ ...fields, settings: resolveSettings({ ...current.settings, ...settings }), updated_at: ev.ts })
         .where(eq(projects.id, ev.project_id))
         .run();
+      if (settings?.desk_model !== undefined) {
+        tx.update(agents)
+          .set({ model: settings.desk_model, updated_at: ev.ts })
+          .where(and(eq(agents.project_id, ev.project_id), eq(agents.role, 'desk')))
+          .run();
+      }
       return;
     }
     case 'agent.created':

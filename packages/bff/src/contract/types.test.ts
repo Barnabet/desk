@@ -9,7 +9,7 @@ describe('ChannelOutput', () => {
   it('names an output for every operation and nothing else', () => {
     const exact: Equal<keyof ChannelOutputs, Channel> = true;
     expect(exact).toBe(true);
-    expect(Object.keys(channels)).toHaveLength(117);
+    expect(Object.keys(channels)).toHaveLength(119);
   });
 
   it("passes deskd's results through and names the host's", () => {

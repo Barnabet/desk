@@ -139,6 +139,8 @@ export type ChannelOutputs = {
   'broker.unwatch': Ok;
   'system.runtimes': Out<Client['catalog']['runtimes']>;
   'system.runtimesCleanup': Out<Client['catalog']['cleanupRuntimes']>;
+  'system.workspaces': Out<Client['storage']['workspaces']>;
+  'system.workspacesCleanup': Out<Client['storage']['cleanupWorkspaces']>;
   'daemon.status': DaemonStatus;
   'daemon.start': DaemonStatus;
   'daemon.restart': DaemonStatus;

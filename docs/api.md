@@ -89,7 +89,7 @@ Project services are long-lived processes (dev servers, APIs, workers) that Desk
 | GET | `/v1/threads/:id/transcript` | paging; every event of the thread |
 | POST | `/v1/threads/:id/messages` | `{ text, question? }`: steer the thread directly. With `question: true`, the user's Ask: an idle, done or failed thread answers it in a short read-only run and keeps its status, result and branch; any other thread reads it as a message. 202. 409 when the thread or its project is archived |
 | POST | `/v1/threads/:id/stop` | Cancels the thread; Desk is notified |
-| POST | `/v1/threads/:id/archive` | Finished threads only. Removes the workspace and keeps the git branch |
+| POST | `/v1/threads/:id/archive` | Finished threads only. Removes the workspace with its files and uncommitted edits, and keeps the git branch. Refuses (409) when Git history would go with it: a detached worktree, or a repository whose history is inside the workspace |
 | GET | `/v1/projects/:id/approvals` | `?status=pending\|approved\|denied` |
 | POST | `/v1/approvals/:id/resolve` | `{ decision: "approved"\|"denied", note? }`. A second resolve returns 409 |
 
@@ -197,6 +197,16 @@ Reviewed skills pinned to a commit and a content digest, installed only at the u
 | POST | `/v1/skills/:name/runtime/retry`, `/v1/projects/:id/skills/:name/runtime/retry` | Rebuilds the runtime of a catalog-installed skill; returns `{ state, reason }`. 404 for skills not from the catalog |
 | GET | `/v1/system/runtimes` | `{ bytes, envs[{ scope, project_id, name, bytes, orphan }] }` |
 | POST | `/v1/system/runtimes/cleanup` | Removes environments whose skill no longer exists: `{ removed, bytes }` |
+| GET | `/v1/system/workspaces` | Completed thread dependency/cache cleanup preview: `{ retention_hours, reclaimable_bytes, workspaces: [{ agent_id, project_id, title, bytes, directories, reason }] }`. `reason` explains why a workspace is protected |
+| POST | `/v1/system/workspaces/cleanup` | Rechecks eligibility and removes reinstallable dependencies and known Python tool caches: `{ removed, bytes, errors }`. `removed` counts directories. Manual cleanup requires at least one minute of inactivity |
+
+Completed managed thread workspaces are checked on daemon startup and hourly. After 24 hours of inactivity, cleanup removes conventional `node_modules` directories when a package manifest and lockfile exist, Python `.venv`/`venv` directories with `pyvenv.cfg` and requirements or a dependency lockfile, and `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, and `__pycache__`. In Git worktrees these directories must also be ignored and contain no tracked files. Symlinks, nested repositories, and reported skill drafts are preserved. Active projects, tasks with pending messages or approvals, and workspaces used by running services are skipped. Wakes wait for cleanup to finish; shutdown waits for it too.
+
+System → Data offers a preview and manual cache cleanup in both apps. That cleanup retains source, worktrees, Git branches, build outputs, ordinary ignored files, unpublished documents and library artifacts. Reinstall dependencies from the saved manifests when resuming a cleaned task. No home-folder or other-app-data scan is used.
+
+Desk also has `close_thread { thread_id, reason, discard_workspace?: false }` to retire accepted work it no longer needs. The default previews workspace bytes, file count, top-level entries and retained Git branches. Desk must preserve required deliverables, review evidence and skill drafts outside the workspace before calling again with `discard_workspace: true`. This explicitly discards **every remaining workspace file**, including scratch files, untracked/ignored outputs and dependencies, removes nested Git worktrees, and records `agent.archived`. Conversations, result summaries, published library files and Git branches in external repositories remain; closed threads appear under **Show archived** and cannot be resumed. Later work needs a new thread. The close tool does not end Desk's own turn.
+
+Closing is available only to the project's Desk and only for a completed, inactive managed thread with no pending messages, questions or approvals. It refuses workspaces used by running services or registered sources, tracked Git edits, detached/locked worktrees, and repositories whose history would be deleted with the workspace. It serializes with archiving/cache cleanup and blocks new messages, wakes and services using the retiring workspace. Files outside the workspace and shared runtimes/caches are outside its scope. It also refuses a thread whose submission is in review, reviewed but undecided, or has changes requested, and a reviewer thread while the work it reviews is undecided. The user's archive endpoint discards the workspace the same way, uncommitted tracked edits included, since its confirmation says the workspace is removed.
 
 Warning kinds: `exec-block` (`` !`cmd` `` or ```` ```! ````, which Desk never runs), `pipe-to-shell`, `base64-blob`, `invisible-unicode`, `paste-site` and `memory-write`. The limits are the skill store's: 50 MB download, 10 MB, 200 files, 2 MB per file, and no links or special files.
 

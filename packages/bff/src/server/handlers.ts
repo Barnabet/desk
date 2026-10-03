@@ -207,6 +207,8 @@ export const handlers = {
 
   'system.runtimes': (_i, c) => c.client().catalog.runtimes(),
   'system.runtimesCleanup': (_i, c) => c.client().catalog.cleanupRuntimes(),
+  'system.workspaces': (_i, c) => c.client().storage.workspaces(),
+  'system.workspacesCleanup': (_i, c) => c.client().storage.cleanupWorkspaces(),
 
   'daemon.status': (_i, c) => c.daemon.status(),
   'daemon.start': (_i, c) => c.daemon.start(),

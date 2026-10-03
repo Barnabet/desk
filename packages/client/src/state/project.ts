@@ -69,7 +69,11 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
   switch (e.type) {
     case 'project.updated': {
       const { settings, ...fields } = e.payload;
-      return { ...s, project: { ...s.project, ...fields, settings: { ...s.project.settings, ...(settings ?? {}) }, updated_at: e.ts } as ProjectRow };
+      return {
+        ...s,
+        project: { ...s.project, ...fields, settings: { ...s.project.settings, ...(settings ?? {}) }, updated_at: e.ts } as ProjectRow,
+        desk: s.desk && settings?.desk_model !== undefined ? { ...s.desk, model: settings.desk_model, updated_at: e.ts } : s.desk,
+      };
     }
     case 'project.archived':
       return { ...s, project: { ...s.project, archived_at: e.ts } };

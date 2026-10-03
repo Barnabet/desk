@@ -7,9 +7,11 @@ import { requireProject } from './projects';
 
 const EVENT_TYPES = new Set<string>(EventBody.options.map((o) => o.shape.type.value));
 
-export function systemRoutes({ store, models, saveModels }: AppDeps): Hono {
+export function systemRoutes({ store, models, saveModels, runtime }: AppDeps): Hono {
   const r = new Hono();
   const db = store.db;
+  r.get('/system/workspaces', async (c) => c.json(await runtime.workspaceStorage()));
+  r.post('/system/workspaces/cleanup', async (c) => c.json(await runtime.cleanupWorkspaces(true)));
 
   r.get('/projects/:id/usage', (c) => {
     requireProject(db, c.req.param('id'));

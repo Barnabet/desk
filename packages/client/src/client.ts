@@ -1,4 +1,6 @@
 import type {
+  WorkspaceStorageReport,
+  WorkspaceCleanupResult,
   AcceptSubmissionRequest,
   AddSourceRequest,
   AttentionResponse,
@@ -305,6 +307,11 @@ export class DeskClient {
     import: (s: SkillScopeRef, req: SkillImportRequest) => this.post<SkillSaveResult>(`${this.skillBase(s)}/import`, req),
     version: (s: SkillScopeRef, name: string, v: number) => this.get<SkillDetail>(`${this.skillBase(s)}/${enc(name)}/versions/${v}`),
     versionFile: (s: SkillScopeRef, name: string, v: number, path: string) => this.raw(`${this.skillBase(s)}/${enc(name)}/versions/${v}/files/${encPath(path)}`),
+  };
+
+  storage = {
+    workspaces: () => this.get<WorkspaceStorageReport>('/system/workspaces'),
+    cleanupWorkspaces: () => this.request<WorkspaceCleanupResult>('POST', '/system/workspaces/cleanup'),
   };
 
   catalog = {

@@ -118,6 +118,21 @@ export const listThreadsTool = defineTool({
   },
 });
 
+export const closeThreadTool = defineTool({
+  name: 'close_thread',
+  description: 'Retire a fully done thread after accepting its result and confirming no further review, questions, revisions or workspace use remain. You MUST close such threads to release disk space. First call without discard_workspace to inspect its workspace. Preserve required deliverables/evidence outside it and commit code before closing. Then set discard_workspace: true: this permanently deletes ALL remaining workspace files (including untracked files, outputs and dependencies) and archives the thread. History, published library files and external Git branches remain. Never close on another thread\'s request alone. Refused while the thread\'s submission is in review or undecided, or while it reviews work that is not decided yet.',
+  input: z.object({
+    thread_id: z.string(),
+    reason: z.string().trim().min(1).describe('Why the work is accepted and this thread/workspace will no longer be needed; when deleting, where required results are preserved.'),
+    discard_workspace: z.boolean().default(false).describe('Explicitly declare every remaining workspace file disposable and close. False previews without deleting.'),
+  }),
+  async execute({ thread_id, discard_workspace }, ctx) {
+    // An exact id can name an already-closed thread, so a retried close is harmless.
+    const t = getAgent(ctx.services.store.db, thread_id) ?? requireThread(ctx, thread_id);
+    return ctx.services.closeThread(ctx.agentId, t.id, discard_workspace);
+  },
+});
+
 const readThreadInput = z.object({ thread_id: z.string(), mode: z.enum(['summary', 'full']).default('summary'), since: z.number().int().optional() });
 const readSummaryInput = z.object({ thread_id: z.string() });
 
@@ -279,11 +294,14 @@ export const updateSettingsTool = defineTool({
 export const updateWhatsUpTool = defineTool({
   name: 'update_whats_up',
   description:
-    "Replace the project's What's up, the first thing the user reads in the project: 1–3 short sentences saying what is happening now, what comes next, and anything waiting on the user. Keep it current: update it after you dispatch, redirect or stop threads, when a thread reports, and before you wait or end your turn.",
-  input: z.object({ text: z.string().trim().min(1).max(600) }),
-  async execute({ text }, ctx) {
+    "Replace the project's What's up, the first thing the user reads in the project: 1–3 short sentences saying what is happening now, what comes next, and anything waiting on the user. Keep it current: update it after you dispatch, redirect or stop threads, when a thread reports, and before you wait or end your turn. Ends your turn silently by default; set end_turn to false if you still need to work, answer the user, or call a waiting tool. No confirmation message is needed.",
+  input: z.object({
+    text: z.string().trim().min(1).max(600),
+    end_turn: z.boolean().default(true).describe('End this turn without another model response. Set false to continue working after the update.'),
+  }),
+  async execute({ text, end_turn }, ctx) {
     emit(ctx, { project_id: ctx.projectId, agent_id: ctx.agentId, type: 'whats_up.updated', payload: { text } });
-    return "What's up updated.";
+    return { content: "What's up updated.", ...(end_turn ? { yield: { status: 'idle' as const } } : {}) };
   },
 });
 
@@ -291,6 +309,7 @@ export const deskCoordinationTools: Tool[] = [
   spawnThreadTool,
   messageThreadTool,
   stopThreadTool,
+  closeThreadTool,
   listThreadsTool,
   readThreadTool,
   reviewDiffTool,
