@@ -11,7 +11,7 @@ import { bashReadonlyTool } from '../tools/bash';
 import { gitCommitTool, gitDiffTool, gitPushTool, gitStatusTool, openPrTool } from '../tools/git';
 import { detectSandbox } from '../tools/sandbox';
 import type { ToolContext } from '../tools/types';
-import { createWorkspace, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from './workspaces';
+import { createWorkspace, discardStepWorktree, gitEnv, removeWorkspace, safeGitArgs, threadBranchName } from './workspaces';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
@@ -93,6 +93,18 @@ describe('workspaces', () => {
     writeFileSync(join(scratch, 'report.pdf'), 'unpublished');
     await expect(removeWorkspace({ path: scratch })).rejects.toThrow(/Publish or move/);
     expect(readFileSync(join(scratch, 'report.pdf'), 'utf8')).toBe('unpublished');
+  });
+
+  it("discards an automation step's worktree with its files, keeping the branch", async () => {
+    const { path, branch } = await worktree();
+    writeFileSync(join(path, 'README.md'), 'edited');
+    mkdirSync(join(path, '.desk'));
+    writeFileSync(join(path, '.desk', 'output.json'), '{}');
+    await discardStepWorktree({ path, gitSourcePath: repo });
+    expect(existsSync(path)).toBe(false);
+    expect(git(repo, 'worktree', 'list')).not.toContain(path);
+    expect(git(repo, 'branch', '--list', branch)).toContain(branch);
+    await discardStepWorktree({ path, gitSourcePath: repo }); // already gone: nothing to do
   });
 
   it('keeps detached worktrees whose commits have no retained branch', async () => {

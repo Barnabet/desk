@@ -97,3 +97,30 @@ it('exposes close only to Desk, defaults to preview, and executes through its no
   expect(existsSync(workspace)).toBe(false);
   expect(h.store.list({ agentId: desk.id, types: ['tool.result'] }).map(e => e.type === 'tool.result' && e.payload.status)).toEqual(['ok', 'ok']);
 });
+
+it('waits for reviews: an undecided submission, and a reviewer of undecided work', async () => {
+  const { rt, project, desk, id, workspace } = await setup();
+  const reviewer = newId();
+  const reviewerWorkspace = join(h.dir, 'workspaces', reviewer);
+  await mkdir(reviewerWorkspace, { recursive: true });
+  const decide = (decision: 'accepted' | 'changes_requested') =>
+    h.store.append({ project_id: project, agent_id: id, type: 'acceptance.recorded', payload: { submission_id: 'sub1', decision, limitations: [], by: 'desk' } });
+  h.store.append([
+    { project_id: project, agent_id: id, type: 'submission.created', payload: { submission_id: 'sub1', seq: 1, commit: null, base: null, artifacts: [], claims: [], limitations: [], evidence: '' } },
+    { project_id: project, agent_id: reviewer, type: 'agent.created', payload: { role: 'thread', model: FAKE_MODEL.id, title: 'Reviewer', brief: 'R', workspace_path: reviewerWorkspace, parent_id: desk.id } },
+    { project_id: project, agent_id: reviewer, type: 'review.requested', payload: { review_id: 'rev1', submission_id: 'sub1', builder_id: id, criteria: ['Works'], requested_by: 'desk', revealed: false } },
+    { project_id: project, agent_id: reviewer, type: 'agent.status_changed', payload: { status: 'done' } },
+  ]);
+  await expect(rt.closeThread(desk.id, id, true)).rejects.toThrow('still being reviewed');
+  await expect(rt.closeThread(desk.id, reviewer, true)).rejects.toThrow('re-review');
+  h.store.append({ project_id: project, agent_id: reviewer, type: 'review.assessed', payload: { review_id: 'rev1', submission_id: 'sub1', builder_id: id, phase: 'final', verdict: 'no_material_issues', requirements: [], not_checked: [] } });
+  await expect(rt.closeThread(desk.id, id, true)).rejects.toThrow('accept_submission');
+  decide('changes_requested');
+  await expect(rt.closeThread(desk.id, id, true)).rejects.toThrow('changes requested');
+  await expect(rt.closeThread(desk.id, reviewer, true)).rejects.toThrow('changes requested');
+  expect(existsSync(workspace) && existsSync(reviewerWorkspace)).toBe(true);
+  decide('accepted');
+  expect(await rt.closeThread(desk.id, reviewer, true)).toContain('Closed');
+  expect(await rt.closeThread(desk.id, id, true)).toContain('Closed');
+  expect(existsSync(workspace)).toBe(false);
+});

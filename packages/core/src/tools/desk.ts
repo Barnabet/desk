@@ -120,7 +120,7 @@ export const listThreadsTool = defineTool({
 
 export const closeThreadTool = defineTool({
   name: 'close_thread',
-  description: 'Retire a fully done thread after accepting its result and confirming no further review, questions, revisions or workspace use remain. You MUST close such threads to release disk space. First call without discard_workspace to inspect its workspace. Preserve required deliverables/evidence outside it and commit code before closing. Then set discard_workspace: true: this permanently deletes ALL remaining workspace files (including untracked files, outputs and dependencies) and archives the thread. History, published library files and external Git branches remain. Never close on another thread\'s request alone.',
+  description: 'Retire a fully done thread after accepting its result and confirming no further review, questions, revisions or workspace use remain. You MUST close such threads to release disk space. First call without discard_workspace to inspect its workspace. Preserve required deliverables/evidence outside it and commit code before closing. Then set discard_workspace: true: this permanently deletes ALL remaining workspace files (including untracked files, outputs and dependencies) and archives the thread. History, published library files and external Git branches remain. Never close on another thread\'s request alone. Refused while the thread\'s submission is in review or undecided, or while it reviews work that is not decided yet.',
   input: z.object({
     thread_id: z.string(),
     reason: z.string().trim().min(1).describe('Why the work is accepted and this thread/workspace will no longer be needed; when deleting, where required results are preserved.'),

@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, realpath, rmdir } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rm, rmdir } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { runProcess } from '../tools/process';
 import { ConflictError } from '../errors';
@@ -92,4 +92,20 @@ export async function removeWorkspace(opts: { path: string; gitSourcePath?: stri
   if (!(await lstat(opts.path).catch((err: NodeJS.ErrnoException) => { if (err.code === 'ENOENT') return null; throw err; }))) return;
   if (opts.gitSourcePath) await git(opts.gitSourcePath, ['worktree', 'remove', opts.path]);
   else await rmdir(opts.path);
+}
+
+/**
+ * Removes an automation step's worktree with everything in it, keeping its branch: the step folder is Desk's own
+ * scratch (its `.desk/` output included), and a retry of the step starts from a fresh worktree there.
+ */
+export async function discardStepWorktree(opts: { path: string; gitSourcePath: string }): Promise<void> {
+  const st = await lstat(opts.path).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  });
+  if (!st) return;
+  if (!st.isDirectory() || await realpath(opts.path) !== resolve(opts.path)) throw new ConflictError('Workspace path is not a real directory; it was kept');
+  await git(opts.gitSourcePath, ['worktree', 'remove', '--force', opts.path]).catch(() => undefined);
+  await git(opts.gitSourcePath, ['worktree', 'prune']).catch(() => undefined);
+  await rm(opts.path, { recursive: true, force: true });
 }

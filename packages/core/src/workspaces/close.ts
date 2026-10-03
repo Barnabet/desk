@@ -11,8 +11,11 @@ export type WorkspaceClosure = {
   repositories: Array<{ path: string; common: string; branch: string; head: string }>;
 };
 
-/** Closing is explicit disposal, unlike cache cleanup. Git history must survive outside the workspace. */
-export async function inspectWorkspaceClosure(path: string): Promise<WorkspaceClosure> {
+/**
+ * Closing is explicit disposal, unlike cache cleanup. Git history must survive outside the workspace. With
+ * `discardEdits`, uncommitted edits to tracked files are disposable too (the user's archive confirms removing them).
+ */
+export async function inspectWorkspaceClosure(path: string, opts: { discardEdits?: boolean } = {}): Promise<WorkspaceClosure> {
   const root = resolve(path);
   const result: WorkspaceClosure = { bytes: 0, files: 0, entries: [], repositories: [] };
   const st = await lstat(root).catch((e: NodeJS.ErrnoException) => { if (e.code === 'ENOENT') return null; throw e; });
@@ -34,7 +37,7 @@ export async function inspectWorkspaceClosure(path: string): Promise<WorkspaceCl
       try { branch = await git(dir, ['symbolic-ref', '--quiet', 'HEAD']); }
       catch { throw new ConflictError(`Detached worktree ${dir}: create a retained branch before closing`); }
       const head = await git(dir, ['rev-parse', 'HEAD']);
-      if (await git(dir, ['status', '--porcelain=v1', '--untracked-files=no'])) throw new ConflictError(`Uncommitted tracked changes in ${dir}; commit or preserve them before closing`);
+      if (!opts.discardEdits && await git(dir, ['status', '--porcelain=v1', '--untracked-files=no'])) throw new ConflictError(`Uncommitted tracked changes in ${dir}; commit or preserve them before closing`);
       const gitDir = await git(dir, ['rev-parse', '--absolute-git-dir']);
       if (await lstat(join(gitDir, 'locked')).catch(() => null)) throw new ConflictError(`Worktree ${dir} is locked; it was kept`);
       result.repositories.push({ path: dir, common, branch, head });
@@ -52,8 +55,8 @@ export async function inspectWorkspaceClosure(path: string): Promise<WorkspaceCl
 }
 
 /** Caller has explicitly declared remaining untracked/ignored/scratch files disposable and holds the task lock. */
-export async function closeWorkspace(path: string, stillSafe: () => void): Promise<WorkspaceClosure> {
-  const report = await inspectWorkspaceClosure(path);
+export async function closeWorkspace(path: string, stillSafe: () => void, opts: { discardEdits?: boolean } = {}): Promise<WorkspaceClosure> {
+  const report = await inspectWorkspaceClosure(path, opts);
   stillSafe();
   // Validate all repositories before removing any. Nested worktrees go first; their branches remain in common Git dirs.
   for (const repo of [...report.repositories].sort((a, b) => b.path.length - a.path.length)) {
@@ -61,8 +64,8 @@ export async function closeWorkspace(path: string, stillSafe: () => void): Promi
     if (await realpath(repo.path) !== repo.path
       || await git(repo.path, ['symbolic-ref', '--quiet', 'HEAD']) !== repo.branch
       || await git(repo.path, ['rev-parse', 'HEAD']) !== repo.head
-      || await git(repo.path, ['status', '--porcelain=v1', '--untracked-files=no'])) throw new ConflictError(`Worktree changed during closing: ${relative(path, repo.path) || '.'}`);
-    // --force discards only explicitly reviewed untracked/ignored files; tracked edits were refused above.
+      || (!opts.discardEdits && await git(repo.path, ['status', '--porcelain=v1', '--untracked-files=no']))) throw new ConflictError(`Worktree changed during closing: ${relative(path, repo.path) || '.'}`);
+    // --force discards only explicitly reviewed untracked/ignored files; tracked edits were refused above unless discardEdits.
     await git(repo.common, ['worktree', 'remove', '--force', repo.path]);
   }
   stillSafe();

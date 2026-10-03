@@ -94,10 +94,3 @@ it('does not clean external workspaces or symlinks masquerading as managed works
   const report = await rt.workspaceStorage();
   expect(report.workspaces.filter((w) => [external, linked].includes(w.agent_id)).every((w) => w.reason === 'This is not a managed thread workspace')).toBe(true);
 });
-
-it('refuses archiving unpublished scratch files and keeps the task unarchived', async () => {
-  const { rt, id, workspace } = await setup();
-  await expect(rt.archiveThread(id)).rejects.toThrow(/Publish or move/);
-  expect(getAgent(h.store.db, id)?.archived_at).toBeNull();
-  expect(existsSync(join(workspace, 'unpublished.txt'))).toBe(true);
-});
