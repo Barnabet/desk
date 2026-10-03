@@ -46,9 +46,9 @@ export const listReceiptsTool = defineTool({
 export const runCheckTool = defineTool({
   name: 'run_check',
   description: [
-    'Run a few shell commands in the background without a thread, to check something cheaply: run a test suite on what a thread submitted, rebuild a report, verify a file. No model runs; you get a Check message when it ends (passed, failed, timed out) with each step\'s exit and the failing step\'s last lines, so do not wait or poll.',
+    'Run a few shell commands in the background without a thread, to check or do something cheaply: run a test suite on what a thread submitted, rebuild a report, verify a file, or a one-off fix or cleanup (git worktree unlock, removing stale files). This, not service_start, is how you run one-off commands. No model runs; you get a Check message when it ends (passed, failed, timed out) with each step\'s exit and the failing step\'s last lines, so do not wait or poll.',
     'Steps run in order with zsh, sandboxed like bash, and stop at the first non-zero exit. Each leaves a receipt (list_receipts).',
-    'where: "scratch" (default, an empty folder); {thread_id, mode: "snapshot"} (a clean git checkout of the thread\'s latest submitted commit, else its branch; writable, the thread\'s own workspace is not touched); {thread_id, mode: "workspace"} (the thread\'s workspace as it is, read-only); {source_id} (a project source, read-only).',
+    'where: "scratch" (default, an empty folder); {thread_id, mode: "snapshot"} (a clean git checkout of the thread\'s latest submitted commit, else its branch; writable, the thread\'s own workspace is not touched); {thread_id, mode: "workspace"} (the thread\'s workspace as it is, read-only); {source_id} (a project source, read-only). Add write: true to change the workspace (of a thread that is not working; its repo\'s shared git dir too, so git worktree commands work) or the source (one that allows agents to write).',
     `$DESK_CHECK_OUT is a folder the steps can always write, and that you can read afterwards. expect: files the steps must produce (relative to the working folder, or "${OUT_PREFIX}name"); each must exist, be non-empty and be written by this check, or the check fails.`,
     `At most 3 checks run at once per project. timeout_s covers all steps (default ${CHECK_TIMEOUT_S}).`,
   ].join(' '),

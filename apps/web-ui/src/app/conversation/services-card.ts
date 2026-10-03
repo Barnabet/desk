@@ -117,7 +117,7 @@ export class LogsSheet {
   }
 }
 
-/** The project's services under the plan: status, URL, where they run, and Open / Logs / Restart / Stop / Start. */
+/** The project's services under the plan: status, URL, where they run, and Open / Logs / Restart / Stop / Remove / Start. */
 @Component({
   selector: 'section[deskServicesCard]',
   imports: [Button, LogsSheet],
@@ -150,6 +150,7 @@ export class LogsSheet {
                 <button deskButton size="sm" variant="ghost" [pending]="busy() === s.id + ':restart'" [disabled]="busy() !== null" (click)="act(s, 'restart')">Restart</button>
                 <button deskButton size="sm" variant="ghost" [pending]="busy() === s.id + ':stop'" [disabled]="busy() !== null" (click)="act(s, 'stop')" [attr.aria-label]="'Stop ' + s.name">Stop</button>
               } @else {
+                <button deskButton size="sm" variant="ghost" [pending]="busy() === s.id + ':remove'" [disabled]="busy() !== null" (click)="act(s, 'remove')" [attr.aria-label]="'Remove ' + s.name" title="Take it off this list, with its log">Remove</button>
                 <button deskButton size="sm" [pending]="busy() === s.id + ':start'" [disabled]="busy() !== null" (click)="act(s, 'start')" [attr.aria-label]="'Start ' + s.name">Start</button>
               }
             </div>
@@ -193,10 +194,13 @@ export class ServicesCard {
     this.bridge.call('app.openExternal', { url }).catch((err: unknown) => this.toasts.error(err));
   }
 
-  protected async act(s: ServiceRow, what: 'start' | 'stop' | 'restart'): Promise<void> {
+  protected async act(s: ServiceRow, what: 'start' | 'stop' | 'restart' | 'remove'): Promise<void> {
     this.busy.set(`${s.id}:${what}`);
     try {
-      await (what === 'start' ? this.bridge.call('services.start', { id: s.id }) : what === 'stop' ? this.bridge.call('services.stop', { id: s.id }) : this.bridge.call('services.restart', { id: s.id }));
+      if (what === 'remove') {
+        await this.bridge.call('services.remove', { id: s.id });
+        if (this.logsFor()?.id === s.id) this.logsFor.set(null);
+      } else await (what === 'start' ? this.bridge.call('services.start', { id: s.id }) : what === 'stop' ? this.bridge.call('services.stop', { id: s.id }) : this.bridge.call('services.restart', { id: s.id }));
     } catch (err) {
       this.toasts.error(err);
     } finally {

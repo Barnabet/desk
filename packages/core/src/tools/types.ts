@@ -147,6 +147,7 @@ export interface RuntimeServices {
   startService(projectId: string, input: { name: string; command: string; cwd?: string; threadId?: string; sourceId?: string; by: string }): Promise<ServiceRow>;
   stopService(serviceId: string, by: string): Promise<ServiceRow>;
   restartService(serviceId: string, by: string): Promise<ServiceRow>;
+  removeService(serviceId: string, by: string): Promise<void>;
   serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean };
 }
 

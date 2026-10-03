@@ -120,10 +120,11 @@ export const ReceiptOutcome = z.enum(['exit', 'timeout', 'aborted', 'killed']);
 export type ReceiptOutcome = z.infer<typeof ReceiptOutcome>;
 
 /** Where a check job runs (spec 2026-10-03 §2). */
+/** Where a check runs. `write`: the thread's workspace or the source itself may be changed (one-off fixes and cleanup). */
 export const CheckWhere = z.union([
   z.literal('scratch'),
-  z.object({ thread_id: z.string().min(1), mode: z.enum(['snapshot', 'workspace']) }),
-  z.object({ source_id: z.string().min(1) }),
+  z.object({ thread_id: z.string().min(1), mode: z.enum(['snapshot', 'workspace']), write: z.boolean().optional() }),
+  z.object({ source_id: z.string().min(1), write: z.boolean().optional() }),
 ]);
 export type CheckWhere = z.infer<typeof CheckWhere>;
 

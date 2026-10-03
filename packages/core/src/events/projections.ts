@@ -399,6 +399,9 @@ export function applyProjections(tx: Tx, ev: StoredEvent): void {
     case 'service.stopped':
       tx.update(services).set({ status: 'stopped', stop_reason: ev.payload.reason, ended_at: ev.ts }).where(eq(services.id, ev.payload.service_id)).run();
       return;
+    case 'service.removed':
+      tx.delete(services).where(eq(services.id, ev.payload.service_id)).run();
+      return;
     case 'attention.dismissed':
       tx.insert(attentionDismissals).values({ item_id: ev.payload.item_id, project_id: ev.project_id, dismissed_at: ev.ts }).onConflictDoNothing().run();
       return;

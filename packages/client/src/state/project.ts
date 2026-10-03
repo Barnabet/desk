@@ -197,6 +197,8 @@ export function reduceProject(prev: ProjectState, e: StoredEvent): ProjectState 
       return updateService(s, e.payload.service_id, (x) => ({ ...x, status: 'exited', exit_code: e.payload.code, exit_signal: e.payload.signal, ended_at: e.ts }));
     case 'service.stopped':
       return updateService(s, e.payload.service_id, (x) => ({ ...x, status: 'stopped', stop_reason: e.payload.reason, ended_at: e.ts }));
+    case 'service.removed':
+      return { ...s, services: s.services.filter((x) => x.id !== e.payload.service_id) };
     default:
       return s;
   }

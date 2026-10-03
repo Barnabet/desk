@@ -25,6 +25,7 @@ export const PHONE_OPS: ReadonlySet<string> = new Set([
   'threads.file',
   'services.logs',
   'services.stop',
+  'services.remove',
   'approvals.list',
   'approvals.resolve',
   'attention.list',

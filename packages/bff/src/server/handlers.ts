@@ -112,6 +112,7 @@ export const handlers = {
   'services.start': (i, c) => c.client().services.start(i.id),
   'services.stop': (i, c) => c.client().services.stop(i.id),
   'services.restart': (i, c) => c.client().services.restart(i.id),
+  'services.remove': (i, c) => c.client().services.remove(i.id),
   'threads.files': (i, c) => c.client().threads.files(i.id, i.path ?? ''),
   'threads.file': (i, c) => c.client().threads.file(i.id, i.path),
 

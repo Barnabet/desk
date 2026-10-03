@@ -10,7 +10,7 @@ function requireService(db: Db, id: string): ServiceRow {
   return s;
 }
 
-/** Project services: list, log tail, and the user's start/stop/restart. */
+/** Project services: list, log tail, and the user's start/stop/restart/remove. */
 export function serviceRoutes({ runtime, store }: AppDeps): Hono {
   const r = new Hono();
   const db = store.db;
@@ -28,5 +28,9 @@ export function serviceRoutes({ runtime, store }: AppDeps): Hono {
   r.post('/services/:id/start', async (c) => c.json(await runtime.restartService(requireService(db, c.req.param('id')).id, 'user')));
   r.post('/services/:id/restart', async (c) => c.json(await runtime.restartService(requireService(db, c.req.param('id')).id, 'user')));
   r.post('/services/:id/stop', async (c) => c.json(await runtime.stopService(requireService(db, c.req.param('id')).id, 'user')));
+  r.delete('/services/:id', async (c) => {
+    await runtime.removeService(requireService(db, c.req.param('id')).id, 'user');
+    return c.json({ ok: true });
+  });
   return r;
 }

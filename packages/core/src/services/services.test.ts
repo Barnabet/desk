@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ import { findService, getAgent, getDeskAgent, getProject, getService } from '../
 import { createHarness, newRuntime, seedThread, type Harness } from '../testing/harness';
 import { writeFileTool } from '../tools/fs';
 import { openPrTool } from '../tools/git';
-import { serviceListTool, serviceStartTool, serviceStopTool } from '../tools/services';
+import { serviceListTool, serviceRemoveTool, serviceStartTool, serviceStopTool } from '../tools/services';
 import { detectLoopbackUrl, sameCommand, stripAnsi } from './manager';
 
 let h: Harness;
@@ -184,6 +184,46 @@ describe('service tools', () => {
 
     const prompt = deskSystemPrompt({ db: h.store.db, agent: desk, project: getProject(h.store.db, projectId)!, libraryDir: h.dir, skills: rt.skills } as never);
     expect(prompt).toContain('## Services\n- web: stopped (requested)');
+  });
+
+  it('does not keep a one-off command as a service, and removes finished services on request', async () => {
+    const { rt, projectId, threadId } = await setup();
+    const desk = getDeskAgent(h.store.db, projectId)!;
+    const dctx = buildToolContext(desk, 'run', 'tc', new AbortController().signal, { sandboxEnabled: false, jobs: rt.jobs, services: rt.services });
+
+    // A new name that ends cleanly without serving anything was a one-off command: it is taken off the list.
+    const once = await serviceStartTool.execute({ name: 'w6-unlock', command: 'echo unlocked', thread_id: threadId }, dctx);
+    expect(once).toMatch(/w6-unlock ran and ended \(exit 0\) without serving anything, so it was not kept as a service/);
+    expect(once).toContain('run_check');
+    expect(once).toContain('unlocked');
+    expect(findService(h.store.db, projectId, 'w6-unlock')).toBeUndefined();
+
+    // A failing one stays, so the failure shows; the agent is told how to remove it.
+    const failed = await serviceStartTool.execute({ name: 'w6-prune', command: 'echo nope; exit 1', thread_id: threadId }, dctx);
+    expect(failed).toMatch(/- w6-prune: exited \(code 1\).*service_remove/s);
+    const row = findService(h.store.db, projectId, 'w6-prune')!;
+    expect(existsSync(rt.serviceLogFile(projectId, row.id))).toBe(true);
+    expect(await serviceRemoveTool.execute({ name: 'w6-prune' }, dctx)).toBe('Removed w6-prune from the Services list.');
+    expect(findService(h.store.db, projectId, 'w6-prune')).toBeUndefined();
+    expect(existsSync(rt.serviceLogFile(projectId, row.id))).toBe(false);
+
+    // A running service is never removed; once stopped, the user can remove it.
+    const web = await rt.startService(projectId, { name: 'web', command: server('http://localhost:5176'), threadId, by: 'user' });
+    await expect(serviceRemoveTool.execute({ name: 'web' }, dctx)).rejects.toThrow(/running; stop it first/);
+    await expect(rt.removeService(web.id, 'user')).rejects.toThrow(/running; stop it first/);
+    await rt.stopService(web.id, 'user');
+    await rt.removeService(web.id, 'user');
+    expect(getService(h.store.db, web.id)).toBeUndefined();
+    expect(h.store.list({ projectId, types: ['service.removed'] }).map((e) => e.payload)).toEqual([
+      { service_id: expect.any(String), by: 'agent:' + desk.id },
+      { service_id: expect.any(String), by: 'agent:' + desk.id },
+      { service_id: web.id, by: 'user' },
+    ]);
+
+    // An existing name that ends at once is kept: it was a real service that crashed or a restart.
+    await rt.startService(projectId, { name: 'api', command: server('http://localhost:5177'), threadId, by: 'user' });
+    await serviceStartTool.execute({ name: 'api', command: 'true', thread_id: threadId }, dctx);
+    expect(findService(h.store.db, projectId, 'api')?.status).toBe('exited');
   });
 
   it('is policy-gated like bash_background, including saved policies that predate it', () => {

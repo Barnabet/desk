@@ -47,7 +47,7 @@ const port = (url: string | null) => {
   }
 };
 
-/** The project's services under the plan: status, URL, where they run, and Open / Logs / Restart / Stop / Start. */
+/** The project's services under the plan: status, URL, where they run, and Open / Logs / Restart / Stop / Remove / Start. */
 export function ServicesCard({ project }: { project: ProjectState }) {
   const now = useNow();
   const [busy, setBusy] = useState<string | null>(null);
@@ -56,10 +56,13 @@ export function ServicesCard({ project }: { project: ProjectState }) {
   if (!services.length) return null;
   const titles = new Map(project.threads.map((t) => [t.id, t.title ?? 'thread']));
   const sourceLabels = new Map(project.sources.map((x) => [x.id, x.label]));
-  const act = async (s: ServiceRow, what: 'start' | 'stop' | 'restart') => {
+  const act = async (s: ServiceRow, what: 'start' | 'stop' | 'restart' | 'remove') => {
     setBusy(`${s.id}:${what}`);
     try {
-      await (what === 'start' ? call('services.start', { id: s.id }) : what === 'stop' ? call('services.stop', { id: s.id }) : call('services.restart', { id: s.id }));
+      if (what === 'remove') {
+        await call('services.remove', { id: s.id });
+        if (logsFor?.id === s.id) setLogsFor(null);
+      } else await (what === 'start' ? call('services.start', { id: s.id }) : what === 'stop' ? call('services.stop', { id: s.id }) : call('services.restart', { id: s.id }));
     } catch (err) {
       toastError(err);
     } finally {
@@ -108,9 +111,14 @@ export function ServicesCard({ project }: { project: ProjectState }) {
                     </Button>
                   </>
                 ) : (
-                  <Button size="sm" pending={busy === `${s.id}:start`} disabled={busy !== null} onClick={() => void act(s, 'start')} aria-label={`Start ${s.name}`}>
-                    Start
-                  </Button>
+                  <>
+                    <Button size="sm" variant="ghost" pending={busy === `${s.id}:remove`} disabled={busy !== null} onClick={() => void act(s, 'remove')} aria-label={`Remove ${s.name}`} title="Take it off this list, with its log">
+                      Remove
+                    </Button>
+                    <Button size="sm" pending={busy === `${s.id}:start`} disabled={busy !== null} onClick={() => void act(s, 'start')} aria-label={`Start ${s.name}`}>
+                      Start
+                    </Button>
+                  </>
                 )}
               </div>
             </li>
