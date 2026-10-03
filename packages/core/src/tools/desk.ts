@@ -4,6 +4,7 @@ import { formatThreadLine, formatThreadSummary, renderTranscript } from '../coor
 import { newId } from '../ids';
 import { currentReviewOf, reviewSummary } from '../reviews/reviews';
 import { getAgent, getApproval, lastEvent, listThreads, pendingApprovalsFor, threadsByRef, type AgentRow } from '../state/queries';
+import { openWatches } from '../watches/watches';
 import { git } from '../workspaces/workspaces';
 import { defineTool, type Tool, type ToolContext } from './types';
 
@@ -113,8 +114,34 @@ export const listThreadsTool = defineTool({
   description: 'List this project’s threads with status, model, branch and result summary.',
   input: z.object({ status: z.enum(['idle', 'queued', 'running', 'waiting', 'done', 'failed', 'cancelled']).optional() }),
   async execute({ status }, ctx) {
-    const threads = listThreads(ctx.services.store.db, ctx.projectId, status).filter((t) => !t.archived_at);
-    return threads.length ? threads.map(formatThreadLine).join('\n') : 'No threads';
+    const db = ctx.services.store.db;
+    const threads = listThreads(db, ctx.projectId, status).filter((t) => !t.archived_at);
+    // Desk sees which threads it watches (watch_thread).
+    const watched = new Map(getAgent(db, ctx.agentId)?.role === 'desk' ? openWatches(db, ctx.projectId).map((w) => [w.thread_id, w]) : []);
+    return threads.length ? threads.map((t) => formatThreadLine(t, watched.get(t.id))).join('\n') : 'No threads';
+  },
+});
+
+export const watchThreadTool = defineTool({
+  name: 'watch_thread',
+  description:
+    "Be woken the next time a thread sends a message to another thread (not to you: those already wake you), optionally only one containing `match` (case-insensitive). One shot: it ends when it fires, when you call unwatch_thread, or when the thread finishes. A new watch on the same thread replaces the old one. At most 10 at once. list_threads marks watched threads.",
+  input: z.object({ thread_id: z.string(), match: z.string().trim().min(1).max(200).optional() }),
+  async execute({ thread_id, match }, ctx) {
+    const t = requireThread(ctx, thread_id);
+    ctx.services.watches.set(ctx.agentId, t, match);
+    return `Watching "${sanitizeLabel(t.title ?? 'untitled')}"${match ? ` for a message containing ${snippet(match, 80)}` : ''}: you will be woken once, at its next message to another thread.`;
+  },
+});
+
+export const unwatchThreadTool = defineTool({
+  name: 'unwatch_thread',
+  description: 'Stop watching a thread (watch_thread).',
+  input: z.object({ thread_id: z.string() }),
+  async execute({ thread_id }, ctx) {
+    const t = getAgent(ctx.services.store.db, thread_id) ?? requireThread(ctx, thread_id);
+    if (t.project_id !== ctx.projectId) throw new Error(`Unknown thread: ${thread_id}`);
+    return ctx.services.watches.unset(ctx.agentId, t.id) ? `Stopped watching "${sanitizeLabel(t.title ?? 'untitled')}".` : `You were not watching "${sanitizeLabel(t.title ?? 'untitled')}".`;
   },
 });
 
@@ -311,6 +338,8 @@ export const deskCoordinationTools: Tool[] = [
   stopThreadTool,
   closeThreadTool,
   listThreadsTool,
+  watchThreadTool,
+  unwatchThreadTool,
   readThreadTool,
   reviewDiffTool,
   waitForThreadsTool,

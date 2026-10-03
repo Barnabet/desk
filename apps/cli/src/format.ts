@@ -204,7 +204,11 @@ export function acceptanceLabel(t: { acceptance?: string; reviews_submission_id?
   return !t.acceptance || t.acceptance === 'none' ? '' : t.acceptance.replace(/_/g, ' ');
 }
 
-/** `desk review <thread>`: acceptance, the current submission, open findings with reproducers, reviews, older submissions. */
+/** How a recorded command ended: `exit 0`, `timed out`, `stopped`, `killed`. */
+const ended = (x: { outcome: string; exit_code: number | null }) =>
+  x.outcome === 'timeout' ? 'timed out' : x.outcome === 'aborted' ? 'stopped' : x.outcome === 'killed' ? 'killed' : `exit ${x.exit_code}`;
+
+/** `desk review <thread>`: acceptance, the current submission (with the commands Desk saw run on it), open findings with reproducers, reviews, older submissions. */
 export function reviewText(r: ThreadReview, name: (threadId: string) => string): string {
   if (r.reviewing) {
     const seq = r.reviewing.submission_seq;
@@ -219,6 +223,8 @@ export function reviewText(r: ThreadReview, name: (threadId: string) => string):
       ...s.claims.map((c) => `  claims: ${c}`),
       ...s.limitations.map((c) => `  limitation: ${c}`),
       ...(s.evidence ? [`  checked: ${clip(s.evidence, 200)}`] : []),
+      // What Desk itself saw run on the commit, with no uncommitted changes.
+      ...(r.receipts?.[s.id] ?? []).map((x) => `  ran: ${ended(x)} · ${clip(x.command, 160)}`),
       ...s.artifacts.map((a) => `  file: ${a.path} ${a.sha256.slice(0, 12)}`),
     ].join('\n');
   const open = r.findings.filter((f) => f.state === 'open');

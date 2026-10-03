@@ -81,6 +81,31 @@ export function reviewFixture(over: Partial<ThreadReview> = {}): ThreadReview {
       },
     ],
     reviewing: null,
+    receipts: {
+      s1: [],
+      s2: [
+        {
+          id: 'rc1',
+          project_id: 'p',
+          agent_id: 't',
+          tool: 'bash',
+          tool_call_id: 'call1',
+          check_id: null,
+          step: null,
+          command: 'pytest -q',
+          cwd: '/w/t',
+          head: '2f9a1c0e2b7d4a6c8e0f1a3b5c7d9e1f2a4b6c8d',
+          dirty: false,
+          exit_code: 0,
+          outcome: 'exit',
+          duration_ms: 4200,
+          output_bytes: 812,
+          output_sha256: 'cd'.repeat(32),
+          started_at: T,
+          finished_at: T,
+        },
+      ],
+    },
     ...over,
   };
 }

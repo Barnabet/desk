@@ -1,6 +1,7 @@
 import type { AgentRow } from '../state/queries';
 import { deskAutomationTools } from '../tools/automations';
 import { bashReadonlyTool, bashTool } from '../tools/bash';
+import { deskCheckTools } from '../tools/checks';
 import { deskCoordinationTools } from '../tools/desk';
 import { editFileTool, fileTools, globTool, grepTool, listDirTool, readFileTool, writeFileTool } from '../tools/fs';
 import { gitTools } from '../tools/git';
@@ -16,7 +17,10 @@ import { viewImageTool } from '../tools/vision';
 import type { Tool } from '../tools/types';
 import { webTools } from '../tools/web';
 
-/** Desk: read (and look at) anything in the project, draft in its own scratch dir, read-only shell, skills (use + authoring), coordination. */
+/**
+ * Desk: read (and look at) anything in the project, draft in its own scratch dir, read-only shell, skills (use +
+ * authoring), coordination, and check jobs (sandboxed commands in their own folders).
+ */
 export function deskToolsFor(_agent: AgentRow): Tool[] {
   return [
     readFileTool,
@@ -36,6 +40,7 @@ export function deskToolsFor(_agent: AgentRow): Tool[] {
     ...serviceTools,
     ...deskCoordinationTools,
     ...deskReviewTools,
+    ...deskCheckTools,
   ];
 }
 

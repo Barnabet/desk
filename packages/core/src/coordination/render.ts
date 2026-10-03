@@ -6,13 +6,14 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s
 export const oneLine = (s: string) => s.replace(/[\s\u0085]+/g, ' ').trim();
 
 /** One line per thread for rosters and list_threads. The title and the result are agents' words: one quoted line each. */
-export function formatThreadLine(t: AgentRow): string {
+export function formatThreadLine(t: AgentRow, watched?: { match: string | null }): string {
   const parts = [`${t.id} ${snippet(t.title ?? 'untitled', 80)} [${t.status}]`, t.reasoning_effort ? `${t.model} (${t.reasoning_effort} effort)` : t.model];
   if (t.git_branch) parts.push(`branch ${t.git_branch}`);
   if (t.review_round) parts.push(`review round ${t.review_round}`);
   if (t.reviews_submission_id) parts.push('reviewer');
   else if (t.acceptance !== 'none') parts.push(`acceptance: ${t.acceptance.replace(/_/g, ' ')}`);
   if (t.result_summary) parts.push(`result: ${snippet(t.result_summary, 160)}`);
+  if (watched) parts.push(watched.match ? `watched (matching ${snippet(watched.match, 60)})` : 'watched');
   return `- ${parts.join('; ')}`;
 }
 

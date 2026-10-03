@@ -1,4 +1,4 @@
-import type { FindingRow, ReviewRow, SubmissionRow, ThreadReview } from '@desk/client';
+import type { FindingRow, ReceiptRow, ReviewRow, SubmissionRow, ThreadReview } from '@desk/client';
 import type { Acceptance, StoredEvent } from '@desk/protocol';
 
 /** A chip's wording and colour, in the status chip's tones (`chip-<tone>`). */
@@ -68,7 +68,26 @@ export type SubmissionView = {
   createdAt: string;
   /** `Accepted`, `Accepted with limitations` or `Superseded`; null for the current one while undecided. */
   tag: string | null;
+  /** Commands Desk recorded on its commit with no uncommitted changes, newest first (receipts spec 2026-10-03 §1). */
+  ran: RanView[];
 };
+
+/** One recorded command: how it ended (`exit 0`, `timed out`…), whether that is a pass, and how long it took. */
+export type RanView = { id: string; command: string; tool: string; ended: string; ok: boolean; duration: string };
+
+/** `340 ms`, `1.2 s`, `42 s`, `2 min 5 s`. */
+export function receiptDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
+  const m = Math.floor(s / 60);
+  return `${m} min ${Math.round(s - m * 60)} s`;
+}
+
+export function ranView(r: ReceiptRow): RanView {
+  const ended = r.outcome === 'timeout' ? 'timed out' : r.outcome === 'aborted' ? 'stopped' : r.outcome === 'killed' ? 'killed' : `exit ${r.exit_code}`;
+  return { id: r.id, command: r.command, tool: r.tool, ended, ok: r.outcome === 'exit' && r.exit_code === 0, duration: receiptDuration(r.duration_ms) };
+}
 
 export type ReviewView = {
   chip: ReviewChip | null;
@@ -131,6 +150,7 @@ export function reviewView(r: ThreadReview): ReviewView {
     evidence: s.evidence,
     createdAt: s.created_at,
     tag: decided && s.id === r.accepted_submission_id ? ACCEPTANCE[r.acceptance as 'accepted'].label : s.superseded_by ? 'Superseded' : null,
+    ran: (r.receipts?.[s.id] ?? []).map(ranView),
   });
   const findings = r.findings.map((f) => findingView(f, seqOf));
   const open = findings.filter((f) => f.open);

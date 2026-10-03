@@ -12,6 +12,8 @@ export type ProcessOptions = {
   maxOutputChars?: number;
   /** Written to the process's stdin (closed afterwards); stdin is empty otherwise. */
   stdin?: string;
+  /** An open file that takes stdout and stderr instead of collecting them (`output` is then empty): a check step's log. */
+  outputFd?: number;
 };
 
 /** Runs a process in its own process group; stdout and stderr are combined. Rejects only on spawn failure. */
@@ -21,7 +23,7 @@ export function runProcess(opts: ProcessOptions): Promise<ProcessResult> {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       detached: true,
-      stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', opts.outputFd ?? 'pipe', opts.outputFd ?? 'pipe'],
     });
     if (opts.stdin !== undefined && child.stdin) {
       child.stdin.on('error', () => {}); // the process may exit without reading its input
@@ -35,8 +37,8 @@ export function runProcess(opts: ProcessOptions): Promise<ProcessResult> {
     const onData = (buf: Buffer) => {
       if (output.length < max) output += buf.toString('utf8');
     };
-    child.stdout!.on('data', onData);
-    child.stderr!.on('data', onData);
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
 
     const killGroup = () => {
       const pid = child.pid;

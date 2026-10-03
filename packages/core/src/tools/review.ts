@@ -88,7 +88,7 @@ export const submitAssessmentTool = defineTool({
       return [
         'Initial assessment recorded.',
         '',
-        builderReport(builder, sub),
+        builderReport(db, builder, sub),
         '',
         'Compare it with what you found. Check any claim you have not verified yet, raise findings for real problems (withdraw any you no longer stand by with resolve_finding), then call submit_assessment again with your final review.',
       ].join('\n');

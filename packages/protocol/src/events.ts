@@ -5,10 +5,13 @@ import {
   AgentRole,
   ArtifactKind,
   AgentStatus,
+  CheckStatus,
+  CheckWhere,
   GitInfo,
   MemoryKind,
   PlanItem,
   ReasoningEffort,
+  ReceiptOutcome,
   RequirementCheck,
   ReviewVerdict,
   RunFinishReason,
@@ -166,6 +169,59 @@ export const EventBody = z.discriminatedUnion('type', [
       note: z.string().optional(),
     }),
   ),
+  /**
+   * A shell command the platform ran for an agent and saw end (receipts spec 2026-10-03 §1): where it ran (the git
+   * commit and whether tracked files had uncommitted changes, null outside git), how it ended, and a fingerprint of
+   * its output. On the agent's stream; a check's steps carry `check_id` and `step`.
+   */
+  event(
+    'receipt.recorded',
+    z.object({
+      receipt_id: z.string(),
+      tool: z.string(),
+      tool_call_id: z.string().optional(),
+      check_id: z.string().optional(),
+      step: z.number().int().min(0).optional(),
+      command: z.string(),
+      cwd: z.string(),
+      head: z.string().nullable(),
+      dirty: z.boolean().nullable(),
+      exit_code: z.number().int().nullable(),
+      outcome: ReceiptOutcome,
+      duration_ms: z.number().int().min(0),
+      output_bytes: z.number().int().min(0),
+      output_sha256: z.string(),
+      started_at: z.string(),
+    }),
+  ),
+  /** On Desk's stream: a check job started (spec 2026-10-03 §2). `head`: the snapshot's commit. */
+  event(
+    'check.started',
+    z.object({
+      check_id: z.string(),
+      title: z.string(),
+      steps: z.array(z.string().min(1)).min(1),
+      where: CheckWhere,
+      expect: z.array(z.string()),
+      timeout_s: z.number().int().min(1),
+      cwd: z.string(),
+      head: z.string().nullable(),
+    }),
+  ),
+  event(
+    'check.finished',
+    z.object({
+      check_id: z.string(),
+      status: CheckStatus.exclude(['running']),
+      /** The step that failed (0-based); null when every step passed or none ran. */
+      failed_step: z.number().int().min(0).nullable(),
+      reason: z.string(),
+      duration_ms: z.number().int().min(0),
+    }),
+  ),
+  /** On Desk's stream: wake Desk once on the thread's next message to another thread (spec 2026-10-03 §3). */
+  event('watch.set', z.object({ watch_id: z.string(), thread_id: z.string(), match: z.string().optional() })),
+  event('watch.ended', z.object({ watch_id: z.string(), reason: z.enum(['fired', 'cancelled', 'thread_finished']), message_id: z.number().int().optional() })),
   event('agent.archived', z.object({})),
   event('agent.skills_changed', z.object({ skills: z.array(SkillName) })),
   event(

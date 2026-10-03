@@ -310,6 +310,21 @@ export function ReviewTab({ thread, threads, version, now }: { thread: ThreadVie
               </>
             ) : null}
             {sub.evidence ? <p className="review-text small">How it checked: {sub.evidence}</p> : null}
+            {sub.ran.length ? (
+              <>
+                <span className="small">Commands Desk saw run on this commit:</span>
+                <ul className="review-req" aria-label={`Commands run on submission ${sub.seq}`}>
+                  {sub.ran.map((c) => (
+                    <li key={c.id}>
+                      <span className={c.ok ? 'met-yes' : 'met-no'}>{c.ended}</span> · <span className="mono">{c.command}</span>
+                      <span className="muted"> · {c.duration}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : sub.commit ? (
+              <span className="small muted">Desk saw no commands run on this commit with no uncommitted changes.</span>
+            ) : null}
             {sub.artifacts.length ? <span className="small mono">{sub.artifacts.map((a) => a.path).join(' · ')}</span> : null}
           </li>
         ))}

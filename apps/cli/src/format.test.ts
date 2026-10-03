@@ -164,6 +164,7 @@ describe('reviews', () => {
       { id: 'f2', title: 'Typo', blocking: false, reproducer: '', state: 'waived', reason: 'Cosmetic' },
     ],
     reviewing: null,
+    receipts: { s2: [{ command: 'pytest -q', outcome: 'exit', exit_code: 0 }, { command: 'pytest -q -k march', outcome: 'timeout', exit_code: null }] },
   } as unknown as ThreadReview;
 
   it('labels acceptance for desk threads', () => {
@@ -180,6 +181,8 @@ describe('reviews', () => {
         '  claims: Totals match',
         '  limitation: EUR only',
         '  checked: pytest: 12 passed',
+        '  ran: exit 0 · pytest -q',
+        '  ran: timed out · pytest -q -k march',
         `  file: r.md ${'ab'.repeat(6)}`,
         'Open findings:',
         '- f1 (blocking) March is off',

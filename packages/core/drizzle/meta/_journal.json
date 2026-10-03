@@ -64,6 +64,13 @@
       "when": 1790981402837,
       "tag": "0008_desk_model",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791019793317,
+      "tag": "0009_receipts_checks_watches",
+      "breakpoints": true
     }
   ]
 }

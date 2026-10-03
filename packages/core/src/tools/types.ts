@@ -14,9 +14,12 @@ import type {
 import type { AttachmentStore } from '../attachments/store';
 import type { AutomationEngine, StepResult } from '../automations/engine';
 import type { Automations } from '../automations/service';
+import type { CheckJobs } from '../checks/service';
+import type { ThreadWatches } from '../watches/watches';
 import type { SkillSaveInput, SkillStore, SkillSummary } from '../skills/store';
 import type { EventStore } from '../events/store';
 import type { ServiceRow } from '../state/queries';
+import type { ReceiptInput } from '../receipts/receipts';
 import type { JobManager } from './jobs';
 import type { SandboxSpec } from './sandbox';
 
@@ -61,6 +64,10 @@ export interface RuntimeServices {
   readonly automations: Automations;
   /** Runs automations: start, cancel, answer (Desk's automation tools). */
   readonly engine: AutomationEngine;
+  /** Desk's check jobs: start, cancel, read a step's log. */
+  readonly checks: CheckJobs;
+  /** Desk's watches on threads' messages to other threads. */
+  readonly watches: ThreadWatches;
   /** The model a tool call runs under (`model`, else the agent's own), and whether it accepts images. */
   agentModel(agentId: string, model?: string): { id: string; vision: boolean };
   activateSkills(agentId: string, names: string[]): SkillSummary[];
@@ -119,6 +126,8 @@ export interface RuntimeServices {
     note?: string;
     by: 'desk' | 'user';
   }): { submissionSeq: number; waived: number };
+  /** Records a shell command the platform ran for the agent and saw end (spec 2026-10-03 §1). */
+  recordReceipt(agentId: string, receipt: ReceiptInput): void;
   /** Whether the pause of the project's automatic wakes is what keeps the agent from running now (design spec §5.4). */
   heldByPause(agentId: string): boolean;
   stopAgent(agentId: string, opts?: { by?: string; reason?: string }): void;
@@ -154,6 +163,8 @@ export type GateContext = { gitBranch?: string };
 
 export type ToolGate<I = any> = {
   subject: (input: I, gctx: GateContext) => PolicySubject;
+  /** Several subjects checked one by one, the strictest decision winning: each command of a check job. `subject` still names the call (approvals, grants). */
+  subjects?: (input: I, gctx: GateContext) => PolicySubject[];
   /** Decision when no rule matches: `ask` for outward-facing tools, `auto` for sandboxed shell. */
   unmatched: 'ask' | 'auto';
   /** Rules written for these tools apply too (a new tool inherits saved policies, e.g. service_start ← bash_background). */

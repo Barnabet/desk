@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ev } from '@desk/client/testing';
-import { acceptanceChip, criteriaDraft, linesOf, reviewVersion, reviewView } from './reviews';
+import { acceptanceChip, criteriaDraft, linesOf, ranView, reviewVersion, reviewView } from './reviews';
 import { reviewFixture } from './testing/automations';
 
 describe('acceptanceChip', () => {
@@ -13,12 +13,23 @@ describe('acceptanceChip', () => {
   });
 });
 
+describe('ranView', () => {
+  it('says how a recorded command ended and whether that passed', () => {
+    const r = reviewFixture().receipts.s2![0]!;
+    expect(ranView({ ...r, outcome: 'timeout', exit_code: null, duration_ms: 125_000 })).toMatchObject({ ended: 'timed out', ok: false, duration: '2 min 5 s' });
+    expect(ranView({ ...r, exit_code: 1, duration_ms: 340 })).toMatchObject({ ended: 'exit 1', ok: false, duration: '340 ms' });
+  });
+});
+
 describe('reviewView', () => {
   it('orders submissions and reviews newest first, splits findings and offers the earlier reviewer again', () => {
     const v = reviewView(reviewFixture());
     expect(v.chip).toEqual({ label: 'Reviewed', tone: 'wait' });
     expect(v.current).toMatchObject({ seq: 2, tag: null, limitations: ['Only EUR checked'] });
     expect(v.earlier.map((s) => [s.seq, s.tag])).toEqual([[1, 'Superseded']]);
+    expect(v.current!.ran).toEqual([{ id: 'rc1', command: 'pytest -q', tool: 'bash', ended: 'exit 0', ok: true, duration: '4.2 s' }]);
+    expect(v.earlier[0]!.ran).toEqual([]);
+    expect(reviewView({ ...reviewFixture(), receipts: undefined as never }).current!.ran).toEqual([]);
     expect(v.reviews).toEqual([
       expect.objectContaining({
         reviewerId: 'r',

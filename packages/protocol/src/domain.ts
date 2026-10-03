@@ -95,6 +95,8 @@ export const AgentMessageKind = z.enum([
   'start',
   /** From an automation to Desk: a Tell Desk step, a Desk review, or the report of a run Desk started. */
   'automation',
+  /** From the runtime to Desk: one of its check jobs ended. */
+  'check',
 ]);
 export type AgentMessageKind = z.infer<typeof AgentMessageKind>;
 
@@ -112,6 +114,21 @@ export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
 /** Whether a submission meets one acceptance criterion, as the reviewer found it. */
 export const RequirementCheck = z.object({ criterion: z.string().min(1), met: z.enum(['yes', 'no', 'unknown']), note: z.string() });
 export type RequirementCheck = z.infer<typeof RequirementCheck>;
+
+/** How a command ended: its own exit, the timeout, a stop (`aborted`), or bash_kill / a cancelled check (`killed`). */
+export const ReceiptOutcome = z.enum(['exit', 'timeout', 'aborted', 'killed']);
+export type ReceiptOutcome = z.infer<typeof ReceiptOutcome>;
+
+/** Where a check job runs (spec 2026-10-03 §2). */
+export const CheckWhere = z.union([
+  z.literal('scratch'),
+  z.object({ thread_id: z.string().min(1), mode: z.enum(['snapshot', 'workspace']) }),
+  z.object({ source_id: z.string().min(1) }),
+]);
+export type CheckWhere = z.infer<typeof CheckWhere>;
+
+export const CheckStatus = z.enum(['running', 'passed', 'failed', 'timed_out', 'cancelled', 'interrupted']);
+export type CheckStatus = z.infer<typeof CheckStatus>;
 
 export const FindingState = z.enum(['open', 'fixed', 'waived', 'withdrawn']);
 export type FindingState = z.infer<typeof FindingState>;

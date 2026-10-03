@@ -216,6 +216,18 @@ const TITLES: Record<Mode, string> = {
                     @if (sub.evidence) {
                       <p class="review-text small">How it checked: {{ sub.evidence }}</p>
                     }
+                    @if (sub.ran.length) {
+                      <span class="small">Commands Desk saw run on this commit:</span>
+                      <ul class="review-req" [attr.aria-label]="'Commands run on submission ' + sub.seq">
+                        @for (c of sub.ran; track c.id) {
+                          <li>
+                            <span [class]="c.ok ? 'met-yes' : 'met-no'">{{ c.ended }}</span> · <span class="mono">{{ c.command }}</span><span class="muted"> · {{ c.duration }}</span>
+                          </li>
+                        }
+                      </ul>
+                    } @else if (sub.commit) {
+                      <span class="small muted">Desk saw no commands run on this commit with no uncommitted changes.</span>
+                    }
                     @if (sub.artifacts.length) {
                       <span class="small mono">{{ paths(sub.artifacts) }}</span>
                     }

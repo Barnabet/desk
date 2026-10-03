@@ -39,6 +39,7 @@ export { listAttention } from './state/attention';
 export { listOverview } from './state/overview';
 export { listFolder, listWorkspace, resolveFolderFile, resolveWorkspaceFile, threadDiff } from './workspaces/inspect';
 export { threadReview, type FindingRow, type ReviewRow, type SubmissionRow, type ThreadReview } from './reviews/reviews';
+export { type CheckRow, type ReceiptRow } from './receipts/receipts';
 export { readAgentFile } from './tools/agent-files';
 export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, modelCredentialsFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';

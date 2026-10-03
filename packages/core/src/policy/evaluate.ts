@@ -10,7 +10,9 @@ export type PolicyDecision = {
   denial?: string;
 };
 
-const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly', 'skill_run', 'service_start']);
+const SHELL_TOOLS = new Set(['bash', 'bash_background', 'bash_readonly', 'skill_run', 'service_start', 'run_check']);
+/** Strictest first: a call with several subjects gets the strictest of their decisions. */
+const STRICTNESS = ['deny', 'ask', 'allow', 'auto'] as const;
 
 export function globToRegExp(glob: string): RegExp {
   const body = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
@@ -38,7 +40,7 @@ function ruleMatches(rule: PolicyRule, toolName: string, subject: PolicySubject)
   return true;
 }
 
-/** Decides whether a validated tool call may run. First matching rule wins. */
+/** Decides whether a validated tool call may run. First matching rule wins, for each subject of the call. */
 export function evaluatePolicy(
   tool: Tool,
   input: unknown,
@@ -47,14 +49,20 @@ export function evaluatePolicy(
 ): PolicyDecision {
   if (!tool.gate) return { action: 'auto', delegateToDesk: false, reason: 'Tool is not policy-gated' };
 
-  let subject: PolicySubject;
+  const gctx = opts.gitBranch ? { gitBranch: opts.gitBranch } : {};
+  let subjects: PolicySubject[];
   try {
-    subject = tool.gate.subject(input, opts.gitBranch ? { gitBranch: opts.gitBranch } : {});
+    subjects = tool.gate.subjects ? tool.gate.subjects(input, gctx) : [tool.gate.subject(input, gctx)];
   } catch {
-    subject = {};
+    subjects = [{}];
   }
+  const decisions = (subjects.length ? subjects : [{}]).map((s) => decide(tool, s, rules, opts));
+  return decisions.reduce((a, b) => (STRICTNESS.indexOf(b.action) < STRICTNESS.indexOf(a.action) ? b : a));
+}
 
-  const names = [tool.name, ...(tool.gate.alsoMatches ?? [])];
+function decide(tool: Tool, subject: PolicySubject, rules: PolicyRule[], opts: { sandboxAvailable: boolean }): PolicyDecision {
+  const gate = tool.gate!;
+  const names = [tool.name, ...(gate.alsoMatches ?? [])];
   const rule = rules.find((r) => names.some((n) => ruleMatches(r, n, subject)));
   if (rule) {
     return {
@@ -69,8 +77,8 @@ export function evaluatePolicy(
     return { action: 'ask', delegateToDesk: false, reason: 'Shell sandbox unavailable: every command needs approval' };
   }
   return {
-    action: tool.gate.unmatched,
+    action: gate.unmatched,
     delegateToDesk: false,
-    reason: tool.gate.unmatched === 'ask' ? `No policy rule allows ${tool.name}` : 'No policy rule matched',
+    reason: gate.unmatched === 'ask' ? `No policy rule allows ${tool.name}` : 'No policy rule matched',
   };
 }
