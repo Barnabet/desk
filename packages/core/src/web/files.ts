@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { writeAgentFile } from '../tools/agent-files';
 import { resolveForTool } from '../tools/paths';
@@ -33,5 +33,22 @@ export async function saveAgentFile(ctx: ToolContext, relPath: string, data: str
   const target = await resolveForTool(join(ctx.workspace, relPath), 'write', ctx);
   await mkdir(dirname(target), { recursive: true });
   await writeAgentFile(target, data, ctx.sandbox.guard);
+  if (relPath.split(/[\\/]/)[0] === WEB_DIR) await ignoreWebDir(ctx);
   return target;
+}
+
+/** The workspace folder the web tools save into. */
+const WEB_DIR = 'web';
+
+/**
+ * Keeps `web/` out of git: a thread's workspace is its worktree, and saved pages and crawls must not end up in its
+ * commits, diff or reviews. A self-ignoring `.gitignore` (`*`) inside the folder needs no change to the repo's files.
+ */
+async function ignoreWebDir(ctx: ToolContext): Promise<void> {
+  const file = await resolveForTool(join(ctx.workspace, WEB_DIR, '.gitignore'), 'write', ctx);
+  try {
+    await access(file);
+  } catch {
+    await writeAgentFile(file, '*\n', ctx.sandbox.guard);
+  }
 }

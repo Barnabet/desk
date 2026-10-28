@@ -31,11 +31,11 @@ describe('ProjectSettings', () => {
       'git_push:allow',
       'git_push:deny',
       'open_pr:allow',
-      'web_fetch:allow',
-      'web_search:allow',
       'web_map:allow',
       'web_crawl:allow',
       'web_extract:allow',
+      'web_fetch:allow',
+      'web_search:allow',
     ]);
   });
 

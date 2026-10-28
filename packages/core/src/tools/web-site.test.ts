@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -107,6 +108,13 @@ describe('web_crawl', () => {
     expect(index.map((p) => p.url)).toEqual(['https://docs.site.org/intro', 'https://docs.site.org/setup']);
   });
 
+  it('keeps saved pages out of a git workspace', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: workspace });
+    await createWebCrawlTool(open).execute({ url: 'https://docs.site.org/', limit: 5 }, ctx());
+    expect(await readFile(join(workspace, 'web', '.gitignore'), 'utf8')).toBe('*\n');
+    expect(execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: workspace, encoding: 'utf8' })).toBe('');
+  });
+
   it('caps a crawl at 50 pages', () => {
     expect(webCrawlTool.input.safeParse({ url: 'https://docs.site.org/', limit: 51 }).success).toBe(false);
     expect(webCrawlTool.input.safeParse({ url: 'https://docs.site.org/', limit: 50 }).success).toBe(true);
@@ -140,5 +148,15 @@ describe('policy and grants for the site tools', () => {
   it('grants a domain to an automation, like web_fetch', () => {
     expect(deriveGrant('web_crawl', { domain: 'docs.site.org' }, 'n')).toEqual({ tool: 'web_crawl', match: { domain: 'docs.site.org' }, action: 'allow' });
     expect(deriveGrant('web_extract', { domain: 'a.b' }, 'n')).toEqual({ tool: 'web_extract', match: { domain: 'a.b' }, action: 'allow' });
+  });
+});
+
+describe('policy rules written for the site tools', () => {
+  it('win over the web_fetch rule in the default policy', () => {
+    const opts = { sandboxAvailable: true };
+    const policy = DEFAULT_POLICY.map((r) => (r.tool === 'web_crawl' ? { ...r, action: 'ask' as const } : r));
+    expect(evaluatePolicy(webCrawlTool, { url: 'https://docs.site.org/' }, policy, opts).action).toBe('ask');
+    const denyMap = DEFAULT_POLICY.map((r) => (r.tool === 'web_map' ? { ...r, action: 'deny' as const } : r));
+    expect(evaluatePolicy(webMapTool, { url: 'https://docs.site.org/' }, denyMap, opts).action).toBe('deny');
   });
 });

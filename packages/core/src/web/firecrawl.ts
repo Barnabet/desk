@@ -11,6 +11,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRY_AFTER_S = 10;
 const CRAWL_DEADLINE_MS = 10 * 60_000;
 const CRAWL_POLL_MS = 2_000;
+/** Status polls that may fail in a row (a 502, a timeout) before the crawl is given up, keeping what it has. */
+const CRAWL_POLL_FAILURES = 3;
 
 export type ScrapeRequest = {
   url: string;
@@ -48,6 +50,8 @@ export type CrawlOutcome = {
   status: 'completed' | 'failed' | 'cancelled' | 'timeout';
   creditsUsed?: number;
   robotsBlocked: string[];
+  /** Why a crawl ended early, when Firecrawl stopped answering. */
+  error?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -191,15 +195,23 @@ export async function firecrawlCrawl(
   if (!id) throw new WebApiError('firecrawl', null, 'Firecrawl did not return a crawl id');
   const statusUrl = `${base}/crawl/${encodeURIComponent(id)}`;
 
-  /** Every page of a status answer, following `next` on Firecrawl's origin. */
+  /**
+   * Every page of a status answer, following `next` on Firecrawl's origin. A chunk that fails ends the walk with the
+   * pages so far: they are paid for, so they are kept.
+   */
   const collect = async (first: Json, s: AbortSignal) => {
     const pages = crawlPages(first.data);
     let next = text(first.next);
     for (let hops = 0; next && hops < 100; hops++) {
-      if (new URL(next).origin !== origin) break;
-      const chunk = await firecrawlRequest(key, 'GET', next, undefined, s);
-      pages.push(...crawlPages(chunk.data));
-      next = text(chunk.next);
+      try {
+        if (new URL(next).origin !== origin) break;
+        const chunk = await firecrawlRequest(key, 'GET', next, undefined, s);
+        pages.push(...crawlPages(chunk.data));
+        next = text(chunk.next);
+      } catch (err) {
+        if (s.aborted) throw err;
+        break;
+      }
     }
     const seen = new Set<string>();
     return pages.filter((p) => !seen.has(p.url) && seen.add(p.url));
@@ -212,33 +224,40 @@ export async function firecrawlCrawl(
       return [];
     }
   };
-  /** Cancels the job (with its own short deadline: the call's signal may be aborted) and keeps what it had. */
-  const stop = async (status: 'cancelled' | 'timeout'): Promise<CrawlOutcome> => {
+  /**
+   * Cancels the job (with its own short deadline: the call's signal may be aborted) and keeps what it had: the job's
+   * pages now, or those of `lastOk`, the last status answer, when Firecrawl no longer answers.
+   */
+  const stop = async (status: 'cancelled' | 'timeout' | 'failed', lastOk?: Json, error?: string): Promise<CrawlOutcome> => {
     const cleanup = AbortSignal.timeout(15_000);
     await firecrawlRequest(key, 'DELETE', statusUrl, undefined, cleanup).catch(() => undefined);
-    let pages: CrawlPage[] = [];
-    let creditsUsed: number | undefined;
+    let last = lastOk;
     try {
-      const last = await firecrawlRequest(key, 'GET', statusUrl, undefined, cleanup);
-      creditsUsed = num(last.creditsUsed);
-      pages = await collect(last, cleanup);
+      last = await firecrawlRequest(key, 'GET', statusUrl, undefined, cleanup);
     } catch {
-      // Nothing more to keep.
+      // Keep lastOk.
     }
-    return { pages, status, ...(creditsUsed !== undefined ? { creditsUsed } : {}), robotsBlocked: await robotsBlocked(cleanup) };
+    const pages = last ? await collect(last, cleanup).catch(() => crawlPages(last?.data)) : [];
+    const creditsUsed = last ? num(last.creditsUsed) : undefined;
+    return { pages, status, ...(creditsUsed !== undefined ? { creditsUsed } : {}), robotsBlocked: await robotsBlocked(cleanup), ...(error ? { error } : {}) };
   };
 
   const deadline = Date.now() + (o.deadlineMs ?? CRAWL_DEADLINE_MS);
+  let lastOk: Json | undefined;
+  let failures = 0;
   for (;;) {
-    if (signal.aborted) return stop('cancelled');
-    if (Date.now() >= deadline) return stop('timeout');
+    if (signal.aborted) return stop('cancelled', lastOk);
+    if (Date.now() >= deadline) return stop('timeout', lastOk);
     let status: Json;
     try {
       status = await firecrawlRequest(key, 'GET', statusUrl, undefined, signal);
+      lastOk = status;
+      failures = 0;
     } catch (err) {
-      if (signal.aborted) return stop('cancelled');
-      await firecrawlRequest(key, 'DELETE', statusUrl, undefined, AbortSignal.timeout(15_000)).catch(() => undefined);
-      throw err;
+      if (signal.aborted) return stop('cancelled', lastOk);
+      if (++failures >= CRAWL_POLL_FAILURES) return stop('failed', lastOk, err instanceof Error ? err.message : String(err));
+      await sleep(Math.min(o.pollMs ?? CRAWL_POLL_MS, Math.max(0, deadline - Date.now())), signal);
+      continue;
     }
     const state = text(status.status);
     if (state === 'completed' || state === 'failed' || state === 'cancelled') {

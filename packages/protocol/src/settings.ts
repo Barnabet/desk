@@ -32,11 +32,12 @@ export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'git_push', match: { branch: 'desk/*' }, action: 'allow' },
   { tool: 'git_push', action: 'deny' },
   { tool: 'open_pr', action: 'allow' },
-  { tool: 'web_fetch', action: 'allow' },
-  { tool: 'web_search', action: 'allow' },
+  // Before web_fetch: these tools also match web_fetch rules (alsoMatches), and the first matching rule wins.
   { tool: 'web_map', action: 'allow' },
   { tool: 'web_crawl', action: 'allow' },
   { tool: 'web_extract', action: 'allow' },
+  { tool: 'web_fetch', action: 'allow' },
+  { tool: 'web_search', action: 'allow' },
 ];
 
 /** Field validators without defaults, shared by the full settings and patches. */

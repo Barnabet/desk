@@ -558,7 +558,7 @@ export function createWebCrawlTool({ archivable = isArchivable }: SiteToolOption
       }
       const folder = dirname(await saveAgentFile(ctx, join(rel, 'index.json'), JSON.stringify(index, null, 2)));
       const lines = [
-        `Crawl ${out.status}: ${index.length} pages saved to ${folder}${out.creditsUsed !== undefined ? ` (credits used: ${out.creditsUsed})` : ''}.`,
+        `Crawl ${out.status}: ${index.length} pages saved to ${folder}${out.creditsUsed !== undefined ? ` (credits used: ${out.creditsUsed})` : ''}.${out.error ? ` Firecrawl stopped answering: ${out.error}` : ''}`,
         ...index.map((p) => `- ${p.file} · ${p.url}${p.title ? ` · ${p.title}` : ''} · ${p.chars} chars`),
         out.robotsBlocked.length ? `Blocked by robots.txt: ${out.robotsBlocked.join(', ')}` : '',
         'Read the pages with read_file or grep, or outline and search them with the web-research skill\'s pages.py.',

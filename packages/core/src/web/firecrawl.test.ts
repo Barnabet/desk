@@ -174,6 +174,24 @@ describe('firecrawlCrawl', () => {
     expect(out.pages.map((p) => p.url)).toContain('https://site.test/p1');
   });
 
+  it('keeps the pages it has, and cancels, when status polls keep failing', async () => {
+    scrapingPolls = 1000;
+    let gets = 0;
+    hook = (s) => (s.method === 'GET' && s.path === '/crawl/c1' && gets++ > 0 ? { status: 502, body: { success: false, error: 'Bad gateway' } } : undefined);
+    const out = await firecrawlCrawl('K', req, signal, { base, pollMs: 5 });
+    expect(out.status).toBe('failed');
+    expect(out.error).toMatch(/502/);
+    expect(out.pages.map((p) => p.url)).toContain('https://site.test/p1');
+    expect(seen.some((x) => x.method === 'DELETE' && x.path === '/crawl/c1')).toBe(true);
+  });
+
+  it('keeps the pages it has when a later chunk fails', async () => {
+    hook = (s) => (s.path === '/crawl/c1?skip=2' ? { status: 500, body: { success: false, error: 'Internal' } } : undefined);
+    const out = await firecrawlCrawl('K', req, signal, { base, pollMs: 5 });
+    expect(out.status).toBe('completed');
+    expect(out.pages.map((p) => p.url)).toEqual(['https://site.test/p1', 'https://site.test/p2']);
+  });
+
   it('reports a failed crawl with what it got', async () => {
     hook = (s) => (s.method === 'GET' && s.path === '/crawl/c1' ? { status: 200, body: { status: 'failed', data: [page(1)] } } : undefined);
     const out = await firecrawlCrawl('K', req, signal, { base, pollMs: 5 });

@@ -145,7 +145,7 @@ The output also ends with the backend that answered, e.g. `(via Serper)`, `(via 
   - The 100k-character cap and truncation note stay. A capped page tells the agent to fetch again with `save: true` and read the file.
   - `save: true` writes the full Markdown to `<workspace>/web/pages/<host>-<slug>.md` and returns its path, outline (headings) and the first ~2k characters instead of the whole page.
   - `screenshot: true` downloads Firecrawl's screenshot (its URL lasts 24 h) to `<workspace>/web/shots/` and returns the path, for `view_image`.
-  - Files are written through `tools/agent-files.ts`. "Workspace" means the agent's own workspace: a thread's or step's folder, or Desk's scratch dir.
+  - Files are written through `tools/agent-files.ts`. `web/` holds a self-ignoring `.gitignore` (`*`), so saved pages never reach a thread's commits, diff or reviews (from the final review). "Workspace" means the agent's own workspace: a thread's or step's folder, or Desk's scratch dir.
 - **Routing:** Firecrawl is used only when all of these hold:
   - there is a key;
   - the URL is safe to send: public by name and DNS (`isArchivable`'s rule) and without credentials (`archiveTarget`'s rule);
