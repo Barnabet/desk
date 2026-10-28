@@ -1,4 +1,5 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
+import { join } from 'node:path';
 import { BlockList, isIP } from 'node:net';
 import { Readability } from '@mozilla/readability';
 import { DOMParser, parseHTML } from 'linkedom';
@@ -10,6 +11,10 @@ import { getProject } from '../state/queries';
 import { defineTool, type Tool, type ToolContext } from './types';
 import { reportKeyProblem } from '../web/notice';
 import { formatSerper, SERPER_TYPES, serperSearch, timeToTbs, type SerperType } from '../web/serper';
+import { firecrawlScrape, type ScrapeResult } from '../web/firecrawl';
+import { pageFileName, saveAgentFile } from '../web/files';
+
+export { pageFileName } from '../web/files';
 
 const MAX_FETCH_CHARS = 100_000;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -37,7 +42,9 @@ function htmlToMarkdown(html: string, url: string): { title: string; markdown: s
 }
 
 function cap(text: string): string {
-  return text.length > MAX_FETCH_CHARS ? `${text.slice(0, MAX_FETCH_CHARS)}\n\n[truncated at ${MAX_FETCH_CHARS} characters]` : text;
+  return text.length > MAX_FETCH_CHARS
+    ? `${text.slice(0, MAX_FETCH_CHARS)}\n\n[truncated at ${MAX_FETCH_CHARS} characters; fetch again with save: true to keep the whole page in a file]`
+    : text;
 }
 
 /** A non-2xx answer, with its status for fallback decisions. */
@@ -279,36 +286,165 @@ export type WebFetchOptions = {
 
 const projectPolicy = (ctx: ToolContext): PolicyRule[] => getProject(ctx.services.store.db, ctx.projectId)?.settings.policy ?? [];
 
-/** `web_fetch`: one page as Markdown, falling back to the Wayback Machine when the live page is gone, blocked or unreachable. */
+const DATA_PATH = /\.(json|csv|tsv|txt|md|xml|rss|atom|ya?ml)$/i;
+
+/** Why a URL must not be sent to Firecrawl (it carries credentials, or it is local or private), or null when it may. */
+export async function privacyRefusal(url: URL, archivable: (u: URL) => boolean | Promise<boolean>): Promise<string | null> {
+  if (!archiveTarget(url)) return 'not sent to Firecrawl: the URL carries credentials';
+  if (!(await archivable(url))) return 'not sent to Firecrawl: a local or private address';
+  return null;
+}
+
+/**
+ * Why web_fetch reads a URL directly instead of through Firecrawl, or null when Firecrawl may read it: `raw` asked
+ * for, a data file (JSON, CSV, feeds… come back raw and cost nothing that way), or `privacyRefusal`.
+ */
+export async function firecrawlRefusal(url: URL, raw: boolean, archivable: (u: URL) => boolean | Promise<boolean>): Promise<string | null> {
+  if (raw) return 'raw requested';
+  if (DATA_PATH.test(url.pathname) || hostOf(url) === 'raw.githubusercontent.com') return 'a data file, fetched directly';
+  return privacyRefusal(url, archivable);
+}
+
+export async function firecrawlEligible(url: URL, raw: boolean, archivable: (u: URL) => boolean | Promise<boolean>): Promise<boolean> {
+  return (await firecrawlRefusal(url, raw, archivable)) === null;
+}
+
+const WebFetchInput = z.object({
+  url: z.string().url(),
+  main_only: z.boolean().default(true).describe('Only the main content, without navigation, headers and footers (default true)'),
+  wait_ms: z.number().int().min(0).max(10_000).optional().describe('Wait this long for JavaScript before reading the page'),
+  fresh: z.boolean().default(false).describe("Skip Firecrawl's cached copy (up to 2 days old)"),
+  screenshot: z.boolean().default(false).describe('Also save a screenshot of the page to look at with view_image'),
+  links: z.boolean().default(false).describe("Also list the page's links"),
+  pdf_max_pages: z.number().int().min(1).max(200).default(20).describe('Read at most this many pages of a PDF (each page costs a credit)'),
+  raw: z.boolean().default(false).describe('Fetch directly and return the raw body of non-HTML content (JSON, CSV, feeds)'),
+  save: z.boolean().default(false).describe('Save the whole page as Markdown in your workspace and return its path, outline and a preview'),
+});
+
+const PREVIEW_CHARS = 2_000;
+const OUTLINE_LINES = 60;
+
+/** A saved page's summary: where it is, its headings and its beginning. */
+function savedSummary(path: string, body: string): string {
+  const outline = body.split('\n').filter((l) => /^#{1,6} /.test(l)).slice(0, OUTLINE_LINES);
+  return [
+    `Saved to ${path} (${body.length} characters). Read it with read_file or grep, or with the web-research skill's pages.py.`,
+    outline.length ? `Outline:\n${outline.join('\n')}` : '',
+    `Preview:\n${body.slice(0, PREVIEW_CHARS)}${body.length > PREVIEW_CHARS ? '\n[…]' : ''}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** A Firecrawl page as text: title, final URL, status, type, the PDF page count when it stopped early, then the Markdown and links. */
+function renderScrape(r: ScrapeResult): string {
+  const head = [
+    r.title ? `Title: ${r.title}` : '',
+    `URL: ${r.url}${r.statusCode ? ` · HTTP ${r.statusCode}` : ''}${r.contentType ? ` · ${r.contentType}` : ''}`,
+    r.numPages && r.totalPages && r.totalPages > r.numPages ? `PDF: read ${r.numPages} of ${r.totalPages} pages; raise pdf_max_pages (up to 200) to read more.` : '',
+  ].filter(Boolean);
+  const links = r.links?.length ? `\n\nLinks:\n${r.links.map((l) => `- ${l}`).join('\n')}` : '';
+  return `${head.join('\n')}\n\n${r.markdown}${links}`;
+}
+
+/** `web_fetch`: one page as Markdown through Firecrawl when its key is set and the URL may go there, otherwise read directly, with the Wayback Machine for pages that are gone. */
 export function createWebFetchTool({ waybackApi = 'https://archive.org/wayback/available', archivable = isArchivable, policy = projectPolicy }: WebFetchOptions = {}) {
-  const tool: Tool<{ url: string }> = defineTool({
+  /** Today's direct read: the page as Markdown or a raw body, or the Wayback copy when the live page is gone. Uncapped. */
+  const direct = async (url: string, parsed: URL, ctx: ToolContext): Promise<string> => {
+    let res: Response;
+    try {
+      res = await httpGet(url, ctx.signal);
+    } catch (err) {
+      const gone = ctx.signal.aborted ? undefined : unavailable(err, parsed.host);
+      if (!gone) throw err;
+      const target = waybackApi ? archiveTarget(parsed) : undefined;
+      if (!waybackApi || !target || !(await archivable(parsed))) throw new Error(gone.message);
+      const rules = policy(ctx);
+      const blocked = (href: string) => {
+        const { action } = evaluatePolicy(tool, { url: href }, rules, { sandboxAvailable: true });
+        return action === 'allow' || action === 'auto' ? undefined : `web_fetch policy for ${new URL(href).hostname}: ${action}`;
+      };
+      return fetchArchived({ url, target, gone, api: waybackApi, blocked }, ctx.signal);
+    }
+    return render(res, url);
+  };
+
+  /** Downloads Firecrawl's screenshot (a 24-hour URL) into the workspace, if it is on a public host. */
+  const screenshotLine = async (shot: string, parsed: URL, ctx: ToolContext): Promise<string> => {
+    try {
+      const at = new URL(shot);
+      if (at.protocol !== 'https:' && at.protocol !== 'http:') throw new Error('not an http(s) URL');
+      if (!(await archivable(at))) throw new Error('not on a public host');
+      const bytes = new Uint8Array(await (await httpGet(shot, ctx.signal)).arrayBuffer());
+      const path = await saveAgentFile(ctx, join('web', 'shots', pageFileName(parsed, '.png')), bytes);
+      return `Screenshot saved to ${path}: look at it with view_image.`;
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      return `Screenshot: ${shot} (valid 24 hours; could not be saved: ${errorText(err)})`;
+    }
+  };
+
+  // Typed by the schema's input, so callers (and tests) may leave out the defaults; execute applies them itself.
+  const tool = defineTool({
     name: 'web_fetch',
     description:
-      'Fetch a web page and return its main content as Markdown (or the raw body for non-HTML). Max 100k characters. ' +
+      'Read a web page as Markdown through Firecrawl: JavaScript pages, PDFs and office files, with optional screenshot, links and saving to a file. ' +
+      'Data files (JSON, CSV, feeds) and raw: true are fetched directly and returned raw. Max 100k characters unless saved. ' +
       'When a public page is gone or blocked (403, 404, 410, 451) or its host is unreachable, returns the Wayback Machine copy instead, labelled as archived.',
-    input: z.object({ url: z.string().url() }),
+    input: WebFetchInput,
     gate: { subject: (i) => ({ domain: new URL(i.url).hostname }), unmatched: 'ask' },
-    async execute({ url }, ctx) {
+    async execute(input, ctx) {
+      const { url } = input;
       const parsed = new URL(url);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Only http(s) URLs can be fetched');
-      let res: Response;
-      try {
-        res = await httpGet(url, ctx.signal);
-      } catch (err) {
-        const gone = ctx.signal.aborted ? undefined : unavailable(err, parsed.host);
-        if (!gone) throw err;
-        const target = waybackApi ? archiveTarget(parsed) : undefined;
-        if (!waybackApi || !target || !(await archivable(parsed))) throw new Error(gone.message);
-        const rules = policy(ctx);
-        const blocked = (href: string) => {
-          const { action } = evaluatePolicy(tool, { url: href }, rules, { sandboxAvailable: true });
-          return action === 'allow' || action === 'auto' ? undefined : `web_fetch policy for ${new URL(href).hostname}: ${action}`;
-        };
-        return cap(await fetchArchived({ url, target, gone, api: waybackApi, blocked }, ctx.signal));
+      const finish = async (body: string, via: string, extra?: string) => {
+        const content = input.save ? savedSummary(await saveAgentFile(ctx, join('web', 'pages', pageFileName(parsed)), body), body) : cap(body);
+        return framed(url, extra ? `${content}\n\n${extra}` : content, via);
+      };
+
+      const key = ctx.services.web.key('firecrawl');
+      let via = 'keyless fallback: no Firecrawl key';
+      if (key) {
+        const refusal = await firecrawlRefusal(parsed, input.raw ?? false, archivable);
+        if (refusal) via = `direct fetch: ${refusal}`;
+        else {
+          let reason: string;
+          try {
+            const r = await firecrawlScrape(
+              key,
+              {
+                url,
+                mainOnly: input.main_only ?? true,
+                ...(input.wait_ms ? { waitMs: input.wait_ms } : {}),
+                ...(input.fresh ? { fresh: true } : {}),
+                ...(input.screenshot ? { screenshot: true } : {}),
+                ...(input.links ? { links: true } : {}),
+                pdfMaxPages: input.pdf_max_pages ?? 20,
+              },
+              ctx.signal,
+              ctx.services.web.endpoints.firecrawl,
+            );
+            if (r.statusCode !== undefined && ARCHIVE_STATUSES.has(r.statusCode)) reason = `Firecrawl got HTTP ${r.statusCode}`;
+            else if (!r.markdown.trim()) reason = 'Firecrawl returned an empty page';
+            else return finish(renderScrape(r), 'Firecrawl', r.screenshotUrl ? await screenshotLine(r.screenshotUrl, parsed, ctx) : undefined);
+          } catch (err) {
+            if (ctx.signal.aborted) throw err;
+            reportKeyProblem(ctx, err);
+            reason = `Firecrawl failed: ${errorText(err)}`;
+          }
+          via = `keyless fallback: ${reason}`;
+        }
       }
-      return cap(await render(res, url));
+      let body: string;
+      try {
+        body = await direct(url, parsed, ctx);
+      } catch (err) {
+        if (ctx.signal.aborted || !via.startsWith('keyless fallback: Firecrawl')) throw err;
+        throw new Error(`${errorText(err)} (after ${via.slice('keyless fallback: '.length)})`);
+      }
+      return finish(body, via, input.screenshot ? `No screenshot: it needs Firecrawl (${via.replace(/^(keyless fallback|direct fetch): /, '')}).` : undefined);
     },
-  });
+  }) as unknown as Tool<z.input<typeof WebFetchInput>>;
   return tool;
 }
 
