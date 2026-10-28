@@ -12,7 +12,7 @@ beforeEach(async () => {
 afterEach(async () => rm(home, { recursive: true, force: true }));
 
 const memKeychain = (secret: string | null = null): Keychain & { secret: string | null } => {
-  const k = { secret, get: () => k.secret, set: (s: string) => void (k.secret = s) };
+  const k = { secret, get: () => k.secret, set: (s: string) => void (k.secret = s), delete: () => void (k.secret = null) };
   return k;
 };
 

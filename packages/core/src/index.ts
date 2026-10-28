@@ -43,6 +43,7 @@ export { type CheckRow, type ReceiptRow } from './receipts/receipts';
 export { readAgentFile } from './tools/agent-files';
 export { loadModelConfig, modelConfigFromEnv, modelConfigFromFile, modelCredentialsFile, normalizeBaseURL, parseEnvFile, type ModelConfig } from './model/config';
 export { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, macKeychain, resolveModelEndpoint, testModelEndpoint, type EndpointSource, type Keychain, type KeychainExec } from './model/endpoint';
+export { createWebKeys, WEB_KEYCHAIN_SERVICES, WEB_PROVIDERS, type WebKeys, type WebProvider } from './web/keys';
 export { createSwitchableAdapter, type SwitchableAdapter } from './model/switchable';
 export { DEFAULT_MODEL_ID, effortFor, ModelRegistry, SEED_MODELS, STANDARD_EFFORTS } from './model/registry';
 export { classifyModelError, imageRefusal, ModelError, type ModelErrorKind } from './model/errors';

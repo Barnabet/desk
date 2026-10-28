@@ -36,7 +36,7 @@ async function start(keychain: Keychain | null) {
 }
 
 function memKeychain(): Keychain & { secret: string | null } {
-  const k = { secret: null as string | null, get: () => k.secret, set: (s: string) => void (k.secret = s) };
+  const k = { secret: null as string | null, get: () => k.secret, set: (s: string) => void (k.secret = s), delete: () => void (k.secret = null) };
   return k;
 }
 

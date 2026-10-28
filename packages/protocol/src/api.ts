@@ -236,6 +236,28 @@ export type ModelEndpointPutRequest = z.input<typeof ModelEndpointPutRequest>;
 export const ModelEndpointTestRequest = ModelEndpointPutRequest.optional();
 export type ModelEndpointTestRequest = z.input<typeof ModelEndpointTestRequest>;
 
+/** The paid web backends whose keys deskd holds (Serper for search, Firecrawl for pages). */
+export const WebProvider = z.enum(['serper', 'firecrawl']);
+export type WebProvider = z.infer<typeof WebProvider>;
+
+/** Whether a web key is set and where it comes from; never the key itself. */
+export const WebKeyStatus = z.object({ set: z.boolean(), source: z.enum(['env', 'keychain']).nullable() });
+export type WebKeyStatus = z.infer<typeof WebKeyStatus>;
+
+export const WebKeysStatus = z.object({ serper: WebKeyStatus, firecrawl: WebKeyStatus });
+export type WebKeysStatus = z.infer<typeof WebKeysStatus>;
+
+/** A pasted key, trimmed, with the same character rules as the model key. */
+export const WebKeyPutRequest = z.object({ key: z.string().trim().min(8).pipe(ApiKey) });
+export type WebKeyPutRequest = z.input<typeof WebKeyPutRequest>;
+
+/** Test a candidate key before saving it, or the stored one when omitted. */
+export const WebKeyTestRequest = WebKeyPutRequest.optional();
+export type WebKeyTestRequest = z.input<typeof WebKeyTestRequest>;
+
+export const WebKeyTestResult = z.object({ ok: z.boolean(), error: z.string().optional() });
+export type WebKeyTestResult = z.infer<typeof WebKeyTestResult>;
+
 export const ModelEndpointTestResult = z.object({ ok: z.boolean(), models: z.array(z.string()).optional(), error: z.string().optional() });
 export type ModelEndpointTestResult = z.infer<typeof ModelEndpointTestResult>;
 

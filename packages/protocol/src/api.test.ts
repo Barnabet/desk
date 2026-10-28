@@ -69,3 +69,18 @@ describe('UI API schemas', () => {
     expect(WAKES_PAUSED).toBe('wakes_paused');
   });
 });
+
+import { WebKeyPutRequest, WebKeysStatus } from '@desk/protocol';
+
+describe('web key schemas', () => {
+  it('trims a pasted key and refuses unsafe ones', () => {
+    expect(WebKeyPutRequest.parse({ key: '  k3y-value\n' }).key).toBe('k3y-value');
+    for (const bad of ['a"b', 'a b c d e f', "it's-a-key", 'back\\slash', 'short', '']) expect(() => WebKeyPutRequest.parse({ key: bad })).toThrow();
+  });
+
+  it('describes both providers without the key', () => {
+    const status = { serper: { set: true, source: 'keychain' }, firecrawl: { set: false, source: null } };
+    expect(WebKeysStatus.parse(status)).toEqual(status);
+    expect(() => WebKeysStatus.parse({ serper: status.serper })).toThrow();
+  });
+});

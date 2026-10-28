@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import type { ModelEndpointTestResult } from '@desk/protocol';
 import { modelConfigFromEnv, modelConfigFromFile, normalizeBaseURL, type ModelConfig } from './config';
 
-export type Keychain = { get(): string | null; set(secret: string): void };
+export type Keychain = { get(): string | null; set(secret: string): void; delete(): void };
 export type KeychainExec = (args: string[], input?: string) => string;
 
 export const KEYCHAIN_SERVICE = 'Desk model endpoint';
@@ -15,20 +15,27 @@ const runSecurity: KeychainExec = (args, input) =>
 
 /**
  * The macOS login Keychain via `/usr/bin/security`. The secret is written through `security -i` on stdin,
- * so it never appears in a process argument list.
+ * so it never appears in a process argument list. `service` names the item (default: the model endpoint's).
  */
-export function macKeychain(exec: KeychainExec = runSecurity): Keychain {
+export function macKeychain(exec: KeychainExec = runSecurity, service: string = KEYCHAIN_SERVICE): Keychain {
   return {
     get() {
       try {
-        return exec(['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w']).trim() || null;
+        return exec(['find-generic-password', '-s', service, '-a', KEYCHAIN_ACCOUNT, '-w']).trim() || null;
       } catch {
         return null;
       }
     },
     set(secret) {
       if (!SAFE_SECRET.test(secret) || /["'\\]/.test(secret)) throw new Error('Refusing to store an unsafe secret');
-      exec(['-i'], `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${KEYCHAIN_ACCOUNT}" -w "${secret}"\n`);
+      exec(['-i'], `add-generic-password -U -s "${service}" -a "${KEYCHAIN_ACCOUNT}" -w "${secret}"\n`);
+    },
+    delete() {
+      try {
+        exec(['delete-generic-password', '-s', service, '-a', KEYCHAIN_ACCOUNT]);
+      } catch {
+        // No such item: nothing to remove.
+      }
     },
   };
 }
