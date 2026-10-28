@@ -66,6 +66,8 @@ describe.skipIf(!ready)('live: web tools on Serper and Firecrawl', () => {
 
   it('extracts a field as JSON', async () => {
     const out = String(await webExtractTool.execute({ url: 'https://example.com', prompt: 'The main heading of the page', schema: { type: 'object', properties: { heading: { type: 'string' } } } }, ctx()));
-    expect(out).toMatch(/"heading": ".*Example/);
+    // The extraction is a model's reading of the page, so check its shape, not its wording.
+    expect(out).toMatch(/"heading": "[^"]{3,}"/);
+    expect(out.endsWith('(via Firecrawl)')).toBe(true);
   });
 });
