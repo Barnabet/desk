@@ -22,6 +22,10 @@ import type {
   ModelEndpointPutRequest,
   ModelEndpointStatus,
   ModelEndpointTestResult,
+  WebKeysStatus,
+  WebKeyStatus,
+  WebKeyTestResult,
+  WebProvider,
   ModelInfo,
   ProjectSummary,
   RequestReviewRequest,
@@ -349,5 +353,12 @@ export class DeskClient {
     saveEndpoint: (req: ModelEndpointPutRequest) => this.put<ModelEndpointStatus>('/config/model-endpoint', req),
     testEndpoint: (req?: ModelEndpointPutRequest) =>
       req ? this.post<ModelEndpointTestResult>('/config/model-endpoint/test', req) : this.request<ModelEndpointTestResult>('POST', '/config/model-endpoint/test'),
+    /** Whether the Serper and Firecrawl keys are set, and where from; never the keys. */
+    webKeys: () => this.get<WebKeysStatus>('/config/web-keys'),
+    saveWebKey: (p: WebProvider, key: string) => this.put<WebKeyStatus>(`/config/web-keys/${p}`, { key }),
+    removeWebKey: (p: WebProvider) => this.request<WebKeyStatus>('DELETE', `/config/web-keys/${p}`),
+    /** Tests `key`, or the stored key when omitted (1 credit). */
+    testWebKey: (p: WebProvider, key?: string) =>
+      key ? this.post<WebKeyTestResult>(`/config/web-keys/${p}/test`, { key }) : this.request<WebKeyTestResult>('POST', `/config/web-keys/${p}/test`),
   };
 }

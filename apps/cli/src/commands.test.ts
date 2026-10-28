@@ -239,3 +239,38 @@ describe('launchd plist', () => {
     expect((await cli('skill', 'off', 'nope')).code).toBe(1);
   });
 });
+
+describe('desk config web-key', () => {
+  it('reads the key from the secret prompt, never from argv, and reports the status', async () => {
+    let out = '';
+    let asked = '';
+    const argv = ['config', 'web-key', 'serper'];
+    const code = await runCli(argv, {
+      out: (s) => (out += s),
+      err: (s) => (out += s),
+      dataDir: dir,
+      readSecret: async (prompt) => {
+        asked = prompt;
+        return 'cli-serper-key-0042\n';
+      },
+    });
+    // The test daemon has no Keychain, so saving is refused, but the key went through the prompt only.
+    expect(asked).toMatch(/Serper API key/);
+    expect(argv.join(' ')).not.toContain('cli-serper-key-0042');
+    expect(code).toBe(1);
+    expect(out).toMatch(/Keychain/);
+    expect(out).not.toContain('cli-serper-key-0042');
+  });
+
+  it('refuses a key given on the command line', async () => {
+    const r = await cli('config', 'web-key', 'serper', 'cli-serper-key-0042');
+    expect(r.code).not.toBe(0);
+  });
+
+  it('shows both keys with --status', async () => {
+    const r = await cli('config', 'web-key', '--status');
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('serper: not set');
+    expect(r.out).toContain('firecrawl: not set');
+  });
+});

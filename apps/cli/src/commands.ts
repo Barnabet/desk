@@ -22,6 +22,8 @@ export type CliIO = {
   stopped?: Promise<void>;
   /** `desk web`: calls back on each Enter (default: the terminal, when stdin is one); returns an unsubscribe. */
   onEnter?(cb: () => void): () => void;
+  /** Reads a secret without echoing it (default: the terminal with echo off, else one line of stdin). */
+  readSecret?(prompt: string): Promise<string>;
 };
 
 type Project = { id: string; name: string; goal: string; settings: Record<string, unknown>; archived_at: string | null };
@@ -47,6 +49,27 @@ function terminalEnter(cb: () => void): () => void {
   rl.on('line', () => cb());
   return () => rl.close();
 }
+
+/** One line from stdin; on a terminal, typed without echo. Secrets never come from argv, where other processes can see them. */
+function terminalSecret(io: CliIO) {
+  return (prompt: string) =>
+    new Promise<string>((resolve) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdin.isTTY ? process.stdout : undefined, terminal: !!process.stdin.isTTY });
+      if (process.stdin.isTTY) {
+        io.err(prompt);
+        // Mute what readline echoes while the key is typed.
+        (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = () => {};
+      }
+      rl.once('line', (line) => {
+        rl.close();
+        if (process.stdin.isTTY) io.err('\n');
+        resolve(line);
+      });
+      rl.once('close', () => resolve(''));
+    });
+}
+
+const WEB_KEY_NAMES = { serper: 'Serper', firecrawl: 'Firecrawl' } as const;
 
 const CATEGORY_TITLES: Array<[CatalogItem['category'], string]> = [
   ['research', 'Research'],
@@ -270,6 +293,35 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       const h = await c.get('/health');
       const projects = await c.get<Project[]>('/projects');
       say(`deskd ${h.version} on 127.0.0.1:${info.port} (pid ${info.pid}) — ${projects.length} project(s)${isInstalled() ? ', LaunchAgent installed' : ''}`);
+    });
+
+  // ── config ─────────────────────────────────────────────────────────
+  const config = program.command('config').description("deskd's settings");
+  config
+    .command('web-key [provider]')
+    .description('Set the Serper or Firecrawl API key (read from stdin, never the command line); --status shows both')
+    .option('--remove', 'remove the stored key')
+    .option('--test', 'test the stored key (1 credit)')
+    .option('--status', 'show whether each key is set')
+    .action(async (provider: string | undefined, opts: { remove?: boolean; test?: boolean; status?: boolean }) => {
+      const c = client();
+      const show = (p: 'serper' | 'firecrawl', s: { set: boolean; source: string | null }) => say(`${p}: ${s.set ? `set (${s.source === 'env' ? 'environment' : 'Keychain'})` : 'not set'}`);
+      if (opts.status) {
+        const all = await c.config.webKeys();
+        show('serper', all.serper);
+        show('firecrawl', all.firecrawl);
+        return;
+      }
+      if (provider !== 'serper' && provider !== 'firecrawl') throw new Error('Name the provider: serper or firecrawl');
+      if (opts.remove) return show(provider, await c.config.removeWebKey(provider));
+      if (opts.test) {
+        const r = await c.config.testWebKey(provider);
+        if (!r.ok) throw new Error(`${WEB_KEY_NAMES[provider]} key test failed: ${r.error ?? 'unknown error'}`);
+        return say(`${WEB_KEY_NAMES[provider]} key works.`);
+      }
+      const key = (await (io.readSecret ?? terminalSecret(io))(`${WEB_KEY_NAMES[provider]} API key: `)).trim();
+      if (!key) throw new Error('No key given');
+      show(provider, await c.config.saveWebKey(provider, key));
     });
 
   // ── web ────────────────────────────────────────────────────────────

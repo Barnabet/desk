@@ -6,6 +6,10 @@ import {
   type ModelEndpointStatus,
   type ModelEndpointTestResult,
   type ModelInfo,
+  type WebKeysStatus,
+  type WebKeyStatus,
+  type WebKeyTestResult,
+  type WebProvider,
 } from '@desk/protocol';
 import type { CatalogService, EventStore, ModelRegistry, Runtime, SkillRuntimes } from '@desk/core';
 import { bearerAuth, errorResponse } from './http';
@@ -29,6 +33,14 @@ export type EndpointDeps = {
   test(req?: { base_url: string; api_key: string }): Promise<ModelEndpointTestResult>;
 };
 
+/** The Serper and Firecrawl keys: write-only, like the model key. */
+export type WebKeysDeps = {
+  status(): WebKeysStatus;
+  save(p: WebProvider, key: string): WebKeyStatus;
+  remove(p: WebProvider): WebKeyStatus;
+  test(p: WebProvider, key?: string): Promise<WebKeyTestResult>;
+};
+
 export type AppDeps = {
   runtime: Runtime;
   store: EventStore;
@@ -49,6 +61,8 @@ export type AppDeps = {
   config?: ConfigDeps;
   /** Model endpoint setup; the key is write-only. */
   endpoint?: EndpointDeps;
+  /** Web search and fetch keys; write-only. */
+  webKeys?: WebKeysDeps;
 };
 
 export function createApp(deps: AppDeps): Hono {

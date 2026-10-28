@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { macKeychain } from '@desk/core';
+import { macKeychain, WEB_KEYCHAIN_SERVICES } from '@desk/core';
 import { startDaemon, DEFAULT_PORT } from './daemon';
 import { createLogger } from './logger';
 import { macNotify } from './notifier';
@@ -30,7 +30,13 @@ try {
       ? { migrationsDir: fileURLToPath(new URL('./drizzle', import.meta.url)), catalog: { builtinRoot: fileURLToPath(new URL('./catalog/skills', import.meta.url)) } }
       : {}),
     ...(bundledUv && existsSync(bundledUv) ? { runtimes: { uv: bundledUv } } : {}),
-    ...(process.platform === 'darwin' ? { keychain: macKeychain(), notify: macNotify } : {}),
+    ...(process.platform === 'darwin'
+      ? {
+          keychain: macKeychain(),
+          webKeychains: { serper: macKeychain(undefined, WEB_KEYCHAIN_SERVICES.serper), firecrawl: macKeychain(undefined, WEB_KEYCHAIN_SERVICES.firecrawl) },
+          notify: macNotify,
+        }
+      : {}),
   });
   let stopping = false;
   const stop = async (signal: string) => {

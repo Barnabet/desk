@@ -17,9 +17,12 @@ import {
   testModelEndpoint,
   type CatalogFetch,
   type Keychain,
+  createWebKeys,
+  testWebKey,
+  type WebAccess,
   type ModelConfig,
 } from '@desk/core';
-import { ENGINE_TICK_MS, type CatalogFile } from '@desk/protocol';
+import { ENGINE_TICK_MS, type CatalogFile, type WebProvider } from '@desk/protocol';
 import { createApp } from './app';
 import { loadDaemonFile, saveDaemonFile } from './config-file';
 import { startNotifier, type Notification } from './notifier';
@@ -55,6 +58,10 @@ export type DaemonOptions = {
   home?: string;
   /** Where PUT /config/model-endpoint stores the key; null disables it (default null; main.ts passes the macOS Keychain). */
   keychain?: Keychain | null;
+  /** Where the Serper and Firecrawl keys are stored; null leaves only DESK_SERPER_API_KEY / DESK_FIRECRAWL_API_KEY (default null; main.ts passes Keychain items). */
+  webKeychains?: Record<WebProvider, Keychain> | null;
+  /** Serper and Firecrawl base URLs (tests point them at fakes). */
+  webEndpoints?: WebAccess['endpoints'];
   /** Posts notifications (main.ts passes macNotify on macOS; tests leave it unset). */
   notify?: (n: Notification) => void;
   /** Drizzle migrations folder (the bundle ships its own copy). */
@@ -102,7 +109,9 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
       exists: (ref) => (ref.scope === 'builtin' ? !!runtimeRef?.builtins?.entry(ref.name) : !!runtimeRef?.skills.get(ref.scope, ref.name, ref.projectId)),
       ...(o.runtimes?.registry ? { registry: o.runtimes.registry } : {}),
     });
+    const webKeys = createWebKeys({ env: o.env ?? process.env, keychains: o.webKeychains ?? null });
     const runtime = new Runtime({
+      web: { keys: webKeys, ...(o.webEndpoints ? { endpoints: o.webEndpoints } : {}) },
       skillEnv: skillRuntimes,
       builtins: { root: builtinRoot },
       store,
@@ -163,6 +172,25 @@ export async function startDaemon(o: DaemonOptions): Promise<RunningDaemon> {
           file = { ...file, ...(p.notifications ? { notifications: p.notifications } : {}) };
           saveDaemonFile(paths.config, file);
           return { notifications: file.notifications };
+        },
+      },
+      webKeys: {
+        status: () => ({ serper: webKeys.status('serper'), firecrawl: webKeys.status('firecrawl') }),
+        save: (p, key) => {
+          if (!o.webKeychains) throw new HttpError(501, 'unsupported', 'Storing a web key needs the macOS Keychain; set DESK_SERPER_API_KEY or DESK_FIRECRAWL_API_KEY instead');
+          const status = webKeys.set(p, key);
+          log.info(`web key updated (${p}, source: ${status.source ?? 'none'})`);
+          return status;
+        },
+        remove: (p) => {
+          if (!o.webKeychains) throw new HttpError(501, 'unsupported', 'Web keys are not stored in a Keychain here');
+          const status = webKeys.remove(p);
+          log.info(`web key removed (${p}, still set: ${status.set})`);
+          return status;
+        },
+        test: async (p, key) => {
+          const k = key ?? webKeys.get(p);
+          return k ? testWebKey(p, k, { ...(o.webEndpoints ? { endpoints: o.webEndpoints } : {}) }) : { ok: false, error: `No ${p === 'serper' ? 'Serper' : 'Firecrawl'} key is set` };
         },
       },
       endpoint: {
