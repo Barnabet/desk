@@ -88,7 +88,8 @@ import { prepareToolCall, runPreparedTool } from '../tools/registry';
 import { runProcess } from '../tools/process';
 import { readAgentFile } from '../tools/agent-files';
 import { detectSandbox, isWithin, realOrSelf, sandboxGuard, type SandboxGuard, type SecretPattern } from '../tools/sandbox';
-import type { PolicySubject, RuntimeServices, SendInput, SendResult, Tool, ToolResult } from '../tools/types';
+import type { PolicySubject, RuntimeServices, SendInput, SendResult, Tool, ToolResult, WebAccess } from '../tools/types';
+import type { WebKeys } from '../web/keys';
 import type { SkillEnvProvider } from '../catalog/runtimes';
 import { ProxyGate } from './proxy-gate';
 import { REMINDER_LABEL, WHATS_UP_REMINDER, whatsUpStale } from '../coordination/whatsup';
@@ -143,6 +144,8 @@ export type RuntimeOptions = {
   skillEnv?: SkillEnvProvider;
   /** Desk's own skills: the folder they ship in (the bundled catalog/skills) and, in tests, another manifest. */
   builtins?: { root: string; manifest?: BuiltinsFile };
+  /** The Serper and Firecrawl keys (deskd passes the Keychain-backed store) and, in tests, fake endpoints. Default: no keys. */
+  web?: { keys: WebKeys; endpoints?: WebAccess['endpoints'] };
   /** How long skill_run waits for a built-in's environment (default BUILTIN_RUNTIME_WAIT_MS; tests shorten it). */
   builtinRuntimeWaitMs?: number;
   /** Remind Desk to update What's up when it ends a turn after changing things (default on; the test harness turns it off). */
@@ -358,7 +361,9 @@ export class Runtime {
       noteToDesk: (projectId, text) => this.runtimeNoteToDesk(projectId, text),
       onError: (err, ctx) => this.reportError(err, ctx),
     });
+    const web = o.web;
     this.services = {
+      web: { key: (p) => web?.keys.get(p) ?? null, endpoints: web?.endpoints ?? {} },
       store: o.store,
       automations: this.automations,
       engine: this.engine,

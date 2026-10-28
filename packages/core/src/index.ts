@@ -67,7 +67,6 @@ export { detectLoopbackUrl, ServiceProcesses, stripAnsi, tailLog } from './servi
 export { formatServiceLine } from './coordination/render';
 export {
   bingProvider,
-  braveProvider,
   createWebFetchTool,
   createWebSearchTool,
   defaultSearchProvider,

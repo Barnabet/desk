@@ -2,12 +2,13 @@ import { JobManager } from '../tools/jobs';
 import { NO_SANDBOX } from '../tools/sandbox';
 import type { RuntimeServices, ToolContext } from '../tools/types';
 
-/** Throws on any access (except skill runtimes, which are empty, and receipts, which are dropped): for unit tests of tools that must not touch runtime services. */
+/** Throws on any access (except skill runtimes, which are empty, receipts, which are dropped, and web keys, which are unset): for unit tests of tools that must not touch runtime services. */
 export const NO_SERVICES = new Proxy({} as RuntimeServices, {
   get(_t, prop) {
     if (prop === 'skillEnv') return () => ({ bins: [], vars: {}, blocked: null, note: null });
     if (prop === 'prepareSkillRuntime') return async () => ({ waitedMs: 0 });
     if (prop === 'recordReceipt') return () => {};
+    if (prop === 'web') return { key: () => null, endpoints: {} };
     throw new Error(`Runtime services are not available in this test context (accessed ${String(prop)})`);
   },
 });

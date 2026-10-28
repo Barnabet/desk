@@ -10,6 +10,7 @@ import type {
   SkillScope,
   ToolImage,
   ToolResultStatus,
+  WebProvider,
 } from '@desk/protocol';
 import type { AttachmentStore } from '../attachments/store';
 import type { AutomationEngine, StepResult } from '../automations/engine';
@@ -149,7 +150,12 @@ export interface RuntimeServices {
   restartService(serviceId: string, by: string): Promise<ServiceRow>;
   removeService(serviceId: string, by: string): Promise<void>;
   serviceLogs(serviceId: string, lines: number): { text: string; truncated: boolean };
+  /** The paid web backends: their keys, read on every call, and where they are reached (tests point them at fakes). */
+  readonly web: WebAccess;
 }
+
+/** What the web tools need from deskd: a provider's key (null when unset) and optional base URLs. */
+export type WebAccess = { key(p: WebProvider): string | null; endpoints: { serper?: string; firecrawl?: string } };
 
 export type ToolYield = { status: AgentStatus; reason?: string };
 /** `images` are stored attachments shown to the model after the result (view_image). */
