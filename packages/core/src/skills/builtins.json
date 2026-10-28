@@ -3,6 +3,30 @@
   "updated": "2026-10-28",
   "skills": [
     {
+      "name": "web-research",
+      "title": "Web research",
+      "summary": "Search Google through Serper, read any page, PDF or office file through Firecrawl, map and crawl sites, extract fields as JSON, and cite with checked quotes. Written by Desk.",
+      "caveats": [
+        "Needs the Serper and Firecrawl keys in System → Web search and fetch; without them the tools fall back to keyless engines.",
+        "Pages you read are sent to Firecrawl, and searches to Serper; private and intranet addresses never are.",
+        "Pages behind logins, paywalls or anti-bot walls are never bypassed."
+      ],
+      "digest": "sha256:1773d6965df5240895e9bd65644e4133bad41249340f8de6584b0a81d4a391a9",
+      "files": 11,
+      "bytes": 69430,
+      "scripts": 5,
+      "runtime": {
+        "python": {
+          "version": "3.12",
+          "packages": []
+        }
+      },
+      "smoke": [
+        "python3",
+        "scripts/selftest.py"
+      ]
+    },
+    {
       "name": "web-research-keyless",
       "title": "Web research without keys",
       "summary": "Search the web without API keys across many engines, read pages as clean Markdown, render JavaScript pages, crawl docs sites, use archives, and cite with verified quotes. Written by Desk.",

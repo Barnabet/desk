@@ -33,7 +33,7 @@ describe('the built-in manifest', () => {
       .filter((d) => existsSync(join(SKILLS, d, 'SKILL.md')))
       .sort();
     expect(manifest.skills.map((s) => s.name).sort()).toEqual(dirs);
-    expect(dirs).toHaveLength(13);
+    expect(dirs).toHaveLength(14);
   });
 
   it('matches every tree (run pnpm builtins:pin after editing a skill)', () => {
