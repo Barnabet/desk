@@ -6,6 +6,7 @@ import { call } from '../bridge';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EndpointPanel } from '../components/EndpointPanel';
+import { WebKeysPanel } from '../components/WebKeysPanel';
 import { describeError, toast, toastError } from '../components/Toast';
 import { useGlobal } from '../state/global';
 import { tokens } from '../threads/tabs/UsageTab';
@@ -409,7 +410,7 @@ function AboutSection() {
   );
 }
 
-/** The machine room: deskd, the model endpoint and registry, usage, notices, notifications and data. */
+/** The machine room: deskd, the model endpoint and registry, the web keys, usage, notices, notifications and data. */
 export function SystemScreen() {
   return (
     <div className="page system">
@@ -419,6 +420,10 @@ export function SystemScreen() {
         <section className="card sys-section" aria-labelledby="sys-endpoint">
           <h2 id="sys-endpoint">Model endpoint</h2>
           <EndpointPanel />
+        </section>
+        <section className="card sys-section" aria-labelledby="sys-web-keys">
+          <h2 id="sys-web-keys">Web search and fetch</h2>
+          <WebKeysPanel />
         </section>
         <AppearanceSection />
         <NotificationsSection />

@@ -5,6 +5,7 @@ import { bytes, clock, duration, href, plural } from '@desk/ui-core';
 import { Button } from '../components/button';
 import { ConfirmDialog } from '../components/confirm-dialog';
 import { EndpointPanel } from '../components/endpoint-panel';
+import { WebKeysPanel } from '../components/web-keys-panel';
 import { describeError, ToastService } from '../components/toast';
 import { singleFlight } from '../core/refresh';
 import { DeskBridge } from '../core/desk-bridge';
@@ -535,7 +536,7 @@ export class AppearanceSection {}
 /** The machine room: deskd, the model endpoint and registry, usage, notices, appearance, notifications and data (SystemScreen.tsx). */
 @Component({
   selector: 'div[deskSystemScreen]',
-  imports: [AboutSection, AppearanceSection, DaemonSection, EndpointPanel, ModelsEditor, NoticesSection, NotificationsSection, UsageSection],
+  imports: [AboutSection, AppearanceSection, DaemonSection, EndpointPanel, WebKeysPanel, ModelsEditor, NoticesSection, NotificationsSection, UsageSection],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   host: { class: 'page system' },
@@ -546,6 +547,10 @@ export class AppearanceSection {}
       <section class="card sys-section" aria-labelledby="sys-endpoint">
         <h2 id="sys-endpoint">Model endpoint</h2>
         <div deskEndpointPanel></div>
+      </section>
+      <section class="card sys-section" aria-labelledby="sys-web-keys">
+        <h2 id="sys-web-keys">Web search and fetch</h2>
+        <div deskWebKeysPanel></div>
       </section>
       <section deskAppearanceSection></section>
       <section deskNotificationsSection></section>

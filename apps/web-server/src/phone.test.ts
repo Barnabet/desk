@@ -190,6 +190,11 @@ describe('what a paired phone may do', () => {
     for (const op of Object.keys(channels)) expect(phoneRefusal(op, {}) === null).toBe(PHONE_OPS.has(op));
     expect(phoneRefusal('approvals.resolve', { id: 'a', decision: 'approved' })).toBeNull();
   });
+
+  it('may see whether web keys are set, but never set, remove or test them', () => {
+    expect(phoneRefusal('config.webKeys', {})).toBeNull();
+    for (const op of ['config.saveWebKey', 'config.removeWebKey', 'config.testWebKey']) expect(phoneRefusal(op, { provider: 'serper', key: 'k' })).not.toBeNull();
+  });
 });
 
 describe('/push for a paired phone', () => {

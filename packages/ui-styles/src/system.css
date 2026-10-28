@@ -16,6 +16,25 @@
   flex-direction: column;
   gap: 12px;
 }
+/* System → Web search and fetch: one block per provider, separated by a rule. */
+.web-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.web-key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.web-key + .web-key {
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+.web-key .status-line {
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .sys-section h2 {
   margin: 0;
   font-family: var(--font-serif);

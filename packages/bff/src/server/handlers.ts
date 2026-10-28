@@ -195,6 +195,10 @@ export const handlers = {
   'config.endpoint': (_i, c) => c.client().config.endpoint(),
   'config.saveEndpoint': (i, c) => c.client().config.saveEndpoint(i),
   'config.testEndpoint': (i, c) => c.client().config.testEndpoint(i.candidate),
+  'config.webKeys': (_i, c) => c.client().config.webKeys(),
+  'config.saveWebKey': (i, c) => c.client().config.saveWebKey(i.provider, i.key),
+  'config.removeWebKey': (i, c) => c.client().config.removeWebKey(i.provider),
+  'config.testWebKey': (i, c) => c.client().config.testWebKey(i.provider, i.key),
 
   'broker.snapshot': (_i, c) => c.broker.snapshot(),
   'broker.watch': async (i, c) => {

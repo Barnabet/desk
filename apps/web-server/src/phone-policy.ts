@@ -65,6 +65,7 @@ export const PHONE_OPS: ReadonlySet<string> = new Set([
   'models.list',
   'config.get',
   'config.endpoint',
+  'config.webKeys',
   'broker.snapshot',
   'broker.watch',
   'broker.unwatch',

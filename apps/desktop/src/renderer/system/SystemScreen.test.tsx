@@ -28,6 +28,7 @@ function setup(extra: Record<string, (input: any) => unknown> = {}) {
     'daemon.stop': () => ({ ...status, running: false }),
     'daemon.repair': () => status,
     'config.endpoint': () => ({ configured: true, source: 'keychain', base_url: 'http://127.0.0.1:8317/v1' }),
+    'config.webKeys': () => ({ serper: { set: true, source: 'keychain' }, firecrawl: { set: false, source: null } }),
     'config.get': () => ({ notifications: 'auto' }),
     'config.patch': (p: { notifications: string }) => p,
     'app.settings': () => ({ notifications: true, appearance: 'system' }),
@@ -174,5 +175,15 @@ describe('SystemScreen', () => {
     expect(await within(data).findByText(/60\.0 MB for 1 skill$/)).toBeTruthy();
     expect(within(data).queryByRole('button', { name: /Clean up unused/ })).toBeNull();
     expect(bridge.calls.filter((c) => c.channel === 'system.runtimesCleanup')).toHaveLength(1);
+  });
+});
+
+describe('SystemScreen web keys', () => {
+  it('shows the web search and fetch card after the model endpoint', async () => {
+    setup();
+    const card = await screen.findByRole('region', { name: 'Web search and fetch' });
+    expect(await within(card).findByRole('group', { name: 'Serper' })).toBeTruthy();
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(headings.indexOf('Web search and fetch')).toBe(headings.indexOf('Model endpoint') + 1);
   });
 });

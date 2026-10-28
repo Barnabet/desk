@@ -135,6 +135,10 @@ export type ChannelOutputs = {
   'config.endpoint': Out<Client['config']['endpoint']>;
   'config.saveEndpoint': Out<Client['config']['saveEndpoint']>;
   'config.testEndpoint': Out<Client['config']['testEndpoint']>;
+  'config.webKeys': Out<Client['config']['webKeys']>;
+  'config.saveWebKey': Out<Client['config']['saveWebKey']>;
+  'config.removeWebKey': Out<Client['config']['removeWebKey']>;
+  'config.testWebKey': Out<Client['config']['testWebKey']>;
   'broker.snapshot': GlobalState;
   'broker.watch': Ok;
   'broker.unwatch': Ok;
