@@ -1,4 +1,4 @@
-"""Keyless search engines for web-research: one request builder and one parser per engine, isolated so a markup
+"""Keyless search engines for web-research-keyless: one request builder and one parser per engine, isolated so a markup
 change breaks one engine rather than search. Parsers are pure functions over the response text (the self-test runs
 them on saved results pages); runners add the polite request and classify failures.
 

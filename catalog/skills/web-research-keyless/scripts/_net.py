@@ -1,4 +1,4 @@
-"""The web-research skill's HTTP layer: one honest client, a shared cache and a cross-process politeness limiter.
+"""The web-research-keyless skill's HTTP layer: one honest client, a shared cache and a cross-process politeness limiter.
 
 - **Client:** httpx (HTTP/2) with the OS trust store (truststore), falling back to certifi. Pages get a normal
   browser User-Agent; APIs and engines' JSON endpoints get `Desk/<version> (+https://github.com/Barnabet/desk)`.

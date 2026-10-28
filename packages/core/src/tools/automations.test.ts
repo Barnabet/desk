@@ -172,14 +172,14 @@ describe("Desk's automation tools", () => {
     const lines = whatItDoes('d', {
       ...digest(),
       steps: [
-        { id: 's', title: 'Fetch', kind: 'script', skill: 'web-research', script: 'fetch.py', args: [], routes: [], publish: [], join: 'all', on_error: 'stop', idempotent: false },
+        { id: 's', title: 'Fetch', kind: 'script', skill: 'web-research-keyless', script: 'fetch.py', args: [], routes: [], publish: [], join: 'all', on_error: 'stop', idempotent: false },
         { id: 'w', title: 'Pause', kind: 'wait', minutes: 5, routes: [], publish: [], join: 'all', on_error: 'stop', idempotent: false },
         { id: 't', title: 'Tell', kind: 'tell_desk', text: 'x', attach: [], routes: [], publish: [], join: 'all', on_error: 'stop', idempotent: false },
         { id: 'c', title: 'Child', kind: 'automation', automation: 'other', inputs: {}, routes: [], publish: [], join: 'all', on_error: 'stop', idempotent: false },
       ],
     } as never);
     expect(lines).toEqual([
-      '- Fetch: runs web-research/fetch.py for real with DESK_TEST=1 set; it acts outward unless the script checks DESK_TEST',
+      '- Fetch: runs web-research-keyless/fetch.py for real with DESK_TEST=1 set; it acts outward unless the script checks DESK_TEST',
       '- Pause: really waits 5 min',
       '- Tell: sends you a message',
       '- Child: runs "other" as a test run too',

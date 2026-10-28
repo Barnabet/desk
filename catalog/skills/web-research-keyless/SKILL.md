@@ -1,10 +1,10 @@
 ---
-name: web-research
-description: Research the web without API keys, and cite it. Metasearch across Bing, DuckDuckGo, Marginalia and Mwmbl, plus news (Google News, Bing News), papers (OpenAlex, arXiv, Crossref, PubMed), code (GitHub, Stack Overflow, Hacker News), Reddit discussions, packages (PyPI, npm, crates.io), Wikipedia, Wikidata, books, places and YouTube. Read any page, PDF or feed as clean Markdown, outline-first (sections, grep, paging), with tables, links and images. Render JavaScript pages and take screenshots in a real browser. Map and crawl a docs site into a local corpus, honouring robots.txt. Read archived copies (Wayback Machine, Common Crawl) or open-access versions when a page is gone or blocked. Follow RSS and Atom feeds. Get YouTube transcripts. Keep a source ledger that verifies every quote on the page and writes numbered references or APA, MLA, Chicago and BibTeX. Use for questions needing current facts, fact-checking, literature or market research, product comparisons, documentation lookup or citations.
+name: web-research-keyless
+description: Research the web without API keys, and cite it; prefer web-research when Desk's web keys are set. Metasearch across Bing, DuckDuckGo, Marginalia and Mwmbl, plus news, papers (OpenAlex, arXiv, Crossref, PubMed), code (GitHub, Stack Overflow, Hacker News), Reddit discussions, packages (PyPI, npm, crates.io), Wikipedia, Wikidata, books, places and YouTube. Read any page, PDF or feed as clean Markdown, outline-first (sections, grep, paging), with tables, links and images. Render JavaScript pages and take screenshots in a real browser. Map and crawl a docs site into a local corpus, honouring robots.txt. Read archived copies (Wayback Machine, Common Crawl) or open-access versions when a page is gone or blocked. Follow RSS and Atom feeds. Get YouTube transcripts. Keep a source ledger that verifies every quote on the page and writes numbered references or APA, MLA and BibTeX. Use for questions needing current facts, fact-checking, literature or market research, product comparisons, documentation lookup or citations.
 license: MIT
 ---
 
-# Web research
+# Web research without keys
 
 Scripts in `scripts/` use httpx, trafilatura, selectolax, feedparser, pypdfium2, Playwright and yt-dlp. Desk sets up
 their Python environment, so run them with `python3`. Every script has `--help`, prints Markdown by default and JSON

@@ -1,4 +1,4 @@
-"""Documents for web-research: a response (HTML, PDF, feed, JSON, text) becomes Markdown plus metadata, and is then
+"""Documents for web-research-keyless: a response (HTML, PDF, feed, JSON, text) becomes Markdown plus metadata, and is then
 read economically: outline, sections, grep, character paging, links, tables and images.
 
 fetch.py, browse.py, archive.py, crawl.py and sources.py share it, so every reader behaves the same way.

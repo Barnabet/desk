@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end self test for the web-research skill, fully offline: a local HTTP server (in a thread) serves fixture
+"""End-to-end self test for the web-research-keyless skill, fully offline: a local HTTP server (in a thread) serves fixture
 pages, robots.txt, sitemaps, feeds, a PDF, archives and every search engine's saved results page; every script then
 runs the way an agent runs it (python3 scripts/<name>.py …) and the outputs are checked. The browser checks run when
 a browser is available. Prints "ok: N checks in Xs".

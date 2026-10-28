@@ -1,4 +1,4 @@
-"""HTML helpers for web-research (selectolax/lexbor): page metadata, links, tables, images, feed links, a
+"""HTML helpers for web-research-keyless (selectolax/lexbor): page metadata, links, tables, images, feed links, a
 JavaScript-needed heuristic, and a plain HTML → Markdown converter used when main-content extraction is not wanted
 (--full) or finds nothing."""
 

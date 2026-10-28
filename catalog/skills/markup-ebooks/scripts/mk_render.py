@@ -9,7 +9,7 @@ the pages. The PDF of a big document is cached, so rendering other pages later i
 Long documents (over about 600 KB of text: a book, a 5 MB web page) are not typeset whole unless you ask for
 --pages or --full: the default shows the beginning, --section typesets that section alone (an address from
 `mk_read.py --outline`, a heading, or tK / "ch N" for an EPUB) and --find the section where the text appears.
-HTML is typeset as a document here, not drawn like a browser would (the web-research skill has a browser).
+HTML is typeset as a document here, not drawn like a browser would (web_fetch renders JavaScript pages; the web-research-keyless skill has a browser).
 
 Examples:
   python3 scripts/mk_render.py report.md                          # first pages + page count

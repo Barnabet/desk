@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "updated": "2026-09-29",
+  "updated": "2026-10-28",
   "skills": [
     {
-      "name": "web-research",
-      "title": "Web research",
+      "name": "web-research-keyless",
+      "title": "Web research without keys",
       "summary": "Search the web without API keys across many engines, read pages as clean Markdown, render JavaScript pages, crawl docs sites, use archives, and cite with verified quotes. Written by Desk.",
       "caveats": [
         "Uses free public search engines without API keys, so results depend on their availability.",
         "JavaScript pages and screenshots need Chrome or Edge, or a Chromium that Desk downloads once at install.",
         "Pages behind logins, paywalls or anti-bot walls are never bypassed."
       ],
-      "digest": "sha256:df19e604f7616f2fe68a0fe785867d7c6a9e2bd1e7a5848fc539edbd10267305",
+      "digest": "sha256:325ad3935d160ad2f9c0bfd8a6f3e5fa55f305797392e2ab48671e394b6b6730",
       "files": 22,
-      "bytes": 604353,
+      "bytes": 604430,
       "scripts": 15,
       "runtime": {
         "python": {
@@ -327,9 +327,9 @@
         "Very long documents are typeset and converted section by section.",
         "Remote images are downloaded (with time limits) before conversion unless --offline is given."
       ],
-      "digest": "sha256:491b1d9e1481d6858c54689fef9e381a6f2879d4717a4bd321594a581180b329",
+      "digest": "sha256:fb2e96079f7f796f7f2854b49b75dd8e6a98893489c6acb9351efc8bbaa23d27",
       "files": 38,
-      "bytes": 689402,
+      "bytes": 689505,
       "scripts": 21,
       "runtime": {
         "python": {

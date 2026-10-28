@@ -202,7 +202,7 @@ intact. For other outputs of such a document, convert it by `--section`. Measure
   user's files. Includes made by other means (LaTeX macros, man `.so`) are not read. Remote pictures are
   downloaded by the skill with limits (`--offline` keeps them as links); pandoc never goes to the network itself.
 - `html_extract.py` works on saved HTML; it does not run JavaScript, so pages that build their content in the
-  browser come out empty (use the web-research skill's browser). MHTML archives are not supported.
+  browser come out empty (read them with web_fetch, which renders JavaScript, or the web-research-keyless skill's browser). MHTML archives are not supported.
 - EPUB: DRM-protected books cannot be read; fixed-layout books convert poorly to other formats.
 - Notebooks are not executed; `.ipynb` widgets and interactive outputs (Plotly, Bokeh) show as their text form.
 - One pandoc run holds about 4 MB of text for DOCX, ODT or EPUB output and a little more for HTML (2 GB limit);

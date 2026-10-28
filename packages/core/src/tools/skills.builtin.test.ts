@@ -26,7 +26,7 @@ describe('skill tools and built-in skills', () => {
     const ctx = testToolContext(mkdtempSync(join(tmpdir(), 'desk-ws-')), { services: testServices({ skills: skills(), store }) });
     const out = await skillListTool.execute({}, ctx);
     expect(out).toMatch(/- pdf-toolkit \(builtin, v1\)/);
-    expect(out).toMatch(/- web-research \(builtin, v1\)/);
+    expect(out).toMatch(/- web-research-keyless \(builtin, v1\)/);
     // A description that does not parse (say an unquoted ": " in SKILL.md's frontmatter) comes out empty.
     for (const line of (out as string).split('\n')) expect(line).toMatch(/ — \S/);
   });
