@@ -20,6 +20,9 @@ export function deriveGrant(tool: string, subject: PolicySubject, automationName
   switch (tool) {
     case 'web_fetch':
     case 'web_search':
+    case 'web_map':
+    case 'web_crawl':
+    case 'web_extract':
       return subject.domain ? { tool, match: { domain: subject.domain }, action: 'allow' } : { tool, action: 'allow' };
     case 'git_push':
     case 'open_pr':

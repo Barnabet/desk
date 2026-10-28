@@ -1,5 +1,5 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { BlockList, isIP } from 'node:net';
 import { Readability } from '@mozilla/readability';
 import { DOMParser, parseHTML } from 'linkedom';
@@ -11,7 +11,7 @@ import { getProject } from '../state/queries';
 import { defineTool, type Tool, type ToolContext } from './types';
 import { reportKeyProblem } from '../web/notice';
 import { formatSerper, SERPER_TYPES, serperSearch, timeToTbs, type SerperType } from '../web/serper';
-import { firecrawlScrape, type ScrapeResult } from '../web/firecrawl';
+import { firecrawlCrawl, firecrawlMap, firecrawlScrape, type ScrapeResult } from '../web/firecrawl';
 import { pageFileName, saveAgentFile } from '../web/files';
 
 export { pageFileName } from '../web/files';
@@ -450,6 +450,157 @@ export function createWebFetchTool({ waybackApi = 'https://archive.org/wayback/a
 
 export const webFetchTool = createWebFetchTool();
 
+/** Options for the Firecrawl-only tools; `archivable` decides which hosts are public (tests open up loopback). */
+export type SiteToolOptions = { archivable?: (url: URL) => boolean | Promise<boolean> };
+
+const siteGate = { subject: (i: { url: string }) => ({ domain: new URL(i.url).hostname }), unmatched: 'ask' as const, alsoMatches: ['web_fetch'] };
+
+/** The Firecrawl key and a URL that may be sent there, or an error saying what is missing. */
+async function siteAccess(tool: string, url: string, ctx: ToolContext, archivable: (u: URL) => boolean | Promise<boolean>): Promise<{ key: string; parsed: URL }> {
+  const key = ctx.services.web.key('firecrawl');
+  if (!key) throw new Error(`${tool} needs the Firecrawl key. Set it in System → Web search and fetch, ${KEYLESS_HINT} (crawl.py).`);
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Only http(s) URLs can be used');
+  const refusal = await privacyRefusal(parsed, archivable);
+  if (refusal) throw new Error(`${url} was ${refusal}`);
+  return { key, parsed };
+}
+
+/** Runs a Firecrawl call, raising the key notice when the key or the account is the problem. */
+async function viaFirecrawl<T>(ctx: ToolContext, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    if (!ctx.signal.aborted) reportKeyProblem(ctx, err);
+    throw err;
+  }
+}
+
+/** `web_map`: a site's URLs, from its sitemap and Firecrawl's index, optionally ranked by a search phrase. */
+const WebMapInput = z.object({
+  url: z.string().url(),
+  search: z.string().optional().describe('Rank URLs by relevance to this phrase'),
+  limit: z.number().int().min(1).max(1000).default(100),
+  include_subdomains: z.boolean().default(false),
+});
+
+export function createWebMapTool({ archivable = isArchivable }: SiteToolOptions = {}) {
+  return defineTool({
+    name: 'web_map',
+    description: "List a site's URLs (from its sitemap and Firecrawl's index), optionally ranked by a search phrase. 1 credit. Use it before web_crawl to pick paths.",
+    input: WebMapInput,
+    gate: siteGate,
+    async execute(input, ctx) {
+      const { key } = await siteAccess('web_map', input.url, ctx, archivable);
+      const limit = input.limit ?? 100;
+      const links = await viaFirecrawl(ctx, () =>
+        firecrawlMap(key, { url: input.url, ...(input.search ? { search: input.search } : {}), limit, includeSubdomains: input.include_subdomains ?? false }, ctx.signal, ctx.services.web.endpoints.firecrawl),
+      );
+      const head = `${links.length} URLs${links.length >= limit ? ` (the limit of ${limit}; raise limit or add search to see others)` : ''}:`;
+      return framed(`site map of ${input.url}`, [head, ...links.map((l) => (l.title ? `${l.url} — ${l.title}` : l.url))].join('\n'), 'Firecrawl');
+    },
+  }) as unknown as Tool<z.input<typeof WebMapInput>>;
+}
+
+/** `20261028-142501`, for crawl folder names. */
+const stamp = (d = new Date()) => d.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+
+/**
+ * `web_crawl`: up to 50 pages of one site (never another host), each saved as Markdown in the agent's workspace with an
+ * `index.json`; the answer is the folder and an index, never the pages, so a crawl cannot flood the context.
+ */
+const WebCrawlInput = z.object({
+  url: z.string().url(),
+  limit: z.number().int().min(1).max(50).default(10),
+  max_depth: z.number().int().min(0).max(10).optional().describe('How many links deep from the start page'),
+  include_paths: z.array(z.string()).max(20).optional().describe('Regexes on the URL path; only matching pages are crawled'),
+  exclude_paths: z.array(z.string()).max(20).optional().describe('Regexes on the URL path to skip'),
+  main_only: z.boolean().default(true),
+});
+
+export function createWebCrawlTool({ archivable = isArchivable }: SiteToolOptions = {}) {
+  return defineTool({
+    name: 'web_crawl',
+    description:
+      'Crawl one site (its host only) through Firecrawl and save each page as Markdown under web/crawls/ in your workspace. Returns the folder and an index ' +
+      '(path, URL, title, size), not the pages: read them with read_file or grep. Max 50 pages, 1 credit per page; map the site first and filter paths.',
+    input: WebCrawlInput,
+    gate: siteGate,
+    async execute(input, ctx) {
+      const { key, parsed } = await siteAccess('web_crawl', input.url, ctx, archivable);
+      const out = await viaFirecrawl(ctx, () =>
+        firecrawlCrawl(
+          key,
+          {
+            url: input.url,
+            limit: input.limit ?? 10,
+            ...(input.max_depth !== undefined ? { maxDepth: input.max_depth } : {}),
+            ...(input.include_paths ? { includePaths: input.include_paths } : {}),
+            ...(input.exclude_paths ? { excludePaths: input.exclude_paths } : {}),
+            mainOnly: input.main_only ?? true,
+          },
+          ctx.signal,
+          { ...(ctx.services.web.endpoints.firecrawl ? { base: ctx.services.web.endpoints.firecrawl } : {}) },
+        ),
+      );
+      const rel = join('web', 'crawls', `${hostOf(parsed)}-${stamp()}`);
+      const index: Array<{ file: string; url: string; title?: string; chars: number }> = [];
+      for (const page of out.pages) {
+        let file: string;
+        try {
+          file = pageFileName(new URL(page.url));
+        } catch {
+          continue;
+        }
+        const text = `${page.title ? `Title: ${page.title}\n` : ''}URL: ${page.url}\n\n${page.markdown}`;
+        await saveAgentFile(ctx, join(rel, file), text);
+        index.push({ file, url: page.url, ...(page.title ? { title: page.title } : {}), chars: page.markdown.length });
+      }
+      const folder = dirname(await saveAgentFile(ctx, join(rel, 'index.json'), JSON.stringify(index, null, 2)));
+      const lines = [
+        `Crawl ${out.status}: ${index.length} pages saved to ${folder}${out.creditsUsed !== undefined ? ` (credits used: ${out.creditsUsed})` : ''}.`,
+        ...index.map((p) => `- ${p.file} · ${p.url}${p.title ? ` · ${p.title}` : ''} · ${p.chars} chars`),
+        out.robotsBlocked.length ? `Blocked by robots.txt: ${out.robotsBlocked.join(', ')}` : '',
+        'Read the pages with read_file or grep, or outline and search them with the web-research skill\'s pages.py.',
+      ];
+      return framed(`crawl of ${input.url}`, lines.filter(Boolean).join('\n'), 'Firecrawl');
+    },
+  }) as unknown as Tool<z.input<typeof WebCrawlInput>>;
+}
+
+/** `web_extract`: fields from one page as JSON, described by a prompt and optionally a JSON schema (5 credits). */
+export function createWebExtractTool({ archivable = isArchivable }: SiteToolOptions = {}) {
+  return defineTool({
+    name: 'web_extract',
+    description:
+      'Extract structured data from one page as JSON through Firecrawl: describe what you want in prompt, and optionally give a JSON schema. ' +
+      '5 credits. Use it for prices, tables, contacts or specs instead of reading the whole page.',
+    input: z.object({
+      url: z.string().url(),
+      prompt: z.string().min(3),
+      schema: z.record(z.string(), z.unknown()).optional().describe('A JSON schema for the result'),
+    }),
+    gate: siteGate,
+    async execute(input, ctx) {
+      const { key } = await siteAccess('web_extract', input.url, ctx, archivable);
+      const r = await viaFirecrawl(ctx, () =>
+        firecrawlScrape(
+          key,
+          { url: input.url, mainOnly: true, json: { prompt: input.prompt, ...(input.schema ? { schema: input.schema } : {}) } },
+          ctx.signal,
+          ctx.services.web.endpoints.firecrawl,
+        ),
+      );
+      if (r.json === undefined) throw new Error(`Firecrawl returned no data for ${input.url}`);
+      return framed(input.url, `Extracted from ${r.url}:\n\n${JSON.stringify(r.json, null, 2)}`, 'Firecrawl');
+    },
+  });
+}
+
+export const webMapTool = createWebMapTool();
+export const webCrawlTool = createWebCrawlTool();
+export const webExtractTool = createWebExtractTool();
+
 /** `provider` names the engine that found the result (set by `fallbackSearchProvider`). */
 export type SearchResult = { title: string; url: string; snippet: string; provider?: string };
 export type SearchProvider = ((query: string, signal: AbortSignal) => Promise<SearchResult[]>) & { readonly name: string };
@@ -675,4 +826,4 @@ export function createWebSearchTool(keyless: SearchProvider = defaultSearchProvi
 }
 
 export const webSearchTool = createWebSearchTool();
-export const webTools: Tool[] = [webFetchTool, webSearchTool];
+export const webTools: Tool[] = [webFetchTool, webSearchTool, webMapTool, webCrawlTool, webExtractTool];

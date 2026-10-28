@@ -3,7 +3,7 @@ import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, type PolicyRule } from '@desk/pr
 import { Button } from '../components/button';
 
 type MatchKey = 'branch' | 'command' | 'domain';
-const TOOLS = ['bash', 'bash_background', 'bash_readonly', 'skill_run', 'git_push', 'open_pr', 'web_fetch', 'web_search'];
+const TOOLS = ['bash', 'bash_background', 'bash_readonly', 'skill_run', 'git_push', 'open_pr', 'web_fetch', 'web_search', 'web_map', 'web_crawl', 'web_extract'];
 const MATCH_HINT: Record<MatchKey, string> = { branch: 'a glob such as desk/*', command: 'a regular expression', domain: 'a glob such as *.github.com' };
 
 /** The same rules in the same order. */

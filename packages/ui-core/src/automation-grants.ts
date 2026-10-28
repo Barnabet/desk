@@ -61,7 +61,7 @@ export function grantOrigins(events: readonly StoredEvent[], automationId: strin
 }
 
 /** The tools a grant is usually for (the Grants tab's suggestions). Any tool name is accepted. */
-export const GRANT_TOOLS = ['web_fetch', 'web_search', 'skill_run', 'bash', 'bash_background', 'git_push', 'open_pr'];
+export const GRANT_TOOLS = ['web_fetch', 'web_search', 'web_map', 'web_crawl', 'web_extract', 'skill_run', 'bash', 'bash_background', 'git_push', 'open_pr'];
 
 /** What a grant matches: every call of its tool, or one field of its `match`. */
 export type GrantMatchKind = 'any' | 'domain' | 'command' | 'branch';
@@ -108,13 +108,16 @@ export function grantFromDraft(d: GrantDraft): { grant: Grant } | { problem: str
   return { grant: { tool, action: d.action, match: { [d.kind]: value } } };
 }
 
+/** The tools whose grants name a domain. */
+const WEB_GRANT_TOOLS = new Set(['web_fetch', 'web_search', 'web_map', 'web_crawl', 'web_extract']);
+
 /**
  * A web grant on an exact host widened (spec §5.3): its registrable domain and every subdomain, two grants because
  * `*.x` does not match `x`. Null for other tools, wildcards and hosts that do not widen.
  */
 export function widenedGrants(g: Grant): Grant[] | null {
   const host = g.match?.domain;
-  if (!host || host.startsWith('*.') || (g.tool !== 'web_fetch' && g.tool !== 'web_search')) return null;
+  if (!host || host.startsWith('*.') || !WEB_GRANT_TOOLS.has(g.tool)) return null;
   const wide = widenDomain(host);
   return wide.length < 2 ? null : wide.map((domain) => ({ ...g, match: { domain } }));
 }

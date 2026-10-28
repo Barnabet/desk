@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Grant } from '@desk/protocol';
 import { ev } from '@desk/client/testing';
 import { dayTime } from './automation-format';
-import { describeGrant, grantDraft, grantFromDraft, grantKey, grantOrigins, grantOriginText, replaceGrant, sameGrant, uniqueGrants, widenDomain, widenedGrants } from './automation-grants';
+import { describeGrant, GRANT_TOOLS, grantDraft, grantFromDraft, grantKey, grantOrigins, grantOriginText, replaceGrant, sameGrant, uniqueGrants, widenDomain, widenedGrants } from './automation-grants';
 import { digestDef } from './testing/automations';
 
 describe('grants', () => {
@@ -61,6 +61,8 @@ describe('editing grants', () => {
     expect(widenedGrants({ ...fetch, match: { domain: '*.bbc.co.uk' } })).toBeNull();
     expect(widenedGrants({ ...fetch, match: { domain: 'localhost' } })).toBeNull();
     expect(widenedGrants({ tool: 'bash', match: { domain: 'a.com' }, action: 'allow' })).toBeNull();
+    for (const tool of ['web_map', 'web_crawl', 'web_extract']) expect(widenedGrants({ tool, match: { domain: 'docs.a.com' }, action: 'allow' })).toHaveLength(2);
+    expect(GRANT_TOOLS).toEqual(expect.arrayContaining(['web_map', 'web_crawl', 'web_extract']));
     const bash: Grant = { tool: 'bash', action: 'allow' };
     expect(replaceGrant([fetch, bash], 0, widenedGrants(fetch)!)).toHaveLength(3);
     expect(replaceGrant([fetch, bash], 1, [])).toEqual([fetch]);

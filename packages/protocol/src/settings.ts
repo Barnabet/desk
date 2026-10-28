@@ -34,6 +34,9 @@ export const DEFAULT_POLICY: PolicyRule[] = [
   { tool: 'open_pr', action: 'allow' },
   { tool: 'web_fetch', action: 'allow' },
   { tool: 'web_search', action: 'allow' },
+  { tool: 'web_map', action: 'allow' },
+  { tool: 'web_crawl', action: 'allow' },
+  { tool: 'web_extract', action: 'allow' },
 ];
 
 /** Field validators without defaults, shared by the full settings and patches. */
