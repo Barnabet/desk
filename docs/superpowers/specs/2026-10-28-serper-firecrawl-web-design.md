@@ -1,7 +1,7 @@
 # Web search and fetch on Serper and Firecrawl — design
 
 - **Date:** 2026-10-28
-- **Status:** draft, awaiting the user's approval.
+- **Status:** approved by the user on 2026-10-28; implemented by Plan 25 (branch `web-serper-firecrawl`).
 - **Scope:**
   - Desk's core web tools run on **Serper** (search) and **Firecrawl** (fetch, plus new map, crawl and extract tools). The keyless engines stay as their fallback.
   - The user's two API keys are stored like the model key: in the Keychain, held by deskd only.

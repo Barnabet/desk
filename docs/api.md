@@ -263,6 +263,10 @@ A step agent's `approval` item also carries `automation_id`, `run_id` and `step_
 | GET | `/v1/config/model-endpoint` | | `{ configured, source: env\|file\|keychain\|null, base_url }`. Never includes the key |
 | PUT | `/v1/config/model-endpoint` | `{ base_url, api_key }` | Write-only. Stores the key in the macOS Keychain (`security -i`, stdin) and `base_url` in `config.json`, then reconfigures the model adapter without a restart. 501 without a Keychain. Keys are printable ASCII without spaces, quotes or backslashes |
 | POST | `/v1/config/model-endpoint/test` | optional `{ base_url, api_key }` | Tests the candidate (or current) endpoint by listing models: `{ ok, models?, error? }`. Errors are scrubbed of the key |
+| GET | `/v1/config/web-keys` | | `{ serper, firecrawl }`, each `{ set, source: env\|keychain\|null }`. Never includes a key |
+| PUT | `/v1/config/web-keys/:provider` | `{ key }` | Write-only. `provider` is `serper` or `firecrawl` (404 otherwise). The key is trimmed, then stored in the macOS Keychain (`Desk Serper API key` or `Desk Firecrawl API key`, via `security -i` on stdin) and used by the web tools at once. 501 without a Keychain (then only `DESK_SERPER_API_KEY` / `DESK_FIRECRAWL_API_KEY` set keys). Same character rules as the model key, at least 8 characters |
+| DELETE | `/v1/config/web-keys/:provider` | | Removes the Keychain key; an env key still shows as set |
+| POST | `/v1/config/web-keys/:provider/test` | optional `{ key }` | Tests the candidate (or stored) key with one call (1 credit): a one-result Serper search, or a Firecrawl scrape of example.com. `{ ok, error? }`, scrubbed of the key |
 
 Model access resolves in this order: `DESK_OPENAI_BASE_URL`/`DESK_OPENAI_API_KEY`, then `~/.config/cliproxyapi.env`, then `config.json`'s `base_url` with the Keychain key. Without any of them the daemon starts anyway; model calls behave like a proxy outage (agents pause) until an endpoint is set.
 

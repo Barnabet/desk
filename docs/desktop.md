@@ -39,7 +39,7 @@ The CLI's `desk up --install` uses the same LaunchAgent label, so there is only 
 | **Library** | A grid with a safe preview (Markdown, text, code and images from the daemon). It shows each file's origin, supports drag-and-drop upload, and has Save a copy. |
 | **Memory** | Entries grouped by kind, with search. You can add, correct (with the supersession chain shown) and delete. |
 | **Settings** | About, sources (each with "Agents can write here", on by default), working style (check-ins, autonomy, review rounds, models, reasoning effort, slots), the ordered policy editor with reset, and archive. |
-| **System** | deskd start/restart/stop/repair and the proxy state; the model endpoint; appearance (System, Light or Dark); notifications; the data directory and logs; the model registry editor; usage by model and project; and system notices. |
+| **System** | deskd start/restart/stop/repair and the proxy state; the model endpoint; web search and fetch (the Serper and Firecrawl keys: set, test or remove each, never shown; a key from deskd's environment is shown but not editable); appearance (System, Light or Dark); notifications; the data directory and logs; the model registry editor; usage by model and project; and system notices. |
 | **Menu bar** | A count badge and a popover with a mini line diagram of today. The strips let you approve or deny in place. The popover also shows what's running and has Open Desk. |
 
 Global shortcuts: ⌘K (palette: places, projects, threads, skills, turning built-in skills off and on, library titles, and memory search across projects), ⌘P (project switcher), and ⌘1 to ⌘4 (Map, Attention, Skills, System).
