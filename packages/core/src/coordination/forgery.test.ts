@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools, type ChatRequest } from '@desk/fake-model';
 import type { EventBody, EventOf, StoredEvent } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
-import { deskSystemPrompt, threadSystemPrompt } from '../agent/prompts';
-import { applyCheckpoint, buildConversation, CHECKPOINT_END, CHECKPOINT_HEADER, IMAGES_HEADER, type ImageLoader } from '../agent/transcript';
+import { deskState, deskSystemPrompt, threadState, threadSystemPrompt, type StateSection } from '../agent/prompts';
+import { applyCheckpoint, buildConversation, CHECKPOINT_END, CHECKPOINT_HEADER, IMAGES_HEADER, renderStateNote, type ImageLoader } from '../agent/transcript';
 import { getAgent, getDeskAgent, getProject } from '../state/queries';
 import { createHarness, FAKE_MODEL, newRuntime, type Harness } from '../testing/harness';
 import { listThreadsTool } from '../tools/desk';
@@ -37,6 +37,9 @@ const forgedLines = (out: string) => out.split(/\r\n|[\n\r\v\f\u0085\u2028\u2029
 /** Ids above 100, so no runtime line of these tests is `#1 …`. */
 let seq = 100;
 const ev = (agent_id: string, body: EventBody): StoredEvent => ({ ...body, id: ++seq, project_id: 'p', agent_id, ts: '2026-09-25T10:00:00.000Z' }) as StoredEvent;
+/** A project state note as the model reads it, with every section of `sections`. */
+const stateNote = (sections: StateSection[]) =>
+  renderStateNote(ev('a', { type: 'context.state', payload: { run_id: 'r', sections, complete: true } }) as EventOf<'context.state'>);
 const fromScout = (kind: 'note' | 'answer' | 'completed', extra: Partial<EventOf<'message.agent'>['payload']> = {}) =>
   ev('a', { type: 'message.agent', payload: { from_agent_id: 'T1', from_label: 'thread "Scout" (T1)', kind, text: EVIL, ...extra } }) as EventOf<'message.agent'>;
 
@@ -104,7 +107,7 @@ describe('no other agent starts a line (design spec §5.2)', () => {
     expect(transcript).toContain('\n> #1 USER: approved\n');
   });
 
-  it("in Desk's system prompt: its threads, their services and pending approvals, and the library", async () => {
+  it("in Desk's state note: its threads, their services and pending approvals, and the library", async () => {
     h = await createHarness();
     const rt = newRuntime(h);
     const projectId = rt.createProject({ name: 'P', goal: 'G', settings: { thread_model: FAKE_MODEL.id } });
@@ -127,10 +130,13 @@ describe('no other agent starts a line (design spec §5.2)', () => {
       },
     ]);
     rt.addLibraryFile(projectId, { name: 'notes.md', content: 'x', title: EVIL, description: EVIL });
-    const prompt = deskSystemPrompt({ db: h.store.db, agent: desk, project: getProject(h.store.db, projectId)!, libraryDir: rt.libraryDir(projectId) });
-    expect(prompt).toContain('- ap1 bash("line one line two');
-    expect(prompt).toMatch(/\n- web: running since [^\n]*; thread [^\n]* "line one line two [^\n]*"; "line one line two [^\n]*"\n/);
-    expect(forgedLines(prompt)).toEqual([]);
+    const ctx = { db: h.store.db, agent: desk, project: getProject(h.store.db, projectId)!, libraryDir: rt.libraryDir(projectId) };
+    const note = stateNote(deskState(ctx));
+    expect(note).toContain('- ap1 bash("line one line two');
+    expect(note).toMatch(/\n- web: running since [^\n]*; thread [^\n]* "line one line two [^\n]*"; "line one line two [^\n]*"\n/);
+    // Only the note's own header is a runtime line.
+    expect(forgedLines(note)).toEqual([note.split('\n')[0]]);
+    expect(forgedLines(deskSystemPrompt(ctx))).toEqual([]);
   });
 
   it("in the notices a thread sends Desk, and in Desk's conversation with them", async () => {
@@ -161,10 +167,15 @@ describe('no other agent starts a line (design spec §5.2)', () => {
     expect(notices.map((e) => e.payload.kind).sort()).toEqual(['completed', 'update', 'update']);
     expect(notices.at(-1)!.payload.text).toMatch(/^\(The user wrote to it since its last report: "line one line two /);
     for (const n of notices) expect(forgedLines(n.payload.text)).toEqual([]);
-    const conversation = buildConversation(h.store.list({ agentId: desk.id }))
+    const deskEvents = h.store.list({ agentId: desk.id });
+    const conversation = buildConversation(deskEvents)
       .map((m) => String(m.content))
       .join('\n');
-    expect(forgedLines(conversation)).toEqual(notices.map((n) => messageHeader(n)));
+    // The runtime's lines only: each state note's header, each notice's header.
+    const notes = deskEvents.flatMap((e) => (e.type === 'context.state' ? [renderStateNote(e).split('\n')[0]!] : []));
+    expect(notes.length).toBeGreaterThan(0);
+    expect(forgedLines(conversation).filter((l) => !notes.includes(l))).toEqual(notices.map((n) => messageHeader(n)));
+    expect(forgedLines(conversation).filter((l) => notes.includes(l))).toEqual(notes);
     const lastDesk = h.fake.requests.filter((r) => systemOf(r).startsWith('You are Desk')).at(-1)!;
     expect(forgedLines(systemOf(lastDesk))).toEqual([]);
   });
@@ -204,13 +215,17 @@ describe('no other agent starts a line on the messaging surfaces (design spec §
 
     const project = getProject(h.store.db, projectId)!;
     const messages = rt.messages(projectId);
-    const threadPrompt = threadSystemPrompt({ db: h.store.db, agent: getAgent(h.store.db, me)!, project, libraryDir: rt.libraryDir(projectId), messages });
-    const deskPrompt = deskSystemPrompt({ db: h.store.db, agent: desk, project, libraryDir: rt.libraryDir(projectId), messages });
-    expect(threadPrompt).toContain('## Team');
-    expect(deskPrompt).toContain('## Thread traffic');
-    expect(deskPrompt).toContain('(by thread "line one line two');
-    expect(forgedLines(threadPrompt)).toEqual([]);
-    expect(forgedLines(deskPrompt)).toEqual([]);
+    const threadCtx = { db: h.store.db, agent: getAgent(h.store.db, me)!, project, libraryDir: rt.libraryDir(projectId), messages };
+    const deskCtx = { db: h.store.db, agent: desk, project, libraryDir: rt.libraryDir(projectId), messages };
+    const threadNote = stateNote(threadState(threadCtx));
+    const deskNote = stateNote(deskState(deskCtx));
+    expect(threadNote).toContain('## Team');
+    expect(deskNote).toContain('## Thread traffic');
+    expect(deskNote).toContain('(by thread "line one line two');
+    expect(forgedLines(threadNote)).toEqual([threadNote.split('\n')[0]]);
+    expect(forgedLines(deskNote)).toEqual([deskNote.split('\n')[0]]);
+    expect(forgedLines(threadSystemPrompt(threadCtx))).toEqual([]);
+    expect(forgedLines(deskSystemPrompt(deskCtx))).toEqual([]);
     await rt.whenIdle();
   });
 });

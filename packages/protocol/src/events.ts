@@ -390,6 +390,20 @@ export const EventBody = z.discriminatedUnion('type', [
     }),
   ),
   /**
+   * The project state an agent's run starts with (Desk's plan, threads, services…, a thread's team, library and
+   * memory): sent as a runtime note in the conversation rather than in the system prompt, so the prompt and the
+   * earlier conversation stay a cacheable prefix. Holds only the sections that changed since the last note the
+   * conversation still shows; `complete` when it holds every section.
+   */
+  event(
+    'context.state',
+    z.object({
+      run_id: z.string(),
+      sections: z.array(z.object({ title: z.string(), body: z.string() })).min(1),
+      complete: z.boolean(),
+    }),
+  ),
+  /**
    * The model endpoint refused a request because of images in it (an image it cannot decode): these image
    * occurrences (the tool result that showed each) are sent as text from now on, so one bad image never wedges the agent.
    */

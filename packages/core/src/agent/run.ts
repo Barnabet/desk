@@ -11,13 +11,21 @@ import type { Tool, ToolContext, ToolResult } from '../tools/types';
 import { WHY } from './answer';
 import { drainEvent, drainInbox } from './inbox';
 import { chooseSplit, compactionPrompt, DEFAULT_KEEP_MESSAGES, shouldCompact } from './compaction';
-import { buildCurrentConversation, imagesInWindow, occurrenceOf, pixelGroups, showImages, withholdMore, type ConversationImage, type Withheld } from './transcript';
+import type { StateSection } from './prompts';
+import { buildCurrentConversation, imagesInWindow, occurrenceOf, pixelGroups, showImages, stateUpdate, withholdMore, type ConversationImage, type Withheld } from './transcript';
 
 export type RunDeps = {
   store: EventStore;
   adapter: ModelAdapter;
   tools: Tool[];
+  /** The agent's stable instructions: the same bytes from run to run unless its role, settings or skills change. */
   systemPrompt: (agent: AgentRow, project: ProjectRow) => string;
+  /**
+   * What changes while the agent works (Desk's plan and threads, a thread's team, the library, memory). A run starts by
+   * appending a `context.state` note with the sections that changed since the conversation last showed them, so the
+   * system prompt and the earlier conversation stay a cacheable prefix.
+   */
+  state?: (agent: AgentRow, project: ProjectRow) => StateSection[];
   maxSteps: number;
   retry?: RetryOptions;
   /** Policy decision for a validated call. */
@@ -141,6 +149,12 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
 
   const runId = newId();
   const base = { project_id: agent.project_id, agent_id: agentId };
+  /** The note that brings the conversation up to the agent's current state; none when nothing changed. */
+  const stateNote = (): EventInput[] => {
+    if (!deps.state) return [];
+    const update = stateUpdate(store.list({ agentId }), deps.state(getAgent(store.db, agentId) ?? agent, getProject(store.db, agent.project_id) ?? project));
+    return update ? [{ ...base, type: 'context.state', payload: { run_id: runId, ...update } }] : [];
+  };
   /** Read per call: settings can change during a run, and a fallback model may take different levels. */
   const effortFor = (model: string) => deps.reasoningEffort?.(getAgent(store.db, agentId) ?? agent, getProject(store.db, agent.project_id) ?? project, model);
   const startEffort = effortFor(agent.model);
@@ -162,7 +176,8 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   const opening: EventInput = answering
     ? drainEvent(store, agentId, runId, answering.upTo)!
     : { ...base, type: 'agent.status_changed', payload: { status: 'running' } };
-  store.append([started, opening]);
+  // The state goes before the inbox, so what the run answers comes last.
+  store.append([started, ...stateNote(), opening]);
 
   /**
    * Ends the run: `run.finished` and the agent's new status. An answer run keeps its status: `end` (its answer or
@@ -203,8 +218,9 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
   const workspace = agent.workspace_path;
   if (!workspace) return finish('error', 'failed', 'Agent has no workspace', closing(WHY.noWorkspace));
   const specs = toToolSpecs(deps.tools);
-  // Snapshot per run: a stable prefix (prompt caching) and no mid-run surprises (e.g. an agent's own fresh
-  // artifact appearing as pre-existing context). Changes made by others arrive as messages instead.
+  // Snapshot per run, and stable across runs (prompt caching): the live state is the note appended above, taken once per
+  // run so there are no mid-run surprises (e.g. an agent's own fresh artifact appearing as pre-existing context).
+  // Changes made by others arrive as messages instead.
   const system = deps.systemPrompt(agent, project);
 
   /** Set once sustained rate limiting switched this run to the project's fallback model. */
@@ -307,6 +323,9 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
         { ...base, type: 'context.compacted', payload: { run_id: runId, checkpoint, up_to: split.upTo, trigger } },
         recordUsage(model, result.usage),
       ]);
+      // A checkpoint that summarised the state notes leaves the conversation without them: the next note is complete.
+      const note = stateNote();
+      if (note.length) store.append(note);
       return true;
     } catch (e) {
       if (classifyModelError(e).kind === 'aborted' || signal.aborted) throw e;

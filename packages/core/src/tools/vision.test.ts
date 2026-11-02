@@ -235,7 +235,8 @@ describe('view_image in the agent loop', () => {
     expect(image).toMatchObject({ name: 'flag.png', media_type: 'image/png', width: 24, height: 16, bytes: png.length });
     expect(existsSync(join(h.dir, 'attachments', `${image!.sha256}.png`))).toBe(true);
     const second = h.fake.requests[1]!;
-    expect(second.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool', 'user']);
+    // The project state note, the question, the call, its result, the images.
+    expect(second.messages.map((m) => m.role)).toEqual(['system', 'user', 'user', 'assistant', 'tool', 'user']);
     expect(lastUser(second).content).toEqual([
       { type: 'text', text: IMAGES_HEADER },
       { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } },

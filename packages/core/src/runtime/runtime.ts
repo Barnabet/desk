@@ -48,7 +48,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getMemory } from '../memory/memory';
 import { buildToolContext } from '../agent/context';
 import { pendingInbox } from '../agent/inbox';
-import { deskSystemPrompt, stepSystemPrompt, threadSystemPrompt } from '../agent/prompts';
+import { deskState, deskSystemPrompt, stepState, stepSystemPrompt, threadState, threadSystemPrompt, type StateSection } from '../agent/prompts';
 import { answerGate, answerText, ANSWER_MAX_STEPS, closureText, WHY } from '../agent/answer';
 import { runAgent, SHUTDOWN_REASON, type RunDeps } from '../agent/run';
 import type { EventStore } from '../events/store';
@@ -2410,11 +2410,22 @@ export class Runtime {
     return step?.kind === 'agent' ? (step.max_steps ?? 100) : 100;
   }
 
-  private systemPrompt(agent: AgentRow, project: ProjectRow): string {
-    if (this.o.systemPrompt) return this.o.systemPrompt(agent, project);
+  private promptContext(agent: AgentRow, project: ProjectRow) {
     const provider = this.o.skillEnv;
     const skillNote = (s: { scope: SkillScope; name: string }) => provider?.env({ scope: s.scope, name: s.name, ...(s.scope === 'project' ? { projectId: project.id } : {}) }).note ?? null;
-    const ctx = { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote, messages: this.messages(project.id) };
+    return { db: this.o.store.db, agent, project, libraryDir: this.libraryDir(project.id), skills: this.skills, skillNote, messages: this.messages(project.id) };
+  }
+
+  /** The live state an agent's run starts with (see RunDeps.state); none when a test replaced the system prompt. */
+  private agentState(agent: AgentRow, project: ProjectRow): StateSection[] {
+    if (this.o.systemPrompt) return [];
+    const ctx = this.promptContext(agent, project);
+    return agent.role === 'desk' ? deskState(ctx) : agent.role === 'step' ? stepState(ctx) : threadState(ctx);
+  }
+
+  private systemPrompt(agent: AgentRow, project: ProjectRow): string {
+    if (this.o.systemPrompt) return this.o.systemPrompt(agent, project);
+    const ctx = this.promptContext(agent, project);
     if (agent.role === 'desk') return deskSystemPrompt(ctx);
     if (agent.role === 'step') {
       const link = stepAgentOf(this.o.store.db, agent.id);
@@ -2595,6 +2606,7 @@ export class Runtime {
         adapter: this.o.adapter,
         tools: this.toolsFor(agent),
         systemPrompt: (a, p) => this.systemPrompt(a, p),
+        state: (a, p) => this.agentState(a, p),
         maxSteps: answer ? ANSWER_MAX_STEPS : agent.role === 'desk' ? maxSteps.desk : agent.role === 'step' ? this.stepMaxSteps(agent) : maxSteps.thread,
         ...(this.o.retry ? { retry: this.o.retry } : {}),
         ...(this.proxy ? { proxy: this.proxy } : {}),

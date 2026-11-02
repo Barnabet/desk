@@ -75,10 +75,13 @@ describe("What's up", () => {
     expect(latestWhatsUp(h.store.db, desk.id)).toMatchObject({ text: 'Two threads on it.' });
     expect(h.store.list({ agentId: desk.id, types: ['whats_up.updated'] })).toHaveLength(2);
     expect(reminders(desk.id)).toHaveLength(0);
-    // Desk sees its current What's up (and its age) in its instructions.
-    const system = deskRequests().map((r) => content(r.messages[0]));
-    expect(system[0]).toContain("## What's up\n(not written yet — write it with update_whats_up)");
-    expect(system.at(-1)).toContain("## What's up\nScoping the relaunch.\n(written just now)");
+    // Desk sees its current What's up (and when it was written) in the project state note its run starts with, never in
+    // its instructions, which stay the same.
+    const requests = deskRequests().map((r) => r.messages.map(content).join('\n'));
+    expect(requests[0]).toContain("## What's up\n(not written yet — write it with update_whats_up)");
+    expect(requests.at(-1)).toMatch(/## What's up\nScoping the relaunch\.\n\(written \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/);
+    expect(content(deskRequests()[0]!.messages[0])).not.toContain("## What's up");
+    expect(new Set(deskRequests().map((r) => content(r.messages[0])))).toHaveProperty('size', 1);
   });
 
   it('reminds Desk once when it ends a turn after changing things without updating it, and Desk updates it', async () => {

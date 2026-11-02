@@ -204,9 +204,10 @@ describe('threads that talk to each other', () => {
     expect(afterwards.length).toBeGreaterThan(0);
     for (const r of afterwards) expect(String(r.messages.at(-1)?.content)).toMatch(/— completed\]/);
 
-    // Desk's next system prompt lists the exchange.
+    // Desk's next request lists the exchange, in the project state note its run starts with.
     const at = (id: number) => h.store.list({ projectId }).find((e) => e.id === id)!.ts.slice(11, 16);
-    const prompt = systemOf(afterwards[0]!);
+    const prompt = all(afterwards[0]!);
+    expect(systemOf(afterwards[0]!)).not.toContain('## Thread traffic');
     expect(prompt).toContain(`- #${q.id} ${at(q.id)} "A" → "B", question, answered by #${answer.id}: "Which token format does the API return?"`);
     expect(prompt).toContain(`- #${answer.id} ${at(answer.id)} "B" → "A", answer, answer to #${q.id}: "A JWT, RS256."`);
   });

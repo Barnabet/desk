@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { call, text, tools } from '@desk/fake-model';
 import { DEFAULT_POLICY, RISKY_COMMAND_PATTERN, resolveSettings, upgradePolicy, type StoredEvent } from '@desk/protocol';
 import { buildToolContext } from '../agent/context';
-import { deskSystemPrompt } from '../agent/prompts';
+import { deskState, renderState } from '../agent/prompts';
 import { evaluatePolicy } from '../policy/evaluate';
 import type { Runtime } from '../runtime/runtime';
 import { findService, getAgent, getDeskAgent, getProject, getService } from '../state/queries';
@@ -182,8 +182,8 @@ describe('service tools', () => {
     await expect(serviceStopTool.execute({ name: 'nope' }, dctx)).rejects.toThrow(/No service named "nope". Services: web/);
     expect(findService(h.store.db, projectId, 'web')?.started_by).toBe(`agent:${threadId}`);
 
-    const prompt = deskSystemPrompt({ db: h.store.db, agent: desk, project: getProject(h.store.db, projectId)!, libraryDir: h.dir, skills: rt.skills } as never);
-    expect(prompt).toContain('## Services\n- web: stopped (requested)');
+    const state = renderState(deskState({ db: h.store.db, agent: desk, project: getProject(h.store.db, projectId)!, libraryDir: h.dir, skills: rt.skills } as never));
+    expect(state).toContain('## Services\n- web: stopped (requested)');
   });
 
   it('does not keep a one-off command as a service, and removes finished services on request', async () => {

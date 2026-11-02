@@ -27,6 +27,8 @@ export const CHECKPOINT_HEADER = '[Checkpoint — summary of the earlier convers
 export const CHECKPOINT_END = '[End of checkpoint]';
 /** First part of the user message that follows tool results with images (Chat Completions takes images only from users). */
 export const IMAGES_HEADER = '[Images from view_image]';
+/** Opens a project state note (`context.state`): the runtime's snapshot of what the system prompt no longer holds. */
+export const STATE_HEADER = '[Desk runtime — project state';
 /** Images sent as pixels: the most recent ones of the conversation. Older ones become text placeholders. */
 export const MAX_IMAGES_SHOWN = 8;
 /**
@@ -130,6 +132,9 @@ export function buildTaggedConversation(events: StoredEvent[]): TaggedMessage[] 
         });
         break;
       }
+      case 'context.state':
+        push({ message: { role: 'user', content: renderStateNote(ev) }, eventId: ev.id });
+        break;
       case 'tool.result': {
         push({ message: { role: 'tool', tool_call_id: ev.payload.tool_call_id, content: ev.payload.content }, eventId: ev.id });
         const toolCallId = ev.payload.tool_call_id;
@@ -146,6 +151,38 @@ export function buildTaggedConversation(events: StoredEvent[]): TaggedMessage[] 
   }
   flushImages();
   return out;
+}
+
+/**
+ * A project state note as the model reads it: a runtime header with the snapshot's time (UTC), then its sections. Agents
+ * write some of what the sections quote (titles, memory, plan items), so no line of it can pass for a runtime marker.
+ */
+export function renderStateNote(ev: EventOf<'context.state'>): string {
+  const when = `${ev.ts.slice(0, 16).replace('T', ' ')} UTC`;
+  const header = ev.payload.complete
+    ? `${STATE_HEADER} at ${when}]`
+    : `${STATE_HEADER} at ${when}: only the sections that changed since the previous state note; the others still hold]`;
+  return [header, ...ev.payload.sections.map((s) => `## ${s.title}\n${neutraliseMarkers(s.body.trim()) || '(none)'}`)].join('\n\n');
+}
+
+/** The state sections the conversation shows (after its latest checkpoint), by title: the latest note's body for each. */
+export function shownState(events: StoredEvent[]): Map<string, string> {
+  const after = latestCheckpoint(events)?.payload.up_to ?? 0;
+  const out = new Map<string, string>();
+  for (const ev of events) if (ev.type === 'context.state' && ev.id > after) for (const s of ev.payload.sections) out.set(s.title, s.body);
+  return out;
+}
+
+/**
+ * The note that brings the conversation up to date with `sections` (the agent's current state, in order): the sections
+ * whose body differs from what it shows, or null when nothing changed. A section never shown is left out while empty.
+ * `complete` when the conversation shows no state yet (a new agent, or one a checkpoint just summarised).
+ */
+export function stateUpdate(events: StoredEvent[], sections: Array<{ title: string; body: string }>): { sections: Array<{ title: string; body: string }>; complete: boolean } | null {
+  const shown = shownState(events);
+  const changed = sections.filter((s) => (shown.has(s.title) ? shown.get(s.title) !== s.body : s.body.trim() !== ''));
+  if (!changed.length) return null;
+  return { sections: changed, complete: shown.size === 0 };
 }
 
 /**
