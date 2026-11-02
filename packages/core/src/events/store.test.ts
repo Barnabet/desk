@@ -95,4 +95,12 @@ describe('EventStore', () => {
     const names = store.db.all<{ name: string }>(sql`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'`).map((r) => r.name);
     expect(names).toContain('events_project_type_idx');
   });
+
+  it('reads events of a type across projects through an index, not a scan of every event', () => {
+    const plan = store.db
+      .all<{ detail: string }>(sql`EXPLAIN QUERY PLAN SELECT * FROM events WHERE type IN ('skill.saved', 'skill.deleted') ORDER BY id`)
+      .map((r) => r.detail)
+      .join('\n');
+    expect(plan).toContain('USING INDEX events_type_idx');
+  });
 });

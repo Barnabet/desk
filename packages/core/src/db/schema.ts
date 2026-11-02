@@ -17,6 +17,8 @@ export const events = sqliteTable(
     index('events_agent_idx').on(t.agent_id, t.id),
     // The message fold reads a project's events of a few types after an id (design spec §1.4).
     index('events_project_type_idx').on(t.project_id, t.type, t.id),
+    // Skill installs and environments are read across projects by type; without it each read scans every event.
+    index('events_type_idx').on(t.type, t.id),
   ],
 );
 
