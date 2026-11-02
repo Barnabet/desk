@@ -31,6 +31,9 @@ export const TEST_SEED_MODELS: ModelInfo[] = SEED_MODELS.map((m) => ({ ...m, api
 /** A fake model on the Messages API (signed thinking carried back): add it with `h.models.upsert(FAKE_CLAUDE)`. */
 export const FAKE_CLAUDE: ModelInfo = { ...FAKE_MODEL, id: 'fake-claude', api: 'messages' };
 
+/** A fake model on the Responses API (encrypted reasoning carried back): add it with `h.models.upsert(FAKE_GPT)`. */
+export const FAKE_GPT: ModelInfo = { ...FAKE_MODEL, id: 'fake-gpt', family: 'gpt', api: 'responses' };
+
 export const noSleep: RetryOptions = { sleep: async () => {}, random: () => 0 };
 
 export type Harness = {

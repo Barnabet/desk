@@ -34,8 +34,8 @@ describe('model adapter', () => {
   it('sends reasoning_effort only when the registry lists that level for the model', async () => {
     fake = await startFakeModel(() => text('ok'));
     const r = new ModelRegistry([
-      { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true },
-      { id: 'thinker', family: 'gpt', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: ['low', 'xhigh'], default_reasoning_effort: null, concurrency: 4, vision: true },
+      { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true, api: 'chat' },
+      { id: 'thinker', family: 'gpt', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: ['low', 'xhigh'], default_reasoning_effort: null, concurrency: 4, vision: true, api: 'chat' },
     ]);
     const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 't' }, r);
     await adapter.complete({ ...req, model: 'thinker', reasoningEffort: 'xhigh' });

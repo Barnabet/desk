@@ -2,6 +2,7 @@ import type { ModelInfo, Reasoning, ReasoningBlock, ReasoningEffort, ToolCall } 
 import { newId } from '../ids';
 import type { ModelConfig } from './config';
 import { apiError, classifyModelError } from './errors';
+import { events, postStream } from './sse';
 import type { ChatMessage, CompletionRequest, CompletionResult, CompletionUsage, ContentPart, ToolSpec } from './types';
 
 /**
@@ -61,7 +62,7 @@ export function toMessages(messages: ChatMessage[], model: string): { system: st
         push('user', [{ type: 'tool_result', tool_use_id: m.tool_call_id, content: m.content || '(no output)' }]);
         break;
       case 'assistant': {
-        const thinking = m.reasoning?.model === model ? m.reasoning.blocks.map((b): Block => ({ ...b })) : [];
+        const thinking = m.reasoning?.model === model ? m.reasoning.blocks.flatMap((b): Block[] => (b.type === 'encrypted_reasoning' ? [] : [{ ...b }])) : [];
         const text: Block[] = m.content ? [{ type: 'text', text: m.content }] : [];
         const calls = (m.tool_calls ?? []).map((tc): Block => ({ type: 'tool_use', id: tc.id, name: tc.function.name, input: toolInput(tc.function.arguments) }));
         push('assistant', [...thinking, ...text, ...calls]);
@@ -94,26 +95,6 @@ export function messagesBody(req: CompletionRequest, info: ModelInfo): Record<st
     ...thinkingFor(effort),
     stream: true,
   };
-}
-
-/** Server-sent events of a response body, as parsed JSON `data` lines. */
-async function* events(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, any>> {
-  const decoder = new TextDecoder();
-  let buffer = '';
-  for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let cut: number;
-    while ((cut = buffer.indexOf('\n\n')) >= 0) {
-      const frame = buffer.slice(0, cut);
-      buffer = buffer.slice(cut + 2);
-      const data = frame
-        .split('\n')
-        .filter((l) => l.startsWith('data:'))
-        .map((l) => l.slice(5).trimStart())
-        .join('\n');
-      if (data && data !== '[DONE]') yield JSON.parse(data) as Record<string, any>;
-    }
-  }
 }
 
 const FINISH: Record<string, string> = { end_turn: 'stop', stop_sequence: 'stop', tool_use: 'tool_calls', max_tokens: 'length', refusal: 'content_filter' };
@@ -199,26 +180,9 @@ export async function completeWithMessages(
   req: CompletionRequest,
   opts: { signal?: AbortSignal; onText?: (delta: string) => void } = {},
 ): Promise<Omit<CompletionResult, 'usage'> & { usage?: CompletionUsage }> {
-  const signals = [AbortSignal.timeout(10 * 60_000), ...(opts.signal ? [opts.signal] : [])];
   try {
-    const res = await fetch(`${config.baseURL}/messages`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': config.apiKey, authorization: `Bearer ${config.apiKey}`, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(messagesBody(req, info)),
-      signal: AbortSignal.any(signals),
-    });
-    if (!res.ok || !res.body) {
-      const text = await res.text().catch(() => '');
-      let type: unknown;
-      let message = text || `${res.status} ${res.statusText}`;
-      try {
-        const parsed = JSON.parse(text) as { error?: { type?: unknown; message?: unknown } };
-        type = parsed.error?.type;
-        if (typeof parsed.error?.message === 'string') message = parsed.error.message;
-      } catch {}
-      throw apiError(res.status, `${res.status} ${message}`, type);
-    }
-    return await readMessagesStream(res.body, req.model, opts.onText);
+    const body = await postStream(config, '/messages', messagesBody(req, info), opts.signal, { 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' });
+    return await readMessagesStream(body, req.model, opts.onText);
   } catch (err) {
     // A user's stop aborts the request: report it as aborted, not as the timeout's error.
     if (opts.signal?.aborted) throw classifyModelError(Object.assign(new Error('Request aborted'), { name: 'AbortError' }));

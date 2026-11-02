@@ -5,12 +5,13 @@ import { newId } from '../ids';
 import type { ModelConfig } from './config';
 import { classifyModelError } from './errors';
 import { completeWithMessages } from './messages';
+import { completeWithResponses } from './responses';
 import type { ModelRegistry } from './registry';
 import type { ChatMessage, CompletionUsage, ModelAdapter } from './types';
 
-/** How Desk talks to a model (ModelInfo.api): the Messages API for Claude unless the registry says otherwise. */
-export function apiOf(info: ModelInfo): 'chat' | 'messages' {
-  return info.api ?? (info.family === 'claude' ? 'messages' : 'chat');
+/** How Desk talks to a model (ModelInfo.api): Messages for Claude and Responses for GPT unless the registry says otherwise. */
+export function apiOf(info: ModelInfo): 'chat' | 'messages' | 'responses' {
+  return info.api ?? (info.family === 'claude' ? 'messages' : 'responses');
 }
 
 /** Chat Completions takes no thinking: an assistant message goes without its reasoning. */
@@ -57,8 +58,10 @@ export function createModelAdapter(config: ModelConfig, registry: ModelRegistry)
     },
     async complete(req, { signal, onText } = {}) {
       const info = registry.get(req.model);
-      if (apiOf(info) === 'messages') {
-        const result = await completeWithMessages(config, info, req, { ...(signal ? { signal } : {}), ...(onText ? { onText } : {}) });
+      const api = apiOf(info);
+      if (api !== 'chat') {
+        const opts = { ...(signal ? { signal } : {}), ...(onText ? { onText } : {}) };
+        const result = api === 'messages' ? await completeWithMessages(config, info, req, opts) : await completeWithResponses(config, info, req, opts);
         return { ...result, usage: result.usage ?? estimateUsage(req.messages, result.content ?? '', result.toolCalls) };
       }
       try {

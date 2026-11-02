@@ -16,17 +16,19 @@ export const ToolCall = z.object({ id: z.string(), name: z.string(), arguments: 
 export type ToolCall = z.infer<typeof ToolCall>;
 
 /**
- * One block of a model's thinking as the Anthropic Messages API returns it: the text (or, redacted, opaque data) and
- * the signature that lets the model take it back on a later request. Only the model that wrote it accepts it.
+ * One block of a model's reasoning, in the form that lets the model take it back on a later request: Anthropic thinking
+ * (its text, or opaque data when redacted, signed), or an OpenAI Responses reasoning item (encrypted, with its summary).
+ * Only the model that wrote it accepts it.
  */
 export const ReasoningBlock = z.discriminatedUnion('type', [
   z.object({ type: z.literal('thinking'), thinking: z.string(), signature: z.string() }),
   z.object({ type: z.literal('redacted_thinking'), data: z.string() }),
+  z.object({ type: z.literal('encrypted_reasoning'), id: z.string(), encrypted_content: z.string(), summary: z.array(z.string()) }),
 ]);
 export type ReasoningBlock = z.infer<typeof ReasoningBlock>;
 
-/** A reply's thinking, and the model that wrote it. */
-export const Reasoning = z.object({ model: z.string(), blocks: z.array(ReasoningBlock).min(1) });
+/** A reply's thinking, the model that wrote it, and (Responses API) the phase of its message, sent back with it. */
+export const Reasoning = z.object({ model: z.string(), blocks: z.array(ReasoningBlock).min(1), phase: z.string().optional() });
 export type Reasoning = z.infer<typeof Reasoning>;
 
 /** Image formats that view_image accepts (and models take in chat messages). */
@@ -73,10 +75,11 @@ export const ModelInfo = z
     /** Whether the model accepts images (view_image). */
     vision: z.boolean().default(true),
     /**
-     * How Desk talks to it: `chat` (Chat Completions) or `messages` (the Anthropic Messages API, which returns signed
-     * thinking that later requests can carry back). Unset: `messages` for the claude family, `chat` otherwise.
+     * How Desk talks to it: `chat` (Chat Completions), `messages` (the Anthropic Messages API) or `responses` (the OpenAI
+     * Responses API). The last two return the model's reasoning in a form later requests can carry back. Unset:
+     * `messages` for the claude family, `responses` for gpt.
      */
-    api: z.enum(['chat', 'messages']).optional(),
+    api: z.enum(['chat', 'messages', 'responses']).optional(),
   })
   .refine((m) => m.default_reasoning_effort === null || m.reasoning_efforts.includes(m.default_reasoning_effort), {
     message: 'The default reasoning effort must be one of the model’s levels',

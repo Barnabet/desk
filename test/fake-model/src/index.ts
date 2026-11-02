@@ -8,7 +8,10 @@ export type FakeReply =
   | {
       kind: 'reply';
       text?: string;
-      /** Messages API only: thinking the reply opens with, signed (see fakeSignature). */
+      /**
+       * Messages and Responses APIs: thinking the reply opens with, signed (fakeSignature) or, on Responses, as an
+       * encrypted reasoning item whose summary is the text (fakeEncrypted).
+       */
       thinking?: string;
       toolCalls?: FakeToolCall[];
       usage?: { prompt_tokens: number; completion_tokens: number } | 'omit';
@@ -79,6 +82,27 @@ function split(s: string, size: number): string[] {
 /** The signature the fake Messages API gives a thinking text, and checks when it comes back. */
 export const fakeSignature = (thinking: string) => `sig-${createHash('sha256').update(thinking).digest('hex').slice(0, 16)}`;
 
+/** The encrypted content the fake Responses API gives a reasoning summary, and checks when it comes back. */
+export const fakeEncrypted = (summary: string) => `enc-${createHash('sha256').update(summary).digest('hex').slice(0, 16)}`;
+
+/**
+ * Checks Responses input the way the OpenAI API does, as far as Desk's adapter can get it wrong: typed items, each
+ * function_call_output answering an earlier function_call, reasoning items as the endpoint encrypted them.
+ */
+export function responsesProblem(input: Array<Record<string, any>>): string | null {
+  const calls = new Set<string>();
+  for (const [i, it] of input.entries()) {
+    if (it.type === 'function_call') calls.add(it.call_id);
+    else if (it.type === 'function_call_output') {
+      if (!calls.has(it.call_id)) return `input[${i}]: No tool call found for function call output with call_id ${it.call_id}.`;
+    } else if (it.type === 'reasoning') {
+      const summary = ((it.summary ?? []) as Array<{ text: string }>).map((x) => x.text).join('');
+      if (it.encrypted_content !== fakeEncrypted(summary)) return `input[${i}]: The encrypted content for item ${it.id} could not be verified.`;
+    } else if (it.type !== 'message') return `input[${i}]: unknown item type ${String(it.type)}`;
+  }
+  return null;
+}
+
 /**
  * Checks a Messages request the way the Anthropic API does, as far as Desk's adapter can get it wrong: user first,
  * roles alternating, each tool result answering a tool_use of the assistant message just before, thinking signed.
@@ -134,6 +158,7 @@ export async function startFakeModel(initial: Script | FakeReply[] = [], opts: {
       return json(res, 200, { object: 'list', data: [{ id: 'fake-model', object: 'model', owned_by: 'fake' }] });
     }
     if (req.method === 'POST' && req.url === '/v1/messages') return messagesReply(req, res);
+    if (req.method === 'POST' && req.url === '/v1/responses') return responsesReply(req, res);
     if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
       return json(res, 404, { error: { type: 'not_found', message: 'not found' } });
     }
@@ -272,6 +297,59 @@ export async function startFakeModel(initial: Script | FakeReply[] = [], opts: {
     }
     send('message_delta', { delta: { stop_reason: reply.toolCalls?.length ? 'tool_use' : 'end_turn' }, ...(usage ? { usage: { output_tokens: usage.completion_tokens } } : {}) });
     send('message_stop', {});
+    res.end();
+  }
+
+  /** The Responses API: the same scripts, the request as Responses sends it (`instructions`, `input` items), a streamed reply. */
+  async function responsesReply(req: IncomingMessage, res: ServerResponse) {
+    let body: ChatRequest;
+    try {
+      body = JSON.parse(await readBody(req)) as ChatRequest;
+    } catch {
+      return json(res, 400, { error: { type: 'invalid_request_error', message: 'bad json' } });
+    }
+    requests.push(body);
+    const problem = responsesProblem((body.input as Array<Record<string, any>> | undefined) ?? []);
+    if (problem) return json(res, 400, { error: { type: 'invalid_request_error', code: null, message: problem } });
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    res.on('close', () => {
+      inFlight--;
+    });
+    const reply = script(body, callIndex++);
+    if (reply.kind === 'hang') return;
+    if (reply.kind === 'error') return json(res, reply.status, { error: { type: reply.type, code: reply.type, message: reply.message } });
+    if (reply.delayMs) await sleep(reply.delayMs);
+    if (res.destroyed) return;
+
+    const usage = reply.usage === 'omit' ? undefined : (reply.usage ?? { prompt_tokens: Math.ceil(JSON.stringify(body.input).length / 4), completion_tokens: 10 });
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    let seq = 0;
+    const send = (type: string, data: object) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: seq++, ...data })}\n\n`);
+    const output: Array<Record<string, unknown>> = [];
+    const done = (item: Record<string, unknown>) => {
+      send('response.output_item.done', { output_index: output.length, item });
+      output.push(item);
+    };
+    send('response.created', { response: { id: 'resp_fake', status: 'in_progress', output: [] } });
+    if (reply.thinking !== undefined) {
+      done({ id: `rs_fake_${++idCounter}`, type: 'reasoning', summary: [{ type: 'summary_text', text: reply.thinking }], encrypted_content: fakeEncrypted(reply.thinking) });
+    }
+    if (reply.text) {
+      for (const piece of split(reply.text, 8)) send('response.output_text.delta', { output_index: output.length, delta: piece });
+      done({ id: `msg_fake_${++idCounter}`, type: 'message', role: 'assistant', status: 'completed', phase: reply.toolCalls?.length ? 'commentary' : 'final_answer', content: [{ type: 'output_text', text: reply.text, annotations: [] }] });
+    }
+    for (const c of reply.toolCalls ?? []) {
+      done({ id: `fc_fake_${++idCounter}`, type: 'function_call', status: 'completed', call_id: c.id ?? `call_fake_${++idCounter}`, name: c.name, arguments: JSON.stringify(c.args) });
+    }
+    send('response.completed', {
+      response: {
+        id: 'resp_fake',
+        status: 'completed',
+        output,
+        ...(usage ? { usage: { input_tokens: usage.prompt_tokens, input_tokens_details: { cached_tokens: 0 }, output_tokens: usage.completion_tokens, total_tokens: usage.prompt_tokens + usage.completion_tokens } } : {}),
+      },
+    });
     res.end();
   }
 
