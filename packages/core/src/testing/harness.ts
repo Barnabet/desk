@@ -21,7 +21,15 @@ export const FAKE_MODEL: ModelInfo = {
   default_reasoning_effort: null,
   concurrency: 4,
   vision: true,
+  // Most tests script Chat Completions; FAKE_CLAUDE talks the Messages API.
+  api: 'chat',
 };
+
+/** The seed models on Chat Completions: tests script the fake model in that form, Desk's default Claude model included. */
+export const TEST_SEED_MODELS: ModelInfo[] = SEED_MODELS.map((m) => ({ ...m, api: 'chat' }));
+
+/** A fake model on the Messages API (signed thinking carried back): add it with `h.models.upsert(FAKE_CLAUDE)`. */
+export const FAKE_CLAUDE: ModelInfo = { ...FAKE_MODEL, id: 'fake-claude', api: 'messages' };
 
 export const noSleep: RetryOptions = { sleep: async () => {}, random: () => 0 };
 
@@ -43,7 +51,7 @@ export async function createHarness(opts: { script?: Script | FakeReply[]; concu
   const files = await realpath(await mkdtemp(join(tmpdir(), 'desk-test-files-')));
   const { db, close } = openDb(':memory:');
   const store = new EventStore(db, opts.now);
-  const models = new ModelRegistry([...SEED_MODELS, { ...FAKE_MODEL, concurrency: opts.concurrency ?? FAKE_MODEL.concurrency }]);
+  const models = new ModelRegistry([...TEST_SEED_MODELS, { ...FAKE_MODEL, concurrency: opts.concurrency ?? FAKE_MODEL.concurrency }]);
   const adapter = createModelAdapter({ baseURL: fake.url, apiKey: 'test' }, models);
   return {
     fake,

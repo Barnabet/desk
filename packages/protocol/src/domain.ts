@@ -15,6 +15,20 @@ export type ToolResultStatus = z.infer<typeof ToolResultStatus>;
 export const ToolCall = z.object({ id: z.string(), name: z.string(), arguments: z.string() });
 export type ToolCall = z.infer<typeof ToolCall>;
 
+/**
+ * One block of a model's thinking as the Anthropic Messages API returns it: the text (or, redacted, opaque data) and
+ * the signature that lets the model take it back on a later request. Only the model that wrote it accepts it.
+ */
+export const ReasoningBlock = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('thinking'), thinking: z.string(), signature: z.string() }),
+  z.object({ type: z.literal('redacted_thinking'), data: z.string() }),
+]);
+export type ReasoningBlock = z.infer<typeof ReasoningBlock>;
+
+/** A reply's thinking, and the model that wrote it. */
+export const Reasoning = z.object({ model: z.string(), blocks: z.array(ReasoningBlock).min(1) });
+export type Reasoning = z.infer<typeof Reasoning>;
+
 /** Image formats that view_image accepts (and models take in chat messages). */
 export const ImageMediaType = z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 export type ImageMediaType = z.infer<typeof ImageMediaType>;
@@ -58,6 +72,11 @@ export const ModelInfo = z
     concurrency: z.number().int().min(1),
     /** Whether the model accepts images (view_image). */
     vision: z.boolean().default(true),
+    /**
+     * How Desk talks to it: `chat` (Chat Completions) or `messages` (the Anthropic Messages API, which returns signed
+     * thinking that later requests can carry back). Unset: `messages` for the claude family, `chat` otherwise.
+     */
+    api: z.enum(['chat', 'messages']).optional(),
   })
   .refine((m) => m.default_reasoning_effort === null || m.reasoning_efforts.includes(m.default_reasoning_effort), {
     message: 'The default reasoning effort must be one of the model’s levels',

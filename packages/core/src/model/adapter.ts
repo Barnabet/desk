@@ -1,11 +1,25 @@
 import OpenAI from 'openai';
 import { imageTokens, readDataUrlInfo } from '../attachments/image';
-import type { ToolCall } from '@desk/protocol';
+import type { ModelInfo, ToolCall } from '@desk/protocol';
 import { newId } from '../ids';
 import type { ModelConfig } from './config';
 import { classifyModelError } from './errors';
+import { completeWithMessages } from './messages';
 import type { ModelRegistry } from './registry';
 import type { ChatMessage, CompletionUsage, ModelAdapter } from './types';
+
+/** How Desk talks to a model (ModelInfo.api): the Messages API for Claude unless the registry says otherwise. */
+export function apiOf(info: ModelInfo): 'chat' | 'messages' {
+  return info.api ?? (info.family === 'claude' ? 'messages' : 'chat');
+}
+
+/** Chat Completions takes no thinking: an assistant message goes without its reasoning. */
+const forChat = (messages: ChatMessage[]): ChatMessage[] =>
+  messages.map((m) => {
+    if (m.role !== 'assistant' || !m.reasoning) return m;
+    const { reasoning: _reasoning, ...rest } = m;
+    return rest;
+  });
 
 /** Tokens for an image part: W×H/750 from the data URL's header (a typical page when it cannot be read). */
 function imagePartTokens(url: string): number {
@@ -43,11 +57,15 @@ export function createModelAdapter(config: ModelConfig, registry: ModelRegistry)
     },
     async complete(req, { signal, onText } = {}) {
       const info = registry.get(req.model);
+      if (apiOf(info) === 'messages') {
+        const result = await completeWithMessages(config, info, req, { ...(signal ? { signal } : {}), ...(onText ? { onText } : {}) });
+        return { ...result, usage: result.usage ?? estimateUsage(req.messages, result.content ?? '', result.toolCalls) };
+      }
       try {
         const stream = await client.chat.completions.create(
           {
             model: req.model,
-            messages: req.messages,
+            messages: forChat(req.messages),
             stream: true,
             stream_options: { include_usage: true },
             ...(req.tools.length ? { tools: req.tools } : {}),

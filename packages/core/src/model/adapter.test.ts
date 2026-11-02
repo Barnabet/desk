@@ -8,7 +8,7 @@ import { ModelError } from './errors';
 import { ModelRegistry } from './registry';
 
 const registry = new ModelRegistry([
-  { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true },
+  { id: 'fake-model', family: 'claude', context_window: 100_000, max_output_tokens: 4096, reasoning_efforts: [], default_reasoning_effort: null, concurrency: 4, vision: true, api: 'chat' },
 ]);
 const req = { model: 'fake-model', messages: [{ role: 'user' as const, content: 'hi' }], tools: [] };
 

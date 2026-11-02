@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { call, startFakeModel, text, tools, type ChatRequest, type FakeModelServer } from '@desk/fake-model';
-import { detectSandbox, SEED_MODELS } from '@desk/core';
-import { FAKE_MODEL } from '@desk/core/testing';
+import { detectSandbox } from '@desk/core';
+import { FAKE_MODEL, TEST_SEED_MODELS } from '@desk/core/testing';
 import { daemonPaths } from './paths';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -47,7 +47,7 @@ async function api(path: string, init: RequestInit = {}): Promise<any> {
 describe.skipIf(!(await detectSandbox()))('real daemon crash', () => {
   it('recovers a thread whose tool was running when deskd was SIGKILLed', async () => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'deskd-crash-')));
-    writeFileSync(daemonPaths(dir).models, JSON.stringify([...SEED_MODELS, FAKE_MODEL]));
+    writeFileSync(daemonPaths(dir).models, JSON.stringify([...TEST_SEED_MODELS, FAKE_MODEL]));
     const hasInterrupted = (req: ChatRequest) => req.messages.some((m) => m.role === 'tool' && String(m.content).includes('restarted'));
     fake = await startFakeModel((req) => {
       if (req.model !== FAKE_MODEL.id) {

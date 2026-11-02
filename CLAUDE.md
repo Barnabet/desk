@@ -71,6 +71,7 @@ There is no build step: TypeScript runs through the `tsx` loader, and packages e
   - `receipts/receipts.ts`, `checks/` (`runner.ts`, `service.ts`: `CheckJobs`), `watches/watches.ts` (`ThreadWatches`): command receipts, Desk's check jobs and its watches on threads (spec `2026-10-03-receipts-checks-watch-scratch-design.md`); `tools/checks.ts` holds `list_receipts`, `run_check`, `check_log` and `cancel_check`.
   - `tools/automations.ts`: Desk's ten automation tools; `tools/step.ts`: a step agent's `complete` and `fail_step`.
   - `model/endpoint.ts`, `model/switchable.ts`: endpoint resolution (env → file → Keychain) and a runtime-configurable adapter.
+  - `model/adapter.ts` routes each model to Chat Completions or, for Claude (`ModelInfo.api`, default `messages` for the claude family), `model/messages.ts`: the Anthropic Messages API, whose signed thinking is kept on `assistant.message` (`reasoning`) and sent back only to the model that wrote it.
   - `testing/`: the harness, exported as `@desk/core/testing`.
 - `apps/daemon`: Hono app (`app.ts`, `routes/*`), WebSocket stream, daemon lifecycle, `notifier.ts` (macOS notifications), `scripts/bundle.mjs`.
 - `apps/cli`: commander CLI over `DeskClient`.

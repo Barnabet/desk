@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -7,6 +8,8 @@ export type FakeReply =
   | {
       kind: 'reply';
       text?: string;
+      /** Messages API only: thinking the reply opens with, signed (see fakeSignature). */
+      thinking?: string;
       toolCalls?: FakeToolCall[];
       usage?: { prompt_tokens: number; completion_tokens: number } | 'omit';
       delayMs?: number;
@@ -73,6 +76,31 @@ function split(s: string, size: number): string[] {
   return out;
 }
 
+/** The signature the fake Messages API gives a thinking text, and checks when it comes back. */
+export const fakeSignature = (thinking: string) => `sig-${createHash('sha256').update(thinking).digest('hex').slice(0, 16)}`;
+
+/**
+ * Checks a Messages request the way the Anthropic API does, as far as Desk's adapter can get it wrong: user first,
+ * roles alternating, each tool result answering a tool_use of the assistant message just before, thinking signed.
+ */
+export function messagesProblem(messages: Array<Record<string, any>>): string | null {
+  let previous: Record<string, any> | undefined;
+  for (const [i, m] of messages.entries()) {
+    if (i === 0 && m.role !== 'user') return 'messages: the first message must use the "user" role';
+    if (previous && previous.role === m.role) return `messages.${i}: roles must alternate between "user" and "assistant"`;
+    if (!Array.isArray(m.content) || !m.content.length) return `messages.${i}.content: expected a non-empty list of blocks`;
+    const asked = new Set((previous?.content ?? []).filter((b: any) => b.type === 'tool_use').map((b: any) => b.id));
+    for (const [k, b] of (m.content as Array<Record<string, any>>).entries()) {
+      if (b.type === 'tool_result' && !asked.has(b.tool_use_id)) return `messages.${i}.content.${k}: unexpected tool_use_id ${b.tool_use_id}`;
+      if (b.type === 'tool_result' && k > 0 && m.content[k - 1].type !== 'tool_result') return `messages.${i}.content.${k}: tool_result blocks must come first`;
+      if (b.type === 'thinking' && (m.role !== 'assistant' || b.signature !== fakeSignature(b.thinking))) return `messages.${i}.content.${k}: Invalid \`signature\` in \`thinking\` block`;
+      if (b.type === 'text' && !b.text) return `messages.${i}.content.${k}: text content blocks must be non-empty`;
+    }
+    previous = m;
+  }
+  return null;
+}
+
 /**
  * Checks message content the way Chat Completions endpoints do: a string, or parts (`text`, and `image_url` only
  * in user messages). Returns the problem, or null.
@@ -105,6 +133,7 @@ export async function startFakeModel(initial: Script | FakeReply[] = [], opts: {
     if (req.method === 'GET' && req.url === '/v1/models') {
       return json(res, 200, { object: 'list', data: [{ id: 'fake-model', object: 'model', owned_by: 'fake' }] });
     }
+    if (req.method === 'POST' && req.url === '/v1/messages') return messagesReply(req, res);
     if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
       return json(res, 404, { error: { type: 'not_found', message: 'not found' } });
     }
@@ -194,6 +223,57 @@ export async function startFakeModel(initial: Script | FakeReply[] = [], opts: {
     res.write('data: [DONE]\n\n');
     res.end();
   });
+
+  /** The Messages API: the same scripts, the request as Messages sends it (`system`, block messages), a streamed reply. */
+  async function messagesReply(req: IncomingMessage, res: ServerResponse) {
+    let body: ChatRequest;
+    try {
+      body = JSON.parse(await readBody(req)) as ChatRequest;
+    } catch {
+      return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'bad json' } });
+    }
+    requests.push(body);
+    const problem = messagesProblem(body.messages ?? []);
+    if (problem) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: problem } });
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    res.on('close', () => {
+      inFlight--;
+    });
+    const reply = script(body, callIndex++);
+    if (reply.kind === 'hang') return;
+    if (reply.kind === 'error') return json(res, reply.status, { type: 'error', error: { type: reply.type, message: reply.message } });
+    if (reply.delayMs) await sleep(reply.delayMs);
+    if (res.destroyed) return;
+
+    const usage = reply.usage === 'omit' ? undefined : (reply.usage ?? { prompt_tokens: Math.ceil(JSON.stringify(body.messages).length / 4), completion_tokens: 10 });
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    const send = (type: string, data: object) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+    send('message_start', {
+      message: { id: 'msg_fake', type: 'message', role: 'assistant', content: [], model: body.model, ...(usage ? { usage: { input_tokens: usage.prompt_tokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 } } : {}) },
+    });
+    let index = 0;
+    if (reply.thinking !== undefined) {
+      send('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } });
+      for (const piece of split(reply.thinking, 8)) send('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: piece } });
+      send('content_block_delta', { index, delta: { type: 'signature_delta', signature: fakeSignature(reply.thinking) } });
+      send('content_block_stop', { index: index++ });
+    }
+    if (reply.text) {
+      send('content_block_start', { index, content_block: { type: 'text', text: '' } });
+      for (const piece of split(reply.text, 8)) send('content_block_delta', { index, delta: { type: 'text_delta', text: piece } });
+      send('content_block_stop', { index: index++ });
+    }
+    for (const c of reply.toolCalls ?? []) {
+      const args = JSON.stringify(c.args);
+      send('content_block_start', { index, content_block: { type: 'tool_use', id: c.id ?? `toolu_fake_${++idCounter}`, name: c.name, input: {} } });
+      for (const piece of split(args, Math.max(1, Math.ceil(args.length / 2)))) send('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: piece } });
+      send('content_block_stop', { index: index++ });
+    }
+    send('message_delta', { delta: { stop_reason: reply.toolCalls?.length ? 'tool_use' : 'end_turn' }, ...(usage ? { usage: { output_tokens: usage.completion_tokens } } : {}) });
+    send('message_stop', {});
+    res.end();
+  }
 
   await new Promise<void>((resolve) => server.listen(opts.port ?? 0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;

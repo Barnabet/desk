@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { call, hang, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
-import { getAgent, loadBuiltinsManifest, SEED_MODELS } from '@desk/core';
-import { FAKE_MODEL } from '@desk/core/testing';
+import { getAgent, loadBuiltinsManifest } from '@desk/core';
+import { FAKE_MODEL, TEST_SEED_MODELS } from '@desk/core/testing';
 import { startDaemon, type RunningDaemon } from './daemon';
 import { daemonPaths } from './paths';
 
@@ -22,7 +22,7 @@ async function boot(script: Parameters<typeof startFakeModel>[0] = [], extra: Pa
   dir ??= realpathSync(mkdtempSync(join(tmpdir(), 'deskd-')));
   fake ??= await startFakeModel(script);
   const f = fake;
-  writeFileSync(daemonPaths(dir).models, JSON.stringify([...SEED_MODELS, FAKE_MODEL]));
+  writeFileSync(daemonPaths(dir).models, JSON.stringify([...TEST_SEED_MODELS, FAKE_MODEL]));
   const d = await startDaemon({ dataDir: dir, port: 0, version: '1.0.0-test', modelConfig: { baseURL: f.url, apiKey: 'secret-key-xyz' }, sandboxAvailable: false, ...extra });
   daemons.push(d);
   return d;

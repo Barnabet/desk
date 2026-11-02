@@ -378,7 +378,11 @@ export async function runAgent(deps: RunDeps, agentId: string, signal: AbortSign
       const model = fallbackModel ?? current.model;
 
       const reply: EventInput[] = [
-        { ...base, type: 'assistant.message', payload: { run_id: runId, content: result.content, tool_calls: result.toolCalls } },
+        {
+          ...base,
+          type: 'assistant.message',
+          payload: { run_id: runId, content: result.content, tool_calls: result.toolCalls, ...(result.reasoning ? { reasoning: result.reasoning } : {}) },
+        },
         recordUsage(model, result.usage),
       ];
       compactNext = shouldCompact(result.usage.prompt_tokens, windowOf(model) ?? Infinity);

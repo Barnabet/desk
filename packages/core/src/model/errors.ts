@@ -39,17 +39,25 @@ export function classifyModelError(err: unknown): ModelError {
     return new ModelError(kind, err.message, undefined, { cause: err });
   }
   if (err instanceof OpenAI.APIError) {
-    const status = err.status;
-    const message = err.message ?? 'Model API error';
     const type = (err as { type?: unknown }).type ?? (err.error as { type?: unknown } | undefined)?.type;
-    if (status === 429 || type === 'rate_limit_error') return new ModelError('rate_limited', message, status, { cause: err });
-    if (status === 400 && CONTEXT_OVERFLOW.test(message)) return new ModelError('context_overflow', message, status, { cause: err });
-    if (status === 408 || status === 409 || (status !== undefined && status >= 500)) {
-      return new ModelError('transient', message, status, { cause: err });
-    }
-    return new ModelError('fatal', message, status, { cause: err });
+    return apiError(err.status, err.message ?? 'Model API error', type, err);
   }
+  if (err instanceof Error && (err.name === 'TimeoutError' || findErrorCode(err) === 'UND_ERR_SOCKET' || findErrorCode(err) === 'ECONNRESET')) {
+    return new ModelError('transient', err.message, undefined, { cause: err });
+  }
+  // fetch (the Messages API) fails with a TypeError whose cause names the connection error.
+  if (err instanceof TypeError && findErrorCode(err) === 'ECONNREFUSED') return new ModelError('proxy_down', err.message, undefined, { cause: err });
   return new ModelError('fatal', err instanceof Error ? err.message : String(err), undefined, { cause: err });
+}
+
+/** An error the endpoint answered with: its HTTP status (undefined inside a stream) and error type. */
+export function apiError(status: number | undefined, message: string, type?: unknown, cause?: unknown): ModelError {
+  if (status === 429 || type === 'rate_limit_error') return new ModelError('rate_limited', message, status, { cause });
+  if (status === 400 && CONTEXT_OVERFLOW.test(message)) return new ModelError('context_overflow', message, status, { cause });
+  if (status === 408 || status === 409 || (status !== undefined && status >= 500) || type === 'overloaded_error' || type === 'api_error') {
+    return new ModelError('transient', message, status, { cause });
+  }
+  return new ModelError('fatal', message, status, { cause });
 }
 
 const TOO_LARGE = /too large|exceeds the maximum (request )?size|maximum (request|payload|body) size/i;

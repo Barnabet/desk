@@ -1,4 +1,4 @@
-import type { ReasoningEffort, ToolCall } from '@desk/protocol';
+import type { Reasoning, ReasoningEffort, ToolCall } from '@desk/protocol';
 
 export type ChatToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
@@ -8,7 +8,8 @@ export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; 
 export type ChatMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string | ContentPart[] }
-  | { role: 'assistant'; content: string | null; tool_calls?: ChatToolCall[] }
+  /** `reasoning`: the reply's signed thinking; only the Messages API sends it back (to the model that wrote it). */
+  | { role: 'assistant'; content: string | null; tool_calls?: ChatToolCall[]; reasoning?: Reasoning }
   | { role: 'tool'; tool_call_id: string; content: string };
 
 export type ToolSpec = {
@@ -25,7 +26,7 @@ export type CompletionRequest = {
 
 export type CompletionUsage = { prompt_tokens: number; completion_tokens: number; cached_tokens?: number; estimated: boolean };
 
-export type CompletionResult = { content: string | null; toolCalls: ToolCall[]; finishReason: string; usage: CompletionUsage };
+export type CompletionResult = { content: string | null; toolCalls: ToolCall[]; finishReason: string; usage: CompletionUsage; reasoning?: Reasoning };
 
 export interface ModelAdapter {
   complete(

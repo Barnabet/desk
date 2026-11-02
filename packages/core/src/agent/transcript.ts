@@ -118,8 +118,9 @@ export function buildTaggedConversation(events: StoredEvent[]): TaggedMessage[] 
         break;
       }
       case 'assistant.message': {
-        const { content, tool_calls } = ev.payload;
+        const { content, tool_calls, reasoning } = ev.payload;
         if (!content && tool_calls.length === 0) break;
+        // The thinking goes back with the reply (the Messages API sends it to the model that wrote it).
         push({
           eventId: ev.id,
           message: tool_calls.length
@@ -127,8 +128,9 @@ export function buildTaggedConversation(events: StoredEvent[]): TaggedMessage[] 
                 role: 'assistant',
                 content,
                 tool_calls: tool_calls.map((tc) => ({ id: tc.id, type: 'function' as const, function: { name: tc.name, arguments: tc.arguments } })),
+                ...(reasoning ? { reasoning } : {}),
               }
-            : { role: 'assistant', content },
+            : { role: 'assistant', content, ...(reasoning ? { reasoning } : {}) },
         });
         break;
       }

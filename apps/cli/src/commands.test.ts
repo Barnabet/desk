@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { call, startFakeModel, text, tools, type FakeModelServer } from '@desk/fake-model';
-import { SEED_MODELS } from '@desk/core';
-import { FAKE_MODEL, seedThread } from '@desk/core/testing';
+import { FAKE_MODEL, TEST_SEED_MODELS, seedThread } from '@desk/core/testing';
 import { daemonPaths, startDaemon, type RunningDaemon } from '@desk/daemon';
 import { runCli } from './commands';
 import { plistFor, webPlistFor } from './launchd';
@@ -21,7 +20,7 @@ beforeEach(async () => {
         ? text('Dispatched a scout.')
         : tools(call('spawn_thread', { title: 'Scout', brief: 'look' })),
   );
-  writeFileSync(daemonPaths(dir).models, JSON.stringify([...SEED_MODELS, FAKE_MODEL]));
+  writeFileSync(daemonPaths(dir).models, JSON.stringify([...TEST_SEED_MODELS, FAKE_MODEL]));
   daemon = await startDaemon({ dataDir: dir, port: 0, modelConfig: { baseURL: fake.url, apiKey: 'k' }, sandboxAvailable: false });
 });
 afterEach(async () => {

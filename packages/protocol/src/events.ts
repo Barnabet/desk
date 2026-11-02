@@ -21,6 +21,7 @@ import {
   SkillName,
   SkillScope,
   SourceKind,
+  Reasoning,
   ToolCall,
   ToolImage,
   ToolResultStatus,
@@ -290,7 +291,13 @@ export const EventBody = z.discriminatedUnion('type', [
   event('run.finished', z.object({ run_id: z.string(), reason: RunFinishReason, detail: z.string().optional() })),
   event(
     'assistant.message',
-    z.object({ run_id: z.string(), content: z.string().nullable(), tool_calls: z.array(ToolCall) }),
+    z.object({
+      run_id: z.string(),
+      content: z.string().nullable(),
+      tool_calls: z.array(ToolCall),
+      /** The model's thinking, as the Messages API returned it (signed), sent back only to the model that wrote it. */
+      reasoning: Reasoning.optional(),
+    }),
   ),
   event(
     'tool.call',
