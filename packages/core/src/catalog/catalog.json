@@ -910,6 +910,26 @@
         "Installing downloads a Chromium build of about 150 MB."
       ],
       "scripts": 4
+    },
+    {
+      "id": "frontend-design",
+      "title": "Frontend design",
+      "category": "code",
+      "summary": "Distinctive, intentional UI design: a compact token plan reviewed against the brief before coding, deliberate typography, restraint, and copy that avoids templated defaults.",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/anthropics/skills",
+      "source": {
+        "type": "github",
+        "repo": "anthropics/skills",
+        "path": "skills/frontend-design",
+        "sha": "ca45fc496a3436251f191354091d557da31c15b5"
+      },
+      "digest": "sha256:82dad751367c85ab3a1e8c893d01077ea73be66f28aef2013ae15b7f5a5ad6ab",
+      "files": 2,
+      "bytes": 19564,
+      "runtime": {},
+      "caveats": [],
+      "scripts": 0
     }
   ]
 }

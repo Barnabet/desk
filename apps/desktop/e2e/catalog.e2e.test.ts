@@ -98,7 +98,7 @@ describe('skill catalog, end to end', () => {
     await page.getByRole('heading', { name: 'Skill catalog' }).waitFor();
     for (const bay of ['Research', 'Documents & data', 'Writing & diagrams', 'Planning', 'Code']) await page.getByRole('region', { name: bay }).waitFor();
     expect(await page.getByRole('region', { name: 'Files & media' }).count()).toBe(0);
-    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(18);
+    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(19);
     await shot(page, 'c1-catalog');
 
     const title = loadCatalog().entries.find((e) => e.id === 'excel-automation')!.title;

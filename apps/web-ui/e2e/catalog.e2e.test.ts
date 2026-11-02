@@ -116,7 +116,7 @@ describe('skills and the catalog in the browser', () => {
     await page.getByRole('heading', { name: 'Skill catalog' }).waitFor();
     for (const bay of ['Research', 'Documents & data', 'Writing & diagrams', 'Planning', 'Code']) await page.getByRole('region', { name: bay }).waitFor();
     expect(await page.getByRole('region', { name: 'Files & media' }).count()).toBe(0);
-    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(18);
+    expect(await page.getByRole('listitem').filter({ has: page.locator('.catalog-card-title') }).count()).toBe(19);
     const card = page.getByRole('listitem', { name: excel });
     await expect.poll(() => card.textContent()).toContain('Python 3.12 · set up by Desk');
     await e2e.shot(page, 'catalog');
