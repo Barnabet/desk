@@ -568,16 +568,17 @@ These are added to CLAUDE.md's invariants:
 
 - **Plan 19, backend:** protocol, events and migration; the engine and the six step kinds; schedules; grants and the policy integration; the `step` role (prompt, toolset, visibility audit of the role checks); Desk's tools and prompt; the `automation-scripts` built-in; API, attention, notifier; client; CLI; `docs/api.md`.
 - **Plan 20, desktop:** the tab and routes; list; Design editor (React Flow, dagre, inspector, validation, save and 409); Runs and view A; Versions and diff; Grants; dialogs; Attention cards; IPC; `docs/desktop.md`; e2e.
+- **Plan 21, web UI:** the same Automations tab in the Angular web UI served by `desk web`, with a hand-built canvas in place of React Flow.
+- **Plan 22 (planned), triggers and for-each:** folder and webhook triggers, and a For each step (`docs/superpowers/plans/2026-09-29-plan-22-automation-triggers-and-for-each.md`).
 
 ## 12. Out of scope
 
-- Other triggers: folder watching, webhooks, email.
-- Loops and for-each (the graph is acyclic).
+- Other triggers: folder watching, webhooks, email. Plan 22 plans folder and webhook triggers.
+- Loops and for-each (the graph is acyclic). Plan 22 plans a For each step that runs another automation per item, so the graph stays acyclic.
 - Automations shared across projects.
 - Connectors such as Slack or email for sending.
 - Waking a sleeping Mac.
 - Cost in currency.
-- Automations in the Angular web UI on `web-ui` (a follow-up once that branch catches up).
 
 ## 13. Clarifications made while planning (Plan 19)
 
